@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Environment (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+out/
+.output/
+*.tsbuildinfo
+
+# Prisma generated client
+apps/api/src/generated/
+
+# Vite / tooling caches
+.vite/
+.turbo/
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE (local only)
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker volumes (if mounted locally)
+docker-data/
+
+# Prisma local DB (if ever used)
+*.db
+*.db-journal

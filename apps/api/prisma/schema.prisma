@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model AgentMemorySession {
+  id        String   @id @default(cuid())
+  scopeKey  String   @unique
+  sessionId String
+  userId    String?
+  metadata  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AgentMemoryMessage[]
+  errors   AgentMemoryError[]
+
+  @@index([sessionId, userId])
+}
+
+model AgentMemoryMessage {
+  id              String             @id @default(cuid())
+  memorySessionId String
+  memorySession   AgentMemorySession @relation(fields: [memorySessionId], references: [id], onDelete: Cascade)
+  runId           String
+  turn            Int
+  position        Int
+  role            String
+  message         Json
+  createdAt       DateTime           @default(now())
+
+  @@unique([memorySessionId, position])
+  @@index([runId])
+}
+
+model AgentMemoryError {
+  id              String             @id @default(cuid())
+  memorySessionId String
+  memorySession   AgentMemorySession @relation(fields: [memorySessionId], references: [id], onDelete: Cascade)
+  runId           String
+  error           Json
+  messages        Json
+  createdAt       DateTime           @default(now())
+
+  @@index([runId])
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@assingment/agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "runner:dev": "pnpm with-env tsx ./src/runner-dev.ts",
+    "with-env": "dotenv -e ../../.env -- "
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.30.3",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "dependencies": {
+    "@anvia/core": "^0.15.0",
+    "@anvia/langfuse": "^0.3.9",
+    "@anvia/openai": "^0.3.25",
+    "@tavily/core": "^0.7.6",
+    "dotenv-cli": "^11.0.0",
+    "zod": "^4.4.3"
+  }
+}

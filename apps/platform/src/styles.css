@@ -1,0 +1,72 @@
+@import "tailwindcss";
+@import "@anvia/react-ui/styles.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+}
+
+.chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.chat-scroll:hover {
+  scrollbar-color: rgb(212 212 216 / 0.9) transparent;
+}
+
+.chat-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-scroll::-webkit-scrollbar-track {
+  margin-block: 8px;
+  background: transparent;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: transparent;
+}
+
+.chat-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(212 212 216 / 0.9);
+}
+
+.chat-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(161 161 170 / 0.95);
+}
+
+.chat-scroll:hover::-webkit-scrollbar-thumb:active {
+  background-color: rgb(113 113 122);
+}
+
+.chat-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Keep focus ring on the rounded composer shell, not the inner editor. */
+[data-anvia-composer-editor]:focus,
+[data-anvia-composer-editor]:focus-visible {
+  outline: none !important;
+}
+
+[data-anvia-composer-editor] p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: rgb(161 161 170);
+}
