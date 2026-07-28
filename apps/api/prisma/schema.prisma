@@ -53,3 +53,45 @@ model AgentMemoryError {
 
   @@index([runId])
 }
+
+enum DocumentStatus {
+  queued
+  uploading
+  ocr_processing
+  embedding_processing
+  ready
+  failed
+}
+
+model Document {
+  id               String         @id @default(cuid())
+  sessionId        String
+  filename         String
+  mimeType         String
+  sizeBytes        Int
+  r2Key            String
+  pageCount        Int            @default(0)
+  status           DocumentStatus @default(queued)
+  errorMessage     String?
+  summary          String         @default("") @db.Text
+  firstPageSummary String         @default("") @db.Text
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  pages            DocumentPage[]
+
+  @@index([sessionId, createdAt])
+  @@index([sessionId, status])
+}
+
+model DocumentPage {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageIndex   Int
+  summary     String   @db.Text
+  rawMarkdown String   @db.Text
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, pageIndex])
+  @@index([documentId, pageIndex])
+}

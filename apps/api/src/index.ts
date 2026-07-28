@@ -1,9 +1,13 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { chatRouter } from "./modules/chat/router.js";
+import { documentsRouter } from "./modules/documents/router.js";
 import { cors } from "hono/cors";
 
-const app = new Hono().use(cors()).route("/api/chat", chatRouter);
+const app = new Hono()
+  .use(cors())
+  .route("/api/chat", chatRouter)
+  .route("/api/documents", documentsRouter);
  
 serve(
   {

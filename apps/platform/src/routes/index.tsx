@@ -1,5 +1,5 @@
 import { initialMessagesFromMemory, useChat } from "@anvia/react";
-import type { UIMessage } from "@anvia/react";
+import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Message, Thread } from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -7,14 +7,23 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Paperclip,
   Plus,
   RefreshCw,
   Square,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ComposerAttachmentChip } from "#/components/composer-attachment";
+import { IngestionStatusPill } from "#/components/ingestion-status-pill";
+import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { MathMarkdown } from "#/components/math-markdown";
+import {
+  API_BASE,
+  uploadDocument,
+  waitForDocumentReady,
+  type DocumentStatus,
+} from "#/lib/api";
 
-const API_BASE = "http://localhost:3001";
 const SESSION_STORAGE_KEY = "chat.sessionId";
 
 export const Route = createFileRoute("/")({
@@ -50,6 +59,26 @@ function mergeSessionIds(sessionId: string, sessionIds: string[]) {
 function shortSessionId(sessionId: string) {
   if (sessionId.length <= 12) return sessionId;
   return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
+}
+
+async function resolveAttachmentFile(attachment: UIAttachment) {
+  if (attachment.url?.startsWith("blob:")) {
+    const response = await fetch(attachment.url);
+    const blob = await response.blob();
+    return new File([blob], attachment.name ?? "document", {
+      type: attachment.mediaType ?? "application/octet-stream",
+    });
+  }
+
+  if (attachment.data) {
+    const response = await fetch(attachment.data);
+    const blob = await response.blob();
+    return new File([blob], attachment.name ?? "document", {
+      type: attachment.mediaType ?? "application/octet-stream",
+    });
+  }
+
+  throw new Error(`Unable to read attachment: ${attachment.name ?? attachment.id}`);
 }
 
 function Home() {
@@ -294,15 +323,28 @@ function ChatSession({
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
   const wasStreamingRef = useRef(false);
+  const [ingestionItems, setIngestionItems] = useState<
+    Array<{ filename: string; status: DocumentStatus }>
+  >([]);
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [isIngesting, setIsIngesting] = useState(false);
 
   const chat = useChat({
     endpoint: `${API_BASE}/api/chat`,
     initialMessages,
-    createRequest: ({ coreMessages }) => ({
-      messages: coreMessages,
-      stream: true as const,
-      sessionId,
-    }),
+    createRequest: ({ coreMessages, uiMessages }) => {
+      const last = uiMessages.at(-1);
+      const documentIds = Array.isArray(last?.metadata?.documentIds)
+        ? (last?.metadata?.documentIds as string[])
+        : [];
+
+      return {
+        messages: coreMessages,
+        stream: true as const,
+        sessionId,
+        documentIds,
+      };
+    },
   });
 
   const focusComposer = useCallback(() => {
@@ -377,9 +419,21 @@ function ChatSession({
                           );
                         }
 
+                        if (part.type === "reasoning") {
+                          return (
+                            <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                              <p className="font-medium">Reasoning</p>
+                              <p className="mt-1 whitespace-pre-wrap opacity-90">
+                                {part.text}
+                              </p>
+                            </Message.Part>
+                          );
+                        }
+
                         if (part.type === "tool") {
                           return (
-                            <Message.Part className="mt-2">
+                            <Message.Part className="mt-2 space-y-2">
+                              <ToolActivityPanel part={part} />
                               <Message.Tool
                                 className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
                                 renderWhen="always"
@@ -412,7 +466,9 @@ function ChatSession({
             </Thread.Messages>
 
             <Thread.Loading className="mx-auto mt-4 w-full max-w-3xl text-sm text-zinc-500">
-              Assistant is writing...
+              {chat.status === "streaming"
+                ? "Assistant is thinking and writing..."
+                : "Assistant is writing..."}
             </Thread.Loading>
 
             <Thread.Error className="mx-auto mt-4 w-full max-w-3xl rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" />
@@ -424,31 +480,144 @@ function ChatSession({
             </Thread.ViewportFooter>
           </Thread.Viewport>
 
-          <Composer.Root className="mx-auto mb-4 flex w-[min(760px,calc(100%-32px))] shrink-0 items-end gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm transition focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20">
-            <Composer.Input
-              ref={composerInputRef}
-              className="min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-900 outline-none"
-              minRows={1}
-              maxRows={6}
-              placeholder="Message Anvia..."
-            />
-            {chat.status === "streaming" ? (
-              <Composer.Stop
-                aria-label="Stop"
-                title="Stop"
-                className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 active:scale-[0.98]"
+          <Composer.Root
+            className="mx-auto mb-4 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2"
+            submitMessage={async ({ input, attachments, chat: chatController, clear }) => {
+              setComposerError(null);
+              const trimmed = input.trim();
+              if (!trimmed && attachments.length === 0) return;
+
+              const documentIds: string[] = [];
+
+              if (attachments.length > 0) {
+                setIsIngesting(true);
+                setIngestionItems([]);
+
+                try {
+                  for (const attachment of attachments) {
+                    const file = await resolveAttachmentFile(attachment);
+                    setIngestionItems((current) => [
+                      ...current,
+                      { filename: file.name, status: "uploading" },
+                    ]);
+
+                    const uploaded = await uploadDocument({
+                      sessionId,
+                      file,
+                    });
+
+                    const ready = await waitForDocumentReady({
+                      sessionId,
+                      documentId: uploaded.id,
+                      onStatus: (status) => {
+                        setIngestionItems((current) =>
+                          current.map((item) =>
+                            item.filename === file.name
+                              ? { ...item, status: status.status }
+                              : item,
+                          ),
+                        );
+                      },
+                    });
+
+                    documentIds.push(ready.id);
+                  }
+                } catch (error) {
+                  const message =
+                    error instanceof Error
+                      ? error.message
+                      : "Document processing failed";
+                  setComposerError(message);
+                  setIsIngesting(false);
+                  return;
+                }
+
+                setIsIngesting(false);
+              }
+
+              await chatController.sendMessage({
+                text: trimmed,
+                metadata: { sessionId, documentIds },
+                attachments: attachments.map((attachment) => ({
+                  id: attachment.id,
+                  type: attachment.type,
+                  name: attachment.name,
+                  mediaType: attachment.mediaType,
+                  url: attachment.url,
+                })),
+              });
+
+              clear();
+              setIngestionItems([]);
+            }}
+          >
+            {ingestionItems.length > 0 ? (
+              <div className="flex flex-col gap-2 px-1">
+                {ingestionItems.map((item) => (
+                  <IngestionStatusPill
+                    key={`${item.filename}-${item.status}`}
+                    filename={item.filename}
+                    status={item.status}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {composerError ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {composerError}
+              </div>
+            ) : null}
+
+            <div className="flex items-end gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm transition focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20">
+              <Composer.Attachments
+                keepMounted
+                className="flex flex-wrap gap-2 px-1"
               >
-                <Square className="size-3.5 fill-current" strokeWidth={0} />
-              </Composer.Stop>
-            ) : (
-              <Composer.Submit
-                aria-label="Send"
-                title="Send"
-                className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-emerald-700 text-white transition hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                {(attachment) => (
+                  <ComposerAttachmentChip attachment={attachment} />
+                )}
+              </Composer.Attachments>
+
+              <Composer.AddAttachment
+                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                multiple
+                aria-label="Attach document"
+                title="Attach document"
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={isIngesting || chat.status === "streaming"}
               >
-                <ArrowUp className="size-4" strokeWidth={2} />
-              </Composer.Submit>
-            )}
+                <Paperclip className="size-4" strokeWidth={1.75} />
+                <span>Attach</span>
+              </Composer.AddAttachment>
+
+              <Composer.Input
+                ref={composerInputRef}
+                className="min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-900 outline-none"
+                minRows={1}
+                maxRows={6}
+                placeholder="Message Anvia..."
+                disabled={isIngesting}
+              />
+              {chat.status === "streaming" ? (
+                <Composer.Stop
+                  aria-label="Stop"
+                  title="Stop"
+                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 active:scale-[0.98]"
+                >
+                  <Square className="size-3.5 fill-current" strokeWidth={0} />
+                </Composer.Stop>
+              ) : (
+                <Composer.Submit
+                  aria-label={isIngesting ? "Processing document" : "Send"}
+                  title={isIngesting ? "Processing document" : "Send"}
+                  disabled={isIngesting}
+                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-emerald-700 text-white transition hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ArrowUp className="size-4" strokeWidth={2} />
+                </Composer.Submit>
+              )}
+            </div>
           </Composer.Root>
         </Thread.Root>
       </div>

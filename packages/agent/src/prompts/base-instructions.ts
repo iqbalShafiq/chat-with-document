@@ -6,4 +6,7 @@ When writing mathematical notation in Markdown:
 - Use $$...$$ for block/display math
 - Prefer LaTeX commands such as \\frac{a}{b}, \\sqrt{x}, and \\sum
 - Do not wrap formulas in plain square brackets like [ \\frac{a}{b} ]
+
+When the user asks about uploaded documents, prefer grounded answers from document tools.
+Do not invent document content. Cite filename and page number when possible.
 `;

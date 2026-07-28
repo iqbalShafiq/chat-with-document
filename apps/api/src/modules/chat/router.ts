@@ -2,11 +2,15 @@ import { Hono } from "hono";
 import { prisma } from "../../utils/prisma.js";
 import { createPrismaMemoryStore } from "@anvia/memory-prisma";
 import {
+  buildDocumentCatalogInstruction,
   createAgent,
+  createChunkSearchService,
   createDataAnalysisTool,
+  createDocumentTools,
   tracing,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
+import { listSessionDocuments } from "../documents/service.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -57,12 +61,22 @@ export const chatRouter = new Hono()
     const lastMessage = messages[messages.length - 1];
 
     const prismaMemory = createPrismaMemoryStore(prisma);
+    const sessionDocuments = await listSessionDocuments(sessionId);
+    const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
+    const searchService = createChunkSearchService();
 
     const agent = createAgent({
       agentId: "my-agent",
       tracing: tracing,
-      additionalInstructions: [],
-      additionalTools: createDataAnalysisTool(),
+      additionalInstructions: [catalogInstruction],
+      additionalTools: [
+        ...createDataAnalysisTool(),
+        ...createDocumentTools({
+          sessionId,
+          prisma,
+          searchService,
+        }),
+      ],
       memory: prismaMemory,
     });
 
