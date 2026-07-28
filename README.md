@@ -1,4 +1,4 @@
-# Devscale Assignment 4
+# Chat with Document
 
 Monorepo aplikasi **AI chat** berbasis [Anvia](https://anvia.dev): UI React (`platform`), API Hono (`api`), dan package agent bersama (`@assingment/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
 
