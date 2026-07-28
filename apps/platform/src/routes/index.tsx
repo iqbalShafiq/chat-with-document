@@ -80,16 +80,26 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
   if (attachment.url?.startsWith("blob:")) {
     const response = await fetch(attachment.url);
     const blob = await response.blob();
+    if (blob.size === 0) {
+      throw new Error(`Attachment is empty: ${attachment.name ?? attachment.id}`);
+    }
     return new File([blob], attachment.name ?? "document", {
       type: attachment.mediaType ?? "application/octet-stream",
     });
   }
 
   if (attachment.data) {
-    const response = await fetch(attachment.data);
+    // Anvia stores File attachments as raw base64 (no data: prefix).
+    const dataUrl = attachment.data.startsWith("data:")
+      ? attachment.data
+      : `data:${attachment.mediaType ?? "application/octet-stream"};base64,${attachment.data}`;
+    const response = await fetch(dataUrl);
     const blob = await response.blob();
+    if (blob.size === 0) {
+      throw new Error(`Attachment is empty: ${attachment.name ?? attachment.id}`);
+    }
     return new File([blob], attachment.name ?? "document", {
-      type: attachment.mediaType ?? "application/octet-stream",
+      type: attachment.mediaType ?? (blob.type || "application/octet-stream"),
     });
   }
 
@@ -509,6 +519,10 @@ function ChatSession({
                 try {
                   for (const attachment of attachments) {
                     const file = await resolveAttachmentFile(attachment);
+                    if (file.size === 0) {
+                      throw new Error(`File is empty: ${file.name}`);
+                    }
+
                     setIngestionItems((current) => [
                       ...current,
                       { filename: file.name, status: "uploading" },
@@ -541,6 +555,16 @@ function ChatSession({
                       ? error.message
                       : "Document processing failed";
                   setComposerError(message);
+                  setIngestionItems((current) =>
+                    current.map((item) =>
+                      item.status === "uploading" ||
+                      item.status === "queued" ||
+                      item.status === "ocr_processing" ||
+                      item.status === "embedding_processing"
+                        ? { ...item, status: "failed" }
+                        : item,
+                    ),
+                  );
                   setIsIngesting(false);
                   return;
                 }
