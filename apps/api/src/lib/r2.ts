@@ -44,13 +44,19 @@ export async function putObject(
   body: Uint8Array,
   contentType: string,
 ) {
+  if (body.byteLength === 0) {
+    throw new Error("Cannot upload empty file");
+  }
+
   const client = getClient();
+  const payload = Buffer.from(body);
   await client.send(
     new PutObjectCommand({
       Bucket: getBucket(),
       Key: key,
-      Body: body,
+      Body: payload,
       ContentType: contentType,
+      ContentLength: payload.byteLength,
     }),
   );
 }
@@ -67,18 +73,28 @@ export async function getObjectBuffer(key: string) {
   const stream = response.Body;
   if (!stream) throw new Error("Empty R2 object body");
 
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of stream as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk);
+  let buffer: Uint8Array;
+  if (typeof stream.transformToByteArray === "function") {
+    buffer = await stream.transformToByteArray();
+  } else {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+    }
+
+    const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    buffer = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
   }
 
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const buffer = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    buffer.set(chunk, offset);
-    offset += chunk.length;
+  if (buffer.byteLength === 0) {
+    throw new Error(`Downloaded empty object from R2: ${key}`);
   }
+
   return buffer;
 }
 

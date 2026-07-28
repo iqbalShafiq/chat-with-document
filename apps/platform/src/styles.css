@@ -63,6 +63,39 @@ body {
   outline: none !important;
 }
 
+/*
+  TipTap nests: [data-anvia-composer-input] > div > [data-anvia-composer-editor]
+  Center the editor content vertically when the shell is taller than one line.
+*/
+.composer-input[data-anvia-composer-input] {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(212 212 216 / 0.9) transparent;
+}
+
+.composer-input[data-anvia-composer-input]::-webkit-scrollbar {
+  width: 6px;
+}
+
+.composer-input[data-anvia-composer-input]::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(212 212 216 / 0.9);
+}
+
+.composer-input[data-anvia-composer-input] > div {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.composer-input[data-anvia-composer-input] [data-anvia-composer-editor] {
+  width: 100%;
+  outline: none;
+}
+
+.composer-input[data-anvia-composer-input] [data-anvia-composer-editor] p {
+  margin: 0;
+}
+
 [data-anvia-composer-editor] p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

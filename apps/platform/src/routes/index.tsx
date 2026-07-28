@@ -582,41 +582,41 @@ function ChatSession({
               </div>
             ) : null}
 
-            <div className="flex items-end gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm transition focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20">
-              <Composer.Attachments
-                keepMounted
-                className="flex flex-wrap gap-2 px-1"
-              >
-                {(attachment) => (
-                  <ComposerAttachmentChip attachment={attachment} />
-                )}
-              </Composer.Attachments>
+            <Composer.Attachments
+              keepMounted
+              className="flex flex-wrap gap-2 px-1 empty:hidden"
+            >
+              {(attachment) => (
+                <ComposerAttachmentChip attachment={attachment} />
+              )}
+            </Composer.Attachments>
 
+            <div className="flex items-end gap-2">
               <Composer.AddAttachment
                 accept=".pdf,.png,.jpg,.jpeg,.webp"
                 multiple
                 aria-label="Attach document"
                 title="Attach document"
-                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={isIngesting || chat.status === "streaming"}
               >
                 <Paperclip className="size-4" strokeWidth={1.75} />
-                <span>Attach</span>
               </Composer.AddAttachment>
 
               <Composer.Input
                 ref={composerInputRef}
-                className="min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed text-zinc-900 outline-none"
+                className="composer-input flex min-w-0 flex-1 items-center rounded-full border border-zinc-200 bg-white px-4 text-sm leading-relaxed text-zinc-900 shadow-sm transition focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20"
                 minRows={1}
-                maxRows={6}
+                maxRows={4}
                 placeholder="Message Anvia..."
                 disabled={isIngesting}
               />
+
               {chat.status === "streaming" ? (
                 <Composer.Stop
                   aria-label="Stop"
                   title="Stop"
-                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 active:scale-[0.98]"
+                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-zinc-900 text-white shadow-sm transition hover:bg-zinc-800 active:scale-[0.98]"
                 >
                   <Square className="size-3.5 fill-current" strokeWidth={0} />
                 </Composer.Stop>
@@ -625,7 +625,7 @@ function ChatSession({
                   aria-label={isIngesting ? "Processing document" : "Send"}
                   title={isIngesting ? "Processing document" : "Send"}
                   disabled={isIngesting}
-                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-emerald-700 text-white transition hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-emerald-700 text-white shadow-sm transition hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ArrowUp className="size-4" strokeWidth={2} />
                 </Composer.Submit>

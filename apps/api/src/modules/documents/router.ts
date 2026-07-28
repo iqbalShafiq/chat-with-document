@@ -51,8 +51,15 @@ export const documentsRouter = new Hono()
       return c.json({ error: "file is required" }, 400);
     }
 
+    if (file.size === 0) {
+      return c.json({ error: "File is empty" }, 400);
+    }
+
     try {
       const buffer = new Uint8Array(await file.arrayBuffer());
+      if (buffer.byteLength === 0) {
+        return c.json({ error: "File is empty" }, 400);
+      }
       const result = await createDocumentUpload({
         sessionId,
         filename: file.name,
