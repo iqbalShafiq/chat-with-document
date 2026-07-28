@@ -42,7 +42,7 @@ export function createSearchDocumentPagesTool(deps: {
       const hits = await deps.searchService.search({
         sessionId: deps.sessionId,
         query,
-        documentIds,
+        ...(documentIds !== undefined ? { documentIds } : {}),
         limit,
       });
 

@@ -6,13 +6,19 @@
   "scripts": {
     "dev": "pnpm run --parallel dev:api dev:worker dev:platform",
     "dev:api": "pnpm --filter api dev",
-    "dev:worker": "pnpm --filter worker dev",
+    "dev:worker": "pnpm --filter api worker:dev",
     "dev:platform": "pnpm --filter platform dev"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.30.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lightningcss"
+    ]
+  },
   "devDependencies": {
     "dotenv-cli": "^11.0.0"
   }

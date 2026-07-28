@@ -1,5 +1,6 @@
-import type { Prisma } from "../../../api/src/generated/prisma/client.js";
+import type { Prisma } from "./generated/prisma/client.js";
 import type { Job } from "bullmq";
+import { Worker } from "bullmq";
 import {
   buildDocumentSummary,
   chunkText,
@@ -11,9 +12,13 @@ import {
   type DocumentChunkMetadata,
 } from "@assingment/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
-import { prisma } from "../utils/prisma.js";
-import { getObjectBuffer } from "../lib/r2.js";
-import type { DocumentIngestJobData } from "./types.js";
+import { getObjectBuffer } from "./lib/r2.js";
+import {
+  DOCUMENT_INGEST_QUEUE,
+  type DocumentIngestJobData,
+} from "./lib/queue.js";
+import { getRedis } from "./lib/redis.js";
+import { prisma } from "./utils/prisma.js";
 
 async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   const { documentId, sessionId, r2Key, filename } = job.data;
@@ -109,15 +114,29 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   });
 }
 
-export async function handleDocumentIngestJob(job: Job<DocumentIngestJobData>) {
-  try {
-    await processDocumentIngest(job);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Ingest failed";
-    await prisma.document.update({
-      where: { id: job.data.documentId },
-      data: { status: "failed", errorMessage: message },
-    });
-    throw error;
-  }
-}
+export const worker = new Worker<DocumentIngestJobData>(
+  DOCUMENT_INGEST_QUEUE,
+  async (job) => {
+    try {
+      await processDocumentIngest(job);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ingest failed";
+      await prisma.document.update({
+        where: { id: job.data.documentId },
+        data: { status: "failed", errorMessage: message },
+      });
+      throw error;
+    }
+  },
+  { connection: getRedis() },
+);
+
+worker.on("completed", (job) => {
+  console.log(`[worker] completed document ingest ${job.id}`);
+});
+
+worker.on("failed", (job, error) => {
+  console.error(`[worker] failed document ingest ${job?.id}`, error);
+});
+
+console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);

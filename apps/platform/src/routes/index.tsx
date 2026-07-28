@@ -61,6 +61,21 @@ function shortSessionId(sessionId: string) {
   return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
 }
 
+function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
+  if (
+    metadata &&
+    typeof metadata === "object" &&
+    !Array.isArray(metadata) &&
+    Array.isArray(metadata.documentIds)
+  ) {
+    return metadata.documentIds.filter(
+      (id): id is string => typeof id === "string",
+    );
+  }
+
+  return [];
+}
+
 async function resolveAttachmentFile(attachment: UIAttachment) {
   if (attachment.url?.startsWith("blob:")) {
     const response = await fetch(attachment.url);
@@ -334,9 +349,7 @@ function ChatSession({
     initialMessages,
     createRequest: ({ coreMessages, uiMessages }) => {
       const last = uiMessages.at(-1);
-      const documentIds = Array.isArray(last?.metadata?.documentIds)
-        ? (last?.metadata?.documentIds as string[])
-        : [];
+      const documentIds = documentIdsFromMetadata(last?.metadata);
 
       return {
         messages: coreMessages,
