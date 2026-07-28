@@ -5,7 +5,7 @@ import {
   buildDocumentCatalogInstruction,
   createAgent,
   createChunkSearchService,
-  createDataAnalysisTool,
+  createDataAnalysisTools,
   createDocumentTools,
   tracing,
 } from "@assingment/agent";
@@ -70,7 +70,7 @@ export const chatRouter = new Hono()
       tracing: tracing,
       additionalInstructions: [catalogInstruction],
       additionalTools: [
-        ...createDataAnalysisTool(),
+        ...createDataAnalysisTools(),
         ...createDocumentTools({
           sessionId,
           prisma,

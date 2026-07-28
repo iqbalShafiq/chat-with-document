@@ -1,3 +1,4 @@
+import type { AnyTool } from "@anvia/core";
 import { createTool } from "@anvia/core";
 import z from "zod";
 
@@ -100,8 +101,8 @@ function correlationStrength(r: number) {
   return "very_weak";
 }
 
-export function createDataAnalysisTool() {
-  const descriptiveStatsTool = createTool({
+export function createDescriptiveStatsTool() {
+  return createTool({
     name: "descriptive_stats",
     description:
       "Compute descriptive statistics for a numeric series: count, mean, median, mode, min/max, range, quartiles, IQR, variance, standard deviation, and skewness.",
@@ -119,7 +120,6 @@ export function createDataAnalysisTool() {
       const min = sorted[0]!;
       const max = sorted[sorted.length - 1]!;
 
-      // Fisher-Pearson sample skewness (bias-adjusted for n >= 3)
       let skewness: number | null = null;
       if (values.length >= 3 && stdDev > 0) {
         const n = values.length;
@@ -146,8 +146,10 @@ export function createDataAnalysisTool() {
       };
     },
   });
+}
 
-  const correlationTool = createTool({
+export function createPearsonCorrelationTool() {
+  return createTool({
     name: "pearson_correlation",
     description:
       "Calculate the Pearson correlation coefficient between two paired numeric series, including covariance and a qualitative strength label.",
@@ -184,8 +186,10 @@ export function createDataAnalysisTool() {
       };
     },
   });
+}
 
-  const linearRegressionTool = createTool({
+export function createLinearRegressionTool() {
+  return createTool({
     name: "linear_regression",
     description:
       "Fit a simple linear regression (y = slope * x + intercept). Returns slope, intercept, R², residual stats, and optional predictions for new x values.",
@@ -252,6 +256,12 @@ export function createDataAnalysisTool() {
       };
     },
   });
+}
 
-  return [descriptiveStatsTool, correlationTool, linearRegressionTool];
+export function createDataAnalysisTools(): AnyTool[] {
+  return [
+    createDescriptiveStatsTool(),
+    createPearsonCorrelationTool(),
+    createLinearRegressionTool(),
+  ];
 }

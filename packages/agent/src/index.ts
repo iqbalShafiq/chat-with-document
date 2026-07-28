@@ -7,7 +7,5 @@ export * from "./document/summaries.js";
 export * from "./document/chunking.js";
 export * from "./document/types.js";
 export * from "./prompts/build-document-catalog.js";
-export * from "./tools/create-document-tools.js";
-export * from "./tools/document-find.js";
-export * from "./tools/document-search.js";
+export * from "./tools/documents.js";
 export * from "./qdrant/chunk-store.js";

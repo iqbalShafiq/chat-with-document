@@ -8,7 +8,7 @@ import {
   type DocumentChunkMetadata,
 } from "../document/types.js";
 import { embeddingModel } from "../providers/mistral.js";
-import type { ChunkSearchHit, ChunkSearchService } from "../tools/document-search.js";
+import type { ChunkSearchHit, ChunkSearchService } from "../tools/documents.js";
 
 let storePromise: Promise<QdrantVectorStore<string, DocumentChunkMetadata>> | null =
   null;
