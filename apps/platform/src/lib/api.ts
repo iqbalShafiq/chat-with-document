@@ -57,6 +57,24 @@ export async function uploadDocument(input: {
   return (await response.json()) as UploadDocumentResponse;
 }
 
+export async function listSessionDocuments(sessionId: string) {
+  const response = await fetch(
+    `${API_BASE}/api/documents?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to load session documents");
+  }
+
+  return (await response.json()) as SessionDocument[];
+}
+
+export interface SessionDocument {
+  id: string;
+  filename: string;
+  firstPageSummary: string;
+}
+
 export async function getDocumentStatus(input: {
   sessionId: string;
   documentId: string;

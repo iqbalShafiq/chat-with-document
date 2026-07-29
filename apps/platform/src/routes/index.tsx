@@ -16,18 +16,21 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  FileText,
   Square,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ComposerAttachmentChip } from "#/components/composer-attachment";
-import { IngestionStatusPill } from "#/components/ingestion-status-pill";
+import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
+import { UploadingDocumentsSection } from "#/components/uploading-documents-section";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { MathMarkdown } from "#/components/math-markdown";
 import {
   API_BASE,
+  listSessionDocuments,
   uploadDocument,
   waitForDocumentReady,
   type DocumentStatus,
+  type SessionDocument,
 } from "#/lib/api";
 
 const SESSION_STORAGE_KEY = "chat.sessionId";
@@ -419,8 +422,20 @@ function ChatSession({
   const [ingestionItems, setIngestionItems] = useState<
     Array<{ filename: string; status: DocumentStatus }>
   >([]);
+  const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
+    [],
+  );
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+
+  const refreshSessionDocuments = useCallback(async () => {
+    try {
+      const documents = await listSessionDocuments(sessionId);
+      setSessionDocuments(documents);
+    } catch {
+      // Keep the previous list if refresh fails.
+    }
+  }, [sessionId]);
 
   const chat = useChat({
     endpoint: `${API_BASE}/api/chat`,
@@ -468,6 +483,11 @@ function ChatSession({
   useEffect(() => {
     focusComposer();
   }, [focusComposer]);
+
+  useEffect(() => {
+    setSessionDocuments([]);
+    void refreshSessionDocuments();
+  }, [refreshSessionDocuments]);
 
   return (
     <ChatProvider controller={chat}>
@@ -532,7 +552,7 @@ function ChatSession({
           </Thread.Viewport>
 
           <Composer.Root
-            className="mx-auto mb-4 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-2"
+            className="mx-auto mb-4 flex w-[min(760px,calc(100%-32px))] shrink-0 flex-col gap-1"
             submitMessage={async ({ input, attachments, chat: chatController, clear }) => {
               setComposerError(null);
               const trimmed = input.trim();
@@ -577,6 +597,8 @@ function ChatSession({
 
                     documentIds.push(ready.id);
                   }
+
+                  await refreshSessionDocuments();
                 } catch (error) {
                   const message =
                     error instanceof Error
@@ -616,17 +638,27 @@ function ChatSession({
               setIngestionItems([]);
             }}
           >
-            {ingestionItems.length > 0 ? (
-              <div className="flex flex-col gap-2 px-1">
-                {ingestionItems.map((item) => (
-                  <IngestionStatusPill
-                    key={`${item.filename}-${item.status}`}
-                    filename={item.filename}
-                    status={item.status}
-                  />
-                ))}
-              </div>
+            {sessionDocuments.length > 0 ? (
+              <CollapsibleDocumentSection title="Active Document">
+                <ul className="doc-chip-scroll flex list-none flex-nowrap gap-2 overflow-x-auto overscroll-x-contain p-0 pb-0.5">
+                  {sessionDocuments.map((doc) => (
+                    <li
+                      key={doc.id}
+                      className="inline-flex min-h-11 w-max max-w-[min(280px,75vw)] shrink-0 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900"
+                      title={doc.firstPageSummary || doc.filename}
+                    >
+                      <FileText
+                        className="size-4 shrink-0 text-emerald-700"
+                        strokeWidth={1.75}
+                      />
+                      <span className="truncate font-medium">{doc.filename}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CollapsibleDocumentSection>
             ) : null}
+
+            <UploadingDocumentsSection ingestionItems={ingestionItems} />
 
             {composerError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -634,16 +666,7 @@ function ChatSession({
               </div>
             ) : null}
 
-            <Composer.Attachments
-              keepMounted
-              className="flex flex-wrap gap-2 px-1 empty:hidden"
-            >
-              {(attachment) => (
-                <ComposerAttachmentChip attachment={attachment} />
-              )}
-            </Composer.Attachments>
-
-            <div className="flex items-end gap-2">
+            <div className="mt-1 flex items-end gap-2">
               <Composer.AddAttachment
                 accept=".pdf,.png,.jpg,.jpeg,.webp"
                 multiple
