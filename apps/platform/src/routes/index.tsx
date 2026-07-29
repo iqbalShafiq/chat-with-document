@@ -1,6 +1,12 @@
 import { initialMessagesFromMemory, useChat } from "@anvia/react";
-import type { UIAttachment, UIMessage } from "@anvia/react";
-import { ChatProvider, Composer, Message, Thread } from "@anvia/react-ui";
+import type { UIAttachment, UIMessage, UseChatStatus } from "@anvia/react";
+import {
+  ChatProvider,
+  Composer,
+  Message,
+  Thread,
+  useMessage,
+} from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   ArrowUp,
@@ -337,6 +343,68 @@ function SessionDropdown({
   );
 }
 
+function ChatMessageParts({
+  chatStatus,
+  lastMessageId,
+}: {
+  chatStatus: UseChatStatus;
+  lastMessageId?: string;
+}) {
+  const { message } = useMessage();
+
+  return (
+    <Message.Parts
+      stream={{
+        isStreaming:
+          chatStatus === "streaming" && lastMessageId === message.id,
+        resetKey: message.id,
+        flushImmediately: chatStatus === "error",
+      }}
+    >
+      {(part) => {
+        if (part.type === "text") {
+          return (
+            <Message.Part className="[&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-zinc-900 [&_pre]:p-3 [&_pre]:text-zinc-100 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-zinc-800 group-data-[role=user]:[&_a]:text-emerald-300">
+              <MathMarkdown />
+            </Message.Part>
+          );
+        }
+
+        if (part.type === "attachment") {
+          return (
+            <Message.Part className="mt-2">
+              <Message.Attachment className="block overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm" />
+            </Message.Part>
+          );
+        }
+
+        if (part.type === "reasoning") {
+          return (
+            <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              <p className="font-medium">Reasoning</p>
+              <p className="mt-1 whitespace-pre-wrap opacity-90">{part.text}</p>
+            </Message.Part>
+          );
+        }
+
+        if (part.type === "tool") {
+          return (
+            <Message.Part className="mt-2 space-y-2">
+              <ToolActivityPanel part={part} />
+              <Message.Tool
+                className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
+                renderWhen="always"
+              />
+            </Message.Part>
+          );
+        }
+
+        return <Message.Part />;
+      }}
+    </Message.Parts>
+  );
+}
+
 function ChatSession({
   sessionId,
   initialMessages,
@@ -424,50 +492,10 @@ function ChatSession({
               {() => (
                 <Message.Root className="group grid gap-2 data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start">
                   <Message.Content className="max-w-[min(100%,42rem)] text-sm leading-relaxed group-data-[role=user]:rounded-2xl group-data-[role=user]:bg-zinc-900 group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-zinc-50 group-data-[role=assistant]:text-zinc-800">
-                    <Message.Parts>
-                      {(part) => {
-                        if (part.type === "text") {
-                          return (
-                            <Message.Part className="[&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-zinc-900 [&_pre]:p-3 [&_pre]:text-zinc-100 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-zinc-800 group-data-[role=user]:[&_a]:text-emerald-300">
-                              <MathMarkdown />
-                            </Message.Part>
-                          );
-                        }
-
-                        if (part.type === "attachment") {
-                          return (
-                            <Message.Part className="mt-2">
-                              <Message.Attachment className="block overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm" />
-                            </Message.Part>
-                          );
-                        }
-
-                        if (part.type === "reasoning") {
-                          return (
-                            <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
-                              <p className="font-medium">Reasoning</p>
-                              <p className="mt-1 whitespace-pre-wrap opacity-90">
-                                {part.text}
-                              </p>
-                            </Message.Part>
-                          );
-                        }
-
-                        if (part.type === "tool") {
-                          return (
-                            <Message.Part className="mt-2 space-y-2">
-                              <ToolActivityPanel part={part} />
-                              <Message.Tool
-                                className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
-                                renderWhen="always"
-                              />
-                            </Message.Part>
-                          );
-                        }
-
-                        return <Message.Part />;
-                      }}
-                    </Message.Parts>
+                    <ChatMessageParts
+                      chatStatus={chat.status}
+                      lastMessageId={chat.messages.at(-1)?.id}
+                    />
                   </Message.Content>
 
                   <Message.Actions className="mt-1.5 flex items-center gap-3 opacity-0 transition-opacity group-hover:opacity-100 group-data-[role=user]:justify-end">

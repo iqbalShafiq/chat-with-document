@@ -4,6 +4,7 @@ import {
   type CompletionModel,
   type MemoryStore,
 } from "@anvia/core";
+import type { Agent } from "@anvia/core/agent";
 import type { LangfuseTracing } from "@anvia/langfuse";
 import { defaultModel } from "./providers/openai.js";
 import { BASE_INSTRUCTIONS } from "./prompts/base-instructions.js";
@@ -17,10 +18,16 @@ interface CreateAgentOptions {
   memory?: MemoryStore;
 }
 
-export function createAgent(opts: CreateAgentOptions) {
+export function createAgent(opts: CreateAgentOptions): Agent {
   const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel)
     .instructions(BASE_INSTRUCTIONS)
     .tools([...(opts.additionalTools ?? [])])
+    .additionalParams({
+      reasoning: {
+        effort: "medium",
+        summary: "auto",
+      },
+    })
     .observe(opts.tracing);
 
   for (const instruction of opts.additionalInstructions ?? []) {
