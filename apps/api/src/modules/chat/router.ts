@@ -10,7 +10,9 @@ import {
   tracing,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
+import type { Message as MessageType } from "@anvia/core/completion";
 import { listSessionDocuments } from "../documents/service.js";
+import { stripUserAttachments } from "./strip-user-attachments.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -57,8 +59,13 @@ export const chatRouter = new Hono()
       return c.json({ error: "sessionId is required" }, 400);
     }
 
-    const messages = body.messages;
+    const messages = body.messages as MessageType[];
     const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) {
+      return c.json({ error: "messages are required" }, 400);
+    }
+
+    const promptMessage = stripUserAttachments(lastMessage);
 
     const prismaMemory = createPrismaMemoryStore(prisma);
     const sessionDocuments = await listSessionDocuments(sessionId);
@@ -82,7 +89,7 @@ export const chatRouter = new Hono()
 
     const stream = agent
       .session(sessionId)
-      .prompt(lastMessage)
+      .prompt(promptMessage)
       .withTrace({ sessionId })
       .stream();
 

@@ -135,8 +135,11 @@ export const worker = new Worker<DocumentIngestJobData>(
     }
   },
   {
-    // Pass options (not a shared ioredis instance) so BullMQ owns blocking conns.
     connection: getBullmqConnectionOptions(),
+    // OCR + embedding can take minutes; keep lock/stall intervals generous so
+    // tsx-watch restarts don't mark in-flight jobs as stalled prematurely.
+    lockDuration: 300_000,
+    stalledInterval: 120_000,
   },
 );
 

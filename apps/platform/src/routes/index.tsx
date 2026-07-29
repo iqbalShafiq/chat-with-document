@@ -70,6 +70,11 @@ function shortSessionId(sessionId: string) {
   return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
 }
 
+type AttachedDocumentMeta = {
+  name: string;
+  mediaType?: string;
+};
+
 function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
   if (
     metadata &&
@@ -83,6 +88,48 @@ function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
   }
 
   return [];
+}
+
+function attachedDocumentsFromMetadata(
+  metadata: UIMessage["metadata"],
+): AttachedDocumentMeta[] {
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    !Array.isArray(metadata.attachedDocuments)
+  ) {
+    return [];
+  }
+
+  return metadata.attachedDocuments.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const name = "name" in item && typeof item.name === "string" ? item.name : null;
+    if (!name) return [];
+    const mediaType =
+      "mediaType" in item && typeof item.mediaType === "string"
+        ? item.mediaType
+        : undefined;
+    return mediaType === undefined ? [{ name }] : [{ name, mediaType }];
+  });
+}
+
+function DocumentAttachmentChip({
+  name,
+  mediaType,
+}: {
+  name: string;
+  mediaType?: string;
+}) {
+  return (
+    <div
+      className="inline-flex min-h-11 w-max max-w-[min(280px,75vw)] items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900"
+      title={mediaType ? `${name} (${mediaType})` : name}
+    >
+      <FileText className="size-4 shrink-0 text-emerald-700" strokeWidth={1.75} />
+      <span className="truncate font-medium">{name}</span>
+    </div>
+  );
 }
 
 async function resolveAttachmentFile(attachment: UIAttachment) {
@@ -354,57 +401,79 @@ function ChatMessageParts({
   lastMessageId?: string;
 }) {
   const { message } = useMessage();
+  const hasAttachmentParts = message.parts.some(
+    (part) => part.type === "attachment",
+  );
+  const metadataAttachments = attachedDocumentsFromMetadata(message.metadata);
 
   return (
-    <Message.Parts
-      stream={{
-        isStreaming:
-          chatStatus === "streaming" && lastMessageId === message.id,
-        resetKey: message.id,
-        flushImmediately: chatStatus === "error",
-      }}
-    >
-      {(part) => {
-        if (part.type === "text") {
-          return (
-            <Message.Part className="[&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-zinc-900 [&_pre]:p-3 [&_pre]:text-zinc-100 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-zinc-800 group-data-[role=user]:[&_a]:text-emerald-300">
-              <MathMarkdown />
-            </Message.Part>
-          );
-        }
+    <>
+      <Message.Parts
+        stream={{
+          isStreaming:
+            chatStatus === "streaming" && lastMessageId === message.id,
+          resetKey: message.id,
+          flushImmediately: chatStatus === "error",
+        }}
+      >
+        {(part) => {
+          if (part.type === "text") {
+            return (
+              <Message.Part className="[&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-zinc-900 [&_pre]:p-3 [&_pre]:text-zinc-100 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-zinc-800 group-data-[role=user]:[&_a]:text-emerald-300">
+                <MathMarkdown />
+              </Message.Part>
+            );
+          }
 
-        if (part.type === "attachment") {
-          return (
-            <Message.Part className="mt-2">
-              <Message.Attachment className="block overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm" />
-            </Message.Part>
-          );
-        }
+          if (part.type === "attachment") {
+            const name = part.attachment.name ?? "Document";
+            return (
+              <Message.Part className="mt-2">
+                <DocumentAttachmentChip
+                  name={name}
+                  mediaType={part.attachment.mediaType}
+                />
+              </Message.Part>
+            );
+          }
 
-        if (part.type === "reasoning") {
-          return (
-            <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
-              <p className="font-medium">Reasoning</p>
-              <p className="mt-1 whitespace-pre-wrap opacity-90">{part.text}</p>
-            </Message.Part>
-          );
-        }
+          if (part.type === "reasoning") {
+            return (
+              <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                <p className="font-medium">Reasoning</p>
+                <p className="mt-1 whitespace-pre-wrap opacity-90">{part.text}</p>
+              </Message.Part>
+            );
+          }
 
-        if (part.type === "tool") {
-          return (
-            <Message.Part className="mt-2 space-y-2">
-              <ToolActivityPanel part={part} />
-              <Message.Tool
-                className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
-                renderWhen="always"
-              />
-            </Message.Part>
-          );
-        }
+          if (part.type === "tool") {
+            return (
+              <Message.Part className="mt-2 space-y-2">
+                <ToolActivityPanel part={part} />
+                <Message.Tool
+                  className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
+                  renderWhen="always"
+                />
+              </Message.Part>
+            );
+          }
 
-        return <Message.Part />;
-      }}
-    </Message.Parts>
+          return <Message.Part />;
+        }}
+      </Message.Parts>
+
+      {!hasAttachmentParts && metadataAttachments.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {metadataAttachments.map((doc, index) => (
+            <DocumentAttachmentChip
+              key={`${doc.name}-${index}`}
+              name={doc.name}
+              mediaType={doc.mediaType}
+            />
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -622,15 +691,23 @@ function ChatSession({
                 setIsIngesting(false);
               }
 
+              const attachedDocuments = attachments.map((attachment) => {
+                const name = attachment.name ?? "Document";
+                return attachment.mediaType
+                  ? { name, mediaType: attachment.mediaType }
+                  : { name };
+              });
+
               await chatController.sendMessage({
                 text: trimmed,
-                metadata: { sessionId, documentIds },
+                metadata: { sessionId, documentIds, attachedDocuments },
                 attachments: attachments.map((attachment) => ({
                   id: attachment.id,
                   type: attachment.type,
                   name: attachment.name,
                   mediaType: attachment.mediaType,
-                  url: attachment.url,
+                  // Display-only: satisfies Anvia UI→core conversion; file bytes stay in RAG.
+                  text: attachment.name ?? "Document",
                 })),
               });
 

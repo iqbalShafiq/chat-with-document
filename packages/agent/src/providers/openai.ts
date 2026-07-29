@@ -3,8 +3,7 @@ import { OpenAIClient } from "@anvia/openai";
 
 const openai = new OpenAIClient({
   apiKey: process.env.OPENAI_API_KEY,
-  baseUrl: process.env.OPENAI_BASE_URL,
-  completionApi: "responses",
+  baseUrl: process.env.OPENAI_BASE_URL
 });
 
-export const defaultModel = openai.completionModel("gpt-5.6-luna");
+export const defaultModel = openai.completionModel("gpt-5.6-luna") as CompletionModel;
