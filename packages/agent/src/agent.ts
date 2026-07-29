@@ -23,6 +23,12 @@ export function createAgent(
   const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel)
     .instructions(BASE_INSTRUCTIONS)
     .tools([...(opts.additionalTools ?? [])])
+    .additionalParams({
+      reasoning: {
+        effort: "medium",
+        summary: "auto",
+      },
+    })
     .observe(opts.tracing);
 
   for (const instruction of opts.additionalInstructions ?? []) {
