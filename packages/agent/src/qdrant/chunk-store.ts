@@ -37,14 +37,35 @@ export async function upsertDocumentChunks(
   await store.upsertDocuments(documents);
 }
 
+function isMissingCollectionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = "status" in error ? error.status : undefined;
+  if (status === 404) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /not\s*found/i.test(message);
+}
+
 export async function deleteDocumentChunks(documentId: string) {
   const client = new QdrantClient({ url: getQdrantUrl() });
-  await client.delete(QDRANT_COLLECTION, {
-    wait: true,
-    filter: {
-      must: [{ key: "documentId", match: { value: documentId } }],
-    },
-  });
+
+  try {
+    const { collections } = await client.getCollections();
+    const exists = collections.some(
+      (collection) => collection.name === QDRANT_COLLECTION,
+    );
+    if (!exists) return;
+
+    await client.delete(QDRANT_COLLECTION, {
+      wait: true,
+      filter: {
+        must: [{ key: "documentId", match: { value: documentId } }],
+      },
+    });
+  } catch (error) {
+    // First ingest (or wiped Qdrant) has no collection yet — treat as empty.
+    if (isMissingCollectionError(error)) return;
+    throw error;
+  }
 }
 
 function buildSessionFilter(sessionId: string, documentIds?: string[]) {

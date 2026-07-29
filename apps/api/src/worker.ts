@@ -17,11 +17,15 @@ import {
   DOCUMENT_INGEST_QUEUE,
   type DocumentIngestJobData,
 } from "./lib/queue.js";
-import { getRedis } from "./lib/redis.js";
+import { getBullmqConnectionOptions } from "./lib/redis.js";
 import { prisma } from "./utils/prisma.js";
+
+console.log("[worker] boot");
 
 async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   const { documentId, sessionId, r2Key, filename } = job.data;
+
+  console.log(`[worker] ingest start ${documentId} (${filename})`);
 
   await prisma.document.update({
     where: { id: documentId },
@@ -110,8 +114,10 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
 
   await prisma.document.update({
     where: { id: documentId },
-    data: { status: "ready" },
+    data: { status: "ready", errorMessage: null },
   });
+
+  console.log(`[worker] ingest ready ${documentId}`);
 }
 
 export const worker = new Worker<DocumentIngestJobData>(
@@ -128,8 +134,15 @@ export const worker = new Worker<DocumentIngestJobData>(
       throw error;
     }
   },
-  { connection: getRedis() },
+  {
+    // Pass options (not a shared ioredis instance) so BullMQ owns blocking conns.
+    connection: getBullmqConnectionOptions(),
+  },
 );
+
+worker.on("ready", () => {
+  console.log(`[worker] ready on queue ${DOCUMENT_INGEST_QUEUE}`);
+});
 
 worker.on("completed", (job) => {
   console.log(`[worker] completed document ingest ${job.id}`);
@@ -137,6 +150,10 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, error) => {
   console.error(`[worker] failed document ingest ${job?.id}`, error);
+});
+
+worker.on("error", (error) => {
+  console.error("[worker] error", error);
 });
 
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);

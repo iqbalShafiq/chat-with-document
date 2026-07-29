@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm with-env tsx watch src/index.ts",
-    "worker:dev": "pnpm with-env tsx watch src/worker.ts",
+    "worker:dev": "pnpm with-env node --import tsx --watch src/worker.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "worker:start": "node dist/worker.js",
