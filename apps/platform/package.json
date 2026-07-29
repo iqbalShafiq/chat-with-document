@@ -12,8 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@anvia/react": "^0.9.2",
-    "@anvia/react-ui": "^0.6.1",
+    "@anvia/react": "^0.9.3",
+    "@anvia/react-ui": "^0.6.2",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",

@@ -14,9 +14,9 @@
     "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
-    "@anvia/core": "^0.15.0",
+    "@anvia/core": "^0.16.0",
     "@anvia/memory-prisma": "^0.2.4",
-    "@anvia/server": "^0.5.13",
+    "@anvia/server": "^0.5.14",
     "@assingment/agent": "workspace:*",
     "@aws-sdk/client-s3": "^3.888.0",
     "@hono/node-server": "^2.0.11",
