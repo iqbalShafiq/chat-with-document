@@ -1,5 +1,72 @@
 export const API_BASE = "http://localhost:3001";
 
+export type SessionListItem = {
+  sessionId: string;
+  updatedAt: string;
+  title: string;
+};
+
+export type SessionListPage = {
+  items: SessionListItem[];
+  nextCursor: string | null;
+};
+
+export async function listSessions(input?: {
+  cursor?: string | null;
+  limit?: number;
+}): Promise<SessionListPage> {
+  const params = new URLSearchParams();
+  if (input?.cursor) params.set("cursor", input.cursor);
+  if (input?.limit) params.set("limit", String(input.limit));
+  const qs = params.toString();
+  const response = await fetch(
+    `${API_BASE}/api/chat/sessions${qs ? `?${qs}` : ""}`,
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load sessions");
+  }
+
+  const data: unknown = await response.json();
+
+  // New shape: { items, nextCursor }
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Array.isArray((data as SessionListPage).items)
+  ) {
+    const page = data as SessionListPage;
+    return {
+      items: page.items.filter(
+        (item): item is SessionListItem =>
+          !!item &&
+          typeof item.sessionId === "string" &&
+          typeof item.updatedAt === "string" &&
+          typeof item.title === "string",
+      ),
+      nextCursor:
+        typeof page.nextCursor === "string" || page.nextCursor === null
+          ? page.nextCursor
+          : null,
+    };
+  }
+
+  // Legacy shape: string[] (old API) — keep UI usable if server not restarted
+  if (Array.isArray(data)) {
+    const now = new Date().toISOString();
+    const items: SessionListItem[] = data
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+      .map((sessionId) => ({
+        sessionId,
+        updatedAt: now,
+        title: sessionId.length > 16 ? `${sessionId.slice(0, 8)}…` : sessionId,
+      }));
+    return { items, nextCursor: null };
+  }
+
+  throw new Error("Unexpected sessions response shape");
+}
+
 export type DocumentStatus =
   | "queued"
   | "uploading"

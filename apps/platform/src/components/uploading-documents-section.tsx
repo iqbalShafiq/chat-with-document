@@ -17,7 +17,7 @@ export function UploadingDocumentsSection({
   if (!hasAttachments && !hasIngestion) return null;
 
   return (
-    <CollapsibleDocumentSection title="Uploading Document">
+    <CollapsibleDocumentSection title="Attachments">
       <div className="doc-chip-scroll flex flex-nowrap gap-2 overflow-x-auto overscroll-x-contain pb-0.5">
         {hasIngestion ? (
           ingestionItems.map((item) => (

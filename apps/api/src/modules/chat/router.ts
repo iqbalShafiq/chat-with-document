@@ -12,6 +12,7 @@ import {
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
 import { listSessionDocuments } from "../documents/service.js";
+import { listSessionsPage } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 
 function requireSessionId(value: unknown): string | null {
@@ -22,20 +23,11 @@ function requireSessionId(value: unknown): string | null {
 
 export const chatRouter = new Hono()
   .get("/sessions", async (c) => {
-    const rows = await prisma.agentMemorySession.findMany({
-      select: { sessionId: true, updatedAt: true },
-      orderBy: { updatedAt: "desc" },
+    const page = await listSessionsPage({
+      cursor: c.req.query("cursor") ?? undefined,
+      limit: c.req.query("limit") ?? undefined,
     });
-
-    const seen = new Set<string>();
-    const sessionIds: string[] = [];
-    for (const row of rows) {
-      if (seen.has(row.sessionId)) continue;
-      seen.add(row.sessionId);
-      sessionIds.push(row.sessionId);
-    }
-
-    return c.json(sessionIds);
+    return c.json(page);
   })
   .get("/", async (c) => {
     const sessionId = requireSessionId(c.req.query("sessionId"));

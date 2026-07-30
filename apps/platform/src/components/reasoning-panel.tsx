@@ -75,8 +75,8 @@ export function ReasoningPanel({
     <div
       className={`overflow-hidden rounded-xl border text-xs ${
         isLive
-          ? "border-violet-200 bg-violet-50 text-violet-800"
-          : "border-violet-100 bg-violet-50/70 text-violet-700"
+          ? "border-accent/30 bg-accent-soft text-text"
+          : "border-hairline bg-surface text-text-muted"
       }`}
       data-reasoning-state={isLive ? "live" : "done"}
     >
@@ -88,7 +88,7 @@ export function ReasoningPanel({
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-violet-100/40 active:scale-[0.995]"
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-surface-elevated active:scale-[0.995]"
       >
         <ChevronDown
           className={`size-3.5 shrink-0 opacity-70 transition-transform duration-200 ${
@@ -96,7 +96,9 @@ export function ReasoningPanel({
           }`}
           strokeWidth={2}
         />
-        <span className="min-w-0 flex-1 font-medium tracking-tight">{label}</span>
+        <span className="min-w-0 flex-1 font-medium tracking-tight text-text">
+          {label}
+        </span>
       </button>
 
       <div
@@ -109,9 +111,9 @@ export function ReasoningPanel({
         aria-hidden={!open}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="border-t border-violet-200/60 px-3 py-2">
+          <div className="border-t border-hairline px-3 py-2">
             {hasSummary ? (
-              <div className="reasoning-summary opacity-90 [&_a]:text-violet-900 [&_a]:underline [&_code]:rounded [&_code]:bg-violet-100/80 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
+              <div className="reasoning-summary opacity-90 text-text-muted [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-surface-elevated [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
                 <MarkdownBody content={summaryText} />
               </div>
             ) : (

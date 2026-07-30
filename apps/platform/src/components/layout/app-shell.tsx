@@ -1,0 +1,144 @@
+import { AuroraBackground } from "#/components/layout/aurora-background";
+import { ChatTopBar } from "#/components/layout/chat-top-bar";
+import { ChatSidebar } from "#/components/sidebar/chat-sidebar";
+import type { SessionSummary } from "#/lib/session-history";
+import { useEffect, useState, type ReactNode } from "react";
+
+function useIsMobile(breakpoint = 768) {
+  const [mobile, setMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(`(max-width: ${breakpoint - 1}px)`).matches;
+  });
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const onChange = () => setMobile(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [breakpoint]);
+
+  return mobile;
+}
+
+export function AppShell({
+  sessions,
+  activeSessionId,
+  activeTitle,
+  sessionsLoading,
+  sessionsLoadingMore,
+  sessionsError,
+  hasMoreSessions,
+  onSelectSession,
+  onNewChat,
+  onLoadMoreSessions,
+  onRetrySessions,
+  children,
+}: {
+  sessions: SessionSummary[];
+  activeSessionId: string;
+  activeTitle: string;
+  sessionsLoading: boolean;
+  sessionsLoadingMore: boolean;
+  sessionsError: string | null;
+  hasMoreSessions: boolean;
+  onSelectSession: (sessionId: string) => void;
+  onNewChat: () => void;
+  onLoadMoreSessions: () => void;
+  onRetrySessions: () => void;
+  children: ReactNode;
+}) {
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isMobile) setMobileOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
+
+  const toggleSidebar = () => {
+    if (isMobile) {
+      setMobileOpen((v) => !v);
+    } else {
+      setSidebarOpen((v) => !v);
+    }
+  };
+
+  const sidebarProps = {
+    sessions,
+    activeSessionId,
+    loading: sessionsLoading,
+    loadingMore: sessionsLoadingMore,
+    error: sessionsError,
+    hasMore: hasMoreSessions,
+    onSelect: onSelectSession,
+    onNewChat,
+    onLoadMore: onLoadMoreSessions,
+    onRetry: onRetrySessions,
+  };
+
+  return (
+    <div className="relative flex h-[100dvh] max-h-[100dvh] overflow-hidden text-text">
+      <AuroraBackground />
+
+      <div className="relative z-[1] flex min-h-0 min-w-0 flex-1">
+        {/* Desktop sidebar */}
+        <div
+          className={`hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
+            sidebarOpen
+              ? "w-[272px] translate-x-0 opacity-100"
+              : "w-0 -translate-x-1 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="h-full w-[272px]">
+            <ChatSidebar
+              {...sidebarProps}
+              onCollapse={() => setSidebarOpen(false)}
+            />
+          </div>
+        </div>
+
+        {/* Mobile drawer */}
+        {isMobile && mobileOpen ? (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <button
+              type="button"
+              aria-label="Close menu"
+              className="absolute inset-0 bg-canvas/60 animate-fade-in"
+              onClick={() => setMobileOpen(false)}
+            />
+            <div className="absolute inset-y-0 left-0 w-[min(288px,88vw)] animate-fade-up shadow-2xl">
+              <ChatSidebar
+                {...sidebarProps}
+                onCloseMobile={() => setMobileOpen(false)}
+                showClose
+              />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ChatTopBar
+            title={activeTitle}
+            sidebarOpen={isMobile ? mobileOpen : sidebarOpen}
+            isMobile={isMobile}
+            onToggleSidebar={toggleSidebar}
+            onNewChat={onNewChat}
+          />
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {children}
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}

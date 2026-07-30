@@ -34,26 +34,34 @@ export function IngestionStatusPill({
 
   return (
     <div
-      className={`inline-flex min-h-11 w-max max-w-[min(320px,80vw)] shrink-0 items-center gap-2.5 rounded-xl border px-3 py-2 text-xs ${
+      className={`inline-flex min-h-10 w-max max-w-[min(320px,80vw)] shrink-0 items-center gap-2.5 rounded-xl border px-3 py-2 text-xs ${
         isFailed
-          ? "border-rose-200 bg-rose-50 text-rose-700"
+          ? "border-danger/30 bg-danger-soft text-danger"
           : isReady
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : "border-zinc-200 bg-zinc-50 text-zinc-700"
+            ? "border-accent/25 bg-accent-soft text-text"
+            : "border-hairline bg-surface text-text-muted"
       }`}
       title={`${filename} — ${ingestionStatusLabel(status)}`}
     >
       {isPending ? (
-        <Loader2 className="size-4 shrink-0 animate-spin" strokeWidth={1.75} />
+        <Loader2 className="size-4 shrink-0 animate-spin text-accent" strokeWidth={1.75} />
       ) : (
         <FileText
-          className={`size-4 shrink-0 ${isFailed ? "text-rose-600" : "text-emerald-700"}`}
+          className={`size-4 shrink-0 ${isFailed ? "text-danger" : "text-accent"}`}
           strokeWidth={1.75}
         />
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate font-medium">{filename}</span>
-        <span className={`text-[10px] leading-tight ${isPending ? "text-zinc-500" : isFailed ? "text-rose-500" : "text-emerald-600"}`}>
+        <span className="truncate font-medium text-text">{filename}</span>
+        <span
+          className={`text-[10px] leading-tight ${
+            isPending
+              ? "text-text-faint"
+              : isFailed
+                ? "text-danger/80"
+                : "text-accent"
+          }`}
+        >
           {ingestionStatusLabel(status)}
           {isPending ? ` · ${formatElapsed(elapsed)}` : null}
         </span>

@@ -1,5 +1,34 @@
 @import "tailwindcss";
 @import "@anvia/react-ui/styles.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@theme {
+  --font-sans: "Geist Variable", "Geist", "SF Pro Display", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  --color-canvas: #0c0b0a;
+  --color-canvas-elevated: #141210;
+  --color-surface: rgba(255, 255, 255, 0.045);
+  --color-surface-elevated: rgba(255, 255, 255, 0.08);
+  --color-hairline: rgba(255, 255, 255, 0.1);
+  --color-text: #f4f0ea;
+  --color-text-muted: #a39e96;
+  --color-text-faint: #6f6a63;
+  --color-accent: #e8a317;
+  --color-accent-hover: #f0b52e;
+  --color-accent-soft: rgba(232, 163, 23, 0.14);
+  --color-accent-ring: rgba(232, 163, 23, 0.28);
+  --color-danger: #f87171;
+  --color-danger-soft: rgba(248, 113, 113, 0.12);
+  --color-success: #6ee7a8;
+  --color-success-soft: rgba(110, 231, 168, 0.12);
+
+  --ease-out-premium: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 160ms;
+  --duration-med: 280ms;
+}
 
 * {
   box-sizing: border-box;
@@ -14,7 +43,197 @@ body,
 
 body {
   margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+  Shared chrome glass (sidebar · top bar · composer).
+  Keep fill low so aurora/content read through; blur does the frost.
+*/
+.glass-surface {
+  background: rgb(255 255 255 / 0.035);
+  border-color: rgb(255 255 255 / 0.08);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+}
+
+.glass-sidebar {
+  background: rgb(255 255 255 / 0.035);
+  border-right: 1px solid rgb(255 255 255 / 0.08);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+}
+
+/* Chips / small pills (Latest, icon buttons) — slightly denser for contrast */
+.glass {
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+}
+
+
+
+/* ─── Aurora ambient layer ───────────────────────────────────── */
+
+.aurora-root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--color-canvas);
+}
+
+.aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.45;
+  will-change: transform;
+  animation: aurora-drift 28s var(--ease-out-premium) infinite alternate;
+}
+
+.aurora-blob-a {
+  width: min(55vw, 640px);
+  height: min(55vw, 640px);
+  top: -12%;
+  right: -8%;
+  background: radial-gradient(
+    circle,
+    rgba(232, 163, 23, 0.35) 0%,
+    rgba(232, 163, 23, 0.08) 45%,
+    transparent 70%
+  );
+  animation-duration: 32s;
+}
+
+.aurora-blob-b {
+  width: min(48vw, 520px);
+  height: min(48vw, 520px);
+  bottom: -10%;
+  left: -6%;
+  background: radial-gradient(
+    circle,
+    rgba(194, 98, 28, 0.28) 0%,
+    rgba(120, 60, 20, 0.08) 50%,
+    transparent 70%
+  );
+  animation-duration: 38s;
+  animation-delay: -8s;
+}
+
+.aurora-blob-c {
+  width: min(36vw, 400px);
+  height: min(36vw, 400px);
+  top: 40%;
+  left: 35%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 200, 80, 0.12) 0%,
+    transparent 65%
+  );
+  animation-duration: 44s;
+  animation-delay: -16s;
+  opacity: 0.35;
+}
+
+.aurora-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+  mix-blend-mode: overlay;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -4%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-2%, 3%, 0) scale(0.96);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up var(--duration-med) var(--ease-out-premium) both;
+}
+
+.animate-fade-in {
+  animation: fade-in var(--duration-med) var(--ease-out-premium) both;
+}
+
+.animate-scale-in {
+  animation: scale-in var(--duration-fast) var(--ease-out-premium) both;
+}
+
+.stagger-item {
+  animation: fade-up var(--duration-med) var(--ease-out-premium) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────── */
 
 .chat-scroll {
   scrollbar-width: thin;
@@ -22,7 +241,7 @@ body {
 }
 
 .chat-scroll:hover {
-  scrollbar-color: rgb(212 212 216 / 0.9) transparent;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
 
 .chat-scroll::-webkit-scrollbar {
@@ -42,15 +261,15 @@ body {
 }
 
 .chat-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: rgb(212 212 216 / 0.9);
+  background-color: rgb(255 255 255 / 0.14);
 }
 
 .chat-scroll:hover::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(161 161 170 / 0.95);
+  background-color: rgb(255 255 255 / 0.22);
 }
 
 .chat-scroll:hover::-webkit-scrollbar-thumb:active {
-  background-color: rgb(113 113 122);
+  background-color: rgb(255 255 255 / 0.3);
 }
 
 .chat-scroll::-webkit-scrollbar-corner {
@@ -59,7 +278,7 @@ body {
 
 .doc-chip-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgb(212 212 216 / 0.9) transparent;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
 
 .doc-chip-scroll::-webkit-scrollbar {
@@ -72,11 +291,11 @@ body {
 
 .doc-chip-scroll::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background-color: rgb(212 212 216 / 0.9);
+  background-color: rgb(255 255 255 / 0.14);
 }
 
 .doc-chip-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(161 161 170 / 0.95);
+  background-color: rgb(255 255 255 / 0.22);
 }
 
 /* Keep focus ring on the rounded composer shell, not the inner editor. */
@@ -87,11 +306,11 @@ body {
 
 /*
   TipTap nests: [data-anvia-composer-input] > div > [data-anvia-composer-editor]
-  Center the editor content vertically when the shell is taller than one line.
 */
 .composer-input[data-anvia-composer-input] {
   scrollbar-width: thin;
-  scrollbar-color: rgb(212 212 216 / 0.9) transparent;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  color: var(--color-text);
 }
 
 .composer-input[data-anvia-composer-input]::-webkit-scrollbar {
@@ -100,18 +319,19 @@ body {
 
 .composer-input[data-anvia-composer-input]::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background-color: rgb(212 212 216 / 0.9);
+  background-color: rgb(255 255 255 / 0.14);
 }
 
 .composer-input[data-anvia-composer-input] > div {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .composer-input[data-anvia-composer-input] [data-anvia-composer-editor] {
   width: 100%;
   outline: none;
+  min-height: 1.5em;
 }
 
 .composer-input[data-anvia-composer-input] [data-anvia-composer-editor] p {
@@ -123,5 +343,46 @@ body {
   float: left;
   height: 0;
   pointer-events: none;
-  color: rgb(161 161 170);
+  color: var(--color-text-faint);
+}
+
+/* ─── Reduced motion / transparency ─────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob {
+    animation: none !important;
+  }
+
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-scale-in,
+  .stagger-item,
+  .skeleton-shimmer {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-surface,
+  .glass-sidebar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--color-canvas-elevated) !important;
+  }
+
+  .aurora-blob {
+    opacity: 0.15;
+  }
+
+  .aurora-grain {
+    display: none;
+  }
 }

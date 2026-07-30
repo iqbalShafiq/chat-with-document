@@ -61,7 +61,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
           {section.items!.map((item, index) => (
             <li
               key={`${section.title}-${item.title}-${index}`}
-              className="rounded-lg border border-current/10 bg-white/40 px-2.5 py-1.5"
+              className="rounded-lg border border-hairline bg-surface px-2.5 py-1.5"
             >
               <p className="font-medium opacity-95">{item.title}</p>
               {item.meta ? (
@@ -148,10 +148,10 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
   }, [isError, isRunning, part.error?.message, part.output, part.toolName]);
 
   const toneClass = isError
-    ? "border-rose-200 bg-rose-50 text-rose-800"
+    ? "border-danger/30 bg-danger-soft text-danger"
     : isRunning
-      ? "border-amber-200 bg-amber-50 text-amber-900"
-      : "border-emerald-200 bg-emerald-50 text-emerald-900";
+      ? "border-accent/30 bg-accent-soft text-text"
+      : "border-hairline bg-surface text-text-muted";
 
   return (
     <div className={`overflow-hidden rounded-xl border text-xs ${toneClass}`}>
@@ -163,7 +163,7 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-black/[0.03] active:scale-[0.995]"
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-surface-elevated active:scale-[0.995]"
       >
         <ChevronDown
           className={`size-3.5 shrink-0 opacity-70 transition-transform duration-200 ${
