@@ -1,5 +1,5 @@
 import { useChatContext, useMessage, useMessagePart } from "@anvia/react-ui";
-import { Brain, ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MarkdownBody } from "#/components/math-markdown";
 
@@ -11,8 +11,8 @@ function formatDuration(ms: number): string {
 }
 
 /**
+ * Flat collapsible reasoning — no card chrome.
  * UI shows only reasoning summary text (Anvia maps that to part.text).
- * Encrypted reasoning stays in server/memory payloads, never rendered here.
  */
 export function ReasoningPanel({
   isStreamingMessage,
@@ -72,8 +72,7 @@ export function ReasoningPanel({
 
   return (
     <div
-      className="activity-card overflow-hidden rounded-xl text-xs text-text-muted"
-      data-state={isLive ? "live" : "done"}
+      className="text-xs text-text-muted"
       data-reasoning-state={isLive ? "live" : "done"}
     >
       <button
@@ -84,57 +83,44 @@ export function ReasoningPanel({
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/[0.03] active:scale-[0.995]"
+        className="group/activity inline-flex max-w-full cursor-pointer items-center gap-1.5 py-0.5 text-left transition-colors duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-text active:scale-[0.99]"
       >
-        <span
-          className={`inline-flex size-6 shrink-0 items-center justify-center rounded-lg ${
-            isLive
-              ? "bg-accent-soft text-accent"
-              : "bg-white/[0.05] text-text-faint"
-          }`}
-        >
-          {isLive ? (
-            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
-          ) : (
-            <Brain className="size-3.5" strokeWidth={1.75} />
-          )}
-        </span>
-
-        <span className="min-w-0 flex-1 font-medium tracking-tight text-text">
-          {label}
-        </span>
-
         <ChevronDown
-          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ${
+          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/activity:text-text-muted ${
             open ? "rotate-0" : "-rotate-90"
           }`}
           strokeWidth={2}
         />
+        {isLive ? (
+          <Loader2
+            className="size-3.5 shrink-0 animate-spin text-accent"
+            strokeWidth={2}
+          />
+        ) : null}
+        <span
+          className={`min-w-0 truncate font-medium tracking-tight ${
+            isLive ? "text-text" : "text-text-muted group-hover/activity:text-text"
+          }`}
+        >
+          {label}
+        </span>
       </button>
 
-      <div
-        id={panelId}
-        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
-          open
-            ? "grid-rows-[1fr] opacity-100"
-            : "pointer-events-none grid-rows-[0fr] opacity-0"
-        }`}
-        aria-hidden={!open}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div className="activity-card-body px-3 py-2.5">
-            {hasSummary ? (
-              <div className="reasoning-summary text-[12px] leading-relaxed text-text-muted [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_strong]:text-text/90 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
-                <MarkdownBody content={summaryText} />
-              </div>
-            ) : (
-              <p className="text-[12px] text-text-faint">
-                {isLive ? "Waiting for summary…" : "No summary available."}
-              </p>
-            )}
-          </div>
+      {open ? (
+        <div id={panelId} className="mt-1.5 border-l border-white/[0.08] pl-3 ml-1.5 animate-fade-in">
+          {hasSummary ? (
+            <div className="reasoning-summary text-[12px] leading-relaxed text-text-muted [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_strong]:text-text/90 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
+              <MarkdownBody content={summaryText} />
+            </div>
+          ) : (
+            <p className="text-[12px] text-text-faint">
+              {isLive ? "Waiting for summary…" : "No summary available."}
+            </p>
+          )}
         </div>
-      </div>
+      ) : (
+        <div id={panelId} hidden />
+      )}
     </div>
   );
 }

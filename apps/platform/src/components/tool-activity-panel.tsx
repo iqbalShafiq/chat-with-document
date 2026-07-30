@@ -1,11 +1,5 @@
 import type { UIMessagePart } from "@anvia/react";
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  Loader2,
-  Wrench,
-} from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   formatToolInput,
@@ -40,7 +34,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
   const hasItems = (section.items?.length ?? 0) > 0;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-faint">
         {section.title}
       </p>
@@ -50,7 +44,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
         </p>
       ) : null}
       {hasFields ? (
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[12px]">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12px]">
           {section.fields!.map((field) => (
             <div key={`${section.title}-${field.label}`} className="contents">
               <dt className="font-medium whitespace-nowrap text-text-faint">
@@ -62,11 +56,11 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
         </dl>
       ) : null}
       {hasItems ? (
-        <ul className="space-y-1.5">
+        <ul className="space-y-2">
           {section.items!.map((item, index) => (
             <li
               key={`${section.title}-${item.title}-${index}`}
-              className="activity-nested rounded-lg px-2.5 py-2"
+              className="min-w-0"
             >
               <p className="text-[12px] font-medium text-text/90">{item.title}</p>
               {item.meta ? (
@@ -88,6 +82,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
   );
 }
 
+/** Flat collapsible tool step — no card chrome. */
 export function ToolActivityPanel({ part }: { part: ToolPart }) {
   const label = getToolActivityLabel(part);
   const isRunning =
@@ -152,27 +147,20 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
     return formatToolOutput(part.toolName, parseToolValue(part.output));
   }, [isError, isRunning, part.error?.message, part.output, part.toolName]);
 
-  const dataState = isError ? "error" : isRunning ? "live" : "done";
+  const labelTone = isError
+    ? "text-danger"
+    : isRunning
+      ? "text-text"
+      : "text-text-muted group-hover/activity:text-text";
 
   const statusTone = isError
-    ? "bg-danger-soft text-danger"
+    ? "text-danger/80"
     : isRunning
-      ? "bg-accent-soft text-accent"
-      : "bg-white/[0.05] text-text-faint";
-
-  const iconTone = isError
-    ? "bg-danger-soft text-danger"
-    : isRunning
-      ? "bg-accent-soft text-accent"
-      : "bg-white/[0.05] text-text-faint";
+      ? "text-accent"
+      : "text-text-faint";
 
   return (
-    <div
-      className={`activity-card overflow-hidden rounded-xl text-xs ${
-        isError ? "text-danger" : "text-text-muted"
-      }`}
-      data-state={dataState}
-    >
+    <div className="text-xs text-text-muted">
       <button
         type="button"
         aria-expanded={open}
@@ -181,57 +169,41 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/[0.03] active:scale-[0.995]"
+        className="group/activity inline-flex max-w-full cursor-pointer items-center gap-1.5 py-0.5 text-left transition-colors duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99]"
       >
-        <span
-          className={`inline-flex size-6 shrink-0 items-center justify-center rounded-lg ${iconTone}`}
-        >
-          {isError ? (
-            <AlertCircle className="size-3.5" strokeWidth={1.75} />
-          ) : isRunning ? (
-            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
-          ) : (
-            <Wrench className="size-3.5" strokeWidth={1.75} />
-          )}
-        </span>
-
-        <span className="min-w-0 flex-1 truncate font-medium tracking-tight text-text">
-          {label}
-        </span>
-
-        <span
-          className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${statusTone}`}
-        >
-          {isDone && !isError ? (
-            <Check className="size-3" strokeWidth={2.25} />
-          ) : null}
-          {statusLabel(part)}
-        </span>
-
         <ChevronDown
-          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ${
+          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/activity:text-text-muted ${
             open ? "rotate-0" : "-rotate-90"
           }`}
           strokeWidth={2}
         />
+        {isRunning ? (
+          <Loader2
+            className="size-3.5 shrink-0 animate-spin text-accent"
+            strokeWidth={2}
+          />
+        ) : null}
+        <span className={`min-w-0 truncate font-medium tracking-tight ${labelTone}`}>
+          {label}
+        </span>
+        <span className={`shrink-0 text-[11px] font-medium ${statusTone}`}>
+          · {statusLabel(part)}
+        </span>
       </button>
 
-      <div
-        id={panelId}
-        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
-          open
-            ? "grid-rows-[1fr] opacity-100"
-            : "pointer-events-none grid-rows-[0fr] opacity-0"
-        }`}
-        aria-hidden={!open}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div className="activity-card-body space-y-3.5 px-3 py-2.5">
-            <ToolSectionView section={requestSection} />
-            <ToolSectionView section={resultSection} />
-          </div>
+      {open ? (
+        <div
+          id={panelId}
+          className={`mt-1.5 ml-1.5 space-y-3 border-l pl-3 animate-fade-in ${
+            isError ? "border-danger/30" : "border-white/[0.08]"
+          }`}
+        >
+          <ToolSectionView section={requestSection} />
+          <ToolSectionView section={resultSection} />
         </div>
-      </div>
+      ) : (
+        <div id={panelId} hidden />
+      )}
     </div>
   );
 }

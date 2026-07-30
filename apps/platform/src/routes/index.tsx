@@ -1,9 +1,11 @@
 import { initialMessagesFromMemory, useChat } from "@anvia/react";
 import type { UIAttachment, UIMessage } from "@anvia/react";
-import { ChatProvider, Thread } from "@anvia/react-ui";
+import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { EmptyState } from "#/components/chat/empty-state";
+import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { AppShell } from "#/components/layout/app-shell";
 import {
@@ -19,7 +21,14 @@ import {
   ensureActiveSession,
   type SessionSummary,
 } from "#/lib/session-history";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 const SESSION_STORAGE_KEY = "chat.sessionId";
 const SESSIONS_PAGE_SIZE = 30;
@@ -270,6 +279,8 @@ function ChatSession({
   onStreamSettled: () => void;
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
+  const composerDockRef = useRef<HTMLDivElement>(null);
+  const chatViewportRef = useRef<HTMLDivElement>(null);
   const wasStreamingRef = useRef(false);
   const [ingestionItems, setIngestionItems] = useState<
     Array<{ filename: string; status: DocumentStatus }>
@@ -279,6 +290,20 @@ function ChatSession({
   );
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+  /** Shared with doc rail so its bottom band matches the textfield dock. */
+  const [composerDockH, setComposerDockH] = useState(120);
+
+  useEffect(() => {
+    const el = composerDockRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height;
+      if (typeof h === "number" && h > 0) setComposerDockH(Math.ceil(h));
+    });
+    ro.observe(el);
+    setComposerDockH(Math.ceil(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, []);
 
   const refreshSessionDocuments = useCallback(async () => {
     try {
@@ -344,162 +369,215 @@ function ChatSession({
   return (
     <ChatProvider controller={chat}>
       {/*
-        One scrollport owns messages + sticky composer so both share the exact
-        same content width (absolute overlay was offset by the scrollbar).
+        Composer.Root wraps chat + right doc rail so attachments share context.
+        When docs exist, rail opens (272px = left sidebar) and pushes chat left.
       */}
-      <div className="relative flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-        <Thread.Root className="relative min-h-0 flex-1 overflow-hidden">
-          <Thread.Viewport
-            className="chat-scroll absolute inset-0 overflow-y-auto overscroll-contain"
-            autoScroll
-          >
-            <div className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3">
+      <Composer.Root
+        className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+        submitMessage={async ({
+          input,
+          attachments,
+          chat: chatController,
+          clear,
+        }) => {
+          setComposerError(null);
+          const trimmed = input.trim();
+          if (!trimmed && attachments.length === 0) return;
+
+          const documentIds: string[] = [];
+
+          if (attachments.length > 0) {
+            setIsIngesting(true);
+            setIngestionItems([]);
+
+            try {
+              for (const attachment of attachments) {
+                const file = await resolveAttachmentFile(attachment);
+                if (file.size === 0) {
+                  throw new Error(`File is empty: ${file.name}`);
+                }
+
+                setIngestionItems((current) => [
+                  ...current,
+                  { filename: file.name, status: "uploading" },
+                ]);
+
+                const uploaded = await uploadDocument({
+                  sessionId,
+                  file,
+                });
+
+                const ready = await waitForDocumentReady({
+                  sessionId,
+                  documentId: uploaded.id,
+                  onStatus: (status) => {
+                    setIngestionItems((current) =>
+                      current.map((item) =>
+                        item.filename === file.name
+                          ? { ...item, status: status.status }
+                          : item,
+                      ),
+                    );
+                  },
+                });
+
+                documentIds.push(ready.id);
+              }
+
+              await refreshSessionDocuments();
+            } catch (error) {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : "Document processing failed";
+              setComposerError(message);
+              setIngestionItems((current) =>
+                current.map((item) =>
+                  item.status === "uploading" ||
+                  item.status === "queued" ||
+                  item.status === "ocr_processing" ||
+                  item.status === "embedding_processing"
+                    ? { ...item, status: "failed" }
+                    : item,
+                ),
+              );
+              setIsIngesting(false);
+              return;
+            }
+
+            setIsIngesting(false);
+          }
+
+          const attachedDocuments = attachments.map((attachment) => {
+            const name = attachment.name ?? "Document";
+            return attachment.mediaType
+              ? { name, mediaType: attachment.mediaType }
+              : { name };
+          });
+
+          await chatController.sendMessage({
+            text: trimmed,
+            metadata: { sessionId, documentIds, attachedDocuments },
+            attachments: attachments.map((attachment) => ({
+              id: attachment.id,
+              type: attachment.type,
+              name: attachment.name,
+              mediaType: attachment.mediaType,
+              text: attachment.name ?? "Document",
+            })),
+          });
+
+          clear();
+          setIngestionItems([]);
+        }}
+      >
+        <div
+          className="flex min-h-0 w-full flex-1 overflow-hidden"
+          style={
+            {
+              ["--composer-dock-h" as string]: `${composerDockH}px`,
+            } as CSSProperties
+          }
+        >
+          {/* Center chat column — shrinks when right rail opens */}
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+            <Thread.Root className="absolute inset-0 overflow-hidden">
               {/*
-                Grows between top bar clearance and sticky composer so empty
-                state can center exactly in that band.
+                Full-bleed scroll: content passes under top bar + textfield.
+                Native scrollbar hidden; InsetScrollbar has 24px insets from
+                top bar bottom and textfield top.
               */}
-              <div className="flex min-h-0 flex-1 flex-col pt-[calc(3.5rem+1rem)] md:pt-[calc(3.5rem+1.5rem)]">
-                <Thread.Empty className="flex min-h-0 flex-1 flex-col">
-                  <EmptyState />
-                </Thread.Empty>
-
-                <Thread.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
-
-                <Thread.Messages className="grid w-full gap-4">
-                  {() => (
-                    <ChatMessageRow
-                      chatStatus={chat.status}
-                      lastMessageId={chat.messages.at(-1)?.id}
-                    />
-                  )}
-                </Thread.Messages>
-
-                <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
-                  {chat.status === "streaming"
-                    ? "Thinking and writing…"
-                    : "Writing…"}
-                </Thread.Loading>
-
-                <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
-              </div>
-
-              {/* Sticky dock: Latest sits above the field; same column width */}
-              <div className="sticky bottom-0 z-20 -mx-3 px-3 pb-3 pt-2 md:pb-4">
-                <Thread.ViewportFooter className="mb-2 flex justify-center">
-                  <Thread.ScrollToBottom className="glass inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:bg-white/12 hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
-                    Latest
-                  </Thread.ScrollToBottom>
-                </Thread.ViewportFooter>
-
-                <ChatComposer
-                  chatStatus={chat.status}
-                  isIngesting={isIngesting}
-                  sessionDocuments={sessionDocuments}
-                  ingestionItems={ingestionItems}
-                  composerError={composerError}
-                  composerInputRef={composerInputRef}
-                  submitMessage={async ({
-                    input,
-                    attachments,
-                    chat: chatController,
-                    clear,
-                  }) => {
-                    setComposerError(null);
-                    const trimmed = input.trim();
-                    if (!trimmed && attachments.length === 0) return;
-
-                    const documentIds: string[] = [];
-
-                    if (attachments.length > 0) {
-                      setIsIngesting(true);
-                      setIngestionItems([]);
-
-                      try {
-                        for (const attachment of attachments) {
-                          const file = await resolveAttachmentFile(attachment);
-                          if (file.size === 0) {
-                            throw new Error(`File is empty: ${file.name}`);
-                          }
-
-                          setIngestionItems((current) => [
-                            ...current,
-                            { filename: file.name, status: "uploading" },
-                          ]);
-
-                          const uploaded = await uploadDocument({
-                            sessionId,
-                            file,
-                          });
-
-                          const ready = await waitForDocumentReady({
-                            sessionId,
-                            documentId: uploaded.id,
-                            onStatus: (status) => {
-                              setIngestionItems((current) =>
-                                current.map((item) =>
-                                  item.filename === file.name
-                                    ? { ...item, status: status.status }
-                                    : item,
-                                ),
-                              );
-                            },
-                          });
-
-                          documentIds.push(ready.id);
-                        }
-
-                        await refreshSessionDocuments();
-                      } catch (error) {
-                        const message =
-                          error instanceof Error
-                            ? error.message
-                            : "Document processing failed";
-                        setComposerError(message);
-                        setIngestionItems((current) =>
-                          current.map((item) =>
-                            item.status === "uploading" ||
-                            item.status === "queued" ||
-                            item.status === "ocr_processing" ||
-                            item.status === "embedding_processing"
-                              ? { ...item, status: "failed" }
-                              : item,
-                          ),
-                        );
-                        setIsIngesting(false);
-                        return;
-                      }
-
-                      setIsIngesting(false);
-                    }
-
-                    const attachedDocuments = attachments.map((attachment) => {
-                      const name = attachment.name ?? "Document";
-                      return attachment.mediaType
-                        ? { name, mediaType: attachment.mediaType }
-                        : { name };
-                    });
-
-                    await chatController.sendMessage({
-                      text: trimmed,
-                      metadata: { sessionId, documentIds, attachedDocuments },
-                      attachments: attachments.map((attachment) => ({
-                        id: attachment.id,
-                        type: attachment.type,
-                        name: attachment.name,
-                        mediaType: attachment.mediaType,
-                        text: attachment.name ?? "Document",
-                      })),
-                    });
-
-                    clear();
-                    setIngestionItems([]);
+              <Thread.Viewport
+                ref={chatViewportRef}
+                className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain"
+                autoScroll
+              >
+                <div
+                  className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3"
+                  style={{
+                    paddingTop: "calc(3.5rem + 24px)",
+                    paddingBottom: "calc(var(--composer-dock-h, 7.5rem) + 24px)",
                   }}
-                />
+                >
+                  <Thread.Empty className="flex min-h-0 flex-1 flex-col">
+                    <EmptyState />
+                  </Thread.Empty>
+
+                  <Thread.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
+
+                  {/*
+                    Same-thread vs cross-message spacing:
+                    - activity chain (tool↔reasoning, any message split): tight mt-1
+                    - only jump to a message that *starts with answer text*: mt-4
+                      (so tool → reasoning+answer stays tight into the reasoning
+                      header; roomy gap is in-message reasoning/tool → text)
+                    - around user turns: mt-4
+                  */}
+                  <Thread.Messages
+                    className={[
+                      "flex w-full flex-col",
+                      "[&>*+*]:mt-1",
+                      // roomy only when next message opens on answer text, not activity
+                      "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
+                      "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
+                      "[&>[data-role=user]+*]:mt-4",
+                      "[&>*+[data-role=user]]:mt-4",
+                    ].join(" ")}
+                  >
+                    {() => (
+                      <ChatMessageRow
+                        chatStatus={chat.status}
+                        lastMessageId={chat.messages.at(-1)?.id}
+                      />
+                    )}
+                  </Thread.Messages>
+
+                  <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
+                    {chat.status === "streaming"
+                      ? "Thinking and writing…"
+                      : "Writing…"}
+                  </Thread.Loading>
+
+                  <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
+                </div>
+              </Thread.Viewport>
+
+              <InsetScrollbar
+                scrollRef={chatViewportRef}
+                top="calc(3.5rem + 24px)"
+                bottom="calc(var(--composer-dock-h, 7.5rem) + 24px)"
+              />
+
+              {/* Overlay dock — content scrolls underneath */}
+              <div
+                ref={composerDockRef}
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-3"
+              >
+                <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
+                  <Thread.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
+                    <Thread.ScrollToBottom className="pointer-events-auto glass inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:bg-white/12 hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                      Latest
+                    </Thread.ScrollToBottom>
+                  </Thread.ViewportFooter>
+
+                  <ChatComposer
+                    chatStatus={chat.status}
+                    isIngesting={isIngesting}
+                    composerError={composerError}
+                    composerInputRef={composerInputRef}
+                  />
+                </div>
               </div>
-            </div>
-          </Thread.Viewport>
-        </Thread.Root>
-      </div>
+            </Thread.Root>
+          </div>
+
+          {/* Right doc rail — same 272px as left sidebar; same vertical band as chat */}
+          <SessionDocumentsRail
+            sessionDocuments={sessionDocuments}
+            ingestionItems={ingestionItems}
+          />
+        </div>
+      </Composer.Root>
     </ChatProvider>
   );
 }

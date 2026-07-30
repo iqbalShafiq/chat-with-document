@@ -23,9 +23,11 @@ function formatElapsed(seconds: number) {
 export function IngestionStatusPill({
   filename,
   status,
+  className = "",
 }: {
   filename: string;
   status: DocumentStatus;
+  className?: string;
 }) {
   const isReady = status === "ready";
   const isFailed = status === "failed";
@@ -34,13 +36,13 @@ export function IngestionStatusPill({
 
   return (
     <div
-      className={`inline-flex min-h-10 w-max max-w-[min(320px,80vw)] shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-xs ${
+      className={`flex min-h-10 w-full min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-xs ${
         isFailed
           ? "glass-pane-soft text-danger ring-1 ring-danger/25"
           : isReady
             ? "glass-pane text-text"
             : "glass-pane-soft text-text-muted"
-      }`}
+      } ${className}`}
       title={`${filename} — ${ingestionStatusLabel(status)}`}
     >
       {isPending ? (
@@ -51,7 +53,7 @@ export function IngestionStatusPill({
           strokeWidth={1.75}
         />
       )}
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate font-medium text-text">{filename}</span>
         <span
           className={`text-[10px] leading-tight ${

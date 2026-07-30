@@ -7,8 +7,10 @@ const EXIT_MS = 180;
 
 export function ComposerAttachmentChip({
   attachment,
+  className = "",
 }: {
   attachment: UIAttachment;
+  className?: string;
 }) {
   const composer = useComposer();
   const name = attachment.name ?? "Document";
@@ -27,16 +29,16 @@ export function ComposerAttachmentChip({
 
   return (
     <div
-      className={`grid min-w-0 shrink-0 transition-[grid-template-columns,opacity] ease-out motion-reduce:transition-none ${
+      className={`grid w-full min-w-0 transition-[grid-template-rows,opacity] ease-out motion-reduce:transition-none ${
         leaving
-          ? "pointer-events-none grid-cols-[0fr] opacity-0"
-          : "grid-cols-[1fr] opacity-100"
-      }`}
+          ? "pointer-events-none grid-rows-[0fr] opacity-0"
+          : "grid-rows-[1fr] opacity-100"
+      } ${className}`}
       style={{ transitionDuration: `${EXIT_MS}ms` }}
     >
-      <div className="min-w-0 overflow-hidden">
+      <div className="min-h-0 w-full min-w-0 overflow-hidden">
         <div
-          className={`glass-pane inline-flex min-h-10 w-max max-w-[min(280px,75vw)] items-center gap-2 rounded-xl px-3 py-2 text-xs text-text transition-[opacity,transform] ease-out motion-reduce:transition-none ${
+          className={`glass-pane flex min-h-10 w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-xs text-text transition-[opacity,transform] ease-out motion-reduce:transition-none ${
             leaving ? "scale-95 opacity-0" : "scale-100 opacity-100"
           }`}
           style={{ transitionDuration: `${EXIT_MS}ms` }}
@@ -45,7 +47,7 @@ export function ComposerAttachmentChip({
             className="size-4 shrink-0 text-accent"
             strokeWidth={1.75}
           />
-          <span className="truncate font-medium">{name}</span>
+          <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
           <button
             type="button"
             aria-label={`Remove ${name}`}

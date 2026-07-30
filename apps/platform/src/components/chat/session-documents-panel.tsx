@@ -1,0 +1,170 @@
+import type { UIAttachment } from "@anvia/react";
+import { Composer, useComposer } from "@anvia/react-ui";
+import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
+import { ComposerAttachmentChip } from "#/components/composer-attachment";
+import { IngestionStatusPill } from "#/components/ingestion-status-pill";
+import type { DocumentStatus, SessionDocument } from "#/lib/api";
+import { FileText } from "lucide-react";
+
+/** Matches left desktop sidebar width. */
+export const DOC_RAIL_WIDTH_PX = 272;
+
+export function useHasSessionDocuments({
+  sessionDocuments,
+  ingestionItems,
+}: {
+  sessionDocuments: SessionDocument[];
+  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+}) {
+  const composer = useComposer();
+  return (
+    sessionDocuments.length > 0 ||
+    ingestionItems.length > 0 ||
+    composer.attachments.length > 0
+  );
+}
+
+/**
+ * Right-rail document list: Active documents + Attachments.
+ * Width matches left sidebar (272px). Parent should animate open/close width.
+ */
+export function SessionDocumentsPanel({
+  sessionDocuments,
+  ingestionItems,
+}: {
+  sessionDocuments: SessionDocument[];
+  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+}) {
+  const composer = useComposer();
+  const hasActive = sessionDocuments.length > 0;
+  const hasIngestion = ingestionItems.length > 0;
+  const hasAttachments = composer.attachments.length > 0;
+  const hasPending = hasIngestion || hasAttachments;
+
+  return (
+    <aside
+      className="flex h-full w-full flex-col bg-transparent"
+      aria-label="Session documents"
+    >
+      <div className="flex h-14 shrink-0 flex-col justify-center px-3">
+        <p className="truncate text-sm font-semibold tracking-tight text-text">
+          Documents
+        </p>
+        <p className="truncate text-[11px] text-text-faint">
+          {[
+            hasActive ? `${sessionDocuments.length} active` : null,
+            hasPending
+              ? `${ingestionItems.length || composer.attachments.length} pending`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || "None yet"}
+        </p>
+      </div>
+
+      <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-3">
+        <div className="flex w-full flex-col gap-4">
+          {hasActive ? (
+            <CollapsibleDocumentSection title="Active documents">
+              <ul className="flex w-full list-none flex-col gap-1.5 p-0">
+                {sessionDocuments.map((doc) => (
+                  <li key={doc.id} className="w-full min-w-0">
+                    <div
+                      className="glass-pane flex w-full min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-xs text-text"
+                      title={doc.firstPageSummary || doc.filename}
+                    >
+                      <FileText
+                        className="mt-0.5 size-4 shrink-0 text-accent"
+                        strokeWidth={1.75}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium leading-snug">
+                          {doc.filename}
+                        </p>
+                        {doc.firstPageSummary ? (
+                          <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-text-faint">
+                            {doc.firstPageSummary}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleDocumentSection>
+          ) : null}
+
+          {hasPending ? (
+            <CollapsibleDocumentSection title="Attachments">
+              <div className="flex w-full flex-col gap-1.5">
+                {hasIngestion
+                  ? ingestionItems.map((item) => (
+                      <IngestionStatusPill
+                        key={`ingest-${item.filename}-${item.status}`}
+                        filename={item.filename}
+                        status={item.status}
+                      />
+                    ))
+                  : null}
+
+                {!hasIngestion && hasAttachments ? (
+                  <Composer.Attachments
+                    keepMounted
+                    className="flex w-full flex-col gap-1.5"
+                  >
+                    {(attachment: UIAttachment) => (
+                      <ComposerAttachmentChip
+                        key={attachment.id}
+                        attachment={attachment}
+                      />
+                    )}
+                  </Composer.Attachments>
+                ) : null}
+              </div>
+            </CollapsibleDocumentSection>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * Animated 272px rail — collapses to 0 when no docs/attachments. Desktop only.
+ * Floating list uses the same vertical insets as the chat scrollbar track:
+ *   top = top bar + 24px, bottom = textfield dock + 24px.
+ */
+export function SessionDocumentsRail({
+  sessionDocuments,
+  ingestionItems,
+}: {
+  sessionDocuments: SessionDocument[];
+  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+}) {
+  const open = useHasSessionDocuments({ sessionDocuments, ingestionItems });
+
+  return (
+    <div
+      className={`hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
+        open
+          ? "w-[272px] translate-x-0 opacity-100"
+          : "w-0 translate-x-1 opacity-0 pointer-events-none"
+      }`}
+    >
+      <div className="relative h-full pr-2" style={{ width: DOC_RAIL_WIDTH_PX }}>
+        <div
+          className="absolute inset-x-0 min-h-0 overflow-hidden pr-2"
+          style={{
+            top: "calc(3.5rem + 24px)",
+            bottom: "calc(var(--composer-dock-h, 7.5rem) + 24px)",
+          }}
+        >
+          <SessionDocumentsPanel
+            sessionDocuments={sessionDocuments}
+            ingestionItems={ingestionItems}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

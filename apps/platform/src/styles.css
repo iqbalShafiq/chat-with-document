@@ -223,48 +223,6 @@ body {
   backdrop-filter: blur(26px) saturate(1.25);
 }
 
-/*
-  Activity cards — reasoning + tool steps.
-  Quieter than user bubbles; shared chrome so the stack feels one system.
-*/
-.activity-card {
-  background: linear-gradient(
-    180deg,
-    rgb(255 255 255 / 0.055) 0%,
-    rgb(255 255 255 / 0.03) 100%
-  );
-  border: 1px solid rgb(255 255 255 / 0.07);
-  box-shadow:
-    0 6px 18px -12px rgb(0 0 0 / 0.4),
-    inset 0 1px 0 rgb(255 255 255 / 0.06);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
-  backdrop-filter: blur(16px) saturate(1.15);
-}
-
-.activity-card[data-state="live"] {
-  border-color: rgb(232 163 23 / 0.22);
-  box-shadow:
-    0 6px 18px -12px rgb(0 0 0 / 0.4),
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    0 0 0 1px rgb(232 163 23 / 0.06);
-}
-
-.activity-card[data-state="error"] {
-  border-color: rgb(248 113 113 / 0.28);
-  box-shadow:
-    0 6px 18px -12px rgb(0 0 0 / 0.4),
-    inset 0 1px 0 rgb(255 255 255 / 0.05);
-}
-
-.activity-card-body {
-  border-top: 1px solid rgb(255 255 255 / 0.06);
-}
-
-.activity-nested {
-  background: rgb(0 0 0 / 0.22);
-  border: 1px solid rgb(255 255 255 / 0.05);
-}
-
 /* ─── Aurora ambient layer ───────────────────────────────────── */
 
 .aurora-root {
@@ -409,6 +367,21 @@ body {
   background-color: rgb(255 255 255 / 0.14);
 }
 
+/*
+  Full-bleed chat viewport: content scrolls under top bar + textfield.
+  Native scrollbar is hidden; InsetScrollbar draws an inset thumb instead.
+*/
+.chat-scroll-bleed {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat-scroll-bleed::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .chat-scroll:hover::-webkit-scrollbar-thumb:hover {
   background-color: rgb(255 255 255 / 0.22);
 }
@@ -522,17 +495,12 @@ body {
   .glass-composer,
   .glass-pane,
   .glass-pane-soft,
-  .activity-card,
   [data-anvia-message][data-role="user"] [data-anvia-message-content],
   .group[data-role="user"] .glass-bubble {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background: var(--color-canvas-elevated) !important;
     box-shadow: none !important;
-  }
-
-  .activity-nested {
-    background: rgb(255 255 255 / 0.04) !important;
   }
 
   .aurora-blob {
