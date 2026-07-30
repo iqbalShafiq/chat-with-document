@@ -132,7 +132,7 @@ export function SessionDocumentsPanel({
 /**
  * Animated 272px rail — collapses to 0 when no docs/attachments. Desktop only.
  * Floating list uses the same vertical insets as the chat scrollbar track:
- *   top = top bar + 24px, bottom = textfield dock + 24px.
+ *   top = top bar + 24px, bottom = textfield dock + --chat-composer-gap.
  */
 export function SessionDocumentsRail({
   sessionDocuments,
@@ -156,7 +156,8 @@ export function SessionDocumentsRail({
           className="absolute inset-x-0 min-h-0 overflow-hidden pr-2"
           style={{
             top: "calc(3.5rem + 24px)",
-            bottom: "calc(var(--composer-dock-h, 7.5rem) + 24px)",
+            bottom:
+              "calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))",
           }}
         >
           <SessionDocumentsPanel

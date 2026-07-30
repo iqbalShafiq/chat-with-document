@@ -476,6 +476,8 @@ function ChatSession({
           style={
             {
               ["--composer-dock-h" as string]: `${composerDockH}px`,
+              // Gap above textfield (last bubble → field); top chrome stays 24px
+              ["--chat-composer-gap" as string]: "40px",
             } as CSSProperties
           }
         >
@@ -484,8 +486,8 @@ function ChatSession({
             <Thread.Root className="absolute inset-0 overflow-hidden">
               {/*
                 Full-bleed scroll: content passes under top bar + textfield.
-                Native scrollbar hidden; InsetScrollbar has 24px insets from
-                top bar bottom and textfield top.
+                Native scrollbar hidden; InsetScrollbar insets from top bar
+                and above the textfield (see --chat-composer-gap).
               */}
               <Thread.Viewport
                 ref={chatViewportRef}
@@ -496,7 +498,8 @@ function ChatSession({
                   className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3"
                   style={{
                     paddingTop: "calc(3.5rem + 24px)",
-                    paddingBottom: "calc(var(--composer-dock-h, 7.5rem) + 24px)",
+                    paddingBottom:
+                      "calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))",
                   }}
                 >
                   <Thread.Empty className="flex min-h-0 flex-1 flex-col">
@@ -545,7 +548,7 @@ function ChatSession({
               <InsetScrollbar
                 scrollRef={chatViewportRef}
                 top="calc(3.5rem + 24px)"
-                bottom="calc(var(--composer-dock-h, 7.5rem) + 24px)"
+                bottom="calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))"
               />
 
               {/* Overlay dock — content scrolls underneath */}
