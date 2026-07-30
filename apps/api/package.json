@@ -2,7 +2,7 @@
   "name": "api",
   "type": "module",
   "scripts": {
-    "dev": "pnpm with-env tsx watch src/index.ts",
+    "dev": "pnpm with-env node --import tsx --watch src/index.ts",
     "worker:dev": "pnpm with-env node --import tsx --watch src/worker.ts",
     "build": "tsc",
     "start": "node dist/index.js",

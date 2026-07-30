@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "pnpm --filter chat-with-document --parallel \"/^dev:(api|worker|platform)$/\"",
+    "dev": "pnpm --filter api --filter platform --parallel \"/^(dev|worker:dev)$/\"",
     "dev:api": "pnpm --filter api dev",
     "dev:worker": "pnpm --filter api worker:dev",
     "dev:platform": "pnpm --filter platform dev"
