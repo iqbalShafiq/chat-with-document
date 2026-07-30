@@ -122,13 +122,13 @@ export function InsetScrollbar({
   return (
     <div
       ref={trackRef}
-      className={`pointer-events-auto absolute right-1 z-30 w-2 ${className}`}
+      className={`pointer-events-auto absolute right-1.5 z-30 w-1 ${className}`}
       style={style}
       onPointerDown={onTrackPointerDown}
       aria-hidden
     >
       <div
-        className="absolute left-0 right-0 cursor-pointer rounded-full bg-white/20 transition-colors hover:bg-white/30 active:bg-white/40"
+        className="absolute left-0 right-0 cursor-pointer rounded-full bg-white/[0.08] transition-colors hover:bg-white/[0.14] active:bg-white/[0.18]"
         style={{
           height: metrics.thumbH,
           transform: `translateY(${metrics.thumbTop}px)`,
