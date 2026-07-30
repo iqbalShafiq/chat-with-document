@@ -23,7 +23,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { UploadingDocumentsSection } from "#/components/uploading-documents-section";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
-import { MathMarkdown, ReasoningMarkdown } from "#/components/math-markdown";
+import { MathMarkdown } from "#/components/math-markdown";
+import { ReasoningPanel } from "#/components/reasoning-panel";
 import {
   API_BASE,
   listSessionDocuments,
@@ -475,7 +476,9 @@ function ChatMessageParts({
       <Message.Parts
         stream={{
           isStreaming:
-            chatStatus === "streaming" && lastMessageId === message.id,
+            chatStatus === "streaming" &&
+            message.role === "assistant" &&
+            lastMessageId === message.id,
           resetKey: message.id,
           flushImmediately: chatStatus === "error",
         }}
@@ -503,11 +506,12 @@ function ChatMessageParts({
 
           if (part.type === "reasoning") {
             return (
-              <Message.Part className="mt-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800 [&_a]:text-violet-900 [&_a]:underline [&_code]:rounded [&_code]:bg-violet-100/80 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
-                <p className="font-medium">Reasoning</p>
-                <div className="mt-1 opacity-90">
-                  <ReasoningMarkdown />
-                </div>
+              <Message.Part className="mt-1.5">
+                <ReasoningPanel
+                  isStreamingMessage={
+                    chatStatus === "streaming" && lastMessageId === message.id
+                  }
+                />
               </Message.Part>
             );
           }

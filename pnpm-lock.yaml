@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@anvia/core@0.16.0':
+    hash: 033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985
+    path: patches/@anvia__core@0.16.0.patch
+
 importers:
 
   .:
@@ -16,10 +21,10 @@ importers:
     dependencies:
       '@anvia/core':
         specifier: ^0.16.0
-        version: 0.16.0
+        version: 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@anvia/memory-prisma':
         specifier: ^0.2.4
-        version: 0.2.4(@anvia/core@0.16.0)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
+        version: 0.2.4(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
       '@anvia/server':
         specifier: ^0.5.14
         version: 0.5.14
@@ -144,19 +149,19 @@ importers:
     dependencies:
       '@anvia/core':
         specifier: ^0.16.0
-        version: 0.16.0
+        version: 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@anvia/langfuse':
         specifier: ^0.3.9
-        version: 0.3.9(@anvia/core@0.16.0)(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))
+        version: 0.3.9(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))
       '@anvia/mistral':
         specifier: ^0.3.7
-        version: 0.3.7(@anvia/core@0.16.0)(@opentelemetry/api@1.9.1)
+        version: 0.3.7(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@opentelemetry/api@1.9.1)
       '@anvia/openai':
         specifier: ^0.4.0
-        version: 0.4.0(@anvia/core@0.16.0)(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
+        version: 0.4.0(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
       '@anvia/qdrant':
         specifier: ^0.2.11
-        version: 0.2.11(@anvia/core@0.16.0)(typescript@7.0.2)
+        version: 0.2.11(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(typescript@7.0.2)
       '@qdrant/js-client-rest':
         specifier: ^1.13.0
         version: 1.18.0(typescript@7.0.2)
@@ -3783,7 +3788,7 @@ packages:
 
 snapshots:
 
-  '@anvia/core@0.16.0':
+  '@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)':
     dependencies:
       '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       pdfjs-dist: 6.2.108
@@ -3794,9 +3799,9 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@anvia/langfuse@0.3.9(@anvia/core@0.16.0)(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))':
+  '@anvia/langfuse@0.3.9(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@langfuse/otel': 5.9.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))
       '@langfuse/tracing': 5.9.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/resources': 2.10.0(@opentelemetry/api@1.9.1)
@@ -3809,23 +3814,23 @@ snapshots:
       - '@opentelemetry/sdk-trace-base'
       - supports-color
 
-  '@anvia/memory-prisma@0.2.4(@anvia/core@0.16.0)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
+  '@anvia/memory-prisma@0.2.4(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@prisma/client': 7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
 
-  '@anvia/mistral@0.3.7(@anvia/core@0.16.0)(@opentelemetry/api@1.9.1)':
+  '@anvia/mistral@0.3.7(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@opentelemetry/api@1.9.1)':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@mistralai/mistralai': 2.5.0(@opentelemetry/api@1.9.1)
     transitivePeerDependencies:
       - '@opentelemetry/api'
       - bufferutil
       - utf-8-validate
 
-  '@anvia/openai@0.4.0(@anvia/core@0.16.0)(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)':
+  '@anvia/openai@0.4.0(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -3834,9 +3839,9 @@ snapshots:
       - ws
       - zod
 
-  '@anvia/qdrant@0.2.11(@anvia/core@0.16.0)(typescript@7.0.2)':
+  '@anvia/qdrant@0.2.11(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(typescript@7.0.2)':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       '@qdrant/js-client-rest': 1.18.0(typescript@7.0.2)
     transitivePeerDependencies:
       - typescript
@@ -3869,7 +3874,7 @@ snapshots:
 
   '@anvia/react@0.9.3(react@19.2.8)':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
       react: 19.2.8
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -3877,7 +3882,7 @@ snapshots:
 
   '@anvia/server@0.5.14':
     dependencies:
-      '@anvia/core': 0.16.0
+      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color

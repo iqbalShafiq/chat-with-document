@@ -13,7 +13,6 @@ import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
 import { listSessionDocuments } from "../documents/service.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
-import { sanitizeMemoryMessages } from "./sanitize-memory-messages.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -68,12 +67,7 @@ export const chatRouter = new Hono()
 
     const promptMessage = stripUserAttachments(lastMessage);
 
-    const baseMemory = createPrismaMemoryStore(prisma);
-    const prismaMemory = Object.create(baseMemory) as typeof baseMemory;
-    prismaMemory.load = async (context: Parameters<typeof baseMemory.load>[0]) => {
-      const loaded = await baseMemory.load(context);
-      return sanitizeMemoryMessages(loaded as MessageType[]);
-    };
+    const prismaMemory = createPrismaMemoryStore(prisma);
     const sessionDocuments = await listSessionDocuments(sessionId);
     const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
     const searchService = createChunkSearchService();

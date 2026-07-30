@@ -49,11 +49,3 @@ export function MathMarkdown() {
 
   return <MarkdownBody content={part.text} />;
 }
-
-export function ReasoningMarkdown() {
-  const { part } = useMessagePart();
-
-  if (part.type !== "reasoning") return null;
-
-  return <MarkdownBody content={part.text} />;
-}

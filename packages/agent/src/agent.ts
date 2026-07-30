@@ -28,6 +28,7 @@ export function createAgent(
         effort: "medium",
         summary: "auto",
       },
+      include: ["reasoning.encrypted_content"],
     })
     .observe(opts.tracing);
 

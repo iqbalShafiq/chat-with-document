@@ -7,4 +7,6 @@ const openai = new OpenAIClient({
   completionApi: "responses",
 });
 
-export const defaultModel = openai.completionModel("gpt-5.6-luna") as CompletionModel;
+export const defaultModel = openai.completionModel(
+  "gpt-5.6-luna",
+) as CompletionModel;
