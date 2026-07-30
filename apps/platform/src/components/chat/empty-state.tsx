@@ -1,8 +1,9 @@
 import { ScanSearch } from "lucide-react";
 
+/** Centered in the band between top app bar and composer (parent is flex-1). */
 export function EmptyState() {
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col items-center justify-center gap-5 px-4 py-12 text-center animate-fade-up">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-5 px-1 py-6 text-center animate-fade-up">
       <div className="relative">
         <div
           className="absolute inset-0 rounded-3xl bg-accent/20 blur-2xl"

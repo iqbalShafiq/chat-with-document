@@ -1,5 +1,11 @@
 import type { UIMessagePart } from "@anvia/react";
-import { ChevronDown } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  Loader2,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   formatToolInput,
@@ -25,8 +31,8 @@ export function getToolActivityLabel(part: ToolPart) {
 
 function statusLabel(part: ToolPart) {
   if (part.state === "error") return "Error";
-  if (part.state === "output-available") return "Completed";
-  return "Working…";
+  if (part.state === "output-available") return "Done";
+  return "Working";
 }
 
 function ToolSectionView({ section }: { section: FormattedSection }) {
@@ -34,41 +40,40 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
   const hasItems = (section.items?.length ?? 0) > 0;
 
   return (
-    <div className="space-y-1.5">
-      <p className="text-[10px] font-semibold tracking-wide uppercase opacity-70">
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-faint">
         {section.title}
       </p>
       {section.summary ? (
-        <p className="font-medium opacity-95">{section.summary}</p>
+        <p className="text-[12px] font-medium leading-relaxed text-text/90">
+          {section.summary}
+        </p>
       ) : null}
       {hasFields ? (
-        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[12px]">
           {section.fields!.map((field) => (
-            <div
-              key={`${section.title}-${field.label}`}
-              className="contents"
-            >
-              <dt className="font-medium whitespace-nowrap opacity-70">
+            <div key={`${section.title}-${field.label}`} className="contents">
+              <dt className="font-medium whitespace-nowrap text-text-faint">
                 {field.label}
               </dt>
-              <dd className="min-w-0 break-words opacity-95">{field.value}</dd>
+              <dd className="min-w-0 break-words text-text/90">{field.value}</dd>
             </div>
           ))}
         </dl>
       ) : null}
       {hasItems ? (
-        <ul className="space-y-2">
+        <ul className="space-y-1.5">
           {section.items!.map((item, index) => (
             <li
               key={`${section.title}-${item.title}-${index}`}
-              className="rounded-lg border border-hairline bg-surface px-2.5 py-1.5"
+              className="activity-nested rounded-lg px-2.5 py-2"
             >
-              <p className="font-medium opacity-95">{item.title}</p>
+              <p className="text-[12px] font-medium text-text/90">{item.title}</p>
               {item.meta ? (
-                <p className="mt-0.5 text-[11px] opacity-70">{item.meta}</p>
+                <p className="mt-0.5 text-[11px] text-text-faint">{item.meta}</p>
               ) : null}
               {item.detail ? (
-                <p className="mt-1 text-[11px] leading-relaxed opacity-80">
+                <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
                   {item.detail}
                 </p>
               ) : null}
@@ -77,7 +82,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
         </ul>
       ) : null}
       {!section.summary && !hasFields && !hasItems && section.emptyText ? (
-        <p className="opacity-70">{section.emptyText}</p>
+        <p className="text-[12px] text-text-faint">{section.emptyText}</p>
       ) : null}
     </div>
   );
@@ -147,14 +152,27 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
     return formatToolOutput(part.toolName, parseToolValue(part.output));
   }, [isError, isRunning, part.error?.message, part.output, part.toolName]);
 
-  const toneClass = isError
-    ? "border-danger/30 bg-danger-soft text-danger"
+  const dataState = isError ? "error" : isRunning ? "live" : "done";
+
+  const statusTone = isError
+    ? "bg-danger-soft text-danger"
     : isRunning
-      ? "border-accent/30 bg-accent-soft text-text"
-      : "border-hairline bg-surface text-text-muted";
+      ? "bg-accent-soft text-accent"
+      : "bg-white/[0.05] text-text-faint";
+
+  const iconTone = isError
+    ? "bg-danger-soft text-danger"
+    : isRunning
+      ? "bg-accent-soft text-accent"
+      : "bg-white/[0.05] text-text-faint";
 
   return (
-    <div className={`overflow-hidden rounded-xl border text-xs ${toneClass}`}>
+    <div
+      className={`activity-card overflow-hidden rounded-xl text-xs ${
+        isError ? "text-danger" : "text-text-muted"
+      }`}
+      data-state={dataState}
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -163,16 +181,39 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-surface-elevated active:scale-[0.995]"
+        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/[0.03] active:scale-[0.995]"
       >
+        <span
+          className={`inline-flex size-6 shrink-0 items-center justify-center rounded-lg ${iconTone}`}
+        >
+          {isError ? (
+            <AlertCircle className="size-3.5" strokeWidth={1.75} />
+          ) : isRunning ? (
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+          ) : (
+            <Wrench className="size-3.5" strokeWidth={1.75} />
+          )}
+        </span>
+
+        <span className="min-w-0 flex-1 truncate font-medium tracking-tight text-text">
+          {label}
+        </span>
+
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${statusTone}`}
+        >
+          {isDone && !isError ? (
+            <Check className="size-3" strokeWidth={2.25} />
+          ) : null}
+          {statusLabel(part)}
+        </span>
+
         <ChevronDown
-          className={`size-3.5 shrink-0 opacity-70 transition-transform duration-200 ${
+          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ${
             open ? "rotate-0" : "-rotate-90"
           }`}
           strokeWidth={2}
         />
-        <span className="min-w-0 flex-1 font-medium">{label}</span>
-        <span className="shrink-0 text-[11px] opacity-80">{statusLabel(part)}</span>
       </button>
 
       <div
@@ -185,7 +226,7 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         aria-hidden={!open}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="space-y-3 border-t border-current/10 px-3 py-2.5">
+          <div className="activity-card-body space-y-3.5 px-3 py-2.5">
             <ToolSectionView section={requestSection} />
             <ToolSectionView section={resultSection} />
           </div>

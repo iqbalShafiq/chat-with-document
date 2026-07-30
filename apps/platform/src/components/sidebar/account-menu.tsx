@@ -41,7 +41,7 @@ export function AccountMenu() {
           id={menuId}
           role="menu"
           aria-labelledby={buttonId}
-          className="absolute bottom-[calc(100%+0.5rem)] left-2.5 right-2.5 z-30 overflow-hidden rounded-2xl border border-white/[0.08] bg-canvas-elevated shadow-[0_12px_40px_-12px_rgb(0_0_0/0.5)] animate-scale-in"
+          className="absolute bottom-[calc(100%+0.5rem)] left-2.5 right-2.5 z-30 overflow-hidden rounded-2xl bg-canvas-elevated/95 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.65)] ring-1 ring-white/[0.04] animate-scale-in"
           style={{ transformOrigin: "bottom center" }}
         >
           <button
@@ -70,7 +70,7 @@ export function AccountMenu() {
 
       {/* Account row: identity is static; only chevron toggles the menu */}
       <div className="flex min-h-12 items-center gap-3 px-1">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-xs font-semibold tracking-wide text-accent">
+        <span className="glass-pane flex size-9 shrink-0 items-center justify-center rounded-xl text-xs font-semibold tracking-wide text-text">
           {HARDCODED_USER.initials}
         </span>
         <span className="min-w-0 flex-1">

@@ -34,12 +34,12 @@ export function IngestionStatusPill({
 
   return (
     <div
-      className={`inline-flex min-h-10 w-max max-w-[min(320px,80vw)] shrink-0 items-center gap-2.5 rounded-xl border px-3 py-2 text-xs ${
+      className={`inline-flex min-h-10 w-max max-w-[min(320px,80vw)] shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-xs ${
         isFailed
-          ? "border-danger/30 bg-danger-soft text-danger"
+          ? "glass-pane-soft text-danger ring-1 ring-danger/25"
           : isReady
-            ? "border-accent/25 bg-accent-soft text-text"
-            : "border-hairline bg-surface text-text-muted"
+            ? "glass-pane text-text"
+            : "glass-pane-soft text-text-muted"
       }`}
       title={`${filename} — ${ingestionStatusLabel(status)}`}
     >

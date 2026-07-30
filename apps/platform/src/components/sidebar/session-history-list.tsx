@@ -63,7 +63,7 @@ export function SessionHistoryList({
   // looks like "only New chat" with no way to recover.
   const errorBanner =
     error && !loading ? (
-      <div className="mx-2 mb-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2">
+      <div className="mb-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2">
         <p className="text-xs text-danger">{error}</p>
         <button
           type="button"
@@ -89,11 +89,11 @@ export function SessionHistoryList({
   let itemIndex = 0;
 
   return (
-    <div className="flex flex-col gap-4 px-2 pb-2">
+    <div className="flex flex-col gap-4 px-2.5 pb-2.5">
       {errorBanner}
       {groups.map((group) => (
         <section key={group.label} className="flex flex-col gap-0.5">
-          <h3 className="sticky top-0 z-10 bg-transparent px-2 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
+          <h3 className="sticky top-0 z-10 bg-transparent px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
             {group.label}
           </h3>
           <ul className="flex list-none flex-col gap-0.5 p-0">
@@ -110,18 +110,13 @@ export function SessionHistoryList({
                     type="button"
                     onClick={() => onSelect(session.sessionId)}
                     title={session.title}
-                    className={`relative flex w-full min-h-9 cursor-pointer items-center rounded-xl px-2.5 py-2 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
+                    aria-current={selected ? "page" : undefined}
+                    className={`flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
                       selected
-                        ? "bg-accent-soft text-text"
-                        : "text-text-muted hover:bg-surface hover:text-text"
+                        ? "glass-pane font-medium text-text"
+                        : "text-text-muted hover:bg-white/[0.035] hover:text-text"
                     }`}
                   >
-                    {selected ? (
-                      <span
-                        className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
-                        aria-hidden
-                      />
-                    ) : null}
                     <span className="truncate">{session.title}</span>
                   </button>
                 </li>

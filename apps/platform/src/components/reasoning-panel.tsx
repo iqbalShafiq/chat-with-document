@@ -1,5 +1,5 @@
 import { useChatContext, useMessage, useMessagePart } from "@anvia/react-ui";
-import { ChevronDown } from "lucide-react";
+import { Brain, ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MarkdownBody } from "#/components/math-markdown";
 
@@ -39,8 +39,7 @@ export function ReasoningPanel({
   const isLive =
     isStreamingMessage && chat.status === "streaming" && !hasFollowUp;
 
-  const summaryText =
-    part.type === "reasoning" ? part.text.trim() : "";
+  const summaryText = part.type === "reasoning" ? part.text.trim() : "";
   const hasSummary = summaryText.length > 0;
 
   useEffect(() => {
@@ -73,11 +72,8 @@ export function ReasoningPanel({
 
   return (
     <div
-      className={`overflow-hidden rounded-xl border text-xs ${
-        isLive
-          ? "border-accent/30 bg-accent-soft text-text"
-          : "border-hairline bg-surface text-text-muted"
-      }`}
+      className="activity-card overflow-hidden rounded-xl text-xs text-text-muted"
+      data-state={isLive ? "live" : "done"}
       data-reasoning-state={isLive ? "live" : "done"}
     >
       <button
@@ -88,17 +84,32 @@ export function ReasoningPanel({
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-surface-elevated active:scale-[0.995]"
+        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/[0.03] active:scale-[0.995]"
       >
+        <span
+          className={`inline-flex size-6 shrink-0 items-center justify-center rounded-lg ${
+            isLive
+              ? "bg-accent-soft text-accent"
+              : "bg-white/[0.05] text-text-faint"
+          }`}
+        >
+          {isLive ? (
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} />
+          ) : (
+            <Brain className="size-3.5" strokeWidth={1.75} />
+          )}
+        </span>
+
+        <span className="min-w-0 flex-1 font-medium tracking-tight text-text">
+          {label}
+        </span>
+
         <ChevronDown
-          className={`size-3.5 shrink-0 opacity-70 transition-transform duration-200 ${
+          className={`size-3.5 shrink-0 text-text-faint transition-transform duration-200 ${
             open ? "rotate-0" : "-rotate-90"
           }`}
           strokeWidth={2}
         />
-        <span className="min-w-0 flex-1 font-medium tracking-tight text-text">
-          {label}
-        </span>
       </button>
 
       <div
@@ -111,13 +122,13 @@ export function ReasoningPanel({
         aria-hidden={!open}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="border-t border-hairline px-3 py-2">
+          <div className="activity-card-body px-3 py-2.5">
             {hasSummary ? (
-              <div className="reasoning-summary opacity-90 text-text-muted [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-surface-elevated [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
+              <div className="reasoning-summary text-[12px] leading-relaxed text-text-muted [&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_strong]:text-text/90 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
                 <MarkdownBody content={summaryText} />
               </div>
             ) : (
-              <p className="opacity-70">
+              <p className="text-[12px] text-text-faint">
                 {isLive ? "Waiting for summary…" : "No summary available."}
               </p>
             )}

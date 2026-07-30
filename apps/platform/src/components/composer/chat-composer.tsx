@@ -31,18 +31,18 @@ export function ChatComposer({
 
   return (
     <Composer.Root
-      className="mx-auto mb-3 flex w-[min(760px,calc(100%-1.5rem))] shrink-0 flex-col md:mb-4"
+      className="flex w-full flex-col"
       submitMessage={submitMessage}
     >
-      {/* Same glass-surface as sidebar / top bar */}
-      <div className="glass-surface group/composer flex flex-col gap-2.5 rounded-[1.35rem] border border-white/[0.08] p-3 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-within:border-accent/35 focus-within:ring-2 focus-within:ring-accent-ring/60">
+      {/* Floating glass field — thread content scrolls underneath */}
+      <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
         {sessionDocuments.length > 0 ? (
           <CollapsibleDocumentSection title="Active documents">
             <ul className="doc-chip-scroll flex list-none flex-nowrap gap-2 overflow-x-auto overscroll-x-contain p-0 pb-0.5">
               {sessionDocuments.map((doc) => (
                 <li
                   key={doc.id}
-                  className="inline-flex min-h-10 w-max max-w-[min(280px,75vw)] shrink-0 items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft px-3 py-2 text-xs text-text"
+                  className="glass-pane inline-flex min-h-10 w-max max-w-[min(280px,75vw)] shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs text-text"
                   title={doc.firstPageSummary || doc.filename}
                 >
                   <FileText

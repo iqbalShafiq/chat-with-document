@@ -91,7 +91,7 @@ export function AppShell({
       <AuroraBackground />
 
       <div className="relative z-[1] flex min-h-0 min-w-0 flex-1">
-        {/* Desktop sidebar */}
+        {/* Desktop sidebar — full-bleed */}
         <div
           className={`hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
             sidebarOpen
@@ -126,7 +126,7 @@ export function AppShell({
           </div>
         ) : null}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <ChatTopBar
             title={activeTitle}
             sidebarOpen={isMobile ? mobileOpen : sidebarOpen}
@@ -135,6 +135,16 @@ export function AppShell({
             onNewChat={onNewChat}
           />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/*
+              Curved L-separator — only while desktop sidebar is open;
+              opacity/border animate out when collapsed.
+            */}
+            <div
+              aria-hidden
+              className={`content-frame ${
+                !isMobile && sidebarOpen ? "content-frame--with-sidebar" : ""
+              }`}
+            />
             {children}
           </main>
         </div>
