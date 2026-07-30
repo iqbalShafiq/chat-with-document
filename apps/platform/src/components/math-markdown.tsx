@@ -29,19 +29,31 @@ export function normalizeMathMarkdown(text: string): string {
 const remarkPlugins = [remarkGfm, remarkMath];
 const rehypePlugins = [rehypeKatex];
 
-export function MathMarkdown() {
-  const { part } = useMessagePart();
-
-  const content = useMemo(() => {
-    if (part.type !== "text") return "";
-    return normalizeMathMarkdown(part.text);
-  }, [part]);
-
-  if (part.type !== "text") return null;
+export function MarkdownBody({ content }: { content: string }) {
+  const normalized = useMemo(
+    () => normalizeMathMarkdown(content),
+    [content],
+  );
 
   return (
     <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
-      {content}
+      {normalized}
     </ReactMarkdown>
   );
+}
+
+export function MathMarkdown() {
+  const { part } = useMessagePart();
+
+  if (part.type !== "text") return null;
+
+  return <MarkdownBody content={part.text} />;
+}
+
+export function ReasoningMarkdown() {
+  const { part } = useMessagePart();
+
+  if (part.type !== "reasoning") return null;
+
+  return <MarkdownBody content={part.text} />;
 }

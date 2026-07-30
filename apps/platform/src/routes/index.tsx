@@ -23,7 +23,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { UploadingDocumentsSection } from "#/components/uploading-documents-section";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
-import { MathMarkdown } from "#/components/math-markdown";
+import { MathMarkdown, ReasoningMarkdown } from "#/components/math-markdown";
 import {
   API_BASE,
   listSessionDocuments,
@@ -112,6 +112,26 @@ function attachedDocumentsFromMetadata(
         : undefined;
     return mediaType === undefined ? [{ name }] : [{ name, mediaType }];
   });
+}
+
+function messageHasUserFacingText(message: UIMessage): boolean {
+  return message.parts.some(
+    (part) => part.type === "text" && part.text.trim().length > 0,
+  );
+}
+
+/** Intermediate agent steps (reasoning/tool only) should not show copy/regenerate. */
+function shouldShowMessageActions(message: UIMessage): boolean {
+  if (message.role === "user") return true;
+  if (message.role === "tool") return false;
+  if (message.role !== "assistant") return false;
+  return messageHasUserFacingText(message);
+}
+
+function isIntermediateStepMessage(message: UIMessage): boolean {
+  if (message.role === "tool") return true;
+  if (message.role !== "assistant") return false;
+  return !messageHasUserFacingText(message);
 }
 
 function DocumentAttachmentChip({
@@ -393,6 +413,50 @@ function SessionDropdown({
   );
 }
 
+function ChatMessageRow({
+  chatStatus,
+  lastMessageId,
+}: {
+  chatStatus: UseChatStatus;
+  lastMessageId?: string;
+}) {
+  const { message } = useMessage();
+  const intermediate = isIntermediateStepMessage(message);
+  const showActions = shouldShowMessageActions(message);
+
+  return (
+    <Message.Root
+      className={`group grid data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start ${
+        intermediate ? "gap-1" : "gap-2"
+      }`}
+    >
+      <Message.Content className="max-w-[min(100%,42rem)] text-sm leading-relaxed group-data-[role=user]:rounded-2xl group-data-[role=user]:bg-zinc-900 group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-zinc-50 group-data-[role=assistant]:text-zinc-800">
+        <ChatMessageParts
+          chatStatus={chatStatus}
+          lastMessageId={lastMessageId}
+        />
+      </Message.Content>
+
+      {showActions ? (
+        <Message.Actions className="mt-1.5 flex items-center gap-3 opacity-0 transition-opacity group-hover:opacity-100 group-data-[role=user]:justify-end">
+          <Message.Copy
+            aria-label="Copy"
+            className="inline-flex cursor-pointer p-0 text-zinc-400 transition hover:text-zinc-700 active:scale-[0.98]"
+          >
+            <Copy className="size-4" strokeWidth={1.75} />
+          </Message.Copy>
+          <Message.Regenerate
+            aria-label="Retry"
+            className="inline-flex cursor-pointer p-0 text-zinc-400 transition hover:text-zinc-700 active:scale-[0.98]"
+          >
+            <RefreshCw className="size-4" strokeWidth={1.75} />
+          </Message.Regenerate>
+        </Message.Actions>
+      ) : null}
+    </Message.Root>
+  );
+}
+
 function ChatMessageParts({
   chatStatus,
   lastMessageId,
@@ -439,21 +503,19 @@ function ChatMessageParts({
 
           if (part.type === "reasoning") {
             return (
-              <Message.Part className="mt-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              <Message.Part className="mt-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800 [&_a]:text-violet-900 [&_a]:underline [&_code]:rounded [&_code]:bg-violet-100/80 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4">
                 <p className="font-medium">Reasoning</p>
-                <p className="mt-1 whitespace-pre-wrap opacity-90">{part.text}</p>
+                <div className="mt-1 opacity-90">
+                  <ReasoningMarkdown />
+                </div>
               </Message.Part>
             );
           }
 
           if (part.type === "tool") {
             return (
-              <Message.Part className="mt-2 space-y-2">
+              <Message.Part className="mt-1.5">
                 <ToolActivityPanel part={part} />
-                <Message.Tool
-                  className="rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600 shadow-sm data-[state=output-available]:border-emerald-300 data-[state=output-error]:border-rose-300"
-                  renderWhen="always"
-                />
               </Message.Part>
             );
           }
@@ -577,31 +639,12 @@ function ChatSession({
 
             <Thread.Suggestions className="mx-auto mb-4 flex w-full max-w-3xl flex-wrap gap-2" />
 
-            <Thread.Messages className="mx-auto grid w-full max-w-3xl gap-6">
+            <Thread.Messages className="mx-auto grid w-full max-w-3xl gap-3">
               {() => (
-                <Message.Root className="group grid gap-2 data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start">
-                  <Message.Content className="max-w-[min(100%,42rem)] text-sm leading-relaxed group-data-[role=user]:rounded-2xl group-data-[role=user]:bg-zinc-900 group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-zinc-50 group-data-[role=assistant]:text-zinc-800">
-                    <ChatMessageParts
-                      chatStatus={chat.status}
-                      lastMessageId={chat.messages.at(-1)?.id}
-                    />
-                  </Message.Content>
-
-                  <Message.Actions className="mt-1.5 flex items-center gap-3 opacity-0 transition-opacity group-hover:opacity-100 group-data-[role=user]:justify-end">
-                    <Message.Copy
-                      aria-label="Copy"
-                      className="inline-flex cursor-pointer p-0 text-zinc-400 transition hover:text-zinc-700 active:scale-[0.98]"
-                    >
-                      <Copy className="size-4" strokeWidth={1.75} />
-                    </Message.Copy>
-                    <Message.Regenerate
-                      aria-label="Retry"
-                      className="inline-flex cursor-pointer p-0 text-zinc-400 transition hover:text-zinc-700 active:scale-[0.98]"
-                    >
-                      <RefreshCw className="size-4" strokeWidth={1.75} />
-                    </Message.Regenerate>
-                  </Message.Actions>
-                </Message.Root>
+                <ChatMessageRow
+                  chatStatus={chat.status}
+                  lastMessageId={chat.messages.at(-1)?.id}
+                />
               )}
             </Thread.Messages>
 
