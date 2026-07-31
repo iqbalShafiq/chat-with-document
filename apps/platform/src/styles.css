@@ -279,6 +279,17 @@ body {
   }
 }
 
+/* Accessible confirm dialog — native <dialog> reset + glass elevated panel */
+.confirm-dialog {
+  color: inherit;
+  background: var(--color-canvas-elevated);
+  border: 1px solid var(--color-hairline);
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

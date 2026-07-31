@@ -3,6 +3,7 @@ import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
+import { ChatTimeline } from "#/components/chat/chat-timeline";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
@@ -12,11 +13,18 @@ import {
   API_BASE,
   listSessionDocuments,
   listSessions,
+  truncateSessionMemory,
   uploadDocument,
   waitForDocumentReady,
   type DocumentStatus,
   type SessionDocument,
 } from "#/lib/api";
+import {
+  canTargetMessageForTruncate,
+  readChatMessageMeta,
+  withChatMessageMeta,
+} from "#/lib/chat/message-metadata";
+import { getMessageRawText } from "#/lib/chat/message-text";
 import {
   ensureActiveSession,
   type SessionSummary,
@@ -60,18 +68,11 @@ function persistSessionId(sessionId: string) {
 }
 
 function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
-  if (
-    metadata &&
-    typeof metadata === "object" &&
-    !Array.isArray(metadata) &&
-    Array.isArray(metadata.documentIds)
-  ) {
-    return metadata.documentIds.filter(
-      (id): id is string => typeof id === "string",
-    );
-  }
+  return readChatMessageMeta(metadata).documentIds ?? [];
+}
 
-  return [];
+function createClientMessageId() {
+  return crypto.randomUUID();
 }
 
 async function resolveAttachmentFile(attachment: UIAttachment) {
@@ -281,6 +282,9 @@ function ChatSession({
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
+  const threadRootRef = useRef<HTMLDivElement>(null);
+  /** Imperative scroll tick for timeline (avoids re-rendering the whole session). */
+  const timelineScrollTickRef = useRef<(() => void) | null>(null);
   const wasStreamingRef = useRef(false);
   const [ingestionItems, setIngestionItems] = useState<
     Array<{ filename: string; status: DocumentStatus }>
@@ -290,6 +294,7 @@ function ChatSession({
   );
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   /** Shared with doc rail so its bottom band matches the textfield dock. */
   const [composerDockH, setComposerDockH] = useState(120);
 
@@ -351,11 +356,27 @@ function ChatSession({
 
   useEffect(() => {
     if (wasStreamingRef.current && chat.status !== "streaming") {
+      // Stamp createdAt on the latest assistant turn when history was not reloaded.
+      chat.setMessages((messages) => {
+        const last = messages.at(-1);
+        if (!last || last.role !== "assistant") return messages;
+        if (readChatMessageMeta(last.metadata).createdAt) return messages;
+        return messages.map((message, index) =>
+          index === messages.length - 1
+            ? {
+                ...message,
+                metadata: withChatMessageMeta(message.metadata, {
+                  createdAt: new Date().toISOString(),
+                }),
+              }
+            : message,
+        );
+      });
       onStreamSettled();
       focusComposer();
     }
     wasStreamingRef.current = chat.status === "streaming";
-  }, [chat.status, focusComposer, onStreamSettled]);
+  }, [chat.setMessages, chat.status, focusComposer, onStreamSettled]);
 
   useEffect(() => {
     focusComposer();
@@ -365,6 +386,73 @@ function ChatSession({
     setSessionDocuments([]);
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
+
+  useEffect(() => {
+    setEditingMessageId(null);
+  }, [sessionId]);
+
+  /**
+   * Shared path for revert (same text) and edit (new text):
+   * truncate memory to exclude the target user message, drop later UI messages,
+   * then send a fresh user turn so the agent appends a single clean prompt.
+   */
+  const resubmitFromUserMessage = useCallback(
+    async (message: UIMessage, text: string) => {
+      if (chat.status === "streaming") {
+        throw new Error("Wait for the current reply to finish");
+      }
+
+      const index = chat.messages.findIndex((item) => item.id === message.id);
+      if (index === -1) {
+        throw new Error("Message is no longer in this conversation");
+      }
+
+      const meta = readChatMessageMeta(message.metadata);
+      if (!canTargetMessageForTruncate(meta)) {
+        throw new Error("This message cannot be regenerated yet");
+      }
+
+      const trimmed = text.trim();
+      if (!trimmed) {
+        throw new Error("Message cannot be empty");
+      }
+
+      await truncateSessionMemory({
+        sessionId,
+        mode: "exclude",
+        memoryPosition: meta.memoryPosition,
+        clientMessageId: meta.clientMessageId,
+      });
+
+      chat.setMessages(chat.messages.slice(0, index));
+      setEditingMessageId(null);
+
+      await chat.sendMessage({
+        text: trimmed,
+        metadata: withChatMessageMeta(undefined, {
+          sessionId,
+          documentIds: meta.documentIds ?? [],
+          createdAt: new Date().toISOString(),
+          clientMessageId: createClientMessageId(),
+        }),
+      });
+    },
+    [chat, sessionId],
+  );
+
+  const handleRevert = useCallback(
+    async (message: UIMessage) => {
+      await resubmitFromUserMessage(message, getMessageRawText(message));
+    },
+    [resubmitFromUserMessage],
+  );
+
+  const handleSubmitEdit = useCallback(
+    async (message: UIMessage, text: string) => {
+      await resubmitFromUserMessage(message, text);
+    },
+    [resubmitFromUserMessage],
+  );
 
   return (
     <ChatProvider controller={chat}>
@@ -457,7 +545,13 @@ function ChatSession({
 
           await chatController.sendMessage({
             text: trimmed,
-            metadata: { sessionId, documentIds, attachedDocuments },
+            metadata: withChatMessageMeta(undefined, {
+              sessionId,
+              documentIds,
+              attachedDocuments,
+              createdAt: new Date().toISOString(),
+              clientMessageId: createClientMessageId(),
+            }),
             attachments: attachments.map((attachment) => ({
               id: attachment.id,
               type: attachment.type,
@@ -483,7 +577,10 @@ function ChatSession({
         >
           {/* Center chat column — shrinks when right rail opens */}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Thread.Root className="absolute inset-0 overflow-hidden">
+            <Thread.Root
+              ref={threadRootRef}
+              className="absolute inset-0 overflow-hidden"
+            >
               {/*
                 Full-bleed scroll: content passes under top bar + textfield.
                 Native scrollbar hidden; InsetScrollbar insets from top bar
@@ -493,6 +590,9 @@ function ChatSession({
                 ref={chatViewportRef}
                 className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain"
                 autoScroll
+                onScroll={() => {
+                  timelineScrollTickRef.current?.();
+                }}
               >
                 <div
                   className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3"
@@ -512,15 +612,12 @@ function ChatSession({
                     Same-thread vs cross-message spacing:
                     - activity chain (tool↔reasoning, any message split): tight mt-1
                     - only jump to a message that *starts with answer text*: mt-4
-                      (so tool → reasoning+answer stays tight into the reasoning
-                      header; roomy gap is in-message reasoning/tool → text)
                     - around user turns: mt-4
                   */}
                   <Thread.Messages
                     className={[
                       "flex w-full flex-col",
                       "[&>*+*]:mt-1",
-                      // roomy only when next message opens on answer text, not activity
                       "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
                       "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
                       "[&>[data-role=user]+*]:mt-4",
@@ -531,6 +628,14 @@ function ChatSession({
                       <ChatMessageRow
                         chatStatus={chat.status}
                         lastMessageId={chat.messages.at(-1)?.id}
+                        editingMessageId={editingMessageId}
+                        onStartEdit={(message) => {
+                          if (chat.status === "streaming") return;
+                          setEditingMessageId(message.id);
+                        }}
+                        onCancelEdit={() => setEditingMessageId(null)}
+                        onSubmitEdit={handleSubmitEdit}
+                        onRevert={handleRevert}
                       />
                     )}
                   </Thread.Messages>
@@ -544,6 +649,18 @@ function ChatSession({
                   <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
                 </div>
               </Thread.Viewport>
+
+              {/*
+                Timeline sits OUTSIDE the chat column — centered in the gap
+                between the left sidebar edge and the max-width message column.
+              */}
+              <ChatTimeline
+                scrollRef={chatViewportRef}
+                containerRef={threadRootRef}
+                messages={chat.messages}
+                contentMaxPx={760}
+                scrollTickRef={timelineScrollTickRef}
+              />
 
               <InsetScrollbar
                 scrollRef={chatViewportRef}

@@ -1,0 +1,153 @@
+import type { UIMessage, UseChatStatus } from "@anvia/react";
+import { Message, useMessage } from "@anvia/react-ui";
+import { Pencil, RefreshCw } from "lucide-react";
+import { useRef, useState } from "react";
+import { MessageCopyButton } from "#/components/chat/message-copy-button";
+import { ConfirmDialog } from "#/components/ui/confirm-dialog";
+import {
+  canTargetMessageForTruncate,
+  readChatMessageMeta,
+} from "#/lib/chat/message-metadata";
+import {
+  formatMessageDateTime,
+  formatMessageTime,
+} from "#/lib/chat/message-time";
+import { getMessageRawText } from "#/lib/chat/message-text";
+
+const ACTION_ICON_CLASS =
+  "inline-flex cursor-pointer p-0 text-text-faint transition hover:text-text active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40";
+
+export type MessageActionsBarProps = {
+  chatStatus: UseChatStatus;
+  onRevert: (message: UIMessage) => Promise<void>;
+  onStartEdit: (message: UIMessage) => void;
+};
+
+export function MessageActionsBar({
+  chatStatus,
+  onRevert,
+  onStartEdit,
+}: MessageActionsBarProps) {
+  const { message } = useMessage();
+  const meta = readChatMessageMeta(message.metadata);
+  const isUser = message.role === "user";
+  const busy = chatStatus === "streaming";
+  const canTruncate = canTargetMessageForTruncate(meta);
+  const hasText = getMessageRawText(message).trim().length > 0;
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const revertTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // User timestamps live inside the bubble; assistant keeps time in the footer.
+  const showFooterTime = !isUser && meta.createdAt;
+  const timeLabel = showFooterTime ? formatMessageTime(meta.createdAt!) : null;
+  const timeTitle = showFooterTime
+    ? formatMessageDateTime(meta.createdAt!)
+    : null;
+
+  return (
+    <>
+      <Message.Actions
+        className={[
+          "mt-0.5 flex items-center gap-3",
+          // Always readable on touch; dim until hover/focus on fine pointers.
+          "opacity-100 [@media(hover:hover)]:opacity-60",
+          "[@media(hover:hover)]:group-hover:opacity-100",
+          "focus-within:opacity-100",
+          "transition-opacity duration-200",
+          "group-data-[role=user]:justify-end",
+        ].join(" ")}
+      >
+        <div className="flex items-center gap-3">
+          {hasText ? <MessageCopyButton /> : null}
+
+          {isUser ? (
+            <>
+              <button
+                type="button"
+                className={ACTION_ICON_CLASS}
+                aria-label="Edit message"
+                title={
+                  busy
+                    ? "Wait for the reply to finish"
+                    : "Edit message"
+                }
+                disabled={busy || !hasText}
+                onClick={() => onStartEdit(message)}
+              >
+                <Pencil className="size-4" strokeWidth={1.75} />
+              </button>
+              <button
+                ref={revertTriggerRef}
+                type="button"
+                className={ACTION_ICON_CLASS}
+                aria-label="Regenerate from this message"
+                title={
+                  busy
+                    ? "Wait for the reply to finish"
+                    : !canTruncate
+                      ? "Cannot regenerate this message"
+                      : "Regenerate from this message"
+                }
+                disabled={busy || !canTruncate}
+                onClick={() => {
+                  setConfirmError(null);
+                  setConfirmOpen(true);
+                }}
+              >
+                <RefreshCw className="size-4" strokeWidth={1.75} />
+              </button>
+            </>
+          ) : null}
+        </div>
+
+        {timeLabel && meta.createdAt ? (
+          <time
+            dateTime={meta.createdAt}
+            title={timeTitle ?? undefined}
+            className="text-[11px] tabular-nums text-text-faint"
+          >
+            {timeLabel}
+          </time>
+        ) : null}
+      </Message.Actions>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Regenerate from this message?"
+        description="All messages after this one will be removed from the conversation, then the assistant will reply again."
+        confirmLabel="Regenerate"
+        cancelLabel="Cancel"
+        busy={confirmBusy}
+        error={confirmError}
+        restoreFocusRef={revertTriggerRef}
+        onCancel={() => {
+          if (confirmBusy) return;
+          setConfirmOpen(false);
+          setConfirmError(null);
+        }}
+        onConfirm={() => {
+          if (confirmBusy) return;
+          setConfirmBusy(true);
+          setConfirmError(null);
+          void (async () => {
+            try {
+              await onRevert(message);
+              setConfirmOpen(false);
+            } catch (error) {
+              setConfirmError(
+                error instanceof Error
+                  ? error.message
+                  : "Could not regenerate from this message",
+              );
+            } finally {
+              setConfirmBusy(false);
+            }
+          })();
+        }}
+      />
+    </>
+  );
+}

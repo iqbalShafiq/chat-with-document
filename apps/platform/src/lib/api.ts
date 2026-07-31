@@ -186,6 +186,44 @@ export async function waitForDocumentReady(input: {
   throw new Error("Document processing timed out");
 }
 
+export type TruncateSessionMemoryInput = {
+  sessionId: string;
+  mode: "include" | "exclude";
+  memoryPosition?: number;
+  clientMessageId?: string;
+};
+
+export type TruncateSessionMemoryResult = {
+  ok: true;
+  deleted: number;
+  keptThrough: number;
+  resolvedPosition: number | null;
+};
+
+export async function truncateSessionMemory(
+  input: TruncateSessionMemoryInput,
+): Promise<TruncateSessionMemoryResult> {
+  const response = await fetch(`${API_BASE}/api/chat/truncate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      mode: input.mode,
+      memoryPosition: input.memoryPosition,
+      clientMessageId: input.clientMessageId,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to update conversation history");
+  }
+
+  return (await response.json()) as TruncateSessionMemoryResult;
+}
+
 export function ingestionStatusLabel(status: DocumentStatus) {
   switch (status) {
     case "queued":
