@@ -1,11 +1,13 @@
 import type { UIMessage, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
+import { MessageCitationProvider } from "#/components/chat/message-citation-context";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
+import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
   formatMessageBubbleTimestamp,
@@ -88,7 +90,16 @@ export function ChatMessageRow({
     if (!isEditing) setEditWidthPx(null);
   }, [isEditing]);
 
-  return (
+  const rawText = getMessageRawText(message);
+  const assistantCitations = useMemo(() => {
+    if (message.role !== "assistant") return [];
+    return resolveMessageCitations({
+      rawText,
+      metadata: message.metadata,
+    }).citations;
+  }, [message.role, message.metadata, rawText]);
+
+  const row = (
     <div
       data-role={message.role}
       data-message-id={message.id}
@@ -112,7 +123,7 @@ export function ChatMessageRow({
         >
           {isEditing ? (
             <UserMessageEdit
-              initialText={getMessageRawText(message)}
+              initialText={rawText}
               busy={chatStatus === "streaming"}
               onCancel={onCancelEdit}
               onSubmit={(text) => onSubmitEdit(message, text)}
@@ -152,6 +163,16 @@ export function ChatMessageRow({
       </Message.Root>
     </div>
   );
+
+  if (message.role === "assistant") {
+    return (
+      <MessageCitationProvider citations={assistantCitations}>
+        {row}
+      </MessageCitationProvider>
+    );
+  }
+
+  return row;
 }
 
 type MessagePart = UIMessage["parts"][number];
@@ -202,7 +223,7 @@ function ChatMessageParts({
         if (part.type === "text") {
           return (
             <Message.Part
-              className="[&_a]:text-accent [&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-white/[0.04] [&_pre]:p-3 [&_pre]:text-text [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-white/[0.08] group-data-[role=user]:[&_a]:text-accent"
+              className="[&_a]:text-accent [&_a]:underline [&_.citation-chip]:no-underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-white/[0.04] [&_pre]:p-3 [&_pre]:text-text [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-white/[0.08] group-data-[role=user]:[&_a]:text-accent"
             >
               <MathMarkdown />
             </Message.Part>

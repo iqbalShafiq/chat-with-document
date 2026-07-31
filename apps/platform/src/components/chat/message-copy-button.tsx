@@ -1,7 +1,8 @@
 import { useMessage } from "@anvia/react-ui";
 import { Check, Copy } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AutoDismissPopover } from "#/components/ui/auto-dismiss-popover";
+import { stripCitationsForCopy } from "#/lib/chat/citations";
 import { getMessageRawText } from "#/lib/chat/message-text";
 
 const ACTION_ICON_CLASS =
@@ -11,7 +12,11 @@ type CopyState = "idle" | "copied" | "error";
 
 export function MessageCopyButton() {
   const { message } = useMessage();
-  const text = getMessageRawText(message);
+  const rawText = getMessageRawText(message);
+  const text = useMemo(() => {
+    if (message.role === "assistant") return stripCitationsForCopy(rawText);
+    return rawText;
+  }, [message.role, rawText]);
   const disabled = text.trim().length === 0;
   const [state, setState] = useState<CopyState>("idle");
   const resetRef = useRef<number | null>(null);

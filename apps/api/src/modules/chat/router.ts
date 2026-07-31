@@ -13,6 +13,10 @@ import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
 import { listSessionDocuments } from "../documents/service.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
+import {
+  finalizeAssistantCitations,
+  tapStreamComplete,
+} from "./finalize-assistant-citations.js";
 import { listSessionsPage } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
@@ -22,9 +26,11 @@ import {
 } from "./truncate-memory.js";
 
 function requireSessionId(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const sessionId = value.trim();
-  return sessionId.length > 0 ? sessionId : null;
+  if (typeof value === "string") {
+    const sessionId = value.trim();
+    return sessionId.length > 0 ? sessionId : null;
+  }
+  return null;
 }
 
 function parseTruncateMode(value: unknown): TruncateMode | null {
@@ -138,7 +144,12 @@ export const chatRouter = new Hono()
       .withTrace({ sessionId })
       .stream();
 
-    return createEventStream(stream, {
+    // After the client consumes the stream: dual-write citations metadata + Langfuse score.
+    const tracedStream = tapStreamComplete(stream, () =>
+      finalizeAssistantCitations(sessionId),
+    );
+
+    return createEventStream(tracedStream, {
       format: "jsonl",
     });
   });

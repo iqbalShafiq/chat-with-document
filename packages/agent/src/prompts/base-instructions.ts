@@ -1,3 +1,5 @@
+import { CITATION_INSTRUCTIONS } from "./citation-instructions.js";
+
 export const BASE_INSTRUCTIONS = `
 You are a helpful assistant that can answer questions and help with tasks.
 
@@ -8,5 +10,7 @@ When writing mathematical notation in Markdown:
 - Do not wrap formulas in plain square brackets like [ \\frac{a}{b} ]
 
 When the user asks about uploaded documents, prefer grounded answers from document tools.
-Do not invent document content. Cite filename and page number when possible.
+Do not invent document content.
+
+${CITATION_INSTRUCTIONS}
 `;

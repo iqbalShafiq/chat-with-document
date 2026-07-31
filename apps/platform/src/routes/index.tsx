@@ -3,6 +3,7 @@ import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
+import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
@@ -18,6 +19,10 @@ import {
   type DocumentStatus,
   type SessionDocument,
 } from "#/lib/api";
+import {
+  parseMessageCitations,
+  validateCitationsAgainstSession,
+} from "#/lib/chat/citations";
 import {
   canTargetMessageForTruncate,
   readChatMessageMeta,
@@ -352,17 +357,37 @@ function ChatSession({
 
   useEffect(() => {
     if (wasStreamingRef.current && chat.status !== "streaming") {
-      // Stamp createdAt on the latest assistant turn when history was not reloaded.
+      // Stamp createdAt + dual-write citations on the latest assistant turn.
+      const sessionDocIds = new Set(sessionDocuments.map((d) => d.id));
       chat.setMessages((messages) => {
         const last = messages.at(-1);
         if (!last || last.role !== "assistant") return messages;
-        if (readChatMessageMeta(last.metadata).createdAt) return messages;
+
+        const existing = readChatMessageMeta(last.metadata);
+        const rawText = getMessageRawText(last);
+        const parsed = parseMessageCitations(rawText).citations;
+        const citations =
+          parsed.length > 0
+            ? validateCitationsAgainstSession(parsed, sessionDocIds)
+            : existing.citations;
+
+        const needsCreatedAt = !existing.createdAt;
+        const needsCitations =
+          citations !== undefined &&
+          citations.length > 0 &&
+          (!existing.citations || existing.citations.length === 0);
+
+        if (!needsCreatedAt && !needsCitations) return messages;
+
         return messages.map((message, index) =>
           index === messages.length - 1
             ? {
                 ...message,
                 metadata: withChatMessageMeta(message.metadata, {
-                  createdAt: new Date().toISOString(),
+                  ...(needsCreatedAt
+                    ? { createdAt: new Date().toISOString() }
+                    : {}),
+                  ...(needsCitations ? { citations } : {}),
                 }),
               }
             : message,
@@ -372,7 +397,13 @@ function ChatSession({
       focusComposer();
     }
     wasStreamingRef.current = chat.status === "streaming";
-  }, [chat.setMessages, chat.status, focusComposer, onStreamSettled]);
+  }, [
+    chat.setMessages,
+    chat.status,
+    focusComposer,
+    onStreamSettled,
+    sessionDocuments,
+  ]);
 
   useEffect(() => {
     focusComposer();
@@ -452,6 +483,7 @@ function ChatSession({
 
   return (
     <ChatProvider controller={chat}>
+      <CitationSessionProvider sessionDocuments={sessionDocuments}>
       {/*
         Composer.Root wraps chat + right doc rail so attachments share context.
         When docs exist, rail opens (272px = left sidebar) and pushes chat left.
@@ -676,6 +708,7 @@ function ChatSession({
           />
         </div>
       </Composer.Root>
+      </CitationSessionProvider>
     </ChatProvider>
   );
 }

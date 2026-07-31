@@ -1,9 +1,12 @@
 import type { UIMessage, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
 import { Pencil, RefreshCw } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { CitationsInfoButton } from "#/components/chat/citations-info-button";
+import { useMessageCitations } from "#/components/chat/message-citation-context";
 import { MessageCopyButton } from "#/components/chat/message-copy-button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
+import { resolveMessageCitations } from "#/lib/chat/citations";
 import {
   canTargetMessageForTruncate,
   readChatMessageMeta,
@@ -29,11 +32,21 @@ export function MessageActionsBar({
   onStartEdit,
 }: MessageActionsBarProps) {
   const { message } = useMessage();
+  const messageCitations = useMessageCitations();
   const meta = readChatMessageMeta(message.metadata);
   const isUser = message.role === "user";
   const busy = chatStatus === "streaming";
   const canTruncate = canTargetMessageForTruncate(meta);
-  const hasText = getMessageRawText(message).trim().length > 0;
+  const rawText = getMessageRawText(message);
+  const hasText = rawText.trim().length > 0;
+  const assistantCitations = useMemo(() => {
+    if (message.role !== "assistant") return [];
+    if (messageCitations) return messageCitations.citations;
+    return resolveMessageCitations({
+      rawText,
+      metadata: message.metadata,
+    }).citations;
+  }, [message.role, message.metadata, messageCitations, rawText]);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -63,6 +76,9 @@ export function MessageActionsBar({
         ].join(" ")}
       >
         <div className="flex items-center gap-3">
+          {!isUser && assistantCitations.length > 0 ? (
+            <CitationsInfoButton citations={assistantCitations} />
+          ) : null}
           {hasText ? <MessageCopyButton /> : null}
 
           {isUser ? (

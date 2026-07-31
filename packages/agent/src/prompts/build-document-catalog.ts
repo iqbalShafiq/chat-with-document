@@ -24,5 +24,5 @@ When answering about uploaded documents:
 2. If the relevant document is unclear, call find_documents.
 3. Use search_document_pages for semantic retrieval.
 4. If a page seems incomplete, call get_document_next_page.
-5. Cite filename and page number in your answer.`;
+5. Ground claims with [[cite:N]] markers and a trailing \`\`\`citations JSON block (see citation instructions). Never invent ids or pages.`;
 }

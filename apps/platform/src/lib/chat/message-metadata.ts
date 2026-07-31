@@ -1,4 +1,6 @@
 import type { UIMessage } from "@anvia/react";
+import type { MessageCitation } from "#/lib/chat/citations";
+import { parseCitationsFromMetadata } from "#/lib/chat/citations";
 
 export type ChatMessageMeta = {
   createdAt?: string;
@@ -7,6 +9,8 @@ export type ChatMessageMeta = {
   documentIds?: string[];
   sessionId?: string;
   attachedDocuments?: Array<{ name: string; mediaType?: string }>;
+  /** Dual-written structured citations (server and/or client). */
+  citations?: MessageCitation[];
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -49,6 +53,11 @@ export function readChatMessageMeta(
     });
   }
 
+  const citations = parseCitationsFromMetadata(metadata);
+  if (citations !== null) {
+    meta.citations = citations;
+  }
+
   return meta;
 }
 
@@ -73,6 +82,21 @@ export function withChatMessageMeta(
     current.attachedDocuments = patch.attachedDocuments.map((doc) => {
       if (doc.mediaType === undefined) return { name: doc.name };
       return { name: doc.name, mediaType: doc.mediaType };
+    });
+  }
+  if (patch.citations !== undefined) {
+    current.citations = patch.citations.map((c) => {
+      const row: Record<string, string | number | boolean> = {
+        id: c.id,
+        filename: c.filename,
+      };
+      if (c.documentId !== undefined) row.documentId = c.documentId;
+      if (c.pageIndex !== undefined) row.pageIndex = c.pageIndex;
+      if (c.pageId !== undefined) row.pageId = c.pageId;
+      if (c.chunkId !== undefined) row.chunkId = c.chunkId;
+      if (c.snippet !== undefined) row.snippet = c.snippet;
+      if (c.inSession !== undefined) row.inSession = c.inSession;
+      return row;
     });
   }
 

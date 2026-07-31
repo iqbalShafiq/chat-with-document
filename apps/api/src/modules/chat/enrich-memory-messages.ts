@@ -1,9 +1,35 @@
 import type { Message } from "@anvia/core/completion";
+import {
+  citationsToJsonValue,
+  extractTextFromMessageJson,
+  parseCitationsFromText,
+} from "@assingment/agent";
 import { prisma } from "../../utils/prisma.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveCitationsMetadata(
+  message: Message,
+  existingMeta: Record<string, unknown>,
+): Array<Record<string, string | number>> | undefined {
+  // Prefer dual-written metadata when present and valid.
+  if (Array.isArray(existingMeta.citations)) {
+    return existingMeta.citations as Array<Record<string, string | number>>;
+  }
+
+  if (message.role !== "assistant") return undefined;
+
+  const rawText = extractTextFromMessageJson(message);
+  if (!rawText.includes("[[cite:") && !rawText.includes("```citations")) {
+    return undefined;
+  }
+
+  const { citations } = parseCitationsFromText(rawText);
+  if (citations.length === 0) return undefined;
+  return citationsToJsonValue(citations);
 }
 
 /**
@@ -63,6 +89,8 @@ export async function loadEnrichedMemoryMessages(
         ? {}
         : { value: message.metadata };
 
+    const citations = resolveCitationsMetadata(message, existingMeta);
+
     return {
       ...message,
       metadata: {
@@ -72,6 +100,7 @@ export async function loadEnrichedMemoryMessages(
             ? existingMeta.createdAt
             : createdAt,
         memoryPosition,
+        ...(citations !== undefined ? { citations } : {}),
       },
     } as Message;
   });

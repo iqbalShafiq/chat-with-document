@@ -1,9 +1,21 @@
 import { useMessagePart } from "@anvia/react-ui";
 import { useMemo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, {
+  defaultUrlTransform,
+  type Components,
+} from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { CitationChip } from "#/components/chat/citation-chip";
+import { useMessageCitations } from "#/components/chat/message-citation-context";
+import {
+  citationIdFromHref,
+  isCitationHref,
+  isPendingCitationHref,
+  prepareCitationMarkdown,
+  type MessageCitation,
+} from "#/lib/chat/citations";
 import "katex/dist/katex.min.css";
 
 /**
@@ -29,14 +41,60 @@ export function normalizeMathMarkdown(text: string): string {
 const remarkPlugins = [remarkGfm, remarkMath];
 const rehypePlugins = [rehypeKatex];
 
+/** Keep citation hash targets; otherwise use react-markdown's safe transform. */
+function citationAwareUrlTransform(url: string): string {
+  if (isPendingCitationHref(url) || isCitationHref(url)) return url;
+  return defaultUrlTransform(url);
+}
+
+function buildMarkdownComponents(
+  byId: Map<number, MessageCitation>,
+): Components {
+  return {
+    a: ({ href, children, node: _node, ...props }) => {
+      // Always intercept citation markers — never render a real navigable link.
+      if (isPendingCitationHref(href)) {
+        return <CitationChip id={0} pending />;
+      }
+      if (isCitationHref(href)) {
+        const id = citationIdFromHref(href);
+        if (id !== null) {
+          return <CitationChip id={id} citation={byId.get(id)} />;
+        }
+      }
+
+      return (
+        <a href={href} {...props}>
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
 export function MarkdownBody({ content }: { content: string }) {
+  const messageCtx = useMessageCitations();
+  const prepared = useMemo(() => prepareCitationMarkdown(content), [content]);
+
+  // Prefer validated citations from message context when available.
+  const byId = messageCtx?.byId ?? prepared.byId;
+
   const normalized = useMemo(
-    () => normalizeMathMarkdown(content),
-    [content],
+    () => normalizeMathMarkdown(prepared.markdown),
+    [prepared.markdown],
+  );
+  const components = useMemo(
+    () => buildMarkdownComponents(byId),
+    [byId],
   );
 
   return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      urlTransform={citationAwareUrlTransform}
+      components={components}
+    >
       {normalized}
     </ReactMarkdown>
   );
