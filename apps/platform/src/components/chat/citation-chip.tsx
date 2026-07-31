@@ -28,9 +28,9 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
 
   if (pending) {
     return (
-      <sup className="citation-chip ml-px cursor-pointer text-[0.9em] tabular-nums leading-none text-text-faint animate-pulse">
+      <span className="citation-chip relative top-[-0.4em] ml-px inline-block cursor-pointer text-[0.9em] tabular-nums leading-none text-text-faint animate-pulse">
         …
-      </sup>
+      </span>
     );
   }
 
@@ -43,9 +43,9 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
   const showPreview = hoverOpen && resolved;
 
   return (
-    <sup
+    <span
       ref={anchorRef}
-      className="citation-chip relative ml-px inline cursor-pointer align-super"
+      className="citation-chip relative top-[-0.4em] ml-px inline-block cursor-pointer"
       onMouseEnter={() => {
         setHoverOpen(true);
         messageCtx?.setHighlightedId(id);
@@ -62,7 +62,7 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
         aria-label={label}
         aria-describedby={showPreview ? tipId : undefined}
         className={[
-          // Text-only: no background, ring, or padding — just a superscript number.
+          // Text-only: no background, ring, or padding — raised slightly (not full super).
           "cursor-pointer select-none text-[0.9em] font-semibold tabular-nums leading-none no-underline",
           "transition-colors duration-150",
           known && !outOfSession
@@ -87,6 +87,6 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
           <CitationSourceItem citation={resolved} static />
         </CitationSourcesPanel>
       ) : null}
-    </sup>
+    </span>
   );
 }
