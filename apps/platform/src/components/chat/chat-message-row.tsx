@@ -8,8 +8,8 @@ import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
+  formatMessageBubbleTimestamp,
   formatMessageDateTime,
-  formatMessageTime,
 } from "#/lib/chat/message-time";
 import {
   getMessageRawText,
@@ -77,7 +77,7 @@ export function ChatMessageRow({
   const userMeta = readChatMessageMeta(message.metadata);
   const userTimeLabel =
     message.role === "user" && userMeta.createdAt
-      ? formatMessageTime(userMeta.createdAt)
+      ? formatMessageBubbleTimestamp(userMeta.createdAt)
       : null;
   const userTimeTitle =
     message.role === "user" && userMeta.createdAt

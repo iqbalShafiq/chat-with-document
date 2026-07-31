@@ -3,7 +3,6 @@ import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
-import { ChatTimeline } from "#/components/chat/chat-timeline";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
@@ -282,9 +281,6 @@ function ChatSession({
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
-  const threadRootRef = useRef<HTMLDivElement>(null);
-  /** Imperative scroll tick for timeline (avoids re-rendering the whole session). */
-  const timelineScrollTickRef = useRef<(() => void) | null>(null);
   const wasStreamingRef = useRef(false);
   const [ingestionItems, setIngestionItems] = useState<
     Array<{ filename: string; status: DocumentStatus }>
@@ -577,10 +573,7 @@ function ChatSession({
         >
           {/* Center chat column — shrinks when right rail opens */}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Thread.Root
-              ref={threadRootRef}
-              className="absolute inset-0 overflow-hidden"
-            >
+            <Thread.Root className="absolute inset-0 overflow-hidden">
               {/*
                 Full-bleed scroll: content passes under top bar + textfield.
                 Native scrollbar hidden; InsetScrollbar insets from top bar
@@ -590,9 +583,6 @@ function ChatSession({
                 ref={chatViewportRef}
                 className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain"
                 autoScroll
-                onScroll={() => {
-                  timelineScrollTickRef.current?.();
-                }}
               >
                 <div
                   className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3"
@@ -649,18 +639,6 @@ function ChatSession({
                   <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
                 </div>
               </Thread.Viewport>
-
-              {/*
-                Timeline sits OUTSIDE the chat column — centered in the gap
-                between the left sidebar edge and the max-width message column.
-              */}
-              <ChatTimeline
-                scrollRef={chatViewportRef}
-                containerRef={threadRootRef}
-                messages={chat.messages}
-                contentMaxPx={760}
-                scrollTickRef={timelineScrollTickRef}
-              />
 
               <InsetScrollbar
                 scrollRef={chatViewportRef}

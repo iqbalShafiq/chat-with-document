@@ -9,8 +9,8 @@ import {
   readChatMessageMeta,
 } from "#/lib/chat/message-metadata";
 import {
+  formatMessageBubbleTimestamp,
   formatMessageDateTime,
-  formatMessageTime,
 } from "#/lib/chat/message-time";
 import { getMessageRawText } from "#/lib/chat/message-text";
 
@@ -42,7 +42,9 @@ export function MessageActionsBar({
 
   // User timestamps live inside the bubble; assistant keeps time in the footer.
   const showFooterTime = !isUser && meta.createdAt;
-  const timeLabel = showFooterTime ? formatMessageTime(meta.createdAt!) : null;
+  const timeLabel = showFooterTime
+    ? formatMessageBubbleTimestamp(meta.createdAt!)
+    : null;
   const timeTitle = showFooterTime
     ? formatMessageDateTime(meta.createdAt!)
     : null;
