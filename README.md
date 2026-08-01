@@ -111,6 +111,9 @@ Factory agent yang dipakai API:
    | `OPENAI_BASE_URL` / `OPENAI_API_KEY` | LLM provider (wajib untuk chat) |
    | `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Observability (opsional) |
    | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
+   | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
+   | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
+   | `PLATFORM_ORIGIN` | Origin frontend untuk CORS + trustedOrigins (default `http://localhost:3000`) |
    | `PORT` | Port API (default `3001`) |
    | `NODE_ENV` | Environment untuk Langfuse (`development`, dll.) |
 
@@ -158,16 +161,27 @@ pnpm --filter api db:generate   # regenerate client → apps/api/src/generated
 pnpm --filter api db:migrate    # migrate (dev)
 pnpm --filter api db:deploy     # migrate (deploy)
 pnpm --filter api db:studio     # Prisma Studio
+
+# API smoke (register → login → chat + usage audit); API must be running
+pnpm --filter api smoke:auth
 ```
+
+## Authentication
+
+- Email/password via **Better Auth** (`/api/auth/*`), HTTP-only cookie session.
+- Platform routes `/login` and `/register`; chat (`/`) requires a session.
+- Chat memory di-scope Anvia dengan `userId`: `scopeKey = [sessionId, userId]`.
+- Documents **owned by user** (no sharing). Storage quota **200MB per user** (`GET /api/documents/storage`).
+- Setiap chat agent run menulis `AgentUsageEvent` (token counts dari Anvia `Usage`; cost USD hanya jika provider mengirim cost — biasanya `null` di OpenAI).
 
 ## API chat
 
-Base path: `/api/chat`
+Base path: `/api/chat` (semua endpoint **require auth cookie**)
 
 | Method | Path | Keterangan |
 | --- | --- | --- |
-| `GET` | `/api/chat/sessions` | Daftar `sessionId` unik (urut `updatedAt` desc) |
-| `GET` | `/api/chat?sessionId=...` | Load history messages untuk session |
+| `GET` | `/api/chat/sessions` | Daftar session milik user (urut `updatedAt` desc) |
+| `GET` | `/api/chat?sessionId=...` | Load history messages untuk session user |
 | `POST` | `/api/chat` | Kirim pesan; response **streaming** JSONL |
 
 Body `POST` (ringkas):
@@ -180,7 +194,7 @@ Body `POST` (ringkas):
 }
 ```
 
-`sessionId` wajib (bisa juga dari `metadata.sessionId`). Tanpa itu API mengembalikan `400`.
+`sessionId` wajib (bisa juga dari `metadata.sessionId`). Tanpa auth → `401`. Tanpa `sessionId` → `400`.
 
 ## Agent tools (data analysis)
 

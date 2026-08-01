@@ -68,10 +68,17 @@ export async function deleteDocumentChunks(documentId: string) {
   }
 }
 
-function buildSessionFilter(sessionId: string, documentIds?: string[]) {
-  const sessionFilter = vectorFilter.eq("sessionId", sessionId);
+function buildUserSessionFilter(
+  userId: string,
+  sessionId: string,
+  documentIds?: string[],
+) {
+  const ownershipFilter = vectorFilter.and(
+    vectorFilter.eq("userId", userId),
+    vectorFilter.eq("sessionId", sessionId),
+  );
   if (!documentIds || documentIds.length === 0) {
-    return sessionFilter;
+    return ownershipFilter;
   }
 
   const docFilters = documentIds.map((documentId) =>
@@ -79,7 +86,7 @@ function buildSessionFilter(sessionId: string, documentIds?: string[]) {
   );
 
   if (docFilters.length === 1) {
-    return vectorFilter.and(sessionFilter, docFilters[0]!);
+    return vectorFilter.and(ownershipFilter, docFilters[0]!);
   }
 
   let docOr = docFilters[0]!;
@@ -87,18 +94,18 @@ function buildSessionFilter(sessionId: string, documentIds?: string[]) {
     docOr = vectorFilter.or(docOr, docFilters[i]!);
   }
 
-  return vectorFilter.and(sessionFilter, docOr);
+  return vectorFilter.and(ownershipFilter, docOr);
 }
 
 export function createChunkSearchService(): ChunkSearchService {
   return {
-    async search({ sessionId, query, documentIds, limit }) {
+    async search({ userId, sessionId, query, documentIds, limit }) {
       const store = await getStore();
       const index = store.index(embeddingModel);
       const results = await index.search({
         query,
         topK: limit,
-        filter: buildSessionFilter(sessionId, documentIds),
+        filter: buildUserSessionFilter(userId, sessionId, documentIds),
       });
 
       return results.map((result) => {
@@ -118,10 +125,4 @@ export function createChunkSearchService(): ChunkSearchService {
       });
     },
   };
-}
-
-export async function enrichChunkHitsWithNextPage(
-  hits: ChunkSearchHit[],
-): Promise<ChunkSearchHit[]> {
-  return hits;
 }

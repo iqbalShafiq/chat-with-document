@@ -1,6 +1,7 @@
 import { AuroraBackground } from "#/components/layout/aurora-background";
 import { ChatTopBar } from "#/components/layout/chat-top-bar";
 import { ChatSidebar } from "#/components/sidebar/chat-sidebar";
+import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -22,6 +23,7 @@ function useIsMobile(breakpoint = 768) {
 }
 
 export function AppShell({
+  user,
   sessions,
   activeSessionId,
   activeTitle,
@@ -35,6 +37,7 @@ export function AppShell({
   onRetrySessions,
   children,
 }: {
+  user: SessionUser;
   sessions: SessionSummary[];
   activeSessionId: string;
   activeTitle: string;
@@ -74,6 +77,7 @@ export function AppShell({
   };
 
   const sidebarProps = {
+    user,
     sessions,
     activeSessionId,
     loading: sessionsLoading,

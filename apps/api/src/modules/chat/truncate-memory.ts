@@ -5,6 +5,7 @@ export type TruncateMode = "include" | "exclude";
 
 export type TruncateMemoryInput = {
   sessionId: string;
+  userId: string;
   mode: TruncateMode;
   /** Prefer when available (history after enrich). */
   memoryPosition?: number;
@@ -40,7 +41,7 @@ function clientMessageIdFromMessage(message: unknown): string | null {
 export async function truncateSessionMemory(
   input: TruncateMemoryInput,
 ): Promise<TruncateMemoryResult> {
-  const scopeKey = createDefaultMemoryScopeKey(input.sessionId);
+  const scopeKey = createDefaultMemoryScopeKey(input.sessionId, input.userId);
 
   const session = await prisma.agentMemorySession.findUnique({
     where: { scopeKey },

@@ -1,6 +1,7 @@
 export * from "./agent.js";
 export * from "./tracing.js";
 export * from "./tools/data-analysis.js";
+export * from "./providers/openai.js";
 export * from "./providers/mistral.js";
 export * from "./ocr/run-document-ocr.js";
 export * from "./document/summaries.js";

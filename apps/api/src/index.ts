@@ -2,13 +2,15 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { chatRouter } from "./modules/chat/router.js";
 import { documentsRouter } from "./modules/documents/router.js";
-import { cors } from "hono/cors";
+import { auth } from "./modules/auth/auth.js";
+import { createAppCors } from "./lib/cors.js";
 
 const app = new Hono()
-  .use(cors())
+  .use(createAppCors())
+  .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   .route("/api/chat", chatRouter)
   .route("/api/documents", documentsRouter);
- 
+
 serve(
   {
     fetch: app.fetch,

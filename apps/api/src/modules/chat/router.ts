@@ -7,11 +7,14 @@ import {
   createChunkSearchService,
   createDataAnalysisTools,
   createDocumentTools,
+  DEFAULT_COMPLETION_MODEL,
+  DEFAULT_COMPLETION_PROVIDER,
   tracing,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
 import { listSessionDocuments } from "../documents/service.js";
+import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import {
   finalizeAssistantCitations,
@@ -24,6 +27,7 @@ import {
   truncateSessionMemory,
   type TruncateMode,
 } from "./truncate-memory.js";
+import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value === "string") {
@@ -37,24 +41,29 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
-export const chatRouter = new Hono()
+export const chatRouter = new Hono<{ Variables: AuthVariables }>()
+  .use("*", requireUser)
   .get("/sessions", async (c) => {
+    const user = c.get("user");
     const page = await listSessionsPage({
+      userId: user.id,
       cursor: c.req.query("cursor") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
     });
     return c.json(page);
   })
   .get("/", async (c) => {
+    const user = c.get("user");
     const sessionId = requireSessionId(c.req.query("sessionId"));
     if (!sessionId) {
       return c.json({ error: "sessionId is required" }, 400);
     }
 
-    const messages = await loadEnrichedMemoryMessages(sessionId);
+    const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
   })
   .post("/truncate", async (c) => {
+    const user = c.get("user");
     const body = (await c.req.json()) as Record<string, unknown>;
     const sessionId = requireSessionId(body.sessionId);
     if (!sessionId) {
@@ -89,6 +98,7 @@ export const chatRouter = new Hono()
     try {
       const result = await truncateSessionMemory({
         sessionId,
+        userId: user.id,
         mode,
         memoryPosition,
         clientMessageId,
@@ -102,6 +112,7 @@ export const chatRouter = new Hono()
     }
   })
   .post("/", async (c) => {
+    const user = c.get("user");
     const body = await c.req.json();
     const sessionId = requireSessionId(
       body.sessionId ?? body.metadata?.sessionId,
@@ -119,7 +130,7 @@ export const chatRouter = new Hono()
     const promptMessage = stripUserAttachments(lastMessage);
 
     const prismaMemory = createPrismaMemoryStore(prisma);
-    const sessionDocuments = await listSessionDocuments(sessionId);
+    const sessionDocuments = await listSessionDocuments(sessionId, user.id);
     const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
     const searchService = createChunkSearchService();
 
@@ -131,6 +142,7 @@ export const chatRouter = new Hono()
         ...createDataAnalysisTools(),
         ...createDocumentTools({
           sessionId,
+          userId: user.id,
           prisma,
           searchService,
         }),
@@ -139,14 +151,22 @@ export const chatRouter = new Hono()
     });
 
     const stream = agent
-      .session(sessionId)
+      .session(sessionId, { userId: user.id })
       .prompt(promptMessage)
-      .withTrace({ sessionId })
+      .withTrace({ sessionId, userId: user.id })
       .stream();
 
+    const auditedStream = tapAgentStreamUsage(stream, {
+      userId: user.id,
+      sessionId,
+      provider: DEFAULT_COMPLETION_PROVIDER,
+      model: DEFAULT_COMPLETION_MODEL,
+      agentId: "my-agent",
+    });
+
     // After the client consumes the stream: dual-write citations metadata + Langfuse score.
-    const tracedStream = tapStreamComplete(stream, () =>
-      finalizeAssistantCitations(sessionId),
+    const tracedStream = tapStreamComplete(auditedStream, () =>
+      finalizeAssistantCitations(sessionId, user.id),
     );
 
     return createEventStream(tracedStream, {

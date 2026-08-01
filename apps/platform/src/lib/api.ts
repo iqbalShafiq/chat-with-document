@@ -1,5 +1,30 @@
 export const API_BASE = "http://localhost:3001";
 
+export class ApiAuthError extends Error {
+  readonly status = 401;
+  constructor(message = "Unauthorized") {
+    super(message);
+    this.name = "ApiAuthError";
+  }
+}
+
+export async function apiFetch(
+  input: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const response = await fetch(input, {
+    ...init,
+    credentials: "include",
+    headers: init?.headers,
+  });
+
+  if (response.status === 401) {
+    throw new ApiAuthError();
+  }
+
+  return response;
+}
+
 export type SessionListItem = {
   sessionId: string;
   updatedAt: string;
@@ -19,7 +44,7 @@ export async function listSessions(input?: {
   if (input?.cursor) params.set("cursor", input.cursor);
   if (input?.limit) params.set("limit", String(input.limit));
   const qs = params.toString();
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_BASE}/api/chat/sessions${qs ? `?${qs}` : ""}`,
   );
   if (!response.ok) {
@@ -28,7 +53,6 @@ export async function listSessions(input?: {
 
   const data: unknown = await response.json();
 
-  // New shape: { items, nextCursor }
   if (
     data &&
     typeof data === "object" &&
@@ -51,19 +75,6 @@ export async function listSessions(input?: {
     };
   }
 
-  // Legacy shape: string[] (old API) — keep UI usable if server not restarted
-  if (Array.isArray(data)) {
-    const now = new Date().toISOString();
-    const items: SessionListItem[] = data
-      .filter((id): id is string => typeof id === "string" && id.length > 0)
-      .map((sessionId) => ({
-        sessionId,
-        updatedAt: now,
-        title: sessionId.length > 16 ? `${sessionId.slice(0, 8)}…` : sessionId,
-      }));
-    return { items, nextCursor: null };
-  }
-
   throw new Error("Unexpected sessions response shape");
 }
 
@@ -82,13 +93,21 @@ export interface DocumentStatusResponse {
   pageCount: number;
   errorMessage: string | null;
   firstPageSummary: string;
+  sizeBytes?: number;
 }
 
 export interface UploadDocumentResponse {
   id: string;
   filename: string;
   status: DocumentStatus;
+  sizeBytes?: number;
 }
+
+export type UserStorageUsage = {
+  usedBytes: number;
+  maxBytes: number;
+  remainingBytes: number;
+};
 
 const READY_STATUSES = new Set<DocumentStatus>(["ready"]);
 const FAILED_STATUSES = new Set<DocumentStatus>(["failed"]);
@@ -101,6 +120,14 @@ export function isDocumentFailed(status: DocumentStatus) {
   return FAILED_STATUSES.has(status);
 }
 
+export async function getUserStorageUsage(): Promise<UserStorageUsage> {
+  const response = await apiFetch(`${API_BASE}/api/documents/storage`);
+  if (!response.ok) {
+    throw new Error("Failed to load storage usage");
+  }
+  return (await response.json()) as UserStorageUsage;
+}
+
 export async function uploadDocument(input: {
   sessionId: string;
   file: File;
@@ -109,7 +136,7 @@ export async function uploadDocument(input: {
   form.append("sessionId", input.sessionId);
   form.append("file", input.file);
 
-  const response = await fetch(`${API_BASE}/api/documents`, {
+  const response = await apiFetch(`${API_BASE}/api/documents`, {
     method: "POST",
     body: form,
   });
@@ -125,7 +152,7 @@ export async function uploadDocument(input: {
 }
 
 export async function listSessionDocuments(sessionId: string) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_BASE}/api/documents?sessionId=${encodeURIComponent(sessionId)}`,
   );
 
@@ -140,13 +167,14 @@ export interface SessionDocument {
   id: string;
   filename: string;
   firstPageSummary: string;
+  sizeBytes?: number;
 }
 
 export async function getDocumentStatus(input: {
   sessionId: string;
   documentId: string;
 }) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_BASE}/api/documents/${encodeURIComponent(input.documentId)}?sessionId=${encodeURIComponent(input.sessionId)}`,
   );
 
@@ -203,7 +231,7 @@ export type TruncateSessionMemoryResult = {
 export async function truncateSessionMemory(
   input: TruncateSessionMemoryInput,
 ): Promise<TruncateSessionMemoryResult> {
-  const response = await fetch(`${API_BASE}/api/chat/truncate`, {
+  const response = await apiFetch(`${API_BASE}/api/chat/truncate`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -222,6 +250,14 @@ export async function truncateSessionMemory(
   }
 
   return (await response.json()) as TruncateSessionMemoryResult;
+}
+
+export async function loadChatMessages(sessionId: string): Promise<unknown> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load messages");
+  return response.json();
 }
 
 export function ingestionStatusLabel(status: DocumentStatus) {

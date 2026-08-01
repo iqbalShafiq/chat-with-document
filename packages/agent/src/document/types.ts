@@ -6,6 +6,7 @@ export const QDRANT_COLLECTION =
 export const EMBEDDING_DIMENSIONS = 1024;
 
 export interface DocumentChunkMetadata extends VectorMetadata {
+  userId: string;
   sessionId: string;
   documentId: string;
   filename: string;

@@ -46,8 +46,9 @@ function resolveCitationsMetadata(
  */
 export async function loadEnrichedMemoryMessages(
   sessionId: string,
+  userId: string,
 ): Promise<Message[]> {
-  const scopeKey = createDefaultMemoryScopeKey(sessionId);
+  const scopeKey = createDefaultMemoryScopeKey(sessionId, userId);
 
   const session = await prisma.agentMemorySession.findUnique({
     where: { scopeKey },

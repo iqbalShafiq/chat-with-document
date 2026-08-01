@@ -6,6 +6,7 @@ export interface FindDocumentsPrisma {
   document: {
     findMany(args: {
       where: {
+        userId: string;
         sessionId: string;
         status: "ready";
         OR: Array<{
@@ -38,7 +39,7 @@ export interface FindDocumentsPrisma {
 export interface NextPagePrisma {
   document: {
     findFirst(args: {
-      where: { id: string; sessionId: string };
+      where: { id: string; userId: string; sessionId: string };
       select: { id: true; pageCount: true; filename: true };
     }): Promise<{ id: string; pageCount: number; filename: string } | null>;
   };
@@ -74,6 +75,7 @@ export interface ChunkSearchHit {
 
 export interface ChunkSearchService {
   search(args: {
+    userId: string;
     sessionId: string;
     query: string;
     documentIds?: string[];
@@ -82,12 +84,14 @@ export interface ChunkSearchService {
 }
 
 export interface DocumentToolsDeps {
+  userId: string;
   sessionId: string;
   prisma: FindDocumentsPrisma & NextPagePrisma;
   searchService: ChunkSearchService;
 }
 
 export function createFindDocumentsTool(deps: {
+  userId: string;
   sessionId: string;
   prisma: FindDocumentsPrisma;
 }) {
@@ -102,6 +106,7 @@ export function createFindDocumentsTool(deps: {
     execute: async ({ query, limit }) => {
       const documents = await deps.prisma.document.findMany({
         where: {
+          userId: deps.userId,
           sessionId: deps.sessionId,
           status: "ready",
           OR: [
@@ -134,6 +139,7 @@ export function createFindDocumentsTool(deps: {
 }
 
 export function createSearchDocumentPagesTool(deps: {
+  userId: string;
   sessionId: string;
   searchService: ChunkSearchService;
 }) {
@@ -151,6 +157,7 @@ export function createSearchDocumentPagesTool(deps: {
     }),
     execute: async ({ query, documentIds, limit }) => {
       const hits = await deps.searchService.search({
+        userId: deps.userId,
         sessionId: deps.sessionId,
         query,
         ...(documentIds !== undefined ? { documentIds } : {}),
@@ -189,6 +196,7 @@ export function createSearchDocumentPagesTool(deps: {
 }
 
 export function createGetDocumentNextPageTool(deps: {
+  userId: string;
   sessionId: string;
   prisma: NextPagePrisma;
 }) {
@@ -202,7 +210,11 @@ export function createGetDocumentNextPageTool(deps: {
     }),
     execute: async ({ documentId, pageIndex }) => {
       const document = await deps.prisma.document.findFirst({
-        where: { id: documentId, sessionId: deps.sessionId },
+        where: {
+          id: documentId,
+          userId: deps.userId,
+          sessionId: deps.sessionId,
+        },
         select: { id: true, pageCount: true, filename: true },
       });
 

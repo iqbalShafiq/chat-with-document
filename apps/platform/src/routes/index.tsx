@@ -1,7 +1,11 @@
-import { initialMessagesFromMemory, useChat } from "@anvia/react";
+import {
+  createChatTransport,
+  initialMessagesFromMemory,
+  useChat,
+} from "@anvia/react";
 import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { EmptyState } from "#/components/chat/empty-state";
@@ -9,16 +13,20 @@ import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { AppShell } from "#/components/layout/app-shell";
+import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import {
   API_BASE,
+  ApiAuthError,
   listSessionDocuments,
   listSessions,
+  loadChatMessages,
   truncateSessionMemory,
   uploadDocument,
   waitForDocumentReady,
   type DocumentStatus,
   type SessionDocument,
 } from "#/lib/api";
+import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
   parseMessageCitations,
   validateCitationsAgainstSession,
@@ -34,6 +42,11 @@ import {
   type SessionSummary,
 } from "#/lib/session-history";
 import {
+  createSessionId,
+  persistSessionId,
+  readStoredSessionId,
+} from "#/lib/session-storage";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -42,34 +55,25 @@ import {
   type CSSProperties,
 } from "react";
 
-const SESSION_STORAGE_KEY = "chat.sessionId";
 const SESSIONS_PAGE_SIZE = 30;
 
 export const Route = createFileRoute("/")({
   component: Home,
+  beforeLoad: async () => {
+    const session = await authClient.getSession();
+    if (!session.data?.user) {
+      throw redirect({ to: "/login", search: { redirect: "/" } });
+    }
+    return {
+      user: {
+        id: session.data.user.id,
+        email: session.data.user.email,
+        name: session.data.user.name,
+        image: session.data.user.image ?? null,
+      } satisfies SessionUser,
+    };
+  },
 });
-
-function createSessionId() {
-  return crypto.randomUUID();
-}
-
-function readStoredSessionId() {
-  try {
-    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (stored && stored.trim().length > 0) return stored;
-  } catch {
-    // ignore storage access errors
-  }
-  return null;
-}
-
-function persistSessionId(sessionId: string) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  } catch {
-    // ignore storage access errors
-  }
-}
 
 function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
   return readChatMessageMeta(metadata).documentIds ?? [];
@@ -109,6 +113,8 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
 }
 
 function Home() {
+  const { user } = Route.useRouteContext();
+  const navigate = useNavigate();
   const [sessionId, setSessionId] = useState(() => {
     return readStoredSessionId() ?? createSessionId();
   });
@@ -125,6 +131,10 @@ function Home() {
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
+  const handleAuthFailure = useCallback(() => {
+    void navigate({ to: "/login", search: { redirect: "/" } });
+  }, [navigate]);
+
   const loadSessionsFirstPage = useCallback(async () => {
     const activeId = sessionIdRef.current;
     setSessionsLoading(true);
@@ -134,13 +144,17 @@ function Home() {
       setSessions(ensureActiveSession(page.items, activeId));
       setNextCursor(page.nextCursor);
     } catch (error) {
+      if (error instanceof ApiAuthError) {
+        handleAuthFailure();
+        return;
+      }
       console.error("[sessions] failed to load", error);
       setSessionsError("Could not load conversations");
       setSessions((current) => ensureActiveSession(current, activeId));
     } finally {
       setSessionsLoading(false);
     }
-  }, []);
+  }, [handleAuthFailure]);
 
   const loadMoreSessions = useCallback(async () => {
     if (!nextCursor || loadMoreLock.current || sessionsLoadingMore) return;
@@ -195,15 +209,15 @@ function Home() {
 
     void (async () => {
       try {
-        const response = await fetch(
-          `${API_BASE}/api/chat?sessionId=${encodeURIComponent(sessionId)}`,
-        );
-        if (!response.ok) throw new Error("Failed to load messages");
-        const data = await response.json();
+        const data = await loadChatMessages(sessionId);
         if (!cancelled) {
-          setInitialMessages(initialMessagesFromMemory(data));
+          setInitialMessages(initialMessagesFromMemory(data as never));
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
         if (!cancelled) {
           setInitialMessages([]);
         }
@@ -213,7 +227,7 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [handleAuthFailure, sessionId]);
 
   const handleSelectSession = (nextSessionId: string) => {
     if (nextSessionId === sessionId) return;
@@ -239,6 +253,7 @@ function Home() {
 
   return (
     <AppShell
+      user={user}
       sessions={sessions}
       activeSessionId={sessionId}
       activeTitle={activeTitle}
@@ -257,6 +272,7 @@ function Home() {
     >
       {initialMessages === null ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-in">
+          <DocChatMark className="opacity-80" />
           <div className="skeleton-shimmer h-4 w-40 rounded-full" />
           <p className="text-sm text-text-muted">Loading conversation…</p>
         </div>
@@ -268,6 +284,7 @@ function Home() {
           onStreamSettled={() => {
             void refreshSessionsQuiet();
           }}
+          onAuthFailure={handleAuthFailure}
         />
       )}
     </AppShell>
@@ -278,10 +295,12 @@ function ChatSession({
   sessionId,
   initialMessages,
   onStreamSettled,
+  onAuthFailure,
 }: {
   sessionId: string;
   initialMessages: UIMessage[];
   onStreamSettled: () => void;
+  onAuthFailure: () => void;
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -320,8 +339,20 @@ function ChatSession({
     }
   }, [sessionId]);
 
+  const chatTransport = useMemo(
+    () =>
+      createChatTransport({
+        endpoint: `${API_BASE}/api/chat`,
+        format: "jsonl",
+        init: { credentials: "include" },
+        body: (request) => JSON.stringify(request),
+        headers: { "content-type": "application/json" },
+      }),
+    [],
+  );
+
   const chat = useChat({
-    endpoint: `${API_BASE}/api/chat`,
+    transport: chatTransport,
     initialMessages,
     createRequest: ({ coreMessages, uiMessages }) => {
       const last = uiMessages.at(-1);
@@ -333,6 +364,11 @@ function ChatSession({
         sessionId,
         documentIds,
       };
+    },
+    onError: (error) => {
+      if (error instanceof ApiAuthError) {
+        onAuthFailure();
+      }
     },
   });
 

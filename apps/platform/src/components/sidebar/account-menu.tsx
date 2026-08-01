@@ -1,17 +1,17 @@
 import { ChevronUp, LogOut, Settings } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { authClient, userInitials, type SessionUser } from "#/lib/auth-client";
+import { clearStoredSessionId } from "#/lib/session-storage";
 
-const HARDCODED_USER = {
-  name: "Alya Rahman",
-  plan: "Free",
-  initials: "AR",
-};
-
-export function AccountMenu() {
+export function AccountMenu({ user }: { user: SessionUser }) {
   const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const buttonId = useId();
+  const navigate = useNavigate();
+  const initials = userInitials(user);
 
   useEffect(() => {
     if (!open) return;
@@ -33,6 +33,19 @@ export function AccountMenu() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  const onLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await authClient.signOut();
+      clearStoredSessionId();
+      setOpen(false);
+      await navigate({ to: "/login" });
+    } catch {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <div ref={rootRef} className="relative shrink-0 px-2.5 py-3">
@@ -58,27 +71,28 @@ export function AccountMenu() {
           <button
             type="button"
             role="menuitem"
-            disabled
-            aria-disabled
-            className="flex w-full cursor-not-allowed items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text-muted opacity-70"
+            disabled={loggingOut}
+            onClick={() => {
+              void onLogout();
+            }}
+            className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <LogOut className="size-4 shrink-0" strokeWidth={1.75} />
-            <span>Log out</span>
+            <span>{loggingOut ? "Signing out…" : "Log out"}</span>
           </button>
         </div>
       ) : null}
 
-      {/* Account row: identity is static; only chevron toggles the menu */}
       <div className="flex min-h-12 items-center gap-3 px-1">
         <span className="glass-pane flex size-9 shrink-0 items-center justify-center rounded-xl text-xs font-semibold tracking-wide text-text">
-          {HARDCODED_USER.initials}
+          {initials}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-text">
-            {HARDCODED_USER.name}
+            {user.name}
           </span>
-          <span className="block text-[11px] text-text-muted">
-            {HARDCODED_USER.plan}
+          <span className="block truncate text-[11px] text-text-muted">
+            {user.email}
           </span>
         </span>
         <button

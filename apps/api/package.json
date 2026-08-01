@@ -11,6 +11,7 @@
     "db:studio": "pnpm with-env prisma studio",
     "db:generate": "pnpm with-env prisma generate",
     "db:deploy": "pnpm with-env prisma migrate deploy",
+    "smoke:auth": "pnpm with-env tsx scripts/smoke-auth.ts",
     "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
@@ -19,9 +20,11 @@
     "@anvia/server": "^0.5.14",
     "@assingment/agent": "workspace:*",
     "@aws-sdk/client-s3": "^3.888.0",
+    "@better-auth/prisma-adapter": "^1.6.25",
     "@hono/node-server": "^2.0.11",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "better-auth": "^1.6.25",
     "bullmq": "^5.58.5",
     "hono": "^4.12.32",
     "ioredis": "^5.7.0",

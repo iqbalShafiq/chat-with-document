@@ -94,13 +94,14 @@ function truncateTitle(text: string): string {
 }
 
 async function titlesForSessions(
+  userId: string,
   sessionIds: string[],
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (sessionIds.length === 0) return map;
 
   const sessions = await prisma.agentMemorySession.findMany({
-    where: { sessionId: { in: sessionIds } },
+    where: { userId, sessionId: { in: sessionIds } },
     select: {
       sessionId: true,
       messages: {
@@ -133,6 +134,7 @@ async function titlesForSessions(
 const MAX_SCAN = 300;
 
 export async function listSessionsPage(input: {
+  userId: string;
   cursor?: string;
   limit?: string;
 }): Promise<SessionListPage> {
@@ -140,6 +142,7 @@ export async function listSessionsPage(input: {
   const cursor = parseCursor(input.cursor);
 
   const rows = await prisma.agentMemorySession.findMany({
+    where: { userId: input.userId },
     select: { sessionId: true, updatedAt: true },
     orderBy: [{ updatedAt: "desc" }, { sessionId: "desc" }],
     take: MAX_SCAN,
@@ -160,7 +163,10 @@ export async function listSessionsPage(input: {
   }
 
   const page = unique.slice(start, start + limit);
-  const titles = await titlesForSessions(page.map((p) => p.sessionId));
+  const titles = await titlesForSessions(
+    input.userId,
+    page.map((p) => p.sessionId),
+  );
 
   const items: SessionListItem[] = page.map((row) => ({
     sessionId: row.sessionId,

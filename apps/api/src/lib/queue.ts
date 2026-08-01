@@ -5,6 +5,7 @@ export const DOCUMENT_INGEST_QUEUE = "document-ingest";
 
 export interface DocumentIngestJobData {
   documentId: string;
+  userId: string;
   sessionId: string;
   r2Key: string;
   filename: string;

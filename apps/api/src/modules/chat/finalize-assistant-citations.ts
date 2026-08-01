@@ -19,8 +19,11 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * 3. Dual-write structured citations onto message.metadata
  * 4. Publish citation_groundedness to Langfuse when signals exist
  */
-export async function finalizeAssistantCitations(sessionId: string): Promise<void> {
-  const scopeKey = createDefaultMemoryScopeKey(sessionId);
+export async function finalizeAssistantCitations(
+  sessionId: string,
+  userId: string,
+): Promise<void> {
+  const scopeKey = createDefaultMemoryScopeKey(sessionId, userId);
 
   const session = await prisma.agentMemorySession.findUnique({
     where: { scopeKey },

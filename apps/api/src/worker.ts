@@ -23,7 +23,7 @@ import { prisma } from "./utils/prisma.js";
 console.log("[worker] boot");
 
 async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
-  const { documentId, sessionId, r2Key, filename } = job.data;
+  const { documentId, userId, sessionId, r2Key, filename } = job.data;
 
   console.log(`[worker] ingest start ${documentId} (${filename})`);
 
@@ -95,6 +95,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
         document: chunk.text,
         embeddings: [{ document: chunk.text, vector: vector.vector }],
         metadata: {
+          userId,
           sessionId,
           documentId,
           filename,

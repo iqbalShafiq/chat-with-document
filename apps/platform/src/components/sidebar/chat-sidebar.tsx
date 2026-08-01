@@ -1,10 +1,12 @@
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
+import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
 import { PanelLeftClose, SquarePen, X } from "lucide-react";
 
 export function ChatSidebar({
+  user,
   sessions,
   activeSessionId,
   loading,
@@ -19,6 +21,7 @@ export function ChatSidebar({
   onCloseMobile,
   showClose,
 }: {
+  user: SessionUser;
   sessions: SessionSummary[];
   activeSessionId: string;
   loading: boolean;
@@ -108,7 +111,7 @@ export function ChatSidebar({
       </div>
 
       <div className="shrink-0">
-        <AccountMenu />
+        <AccountMenu user={user} />
       </div>
     </aside>
   );
