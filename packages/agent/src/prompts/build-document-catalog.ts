@@ -8,7 +8,15 @@ export function buildDocumentCatalogInstruction(
   documents: SessionDocumentCatalogEntry[],
 ) {
   if (documents.length === 0) {
-    return `Session documents:\n(none uploaded yet)`;
+    return `Session documents:
+(none active in this session)
+
+Important:
+- There are **no active documents** linked to this chat right now.
+- Document tools (find_documents, search_document_pages, get_document_next_page) are **not available**.
+- Do **not** invent document ids, page numbers, or citations from earlier turns.
+- Prior conversation may mention documents that were since unlinked — treat that as history only; you cannot retrieve their content unless the user re-adds them.
+- Answer from general knowledge, or ask the user to attach/link documents if the question requires source material.`;
   }
 
   const lines = documents.map(
@@ -24,5 +32,6 @@ When answering about uploaded documents:
 2. If the relevant document is unclear, call find_documents.
 3. Use search_document_pages for semantic retrieval.
 4. If a page seems incomplete, call get_document_next_page.
-5. Ground claims with [[cite:N]] markers and a trailing \`\`\`citations JSON block (see citation instructions). Never invent ids or pages.`;
+5. Ground claims with [[cite:N]] markers and a trailing \`\`\`citations JSON block (see citation instructions). Never invent ids or pages.
+6. Only use ids from this catalog — ignore documents that are not listed (e.g. unlinked from the session).`;
 }

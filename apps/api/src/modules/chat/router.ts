@@ -163,7 +163,18 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const prismaMemory = createPrismaMemoryStore(prisma);
     const sessionDocuments = await listSessionDocuments(sessionId, user.id);
     const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
-    const searchService = createChunkSearchService();
+    const hasActiveDocuments = sessionDocuments.length > 0;
+
+    // Document tools only when the session has linked ready docs — avoids the
+    // model re-searching unlinked files based on conversation memory.
+    const documentTools = hasActiveDocuments
+      ? createDocumentTools({
+          sessionId,
+          userId: user.id,
+          prisma,
+          searchService: createChunkSearchService(),
+        })
+      : [];
 
     const agent = createAgent({
       agentId: "my-agent",
@@ -171,15 +182,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       reasoningEffort,
       tracing: tracing,
       additionalInstructions: [catalogInstruction],
-      additionalTools: [
-        ...createDataAnalysisTools(),
-        ...createDocumentTools({
-          sessionId,
-          userId: user.id,
-          prisma,
-          searchService,
-        }),
-      ],
+      additionalTools: [...createDataAnalysisTools(), ...documentTools],
       memory: prismaMemory,
     });
 
