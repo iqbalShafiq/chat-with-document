@@ -128,6 +128,32 @@ export async function getUserStorageUsage(): Promise<UserStorageUsage> {
   return (await response.json()) as UserStorageUsage;
 }
 
+export type UserUsageSummary = {
+  storage: UserStorageUsage;
+  tokens: {
+    maxTokens: null;
+    requestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    composition: {
+      inputUncached: number;
+      cacheRead: number;
+      output: number;
+    };
+  };
+};
+
+export async function getUserUsageSummary(): Promise<UserUsageSummary> {
+  const response = await apiFetch(`${API_BASE}/api/usage/summary`);
+  if (!response.ok) {
+    throw new Error("Failed to load usage summary");
+  }
+  return (await response.json()) as UserUsageSummary;
+}
+
 export async function uploadDocument(input: {
   sessionId: string;
   file: File;

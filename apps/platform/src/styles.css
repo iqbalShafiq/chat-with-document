@@ -279,7 +279,22 @@ body {
   }
 }
 
+/* Settings modal — native <dialog>; ~standard app settings size */
+.settings-dialog {
+  height: min(80dvh, 36rem);
+  max-height: min(90dvh, 40rem);
+  overflow: hidden;
+  color: inherit;
+  background: var(--color-canvas-elevated);
+  border: 1px solid var(--color-hairline);
+}
+
+.settings-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
 /* Accessible confirm dialog — native <dialog> reset + glass elevated panel */
+
 .confirm-dialog {
   color: inherit;
   background: var(--color-canvas-elevated);

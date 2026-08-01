@@ -1,13 +1,16 @@
 import { ChevronUp, LogOut, Settings } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { SettingsModal } from "#/components/settings/settings-modal";
 import { authClient, userInitials, type SessionUser } from "#/lib/auth-client";
 import { clearStoredSessionId } from "#/lib/session-storage";
 
 export function AccountMenu({ user }: { user: SessionUser }) {
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const buttonId = useId();
   const navigate = useNavigate();
@@ -58,11 +61,14 @@ export function AccountMenu({ user }: { user: SessionUser }) {
           style={{ transformOrigin: "bottom center" }}
         >
           <button
+            ref={settingsTriggerRef}
             type="button"
             role="menuitem"
-            disabled
-            aria-disabled
-            className="flex w-full cursor-not-allowed items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text-muted opacity-70"
+            onClick={() => {
+              setOpen(false);
+              setSettingsOpen(true);
+            }}
+            className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] active:scale-[0.99]"
           >
             <Settings className="size-4 shrink-0" strokeWidth={1.75} />
             <span>Settings</span>
@@ -114,6 +120,13 @@ export function AccountMenu({ user }: { user: SessionUser }) {
           />
         </button>
       </div>
+
+      <SettingsModal
+        open={settingsOpen}
+        user={user}
+        onClose={() => setSettingsOpen(false)}
+        restoreFocusRef={settingsTriggerRef}
+      />
     </div>
   );
 }
