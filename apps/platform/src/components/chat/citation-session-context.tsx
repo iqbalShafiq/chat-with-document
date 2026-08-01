@@ -124,6 +124,8 @@ export function CitationSessionProvider({
 
   const closeDocumentPreview = useCallback(() => {
     setPreviewTarget(null);
+    // Drop citation rail highlight when the preview closes.
+    setFocusTarget(null);
   }, []);
 
   const focusCitationDocument = useCallback(

@@ -8,7 +8,6 @@ import { DocumentRow } from "#/components/documents/document-row";
 import { IngestionStatusPill } from "#/components/ingestion-status-pill";
 import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
-import { formatCitationPageLabel } from "#/lib/chat/citations";
 import { Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
@@ -105,6 +104,8 @@ export function SessionDocumentsPanel({
     pageCount?: number;
   }) => {
     if (!openDocumentPreview) return;
+    // Sidebar/list opens are plain previews — clear citation focus chrome.
+    citationSession?.clearDocumentFocus();
     openDocumentPreview({
       documentId: input.documentId,
       filename: input.filename,
@@ -161,10 +162,6 @@ export function SessionDocumentsPanel({
                 className="flex w-full list-none flex-col gap-1.5 p-0"
               >
                 {sessionDocuments.map((doc) => {
-                  const focused = focusTarget?.documentId === doc.id;
-                  const pageLabel = focused
-                    ? formatCitationPageLabel(focusTarget?.pageIndex)
-                    : null;
                   const removing = removingDocumentId === doc.id;
 
                   return (
@@ -176,7 +173,6 @@ export function SessionDocumentsPanel({
                       <DocumentRow
                         filename={doc.filename}
                         summary={doc.firstPageSummary}
-                        focused={focused}
                         data-document-id={doc.id}
                         title={`Preview ${doc.filename}`}
                         onClick={() =>
@@ -187,42 +183,26 @@ export function SessionDocumentsPanel({
                             sizeBytes: doc.sizeBytes,
                             mimeType: doc.mimeType,
                             pageCount: doc.pageCount,
-                            ...(focused &&
-                            typeof focusTarget?.pageIndex === "number"
-                              ? { pageIndex: focusTarget.pageIndex }
-                              : {}),
                           })
                         }
                         trailing={
-                          <div className="flex flex-col items-end gap-1">
-                            {pageLabel ? (
-                              <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-accent ring-1 ring-accent-ring/40">
-                                {pageLabel}
-                              </span>
-                            ) : null}
-                            {onRemoveActiveDocument ? (
-                              <button
-                                type="button"
-                                aria-label={`Remove ${doc.filename} from this chat`}
-                                title="Remove from this chat (keeps your library copy)"
-                                disabled={removing}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleRemove(doc.id);
-                                }}
-                                className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.06] hover:text-text disabled:cursor-default disabled:opacity-40"
-                              >
-                                <X className="size-3.5" strokeWidth={2} />
-                              </button>
-                            ) : null}
-                          </div>
+                          onRemoveActiveDocument ? (
+                            <button
+                              type="button"
+                              aria-label={`Remove ${doc.filename} from this chat`}
+                              title="Remove from this chat (keeps your library copy)"
+                              disabled={removing}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleRemove(doc.id);
+                              }}
+                              className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.06] hover:text-text disabled:cursor-default disabled:opacity-40"
+                            >
+                              <X className="size-3.5" strokeWidth={2} />
+                            </button>
+                          ) : null
                         }
                       />
-                      {focused && focusTarget?.citationId != null ? (
-                        <p className="mt-0.5 px-1 text-[10px] text-accent">
-                          Cited as [{focusTarget.citationId}]
-                        </p>
-                      ) : null}
                     </li>
                   );
                 })}
@@ -237,7 +217,6 @@ export function SessionDocumentsPanel({
                 className="flex w-full list-none flex-col gap-1.5 p-0"
               >
                 {citedDocuments.map((doc) => {
-                  const focused = focusTarget?.documentId === doc.documentId;
                   const inActive = sessionDocuments.find(
                     (d) => d.id === doc.documentId,
                   );
@@ -249,7 +228,6 @@ export function SessionDocumentsPanel({
                     >
                       <DocumentRow
                         filename={doc.filename}
-                        focused={focused}
                         data-document-id={doc.documentId}
                         title={`Preview ${doc.filename}`}
                         onClick={() =>
@@ -260,10 +238,6 @@ export function SessionDocumentsPanel({
                             sizeBytes: inActive?.sizeBytes,
                             mimeType: inActive?.mimeType,
                             pageCount: inActive?.pageCount,
-                            ...(focused &&
-                            typeof focusTarget?.pageIndex === "number"
-                              ? { pageIndex: focusTarget.pageIndex }
-                              : {}),
                           })
                         }
                         meta={[
