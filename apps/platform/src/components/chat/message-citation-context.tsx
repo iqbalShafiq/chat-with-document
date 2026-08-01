@@ -9,6 +9,7 @@ import {
 import { useCitationSessionOptional } from "#/components/chat/citation-session-context";
 import type { MessageCitation } from "#/lib/chat/citations";
 import { validateCitationsAgainstSession } from "#/lib/chat/citations";
+import { resolveDocumentIdFromCatalog } from "#/lib/documents/previewable-document";
 
 type MessageCitationContextValue = {
   citations: MessageCitation[];
@@ -52,7 +53,30 @@ export function MessageCitationProvider({
   const focusCitation = useCallback(
     (citation: MessageCitation) => {
       setHighlightedIdState(citation.id);
-      session?.focusCitationDocument(citation);
+
+      if (!session) return;
+
+      const documentId = resolveDocumentIdFromCatalog(session.sessionDocuments, {
+        documentId: citation.documentId,
+        filename: citation.filename,
+      });
+
+      // Prefer resolved id; still forward original citation so pageIndex is kept.
+      const resolved: MessageCitation = documentId
+        ? { ...citation, documentId }
+        : citation;
+
+      // Always try session focus (handles id / fuzzy filename).
+      session.focusCitationDocument(resolved);
+
+      // Belt-and-suspenders: also open preview directly if we have an id.
+      if (documentId) {
+        session.openDocumentPreview({
+          documentId,
+          filename: citation.filename,
+          pageIndex: citation.pageIndex,
+        });
+      }
     },
     [session],
   );

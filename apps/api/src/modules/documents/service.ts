@@ -14,6 +14,9 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/webp",
 ]);
 
+const DEFAULT_LIBRARY_LIMIT = 20;
+const MAX_LIBRARY_LIMIT = 50;
+
 export class DocumentStorageQuotaError extends Error {
   readonly code = "STORAGE_QUOTA_EXCEEDED";
   readonly usedBytes: number;
@@ -41,6 +44,36 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function clampLimit(value: unknown, fallback: number, max: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(max, Math.max(1, Math.floor(value)));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.min(max, Math.max(1, Math.floor(parsed)));
+    }
+  }
+  return fallback;
+}
+
+/** Cursor format: `${isoCreatedAt}|${documentId}` */
+function decodeLibraryCursor(
+  raw: string | undefined,
+): { createdAt: Date; id: string } | null {
+  if (!raw) return null;
+  const sep = raw.indexOf("|");
+  if (sep <= 0) return null;
+  const createdAt = new Date(raw.slice(0, sep));
+  const id = raw.slice(sep + 1);
+  if (!id || Number.isNaN(createdAt.getTime())) return null;
+  return { createdAt, id };
+}
+
+function encodeLibraryCursor(createdAt: Date, id: string): string {
+  return `${createdAt.toISOString()}|${id}`;
+}
+
 export async function getUserStorageUsage(userId: string): Promise<{
   usedBytes: number;
   maxBytes: number;
@@ -56,6 +89,27 @@ export async function getUserStorageUsage(userId: string): Promise<{
     maxBytes: MAX_USER_STORAGE_BYTES,
     remainingBytes: Math.max(0, MAX_USER_STORAGE_BYTES - usedBytes),
   };
+}
+
+async function ensureSessionLink(input: {
+  documentId: string;
+  sessionId: string;
+  userId: string;
+}) {
+  await prisma.documentSession.upsert({
+    where: {
+      documentId_sessionId: {
+        documentId: input.documentId,
+        sessionId: input.sessionId,
+      },
+    },
+    create: {
+      documentId: input.documentId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+    },
+    update: {},
+  });
 }
 
 export async function createDocumentUpload(input: {
@@ -93,6 +147,12 @@ export async function createDocumentUpload(input: {
       sizeBytes: input.data.byteLength,
       r2Key: "",
       status: "uploading",
+      sessionLinks: {
+        create: {
+          sessionId: input.sessionId,
+          userId: input.userId,
+        },
+      },
     },
   });
 
@@ -133,14 +193,25 @@ export async function createDocumentUpload(input: {
 
 export async function getDocumentStatus(input: {
   userId: string;
-  sessionId: string;
+  sessionId?: string;
   documentId: string;
 }) {
   const document = await prisma.document.findFirst({
     where: {
       id: input.documentId,
       userId: input.userId,
-      sessionId: input.sessionId,
+      ...(input.sessionId
+        ? {
+            OR: [
+              { sessionId: input.sessionId },
+              {
+                sessionLinks: {
+                  some: { sessionId: input.sessionId, userId: input.userId },
+                },
+              },
+            ],
+          }
+        : {}),
     },
     select: {
       id: true,
@@ -156,15 +227,258 @@ export async function getDocumentStatus(input: {
   return document;
 }
 
+/** Ready documents linked to a chat session (active docs). */
 export async function listSessionDocuments(sessionId: string, userId: string) {
-  return prisma.document.findMany({
-    where: { sessionId, userId, status: "ready" },
+  const links = await prisma.documentSession.findMany({
+    where: {
+      sessionId,
+      userId,
+      document: { status: "ready", userId },
+    },
     orderBy: { createdAt: "asc" },
+    select: {
+      document: {
+        select: {
+          id: true,
+          filename: true,
+          firstPageSummary: true,
+          sizeBytes: true,
+          mimeType: true,
+          pageCount: true,
+        },
+      },
+    },
+  });
+
+  return links.map((link) => link.document);
+}
+
+export type UserDocumentLibraryItem = {
+  id: string;
+  filename: string;
+  firstPageSummary: string;
+  sizeBytes: number;
+  mimeType: string;
+  pageCount: number;
+  createdAt: string;
+  /** Origin session id (upload site). */
+  originSessionId: string;
+};
+
+export type UserDocumentLibraryPage = {
+  items: UserDocumentLibraryItem[];
+  nextCursor: string | null;
+};
+
+export async function listUserDocuments(input: {
+  userId: string;
+  query?: string;
+  cursor?: string;
+  limit?: number | string;
+}): Promise<UserDocumentLibraryPage> {
+  const limit = clampLimit(
+    input.limit,
+    DEFAULT_LIBRARY_LIMIT,
+    MAX_LIBRARY_LIMIT,
+  );
+  const cursor = decodeLibraryCursor(input.cursor);
+  const q = input.query?.trim() ?? "";
+
+  const andFilters: Array<Record<string, unknown>> = [];
+  if (q) {
+    andFilters.push({
+      OR: [
+        { filename: { contains: q, mode: "insensitive" as const } },
+        { summary: { contains: q, mode: "insensitive" as const } },
+        {
+          firstPageSummary: {
+            contains: q,
+            mode: "insensitive" as const,
+          },
+        },
+      ],
+    });
+  }
+  if (cursor) {
+    andFilters.push({
+      OR: [
+        { createdAt: { lt: cursor.createdAt } },
+        {
+          AND: [
+            { createdAt: cursor.createdAt },
+            { id: { lt: cursor.id } },
+          ],
+        },
+      ],
+    });
+  }
+
+  const rows = await prisma.document.findMany({
+    where: {
+      userId: input.userId,
+      status: "ready",
+      ...(andFilters.length > 0 ? { AND: andFilters } : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
     select: {
       id: true,
       filename: true,
       firstPageSummary: true,
       sizeBytes: true,
+      mimeType: true,
+      pageCount: true,
+      createdAt: true,
+      sessionId: true,
     },
   });
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+
+  return {
+    items: page.map((doc) => ({
+      id: doc.id,
+      filename: doc.filename,
+      firstPageSummary: doc.firstPageSummary,
+      sizeBytes: doc.sizeBytes,
+      mimeType: doc.mimeType,
+      pageCount: doc.pageCount,
+      createdAt: doc.createdAt.toISOString(),
+      originSessionId: doc.sessionId,
+    })),
+    nextCursor:
+      hasMore && last
+        ? encodeLibraryCursor(last.createdAt, last.id)
+        : null,
+  };
 }
+
+export async function linkDocumentsToSession(input: {
+  userId: string;
+  sessionId: string;
+  documentIds: string[];
+}) {
+  const uniqueIds = [...new Set(input.documentIds.map((id) => id.trim()))].filter(
+    Boolean,
+  );
+  if (uniqueIds.length === 0) {
+    return { linked: [] as Awaited<ReturnType<typeof listSessionDocuments>> };
+  }
+
+  const owned = await prisma.document.findMany({
+    where: {
+      userId: input.userId,
+      id: { in: uniqueIds },
+      status: "ready",
+    },
+    select: { id: true },
+  });
+
+  if (owned.length === 0) {
+    return { linked: [] as Awaited<ReturnType<typeof listSessionDocuments>> };
+  }
+
+  await prisma.$transaction(
+    owned.map((doc) =>
+      prisma.documentSession.upsert({
+        where: {
+          documentId_sessionId: {
+            documentId: doc.id,
+            sessionId: input.sessionId,
+          },
+        },
+        create: {
+          documentId: doc.id,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        },
+        update: {},
+      }),
+    ),
+  );
+
+  const linked = await listSessionDocuments(input.sessionId, input.userId);
+  return { linked };
+}
+
+export async function unlinkDocumentFromSession(input: {
+  userId: string;
+  sessionId: string;
+  documentId: string;
+}) {
+  const result = await prisma.documentSession.deleteMany({
+    where: {
+      userId: input.userId,
+      sessionId: input.sessionId,
+      documentId: input.documentId,
+    },
+  });
+
+  return { ok: true as const, removed: result.count > 0 };
+}
+
+export async function getDocumentPreview(input: {
+  userId: string;
+  documentId: string;
+  pageIndex?: number;
+  pageLimit?: number;
+}) {
+  const document = await prisma.document.findFirst({
+    where: {
+      id: input.documentId,
+      userId: input.userId,
+      status: "ready",
+    },
+    select: {
+      id: true,
+      filename: true,
+      mimeType: true,
+      pageCount: true,
+      sizeBytes: true,
+      firstPageSummary: true,
+      summary: true,
+    },
+  });
+
+  if (!document) return null;
+
+  const pageLimit = clampLimit(input.pageLimit, 1, 5);
+  const startPage =
+    typeof input.pageIndex === "number" &&
+    Number.isInteger(input.pageIndex) &&
+    input.pageIndex >= 0
+      ? input.pageIndex
+      : 0;
+
+  const pages = await prisma.documentPage.findMany({
+    where: {
+      documentId: document.id,
+      pageIndex: {
+        gte: startPage,
+        lt: startPage + pageLimit,
+      },
+    },
+    orderBy: { pageIndex: "asc" },
+    select: {
+      pageIndex: true,
+      summary: true,
+      rawMarkdown: true,
+    },
+  });
+
+  return {
+    id: document.id,
+    filename: document.filename,
+    mimeType: document.mimeType,
+    pageCount: document.pageCount,
+    sizeBytes: document.sizeBytes,
+    firstPageSummary: document.firstPageSummary,
+    summary: document.summary,
+    pages,
+  };
+}
+
+/** Re-export for call sites that need explicit link after create paths. */
+export { ensureSessionLink };

@@ -1,18 +1,22 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer } from "@anvia/react-ui";
-import { ArrowUp, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import type { RefObject } from "react";
+import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import type {
   CompletionModelId,
   ReasoningEffort,
 } from "#/lib/chat/models";
+import type { SessionDocument } from "#/lib/api";
 
 /**
  * Input shell only — must sit inside Composer.Root.
  * Session docs / attachments live in the right SessionDocumentsPanel.
  */
 export function ChatComposer({
+  sessionId,
+  activeDocumentIds,
   chatStatus,
   isIngesting,
   composerError,
@@ -21,7 +25,10 @@ export function ChatComposer({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
+  onLinkedDocuments,
 }: {
+  sessionId: string;
+  activeDocumentIds?: ReadonlySet<string>;
   chatStatus: UseChatStatus;
   isIngesting: boolean;
   composerError: string | null;
@@ -30,6 +37,7 @@ export function ChatComposer({
   reasoningEffort: ReasoningEffort;
   onModelChange: (model: CompletionModelId) => void;
   onReasoningChange: (effort: ReasoningEffort) => void;
+  onLinkedDocuments?: (documents: SessionDocument[]) => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
 
@@ -61,16 +69,12 @@ export function ChatComposer({
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
-            <Composer.AddAttachment
-              accept=".pdf,.png,.jpg,.jpeg,.webp"
-              multiple
-              aria-label="Attach document"
-              title="Attach document"
-              className="glass inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+            <ComposerAttachControl
+              sessionId={sessionId}
+              activeDocumentIds={activeDocumentIds}
               disabled={busy}
-            >
-              <Paperclip className="size-4" strokeWidth={1.75} />
-            </Composer.AddAttachment>
+              onLinkedDocuments={onLinkedDocuments}
+            />
 
             {chatStatus === "streaming" ? (
               <Composer.Stop

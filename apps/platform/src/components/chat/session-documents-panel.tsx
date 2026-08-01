@@ -1,61 +1,128 @@
 import type { UIAttachment } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCitationSessionOptional } from "#/components/chat/citation-session-context";
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { ComposerAttachmentChip } from "#/components/composer-attachment";
+import { DocumentRow } from "#/components/documents/document-row";
 import { IngestionStatusPill } from "#/components/ingestion-status-pill";
+import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
 import { formatCitationPageLabel } from "#/lib/chat/citations";
-import { FileText } from "lucide-react";
+import { Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
 
 export function useHasSessionDocuments({
   sessionDocuments,
+  citedDocuments,
   ingestionItems,
 }: {
   sessionDocuments: SessionDocument[];
+  citedDocuments: CitedDocumentSummary[];
   ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
 }) {
   const composer = useComposer();
   return (
     sessionDocuments.length > 0 ||
+    citedDocuments.length > 0 ||
     ingestionItems.length > 0 ||
     composer.attachments.length > 0
   );
 }
 
 /**
- * Right-rail document list: Active documents + Attachments.
+ * Right-rail document list: Active, Cited, Attachments.
  * Width matches left sidebar (272px). Parent should animate open/close width.
  */
 export function SessionDocumentsPanel({
   sessionDocuments,
+  citedDocuments,
   ingestionItems,
+  onRemoveActiveDocument,
+  removingDocumentId = null,
 }: {
   sessionDocuments: SessionDocument[];
+  citedDocuments: CitedDocumentSummary[];
   ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+  onRemoveActiveDocument?: (documentId: string) => void;
+  removingDocumentId?: string | null;
 }) {
   const composer = useComposer();
   const citationSession = useCitationSessionOptional();
   const focusTarget = citationSession?.focusTarget ?? null;
+  const openDocumentPreview = citationSession?.openDocumentPreview;
   const listRef = useRef<HTMLUListElement>(null);
+  const citedListRef = useRef<HTMLUListElement>(null);
   const hasActive = sessionDocuments.length > 0;
+  const hasCited = citedDocuments.length > 0;
   const hasIngestion = ingestionItems.length > 0;
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // Scroll + pulse the focused document when a citation is clicked.
   useEffect(() => {
-    if (!focusTarget?.documentId || !listRef.current) return;
-    const el = listRef.current.querySelector<HTMLElement>(
-      `[data-document-id="${CSS.escape(focusTarget.documentId)}"]`,
-    );
+    if (!focusTarget?.documentId) return;
+    const id = CSS.escape(focusTarget.documentId);
+    const el =
+      listRef.current?.querySelector<HTMLElement>(
+        `[data-document-id="${id}"]`,
+      ) ??
+      citedListRef.current?.querySelector<HTMLElement>(
+        `[data-document-id="${id}"]`,
+      );
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusTarget?.documentId, focusTarget?.nonce]);
+
+  useEffect(() => {
+    setRemoveError(null);
+  }, [sessionDocuments]);
+
+  const handleRemove = async (documentId: string) => {
+    if (!onRemoveActiveDocument) return;
+    setRemoveError(null);
+    try {
+      await onRemoveActiveDocument(documentId);
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error
+          ? error.message
+          : "Could not remove document from session",
+      );
+    }
+  };
+
+  const openPreview = (input: {
+    documentId: string;
+    filename: string;
+    pageIndex?: number;
+    firstPageSummary?: string;
+    sizeBytes?: number;
+    mimeType?: string;
+    pageCount?: number;
+  }) => {
+    if (!openDocumentPreview) return;
+    openDocumentPreview({
+      documentId: input.documentId,
+      filename: input.filename,
+      ...(typeof input.pageIndex === "number"
+        ? { pageIndex: input.pageIndex }
+        : {}),
+      ...(input.firstPageSummary
+        ? { firstPageSummary: input.firstPageSummary }
+        : {}),
+      ...(typeof input.sizeBytes === "number"
+        ? { sizeBytes: input.sizeBytes }
+        : {}),
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      ...(typeof input.pageCount === "number"
+        ? { pageCount: input.pageCount }
+        : {}),
+    });
+  };
 
   return (
     <aside
@@ -69,6 +136,7 @@ export function SessionDocumentsPanel({
         <p className="truncate text-[11px] text-text-faint">
           {[
             hasActive ? `${sessionDocuments.length} active` : null,
+            hasCited ? `${citedDocuments.length} cited` : null,
             hasPending
               ? `${ingestionItems.length || composer.attachments.length} pending`
               : null,
@@ -79,7 +147,13 @@ export function SessionDocumentsPanel({
       </div>
 
       <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-3">
-        <div className="flex w-full flex-col gap-4">
+        <div className="flex w-full flex-col gap-2">
+          {removeError ? (
+            <p className="px-0.5 text-[11px] text-danger" role="alert">
+              {removeError}
+            </p>
+          ) : null}
+
           {hasActive ? (
             <CollapsibleDocumentSection title="Active documents">
               <ul
@@ -91,6 +165,7 @@ export function SessionDocumentsPanel({
                   const pageLabel = focused
                     ? formatCitationPageLabel(focusTarget?.pageIndex)
                     : null;
+                  const removing = removingDocumentId === doc.id;
 
                   return (
                     <li
@@ -98,43 +173,112 @@ export function SessionDocumentsPanel({
                       data-document-id={doc.id}
                       className="w-full min-w-0"
                     >
-                      <div
-                        className={[
-                          "glass-pane flex w-full min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-xs text-text",
-                          "transition-[box-shadow,background-color] duration-300",
-                          focused
-                            ? "bg-accent-soft/40 ring-2 ring-accent-ring shadow-[0_0_0_1px_rgba(232,163,23,0.2)]"
-                            : "",
-                        ].join(" ")}
-                        title={doc.firstPageSummary || doc.filename}
-                      >
-                        <FileText
-                          className="mt-0.5 size-4 shrink-0 text-accent"
-                          strokeWidth={1.75}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-start gap-2">
-                            <p className="min-w-0 flex-1 truncate font-medium leading-snug">
-                              {doc.filename}
-                            </p>
+                      <DocumentRow
+                        filename={doc.filename}
+                        summary={doc.firstPageSummary}
+                        focused={focused}
+                        data-document-id={doc.id}
+                        title={`Preview ${doc.filename}`}
+                        onClick={() =>
+                          openPreview({
+                            documentId: doc.id,
+                            filename: doc.filename,
+                            firstPageSummary: doc.firstPageSummary,
+                            sizeBytes: doc.sizeBytes,
+                            mimeType: doc.mimeType,
+                            pageCount: doc.pageCount,
+                            ...(focused &&
+                            typeof focusTarget?.pageIndex === "number"
+                              ? { pageIndex: focusTarget.pageIndex }
+                              : {}),
+                          })
+                        }
+                        trailing={
+                          <div className="flex flex-col items-end gap-1">
                             {pageLabel ? (
                               <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-accent ring-1 ring-accent-ring/40">
                                 {pageLabel}
                               </span>
                             ) : null}
+                            {onRemoveActiveDocument ? (
+                              <button
+                                type="button"
+                                aria-label={`Remove ${doc.filename} from this chat`}
+                                title="Remove from this chat (keeps your library copy)"
+                                disabled={removing}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleRemove(doc.id);
+                                }}
+                                className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.06] hover:text-text disabled:cursor-default disabled:opacity-40"
+                              >
+                                <X className="size-3.5" strokeWidth={2} />
+                              </button>
+                            ) : null}
                           </div>
-                          {focused && focusTarget?.citationId != null ? (
-                            <p className="mt-0.5 text-[10px] text-accent">
-                              Cited as [{focusTarget.citationId}]
-                            </p>
-                          ) : null}
-                          {doc.firstPageSummary ? (
-                            <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-text-faint">
-                              {doc.firstPageSummary}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
+                        }
+                      />
+                      {focused && focusTarget?.citationId != null ? (
+                        <p className="mt-0.5 px-1 text-[10px] text-accent">
+                          Cited as [{focusTarget.citationId}]
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </CollapsibleDocumentSection>
+          ) : null}
+
+          {hasCited ? (
+            <CollapsibleDocumentSection title="Cited documents">
+              <ul
+                ref={citedListRef}
+                className="flex w-full list-none flex-col gap-1.5 p-0"
+              >
+                {citedDocuments.map((doc) => {
+                  const focused = focusTarget?.documentId === doc.documentId;
+                  const inActive = sessionDocuments.find(
+                    (d) => d.id === doc.documentId,
+                  );
+                  return (
+                    <li
+                      key={doc.documentId}
+                      data-document-id={doc.documentId}
+                      className="w-full min-w-0"
+                    >
+                      <DocumentRow
+                        filename={doc.filename}
+                        focused={focused}
+                        data-document-id={doc.documentId}
+                        title={`Preview ${doc.filename}`}
+                        onClick={() =>
+                          openPreview({
+                            documentId: doc.documentId,
+                            filename: doc.filename,
+                            firstPageSummary: inActive?.firstPageSummary,
+                            sizeBytes: inActive?.sizeBytes,
+                            mimeType: inActive?.mimeType,
+                            pageCount: inActive?.pageCount,
+                            ...(focused &&
+                            typeof focusTarget?.pageIndex === "number"
+                              ? { pageIndex: focusTarget.pageIndex }
+                              : {}),
+                          })
+                        }
+                        meta={[
+                          `${doc.citationCount} citation${doc.citationCount === 1 ? "" : "s"}`,
+                          inActive ? null : "Not in active set",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        leading={
+                          <Quote
+                            className="mt-0.5 size-4 shrink-0 text-accent"
+                            strokeWidth={1.75}
+                          />
+                        }
+                      />
                     </li>
                   );
                 })}
@@ -171,6 +315,12 @@ export function SessionDocumentsPanel({
               </div>
             </CollapsibleDocumentSection>
           ) : null}
+
+          {!hasActive && !hasCited && !hasPending ? (
+            <p className="px-1 py-6 text-center text-[11px] text-text-faint">
+              Attach a file or pick from your library to ground this chat.
+            </p>
+          ) : null}
         </div>
       </div>
     </aside>
@@ -179,38 +329,48 @@ export function SessionDocumentsPanel({
 
 /**
  * Animated 272px rail — collapses to 0 when no docs/attachments. Desktop only.
- * Floating list uses the same vertical insets as the chat scrollbar track:
- *   top = top bar + 24px, bottom = textfield dock + --chat-composer-gap.
+ * Sits under the absolute top app bar (h-14) and runs full height to the
+ * bottom of the viewport (not cut off above the composer).
  */
 export function SessionDocumentsRail({
   sessionDocuments,
+  citedDocuments,
   ingestionItems,
+  onRemoveActiveDocument,
+  removingDocumentId,
 }: {
   sessionDocuments: SessionDocument[];
+  citedDocuments: CitedDocumentSummary[];
   ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+  onRemoveActiveDocument?: (documentId: string) => void;
+  removingDocumentId?: string | null;
 }) {
-  const open = useHasSessionDocuments({ sessionDocuments, ingestionItems });
+  const open = useHasSessionDocuments({
+    sessionDocuments,
+    citedDocuments,
+    ingestionItems,
+  });
 
   return (
     <div
-      className={`hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
+      className={`hidden h-full min-h-0 shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
         open
           ? "w-[272px] translate-x-0 opacity-100"
           : "w-0 translate-x-1 opacity-0 pointer-events-none"
       }`}
     >
-      <div className="relative h-full pr-2" style={{ width: DOC_RAIL_WIDTH_PX }}>
-        <div
-          className="absolute inset-x-0 min-h-0 overflow-hidden pr-2"
-          style={{
-            top: "calc(3.5rem + 24px)",
-            bottom:
-              "calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))",
-          }}
-        >
+      <div className="relative h-full" style={{ width: DOC_RAIL_WIDTH_PX }}>
+        {/*
+          Top bar is position:absolute over the main column.
+          Anchor under the bar with top-24, stretch to the bottom edge.
+        */}
+        <div className="absolute inset-x-0 bottom-0 top-17 flex min-h-0 flex-col overflow-hidden">
           <SessionDocumentsPanel
             sessionDocuments={sessionDocuments}
+            citedDocuments={citedDocuments}
             ingestionItems={ingestionItems}
+            onRemoveActiveDocument={onRemoveActiveDocument}
+            removingDocumentId={removingDocumentId}
           />
         </div>
       </div>

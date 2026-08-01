@@ -16,6 +16,11 @@ export type CitationSourceItemProps = {
   highlighted?: boolean;
   /** When true, render as a non-interactive row (chip hover preview). */
   static?: boolean;
+  /**
+   * Force the row to stay interactive even if `documentId` is missing
+   * (caller will resolve id on click, e.g. via session catalog).
+   */
+  forceClickable?: boolean;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   onClick?: () => void;
@@ -29,13 +34,16 @@ export function CitationSourceItem({
   citation,
   highlighted = false,
   static: isStatic = false,
+  forceClickable = false,
   onMouseEnter,
   onMouseLeave,
   onClick,
 }: CitationSourceItemProps) {
   const page = formatCitationPageLabel(citation.pageIndex);
   const outOfSession = citation.inSession === false;
-  const clickable = Boolean(citation.documentId) && !isStatic;
+  // Preview is allowed even if unlinked from the session (doc still owned by user).
+  const clickable =
+    !isStatic && (forceClickable || Boolean(citation.documentId));
 
   const body = (
     <>
@@ -99,7 +107,16 @@ export function CitationSourceItem({
       disabled={!clickable}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      onClick={onClick}
+      onPointerDown={(event) => {
+        // Keep the popover open through the click (pointerdown-outside closes it).
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!clickable) return;
+        onClick?.();
+      }}
       className={rowClass}
     >
       {body}

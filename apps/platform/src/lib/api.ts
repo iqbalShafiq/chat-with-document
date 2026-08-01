@@ -206,6 +206,140 @@ export interface SessionDocument {
   filename: string;
   firstPageSummary: string;
   sizeBytes?: number;
+  mimeType?: string;
+  pageCount?: number;
+}
+
+export type UserLibraryDocument = {
+  id: string;
+  filename: string;
+  firstPageSummary: string;
+  sizeBytes: number;
+  mimeType: string;
+  pageCount: number;
+  createdAt: string;
+  originSessionId: string;
+};
+
+export type UserLibraryPage = {
+  items: UserLibraryDocument[];
+  nextCursor: string | null;
+};
+
+export async function listUserDocuments(input?: {
+  query?: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<UserLibraryPage> {
+  const params = new URLSearchParams();
+  if (input?.query?.trim()) params.set("q", input.query.trim());
+  if (input?.cursor) params.set("cursor", input.cursor);
+  if (input?.limit) params.set("limit", String(input.limit));
+  const qs = params.toString();
+
+  const response = await apiFetch(
+    `${API_BASE}/api/documents/library${qs ? `?${qs}` : ""}`,
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load document library");
+  }
+
+  const data = (await response.json()) as UserLibraryPage;
+  return {
+    items: Array.isArray(data.items) ? data.items : [],
+    nextCursor:
+      typeof data.nextCursor === "string" || data.nextCursor === null
+        ? data.nextCursor
+        : null,
+  };
+}
+
+export async function linkDocumentsToSession(input: {
+  sessionId: string;
+  documentIds: string[];
+}): Promise<{ linked: SessionDocument[] }> {
+  const response = await apiFetch(`${API_BASE}/api/documents/links`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      documentIds: input.documentIds,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to add documents to session");
+  }
+
+  return (await response.json()) as { linked: SessionDocument[] };
+}
+
+export async function unlinkDocumentFromSession(input: {
+  sessionId: string;
+  documentId: string;
+}): Promise<{ ok: true; removed: boolean }> {
+  const response = await apiFetch(`${API_BASE}/api/documents/links`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      documentId: input.documentId,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to remove document from session");
+  }
+
+  return (await response.json()) as { ok: true; removed: boolean };
+}
+
+export type DocumentPreviewPage = {
+  pageIndex: number;
+  summary: string;
+  rawMarkdown: string;
+};
+
+export type DocumentPreview = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  pageCount: number;
+  sizeBytes: number;
+  firstPageSummary: string;
+  summary: string;
+  pages: DocumentPreviewPage[];
+};
+
+export async function getDocumentPreview(input: {
+  documentId: string;
+  pageIndex?: number;
+  pageLimit?: number;
+}): Promise<DocumentPreview> {
+  const params = new URLSearchParams();
+  if (input.pageIndex !== undefined) {
+    params.set("pageIndex", String(input.pageIndex));
+  }
+  if (input.pageLimit !== undefined) {
+    params.set("pageLimit", String(input.pageLimit));
+  }
+  const qs = params.toString();
+
+  const response = await apiFetch(
+    `${API_BASE}/api/documents/${encodeURIComponent(input.documentId)}/preview${qs ? `?${qs}` : ""}`,
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to load document preview");
+  }
+
+  return (await response.json()) as DocumentPreview;
 }
 
 export async function getDocumentStatus(input: {

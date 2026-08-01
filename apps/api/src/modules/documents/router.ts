@@ -3,9 +3,13 @@ import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import {
   createDocumentUpload,
   DocumentStorageQuotaError,
+  getDocumentPreview,
   getDocumentStatus,
   getUserStorageUsage,
+  linkDocumentsToSession,
   listSessionDocuments,
+  listUserDocuments,
+  unlinkDocumentFromSession,
 } from "./service.js";
 
 function requireSessionId(value: unknown): string | null {
@@ -14,12 +18,77 @@ function requireSessionId(value: unknown): string | null {
   return sessionId.length > 0 ? sessionId : null;
 }
 
+function parseDocumentIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
 export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/storage", async (c) => {
     const user = c.get("user");
     const usage = await getUserStorageUsage(user.id);
     return c.json(usage);
+  })
+  .get("/library", async (c) => {
+    const user = c.get("user");
+    const page = await listUserDocuments({
+      userId: user.id,
+      query: c.req.query("q") ?? undefined,
+      cursor: c.req.query("cursor") ?? undefined,
+      limit: c.req.query("limit") ?? undefined,
+    });
+    return c.json(page);
+  })
+  .post("/links", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const sessionId = requireSessionId(body?.sessionId);
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+
+    const documentIds = parseDocumentIds(body?.documentIds);
+    if (documentIds.length === 0) {
+      return c.json({ error: "documentIds is required" }, 400);
+    }
+
+    const result = await linkDocumentsToSession({
+      userId: user.id,
+      sessionId,
+      documentIds,
+    });
+    return c.json(result);
+  })
+  .delete("/links", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const sessionId = requireSessionId(body?.sessionId);
+    const documentId =
+      typeof body?.documentId === "string" ? body.documentId.trim() : "";
+
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    if (!documentId) {
+      return c.json({ error: "documentId is required" }, 400);
+    }
+
+    const result = await unlinkDocumentFromSession({
+      userId: user.id,
+      sessionId,
+      documentId,
+    });
+    return c.json(result);
   })
   .get("/", async (c) => {
     const user = c.get("user");
@@ -31,17 +100,40 @@ export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
     const documents = await listSessionDocuments(sessionId, user.id);
     return c.json(documents);
   })
+  .get("/:id/preview", async (c) => {
+    const user = c.get("user");
+    const pageIndexRaw = c.req.query("pageIndex");
+    const pageIndex =
+      pageIndexRaw !== undefined && pageIndexRaw !== ""
+        ? Number(pageIndexRaw)
+        : undefined;
+    const pageLimitRaw = c.req.query("pageLimit");
+    const pageLimit =
+      pageLimitRaw !== undefined && pageLimitRaw !== ""
+        ? Number(pageLimitRaw)
+        : undefined;
+
+    const preview = await getDocumentPreview({
+      userId: user.id,
+      documentId: c.req.param("id"),
+      ...(Number.isInteger(pageIndex) ? { pageIndex } : {}),
+      ...(Number.isInteger(pageLimit) ? { pageLimit } : {}),
+    });
+
+    if (!preview) {
+      return c.json({ error: "Document not found" }, 404);
+    }
+
+    return c.json(preview);
+  })
   .get("/:id", async (c) => {
     const user = c.get("user");
     const sessionId = requireSessionId(c.req.query("sessionId"));
-    if (!sessionId) {
-      return c.json({ error: "sessionId is required" }, 400);
-    }
 
     const document = await getDocumentStatus({
       userId: user.id,
-      sessionId,
       documentId: c.req.param("id"),
+      ...(sessionId ? { sessionId } : {}),
     });
 
     if (!document) {

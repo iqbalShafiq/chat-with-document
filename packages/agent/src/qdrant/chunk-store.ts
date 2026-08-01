@@ -68,17 +68,21 @@ export async function deleteDocumentChunks(documentId: string) {
   }
 }
 
-function buildUserSessionFilter(
-  userId: string,
-  sessionId: string,
-  documentIds?: string[],
-) {
-  const ownershipFilter = vectorFilter.and(
-    vectorFilter.eq("userId", userId),
-    vectorFilter.eq("sessionId", sessionId),
-  );
-  if (!documentIds || documentIds.length === 0) {
-    return ownershipFilter;
+/**
+ * Retrieve by user ownership + explicit document ids.
+ * Session membership is enforced in tools before calling search so docs
+ * re-linked across chats remain searchable regardless of origin sessionId
+ * stored on the vectors.
+ */
+function buildUserDocumentsFilter(userId: string, documentIds: string[]) {
+  const ownership = vectorFilter.eq("userId", userId);
+
+  if (documentIds.length === 0) {
+    // Empty set must not match all user vectors.
+    return vectorFilter.and(
+      ownership,
+      vectorFilter.eq("documentId", "__none__"),
+    );
   }
 
   const docFilters = documentIds.map((documentId) =>
@@ -86,7 +90,7 @@ function buildUserSessionFilter(
   );
 
   if (docFilters.length === 1) {
-    return vectorFilter.and(ownershipFilter, docFilters[0]!);
+    return vectorFilter.and(ownership, docFilters[0]!);
   }
 
   let docOr = docFilters[0]!;
@@ -94,18 +98,22 @@ function buildUserSessionFilter(
     docOr = vectorFilter.or(docOr, docFilters[i]!);
   }
 
-  return vectorFilter.and(ownershipFilter, docOr);
+  return vectorFilter.and(ownership, docOr);
 }
 
 export function createChunkSearchService(): ChunkSearchService {
   return {
-    async search({ userId, sessionId, query, documentIds, limit }) {
+    async search({ userId, query, documentIds, limit }) {
+      if (!documentIds || documentIds.length === 0) {
+        return [];
+      }
+
       const store = await getStore();
       const index = store.index(embeddingModel);
       const results = await index.search({
         query,
         topK: limit,
-        filter: buildUserSessionFilter(userId, sessionId, documentIds),
+        filter: buildUserDocumentsFilter(userId, documentIds),
       });
 
       return results.map((result) => {

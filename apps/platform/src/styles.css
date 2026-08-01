@@ -448,6 +448,65 @@ body {
   outline: none !important;
 }
 
+/* Document preview modal — native dialog top-layer styling */
+.document-preview-dialog {
+  color: inherit;
+  background: var(--color-canvas-elevated);
+  border: 1px solid var(--color-hairline);
+}
+
+.document-preview-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.document-preview-dialog:not([open]) {
+  display: none;
+}
+
+.document-preview-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Document preview markdown — code block chrome (belt + suspenders for pre/code). */
+.document-markdown pre.document-md-pre,
+.document-markdown pre {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: #0a0a0a;
+  padding: 0.875rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.document-markdown pre code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: transparent !important;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.document-markdown :not(pre) > code {
+  border-radius: 0.25rem;
+  background: rgb(255 255 255 / 0.08);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-text);
+}
+
 /*
   TipTap nests: [data-anvia-composer-input] > div > [data-anvia-composer-editor]
 */

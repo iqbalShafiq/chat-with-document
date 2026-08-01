@@ -16,7 +16,7 @@ export type CitationChipProps = {
 /**
  * Inline citation marker in message text.
  * Text-only superscript (no pill/container). Hover shows a single-source
- * popover matching the Sources panel styling (portaled, top z-index).
+ * popover; click opens the document preview modal on the cited page.
  */
 export function CitationChip({ id, citation, pending = false }: CitationChipProps) {
   const messageCtx = useMessageCitations();
@@ -40,7 +40,14 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
     : `Source ${id}`;
   const known = resolved !== undefined;
   const outOfSession = resolved?.inSession === false;
+  // focusCitation resolves documentId from the session catalog when missing.
+  const canOpen = Boolean(resolved);
   const showPreview = hoverOpen && resolved;
+
+  const openPreview = () => {
+    if (!resolved) return;
+    messageCtx?.focusCitation(resolved);
+  };
 
   return (
     <span
@@ -57,24 +64,34 @@ export function CitationChip({ id, citation, pending = false }: CitationChipProp
         }
       }}
     >
-      <span
-        role="note"
-        aria-label={label}
+      <button
+        type="button"
+        aria-label={
+          canOpen ? `Open preview for ${label}` : label
+        }
         aria-describedby={showPreview ? tipId : undefined}
+        disabled={!canOpen}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openPreview();
+        }}
         className={[
           // Text-only: no background, ring, or padding — raised slightly (not full super).
-          "cursor-pointer select-none text-[0.9em] font-semibold tabular-nums leading-none no-underline",
+          "cursor-pointer select-none border-0 bg-transparent p-0 text-[0.9em] font-semibold tabular-nums leading-none no-underline",
           "transition-colors duration-150",
+          "focus-visible:outline-none focus-visible:underline focus-visible:decoration-accent/60",
           known && !outOfSession
             ? "text-accent"
             : outOfSession
               ? "text-danger"
               : "text-text-faint",
           highlighted ? "underline decoration-accent/50 underline-offset-2" : "",
+          !canOpen ? "cursor-default" : "",
         ].join(" ")}
       >
         {id}
-      </span>
+      </button>
 
       {showPreview ? (
         <CitationSourcesPanel

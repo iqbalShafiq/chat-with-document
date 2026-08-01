@@ -132,26 +132,45 @@ enum DocumentStatus {
 }
 
 model Document {
-  id               String         @id @default(cuid())
+  id               String            @id @default(cuid())
   userId           String
+  /// Origin chat session where the file was first uploaded (R2 path / audit).
   sessionId        String
   filename         String
   mimeType         String
   sizeBytes        Int
   r2Key            String
-  pageCount        Int            @default(0)
-  status           DocumentStatus @default(queued)
+  pageCount        Int               @default(0)
+  status           DocumentStatus    @default(queued)
   errorMessage     String?
-  summary          String         @default("") @db.Text
-  firstPageSummary String         @default("") @db.Text
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  summary          String            @default("") @db.Text
+  firstPageSummary String            @default("") @db.Text
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   pages            DocumentPage[]
+  sessionLinks     DocumentSession[]
 
   @@index([userId, sessionId, createdAt])
   @@index([userId, sessionId, status])
   @@index([userId, id])
   @@index([userId, createdAt])
+  @@index([userId, status, createdAt])
+}
+
+/// Many-to-many: a user document can be active in multiple chat sessions.
+/// Removing a link unlinks from the session only — it does not delete the document.
+model DocumentSession {
+  id         String   @id @default(cuid())
+  documentId String
+  sessionId  String
+  userId     String
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, sessionId])
+  @@index([userId, sessionId, createdAt])
+  @@index([sessionId])
+  @@index([documentId])
 }
 
 model DocumentPage {

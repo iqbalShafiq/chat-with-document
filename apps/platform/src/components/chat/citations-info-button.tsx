@@ -102,6 +102,7 @@ export function CitationsInfoButton({ citations }: CitationsInfoButtonProps) {
           panelRef={panelRef}
           onMouseEnter={openNow}
           onMouseLeave={scheduleClose}
+          onSourceActivate={() => setOpen(false)}
         />
       ) : null}
     </span>

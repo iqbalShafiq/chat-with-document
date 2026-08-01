@@ -21,11 +21,13 @@ import {
   listSessions,
   loadChatMessages,
   truncateSessionMemory,
+  unlinkDocumentFromSession,
   uploadDocument,
   waitForDocumentReady,
   type DocumentStatus,
   type SessionDocument,
 } from "#/lib/api";
+import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
   parseMessageCitations,
@@ -322,6 +324,9 @@ function ChatSession({
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
   );
+  const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
+    null,
+  );
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -358,6 +363,30 @@ function ChatSession({
       // Keep the previous list if refresh fails.
     }
   }, [sessionId]);
+
+  const sessionDocumentIds = useMemo(
+    () => new Set(sessionDocuments.map((doc) => doc.id)),
+    [sessionDocuments],
+  );
+
+  const handleLinkedDocuments = useCallback((documents: SessionDocument[]) => {
+    setSessionDocuments(documents);
+  }, []);
+
+  const handleRemoveActiveDocument = useCallback(
+    async (documentId: string) => {
+      setRemovingDocumentId(documentId);
+      try {
+        await unlinkDocumentFromSession({ sessionId, documentId });
+        setSessionDocuments((current) =>
+          current.filter((doc) => doc.id !== documentId),
+        );
+      } finally {
+        setRemovingDocumentId(null);
+      }
+    },
+    [sessionId],
+  );
 
   const chatTransport = useMemo(
     () =>
@@ -549,6 +578,11 @@ function ChatSession({
     [resubmitFromUserMessage],
   );
 
+  const citedDocuments = useMemo(
+    () => collectCitedDocuments(chat.messages),
+    [chat.messages],
+  );
+
   return (
     <ChatProvider controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
@@ -662,7 +696,7 @@ function ChatSession({
         }}
       >
         <div
-          className="flex min-h-0 w-full flex-1 overflow-hidden"
+          className="flex min-h-0 w-full flex-1 items-stretch overflow-hidden"
           style={
             {
               ["--composer-dock-h" as string]: `${composerDockH}px`,
@@ -759,6 +793,8 @@ function ChatSession({
                   </Thread.ViewportFooter>
 
                   <ChatComposer
+                    sessionId={sessionId}
+                    activeDocumentIds={sessionDocumentIds}
                     chatStatus={chat.status}
                     isIngesting={isIngesting}
                     composerError={composerError}
@@ -767,16 +803,20 @@ function ChatSession({
                     reasoningEffort={selectedReasoningEffort}
                     onModelChange={handleModelChange}
                     onReasoningChange={handleReasoningChange}
+                    onLinkedDocuments={handleLinkedDocuments}
                   />
                 </div>
               </div>
             </Thread.Root>
           </div>
 
-          {/* Right doc rail — same 272px as left sidebar; same vertical band as chat */}
+          {/* Right doc rail — same 272px + full height as left sidebar */}
           <SessionDocumentsRail
             sessionDocuments={sessionDocuments}
+            citedDocuments={citedDocuments}
             ingestionItems={ingestionItems}
+            onRemoveActiveDocument={handleRemoveActiveDocument}
+            removingDocumentId={removingDocumentId}
           />
         </div>
       </Composer.Root>

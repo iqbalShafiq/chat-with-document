@@ -7,8 +7,8 @@ export interface FindDocumentsPrisma {
     findMany(args: {
       where: {
         userId: string;
-        sessionId: string;
         status: "ready";
+        sessionLinks: { some: { sessionId: string; userId: string } };
         OR: Array<{
           filename?: { contains: string; mode: "insensitive" };
           summary?: { contains: string; mode: "insensitive" };
@@ -39,7 +39,11 @@ export interface FindDocumentsPrisma {
 export interface NextPagePrisma {
   document: {
     findFirst(args: {
-      where: { id: string; userId: string; sessionId: string };
+      where: {
+        id: string;
+        userId: string;
+        sessionLinks: { some: { sessionId: string; userId: string } };
+      };
       select: { id: true; pageCount: true; filename: true };
     }): Promise<{ id: string; pageCount: number; filename: string } | null>;
   };
@@ -61,6 +65,19 @@ export interface NextPagePrisma {
   };
 }
 
+export interface SessionDocumentIdsPrisma {
+  documentSession: {
+    findMany(args: {
+      where: {
+        sessionId: string;
+        userId: string;
+        document: { status: "ready"; userId: string };
+      };
+      select: { documentId: true };
+    }): Promise<Array<{ documentId: string }>>;
+  };
+}
+
 export interface ChunkSearchHit {
   chunkId: string;
   documentId: string;
@@ -76,9 +93,10 @@ export interface ChunkSearchHit {
 export interface ChunkSearchService {
   search(args: {
     userId: string;
-    sessionId: string;
+    /** Optional origin session (audit only). Retrieval is document-scoped. */
+    sessionId?: string;
     query: string;
-    documentIds?: string[];
+    documentIds: string[];
     limit: number;
   }): Promise<ChunkSearchHit[]>;
 }
@@ -86,7 +104,7 @@ export interface ChunkSearchService {
 export interface DocumentToolsDeps {
   userId: string;
   sessionId: string;
-  prisma: FindDocumentsPrisma & NextPagePrisma;
+  prisma: FindDocumentsPrisma & NextPagePrisma & SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }
 
@@ -107,8 +125,10 @@ export function createFindDocumentsTool(deps: {
       const documents = await deps.prisma.document.findMany({
         where: {
           userId: deps.userId,
-          sessionId: deps.sessionId,
           status: "ready",
+          sessionLinks: {
+            some: { sessionId: deps.sessionId, userId: deps.userId },
+          },
           OR: [
             { filename: { contains: query, mode: "insensitive" } },
             { summary: { contains: query, mode: "insensitive" } },
@@ -138,9 +158,26 @@ export function createFindDocumentsTool(deps: {
   });
 }
 
+async function resolveSessionDocumentIds(
+  prisma: SessionDocumentIdsPrisma,
+  userId: string,
+  sessionId: string,
+): Promise<string[]> {
+  const links = await prisma.documentSession.findMany({
+    where: {
+      sessionId,
+      userId,
+      document: { status: "ready", userId },
+    },
+    select: { documentId: true },
+  });
+  return links.map((link) => link.documentId);
+}
+
 export function createSearchDocumentPagesTool(deps: {
   userId: string;
   sessionId: string;
+  prisma: SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }) {
   return createTool({
@@ -156,11 +193,30 @@ export function createSearchDocumentPagesTool(deps: {
       limit: z.number().int().min(1).max(10).optional().default(5),
     }),
     execute: async ({ query, documentIds, limit }) => {
+      const sessionDocIds = await resolveSessionDocumentIds(
+        deps.prisma,
+        deps.userId,
+        deps.sessionId,
+      );
+      if (sessionDocIds.length === 0) {
+        return { results: [] };
+      }
+
+      const allowed = new Set(sessionDocIds);
+      const scopedIds =
+        documentIds && documentIds.length > 0
+          ? documentIds.filter((id) => allowed.has(id))
+          : sessionDocIds;
+
+      if (scopedIds.length === 0) {
+        return { results: [] };
+      }
+
       const hits = await deps.searchService.search({
         userId: deps.userId,
         sessionId: deps.sessionId,
         query,
-        ...(documentIds !== undefined ? { documentIds } : {}),
+        documentIds: scopedIds,
         limit,
       });
 
@@ -213,7 +269,9 @@ export function createGetDocumentNextPageTool(deps: {
         where: {
           id: documentId,
           userId: deps.userId,
-          sessionId: deps.sessionId,
+          sessionLinks: {
+            some: { sessionId: deps.sessionId, userId: deps.userId },
+          },
         },
         select: { id: true, pageCount: true, filename: true },
       });
