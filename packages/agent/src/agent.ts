@@ -5,12 +5,17 @@ import {
   type MemoryStore,
 } from "@anvia/core";
 import type { LangfuseTracing } from "@anvia/langfuse";
-import { defaultModel } from "./providers/openai.js";
+import {
+  DEFAULT_REASONING_EFFORT,
+  defaultModel,
+  type ReasoningEffort,
+} from "./providers/openai.js";
 import { BASE_INSTRUCTIONS } from "./prompts/base-instructions.js";
 
 interface CreateAgentOptions {
   agentId: string;
   model?: CompletionModel;
+  reasoningEffort?: ReasoningEffort;
   additionalTools?: AnyTool[];
   additionalInstructions?: string[];
   tracing: LangfuseTracing;
@@ -20,12 +25,14 @@ interface CreateAgentOptions {
 export function createAgent(
   opts: CreateAgentOptions,
 ): ReturnType<AgentBuilder["build"]> {
+  const reasoningEffort = opts.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+
   const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel)
     .instructions(BASE_INSTRUCTIONS)
     .tools([...(opts.additionalTools ?? [])])
     .additionalParams({
       reasoning: {
-        effort: "medium",
+        effort: reasoningEffort,
         summary: "auto",
       },
       include: ["reasoning.encrypted_content"],

@@ -42,6 +42,16 @@ import {
   type SessionSummary,
 } from "#/lib/session-history";
 import {
+  persistSelectedModel,
+  persistSelectedReasoningEffort,
+  readSelectedModel,
+  readSelectedReasoningEffort,
+} from "#/lib/chat-preferences";
+import type {
+  CompletionModelId,
+  ReasoningEffort,
+} from "#/lib/chat/models";
+import {
   createSessionId,
   persistSessionId,
   readStoredSessionId,
@@ -315,6 +325,16 @@ function ChatSession({
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<CompletionModelId>(() =>
+    readSelectedModel(),
+  );
+  const [selectedReasoningEffort, setSelectedReasoningEffort] =
+    useState<ReasoningEffort>(() => readSelectedReasoningEffort());
+  /** Latest model/effort for createRequest (avoids stale closures). */
+  const selectedModelRef = useRef(selectedModel);
+  const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
+  selectedModelRef.current = selectedModel;
+  selectedReasoningEffortRef.current = selectedReasoningEffort;
   /** Shared with doc rail so its bottom band matches the textfield dock. */
   const [composerDockH, setComposerDockH] = useState(120);
 
@@ -363,6 +383,8 @@ function ChatSession({
         stream: true as const,
         sessionId,
         documentIds,
+        model: selectedModelRef.current,
+        reasoningEffort: selectedReasoningEffortRef.current,
       };
     },
     onError: (error) => {
@@ -371,6 +393,16 @@ function ChatSession({
       }
     },
   });
+
+  const handleModelChange = useCallback((model: CompletionModelId) => {
+    setSelectedModel(model);
+    persistSelectedModel(model);
+  }, []);
+
+  const handleReasoningChange = useCallback((effort: ReasoningEffort) => {
+    setSelectedReasoningEffort(effort);
+    persistSelectedReasoningEffort(effort);
+  }, []);
 
   const focusComposer = useCallback(() => {
     let attempts = 0;
@@ -731,6 +763,10 @@ function ChatSession({
                     isIngesting={isIngesting}
                     composerError={composerError}
                     composerInputRef={composerInputRef}
+                    model={selectedModel}
+                    reasoningEffort={selectedReasoningEffort}
+                    onModelChange={handleModelChange}
+                    onReasoningChange={handleReasoningChange}
                   />
                 </div>
               </div>

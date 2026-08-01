@@ -40,6 +40,7 @@ export type TapAgentUsageContext = {
   sessionId: string;
   provider: string;
   model: string;
+  reasoningEffort?: string | null;
   agentId?: string;
 };
 
@@ -80,6 +81,7 @@ export async function* tapAgentStreamUsage<T>(
         runId,
         provider: ctx.provider,
         model: ctx.model,
+        reasoningEffort: ctx.reasoningEffort ?? null,
         agentId: ctx.agentId,
         usage,
         status,

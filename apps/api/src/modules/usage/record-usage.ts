@@ -9,6 +9,7 @@ export type RecordAgentUsageInput = {
   agentId?: string;
   provider: string;
   model: string;
+  reasoningEffort?: string | null;
   usage: Usage;
   status: "completed" | "error";
   errorMessage?: string | null;
@@ -29,6 +30,7 @@ export async function recordAgentUsageEvent(
       agentId: input.agentId ?? "my-agent",
       provider: input.provider,
       model: input.model,
+      reasoningEffort: input.reasoningEffort ?? null,
       inputTokens: input.usage.inputTokens,
       outputTokens: input.usage.outputTokens,
       totalTokens: input.usage.totalTokens,

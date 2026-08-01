@@ -144,6 +144,18 @@ export type UserUsageSummary = {
       output: number;
     };
   };
+  byModel: Array<{
+    model: string;
+    requestCount: number;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+  }>;
+  byReasoningEffort: Array<{
+    reasoningEffort: string;
+    requestCount: number;
+    totalTokens: number;
+  }>;
 };
 
 export async function getUserUsageSummary(): Promise<UserUsageSummary> {

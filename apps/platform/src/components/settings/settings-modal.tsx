@@ -6,12 +6,22 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { HardDrive, UserRound, X, Zap } from "lucide-react";
+import { Activity, HardDrive, UserRound, X, Zap } from "lucide-react";
+import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
 import {
   getUserUsageSummary,
   type UserUsageSummary,
 } from "#/lib/api";
 import type { SessionUser } from "#/lib/auth-client";
+import {
+  COMPLETION_MODELS,
+  MODEL_OPTIONS,
+  REASONING_EFFORTS,
+  modelLabel,
+  reasoningLabel,
+  type ReasoningEffort,
+} from "#/lib/chat/models";
 
 type SettingsSection = "account" | "usage";
 
@@ -20,6 +30,18 @@ export type SettingsModalProps = {
   user: SessionUser;
   onClose: () => void;
   restoreFocusRef?: RefObject<HTMLElement | null>;
+};
+
+const MODEL_BAR_COLORS = [
+  "bg-sky-400/80",
+  "bg-violet-400/75",
+  "bg-accent",
+] as const;
+
+const REASONING_BAR_COLORS: Record<ReasoningEffort, string> = {
+  low: "bg-emerald-400/70",
+  medium: "bg-amber-400/75",
+  high: "bg-rose-400/75",
 };
 
 function formatBytes(bytes: number): string {
@@ -50,6 +72,7 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const [section, setSection] = useState<SettingsSection>("account");
   const [usage, setUsage] = useState<UserUsageSummary | null>(null);
@@ -113,6 +136,11 @@ export function SettingsModal({
     };
   }, [open, section]);
 
+  // Reset scroll when switching sections
+  useEffect(() => {
+    contentScrollRef.current?.scrollTo({ top: 0 });
+  }, [section]);
+
   return (
     <dialog
       ref={dialogRef}
@@ -165,57 +193,74 @@ export function SettingsModal({
           />
         </nav>
 
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5 md:p-6">
-          {section === "account" ? (
-            <div className="flex flex-col gap-5 animate-fade-in">
-              <div>
-                <h3 className="text-sm font-medium text-text">Account</h3>
-                <p className="mt-1 text-xs leading-relaxed text-text-muted">
-                  Profile details for this workspace.
-                </p>
-              </div>
+        {/* Same scroll treatment as chat room: hide native bar + InsetScrollbar */}
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div
+            ref={contentScrollRef}
+            className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-5 md:p-6"
+          >
+            {section === "account" ? (
+              <div className="flex flex-col gap-5 animate-fade-in">
+                <div>
+                  <h3 className="text-sm font-medium text-text">Account</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                    Profile details for this workspace.
+                  </p>
+                </div>
 
-              <dl className="grid gap-4 text-sm">
-                <div className="flex flex-col gap-1">
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
-                    Name
-                  </dt>
-                  <dd className="text-text">{user.name}</dd>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
-                    Email
-                  </dt>
-                  <dd className="text-text">{user.email}</dd>
-                </div>
-              </dl>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6 animate-fade-in">
-              <div>
-                <h3 className="text-sm font-medium text-text">Usage</h3>
-                <p className="mt-1 text-xs leading-relaxed text-text-muted">
-                  Storage quota and token consumption for your account.
-                </p>
+                <dl className="grid gap-4 text-sm">
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
+                      Name
+                    </dt>
+                    <dd className="text-text">{user.name}</dd>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
+                      Email
+                    </dt>
+                    <dd className="text-text">{user.email}</dd>
+                  </div>
+                </dl>
               </div>
-
-              {usageLoading ? (
-                <div className="flex flex-col gap-3">
-                  <div className="skeleton-shimmer h-16 w-full rounded-xl" />
-                  <div className="skeleton-shimmer h-24 w-full rounded-xl" />
+            ) : (
+              <div className="flex flex-col gap-6 animate-fade-in">
+                <div>
+                  <h3 className="text-sm font-medium text-text">Usage</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                    Storage, tokens, and how you use models & reasoning.
+                  </p>
                 </div>
-              ) : usageError ? (
-                <p className="text-sm text-danger" role="alert">
-                  {usageError}
-                </p>
-              ) : usage ? (
-                <>
-                  <StorageUsageCard storage={usage.storage} />
-                  <TokenUsageCard tokens={usage.tokens} />
-                </>
-              ) : null}
-            </div>
-          )}
+
+                {usageLoading ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="skeleton-shimmer h-16 w-full rounded-xl" />
+                    <div className="skeleton-shimmer h-24 w-full rounded-xl" />
+                    <div className="skeleton-shimmer h-28 w-full rounded-xl" />
+                  </div>
+                ) : usageError ? (
+                  <p className="text-sm text-danger" role="alert">
+                    {usageError}
+                  </p>
+                ) : usage ? (
+                  <>
+                    <StorageUsageCard storage={usage.storage} />
+                    <TokenUsageCard tokens={usage.tokens} />
+                    <RequestMixCard
+                      byModel={usage.byModel ?? []}
+                      byReasoningEffort={usage.byReasoningEffort ?? []}
+                      requestCount={usage.tokens.requestCount}
+                    />
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
+          <InsetScrollbar
+            scrollRef={contentScrollRef}
+            top="0.75rem"
+            bottom="0.75rem"
+          />
         </div>
       </div>
     </dialog>
@@ -330,52 +375,51 @@ function TokenUsageCard({
         </p>
       </div>
 
-      {/* Composition bar: input (uncached) | cache | output — relative, no max */}
-      <div
-        className="flex h-2.5 overflow-hidden rounded-full bg-white/[0.06]"
-        role="img"
-        aria-label={`Token mix: input ${formatTokenCount(composition.inputUncached)}, cache ${formatTokenCount(composition.cacheRead)}, output ${formatTokenCount(composition.output)}`}
-      >
-        {compositionTotal === 0 ? (
-          <div className="h-full w-full bg-white/[0.04]" />
-        ) : (
-          <>
-            <div
-              className="h-full bg-sky-400/80 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-              style={{ width: `${inputPct}%` }}
-              title="Input"
-            />
-            <div
-              className="h-full bg-violet-400/75 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-              style={{ width: `${cachePct}%` }}
-              title="Cache"
-            />
-            <div
-              className="h-full bg-accent transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-              style={{ width: `${outputPct}%` }}
-              title="Output"
-            />
-          </>
-        )}
-      </div>
+      <SegmentedBar
+        ariaLabel={`Token mix: input ${formatTokenCount(composition.inputUncached)}, cache ${formatTokenCount(composition.cacheRead)}, output ${formatTokenCount(composition.output)}`}
+        segments={
+          compositionTotal === 0
+            ? []
+            : [
+                {
+                  key: "input",
+                  widthPct: inputPct,
+                  colorClass: "bg-sky-400/80",
+                  title: "Input",
+                },
+                {
+                  key: "cache",
+                  widthPct: cachePct,
+                  colorClass: "bg-violet-400/75",
+                  title: "Cache",
+                },
+                {
+                  key: "output",
+                  widthPct: outputPct,
+                  colorClass: "bg-accent",
+                  title: "Output",
+                },
+              ]
+        }
+      />
 
       <ul className="grid gap-2 text-xs">
-        <TokenLegendRow
+        <LegendRow
           colorClass="bg-sky-400/80"
           label="Input"
-          value={composition.inputUncached}
+          value={formatTokenCount(composition.inputUncached)}
           hint="Uncached"
         />
-        <TokenLegendRow
+        <LegendRow
           colorClass="bg-violet-400/75"
           label="Cache"
-          value={composition.cacheRead}
+          value={formatTokenCount(composition.cacheRead)}
           hint="Read"
         />
-        <TokenLegendRow
+        <LegendRow
           colorClass="bg-accent"
           label="Output"
-          value={composition.output}
+          value={formatTokenCount(composition.output)}
         />
       </ul>
 
@@ -388,7 +432,195 @@ function TokenUsageCard({
   );
 }
 
-function TokenLegendRow({
+/**
+ * Single Usage block for model + reasoning mix (stacked composition bars).
+ */
+function RequestMixCard({
+  byModel,
+  byReasoningEffort,
+  requestCount,
+}: {
+  byModel: UserUsageSummary["byModel"];
+  byReasoningEffort: UserUsageSummary["byReasoningEffort"];
+  requestCount: number;
+}) {
+  // Prefer known order; include only models with activity when any data exists
+  const activeModels =
+    byModel.length === 0
+      ? []
+      : MODEL_OPTIONS.map((opt, index) => {
+          const found = byModel.find((r) => r.model === opt.id);
+          return {
+            id: opt.id,
+            label: opt.label,
+            requestCount: found?.requestCount ?? 0,
+            totalTokens: found?.totalTokens ?? 0,
+            colorClass: MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],
+          };
+        }).filter((r) => r.requestCount > 0);
+
+  // Any unexpected models not in allow-list
+  const extraModels = byModel
+    .filter((r) => !(COMPLETION_MODELS as readonly string[]).includes(r.model))
+    .map((r, index) => ({
+      id: r.model,
+      label: modelLabel(r.model),
+      requestCount: r.requestCount,
+      totalTokens: r.totalTokens,
+      colorClass:
+        MODEL_BAR_COLORS[(activeModels.length + index) % MODEL_BAR_COLORS.length],
+    }));
+
+  const modelSegments = [...activeModels, ...extraModels];
+  const modelTotal = modelSegments.reduce((s, r) => s + r.requestCount, 0);
+
+  const reasoningSegments = REASONING_EFFORTS.map((effort) => {
+    const found = byReasoningEffort.find((r) => r.reasoningEffort === effort);
+    return {
+      id: effort,
+      label: reasoningLabel(effort),
+      requestCount: found?.requestCount ?? 0,
+      totalTokens: found?.totalTokens ?? 0,
+      colorClass: REASONING_BAR_COLORS[effort],
+    };
+  }).filter((r) => r.requestCount > 0);
+
+  const reasoningTotal = reasoningSegments.reduce(
+    (s, r) => s + r.requestCount,
+    0,
+  );
+
+  const empty = modelSegments.length === 0 && reasoningSegments.length === 0;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Activity className="size-4 text-text-muted" strokeWidth={1.75} />
+          <h4 className="text-sm font-medium text-text">Requests</h4>
+        </div>
+        <span className="text-[11px] text-text-faint">
+          {requestCount} total
+        </span>
+      </div>
+
+      {empty ? (
+        <p className="text-xs text-text-faint">
+          No chat requests yet. Model and reasoning mix will appear here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {/* Model mix */}
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
+              By model
+            </p>
+            <SegmentedBar
+              ariaLabel={`Model mix: ${modelSegments.map((s) => `${s.label} ${s.requestCount}`).join(", ")}`}
+              segments={modelSegments.map((s) => ({
+                key: s.id,
+                widthPct: percent(s.requestCount, modelTotal),
+                colorClass: s.colorClass,
+                title: s.label,
+              }))}
+            />
+            <ul className="grid gap-2 text-xs">
+              {modelSegments.map((s) => (
+                <LegendRow
+                  key={s.id}
+                  colorClass={s.colorClass}
+                  label={s.label}
+                  value={`${s.requestCount} req`}
+                  hint={formatTokenCount(s.totalTokens)}
+                />
+              ))}
+            </ul>
+          </div>
+
+          {/* Reasoning mix */}
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-faint">
+              By reasoning
+            </p>
+            <SegmentedBar
+              ariaLabel={`Reasoning mix: ${reasoningSegments.map((s) => `${s.label} ${s.requestCount}`).join(", ")}`}
+              segments={reasoningSegments.map((s) => ({
+                key: s.id,
+                widthPct: percent(s.requestCount, reasoningTotal),
+                colorClass: s.colorClass,
+                title: s.label,
+              }))}
+            />
+            <ul className="grid gap-2 text-xs">
+              {reasoningSegments.map((s) => (
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="inline-flex items-center gap-2 text-text-muted">
+                    <span
+                      className={`size-2 shrink-0 rounded-full ${s.colorClass}`}
+                      aria-hidden
+                    />
+                    <ReasoningEffortIcon
+                      effort={s.id as ReasoningEffort}
+                      className="size-3.5 shrink-0"
+                    />
+                    {s.label}
+                  </span>
+                  <span className="inline-flex items-center gap-2 tabular-nums text-text">
+                    <span>{s.requestCount} req</span>
+                    <span className="text-text-faint">
+                      {formatTokenCount(s.totalTokens)}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SegmentedBar({
+  segments,
+  ariaLabel,
+}: {
+  segments: Array<{
+    key: string;
+    widthPct: number;
+    colorClass: string;
+    title: string;
+  }>;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      className="flex h-2.5 overflow-hidden rounded-full bg-white/[0.06]"
+      role="img"
+      aria-label={ariaLabel}
+    >
+      {segments.length === 0 ? (
+        <div className="h-full w-full bg-white/[0.04]" />
+      ) : (
+        segments.map((seg) =>
+          seg.widthPct <= 0 ? null : (
+            <div
+              key={seg.key}
+              className={`h-full transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${seg.colorClass}`}
+              style={{ width: `${seg.widthPct}%` }}
+              title={seg.title}
+            />
+          ),
+        )
+      )}
+    </div>
+  );
+}
+
+function LegendRow({
   colorClass,
   label,
   value,
@@ -396,7 +628,7 @@ function TokenLegendRow({
 }: {
   colorClass: string;
   label: string;
-  value: number;
+  value: string;
   hint?: string;
 }) {
   return (
@@ -407,11 +639,9 @@ function TokenLegendRow({
           aria-hidden
         />
         {label}
-        {hint ? (
-          <span className="text-text-faint">· {hint}</span>
-        ) : null}
+        {hint ? <span className="text-text-faint">· {hint}</span> : null}
       </span>
-      <span className="tabular-nums text-text">{formatTokenCount(value)}</span>
+      <span className="tabular-nums text-text">{value}</span>
     </li>
   );
 }

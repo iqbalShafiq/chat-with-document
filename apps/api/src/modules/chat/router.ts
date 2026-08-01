@@ -5,10 +5,14 @@ import {
   buildDocumentCatalogInstruction,
   createAgent,
   createChunkSearchService,
+  createCompletionModel,
   createDataAnalysisTools,
   createDocumentTools,
   DEFAULT_COMPLETION_MODEL,
   DEFAULT_COMPLETION_PROVIDER,
+  DEFAULT_REASONING_EFFORT,
+  parseCompletionModel,
+  parseReasoningEffort,
   tracing,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
@@ -127,6 +131,33 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "messages are required" }, 400);
     }
 
+    // model / reasoningEffort: omit → defaults; invalid non-empty → 400
+    const modelRaw = body.model;
+    const effortRaw = body.reasoningEffort;
+    const model =
+      modelRaw === undefined || modelRaw === null || modelRaw === ""
+        ? DEFAULT_COMPLETION_MODEL
+        : parseCompletionModel(modelRaw);
+    if (!model) {
+      return c.json(
+        {
+          error:
+            "model must be one of: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol",
+        },
+        400,
+      );
+    }
+    const reasoningEffort =
+      effortRaw === undefined || effortRaw === null || effortRaw === ""
+        ? DEFAULT_REASONING_EFFORT
+        : parseReasoningEffort(effortRaw);
+    if (!reasoningEffort) {
+      return c.json(
+        { error: "reasoningEffort must be one of: low, medium, high" },
+        400,
+      );
+    }
+
     const promptMessage = stripUserAttachments(lastMessage);
 
     const prismaMemory = createPrismaMemoryStore(prisma);
@@ -136,6 +167,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
 
     const agent = createAgent({
       agentId: "my-agent",
+      model: createCompletionModel(model),
+      reasoningEffort,
       tracing: tracing,
       additionalInstructions: [catalogInstruction],
       additionalTools: [
@@ -160,7 +193,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       userId: user.id,
       sessionId,
       provider: DEFAULT_COMPLETION_PROVIDER,
-      model: DEFAULT_COMPLETION_MODEL,
+      model,
+      reasoningEffort,
       agentId: "my-agent",
     });
 
