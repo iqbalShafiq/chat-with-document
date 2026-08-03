@@ -715,11 +715,11 @@ function ChatSession({
               */}
               <Thread.Viewport
                 ref={chatViewportRef}
-                className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain"
+                className="chat-scroll-bleed absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain"
                 autoScroll
               >
                 <div
-                  className="mx-auto flex min-h-full w-full max-w-[760px] flex-col px-3"
+                  className="mx-auto flex min-h-full w-full min-w-0 max-w-[760px] flex-col px-3"
                   style={{
                     paddingTop: "calc(3.5rem + 24px)",
                     paddingBottom:
@@ -740,7 +740,8 @@ function ChatSession({
                   */}
                   <Thread.Messages
                     className={[
-                      "flex w-full flex-col",
+                      "flex w-full min-w-0 flex-col",
+                      "[&>*]:min-w-0",
                       "[&>*+*]:mt-1",
                       "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
                       "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-4",

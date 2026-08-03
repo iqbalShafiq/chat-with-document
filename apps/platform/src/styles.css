@@ -442,6 +442,137 @@ body {
   background-color: rgb(255 255 255 / 0.14);
 }
 
+/*
+  Chat markdown — keep the assistant bubble within the composer column width.
+  Wide content (code / tables / math) scrolls per-element, not the whole room.
+*/
+.chat-markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Thin horizontal scrollbar shared by pre, tables, display math, inline code */
+.chat-md-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+.chat-md-scroll::-webkit-scrollbar {
+  height: 5px;
+  width: 5px;
+}
+
+.chat-md-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-md-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(255 255 255 / 0.1);
+}
+
+.chat-md-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 0.16);
+}
+
+.chat-md-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.chat-markdown pre.chat-md-pre,
+.chat-markdown pre {
+  margin: 0.75rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.04);
+  padding: 0.75rem;
+  color: var(--color-text);
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+.chat-markdown pre.chat-md-pre::-webkit-scrollbar,
+.chat-markdown pre::-webkit-scrollbar {
+  height: 5px;
+}
+
+.chat-markdown pre.chat-md-pre::-webkit-scrollbar-thumb,
+.chat-markdown pre::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(255 255 255 / 0.1);
+}
+
+.chat-markdown pre code,
+.chat-markdown .chat-md-code-block {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Long inline code scrolls inside the chip instead of stretching the bubble */
+.chat-markdown :not(pre) > code.chat-md-inline-code,
+.chat-markdown :not(pre) > code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: bottom;
+  border-radius: 0.25rem;
+  background: rgb(255 255 255 / 0.06);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+.chat-markdown :not(pre) > code::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chat-markdown :not(pre) > code::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(255 255 255 / 0.1);
+}
+
+/* Display math: scroll the formula block, keep room width fixed */
+.chat-markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+.chat-markdown .katex-display::-webkit-scrollbar {
+  height: 5px;
+}
+
+.chat-markdown .katex-display::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(255 255 255 / 0.1);
+}
+
 /* Keep focus ring on the rounded composer shell, not the inner editor. */
 [data-anvia-composer-editor]:focus,
 [data-anvia-composer-editor]:focus-visible {

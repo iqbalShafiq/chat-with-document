@@ -105,16 +105,16 @@ export function ChatMessageRow({
       data-message-id={message.id}
       data-activity-only={intermediate ? "" : undefined}
       data-starts-activity={startsWithActivity ? "" : undefined}
-      className="relative flex w-full flex-col"
+      className="relative flex w-full min-w-0 flex-col"
     >
       <Message.Root
-        className={`group grid w-full data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start ${
+        className={`group grid w-full min-w-0 data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start ${
           intermediate ? "gap-1" : "gap-1.5"
         }`}
       >
         <Message.Content
           ref={contentRef}
-          className="glass-bubble max-w-full text-sm leading-relaxed group-data-[role=user]:max-w-[min(100%,42rem)] group-data-[role=user]:rounded-2xl group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-text group-data-[role=assistant]:w-full group-data-[role=assistant]:max-w-full group-data-[role=assistant]:text-text"
+          className="glass-bubble min-w-0 max-w-full text-sm leading-relaxed group-data-[role=user]:max-w-[min(100%,42rem)] group-data-[role=user]:rounded-2xl group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-text group-data-[role=assistant]:w-full group-data-[role=assistant]:max-w-full group-data-[role=assistant]:text-text"
           style={
             isEditing && editWidthPx
               ? { width: editWidthPx, maxWidth: editWidthPx }
@@ -188,7 +188,7 @@ function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
 }
 
 const PARTS_STACK_CLASS = [
-  "flex flex-col",
+  "flex min-w-0 max-w-full flex-col",
   "[&>[data-part=reasoning]+[data-part=tool]]:mt-1",
   "[&>[data-part=tool]+[data-part=reasoning]]:mt-1",
   "[&>[data-part=tool]+[data-part=tool]]:mt-1",
@@ -222,9 +222,7 @@ function ChatMessageParts({
       {(part) => {
         if (part.type === "text") {
           return (
-            <Message.Part
-              className="[&_a]:text-accent [&_a]:underline [&_.citation-chip]:no-underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p+p]:mt-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-white/[0.04] [&_pre]:p-3 [&_pre]:text-text [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_.katex-display]:my-3 [&_.katex]:text-[1.05em] group-data-[role=user]:[&_code]:bg-white/[0.08] group-data-[role=user]:[&_a]:text-accent"
-            >
+            <Message.Part className="min-w-0 max-w-full">
               <MathMarkdown />
             </Message.Part>
           );
@@ -232,7 +230,7 @@ function ChatMessageParts({
 
         if (part.type === "reasoning") {
           return (
-            <Message.Part>
+            <Message.Part className="min-w-0 max-w-full">
               <ReasoningPanel
                 isStreamingMessage={
                   chatStatus === "streaming" && lastMessageId === message.id
@@ -244,7 +242,7 @@ function ChatMessageParts({
 
         if (part.type === "tool") {
           return (
-            <Message.Part>
+            <Message.Part className="min-w-0 max-w-full">
               <ToolActivityPanel part={part} />
             </Message.Part>
           );
