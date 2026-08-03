@@ -16,6 +16,7 @@ import type { SessionDocument } from "#/lib/api";
  */
 export function ChatComposer({
   sessionId,
+  projectId = null,
   activeDocumentIds,
   chatStatus,
   isIngesting,
@@ -28,6 +29,7 @@ export function ChatComposer({
   onLinkedDocuments,
 }: {
   sessionId: string;
+  projectId?: string | null;
   activeDocumentIds?: ReadonlySet<string>;
   chatStatus: UseChatStatus;
   isIngesting: boolean;
@@ -71,6 +73,7 @@ export function ChatComposer({
           <div className="flex shrink-0 items-center gap-1.5">
             <ComposerAttachControl
               sessionId={sessionId}
+              projectId={projectId}
               activeDocumentIds={activeDocumentIds}
               disabled={busy}
               onLinkedDocuments={onLinkedDocuments}

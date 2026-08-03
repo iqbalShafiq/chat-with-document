@@ -71,7 +71,11 @@ export interface SessionDocumentIdsPrisma {
       where: {
         sessionId: string;
         userId: string;
-        document: { status: "ready"; userId: string };
+        document: {
+          status: "ready";
+          userId: string;
+          projectId?: string | null;
+        };
       };
       select: { documentId: true };
     }): Promise<Array<{ documentId: string }>>;
@@ -104,6 +108,8 @@ export interface ChunkSearchService {
 export interface DocumentToolsDeps {
   userId: string;
   sessionId: string;
+  /** When set, only project corpus docs may be resolved (defense in depth). */
+  projectId?: string | null;
   prisma: FindDocumentsPrisma & NextPagePrisma & SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }
@@ -162,12 +168,22 @@ async function resolveSessionDocumentIds(
   prisma: SessionDocumentIdsPrisma,
   userId: string,
   sessionId: string,
+  projectId?: string | null,
 ): Promise<string[]> {
   const links = await prisma.documentSession.findMany({
     where: {
       sessionId,
       userId,
-      document: { status: "ready", userId },
+      document: {
+        status: "ready",
+        userId,
+        // Standalone: projectId null; project: exact match. Matches app isolation.
+        ...(projectId === undefined
+          ? {}
+          : projectId
+            ? { projectId }
+            : { projectId: null }),
+      },
     },
     select: { documentId: true },
   });
@@ -177,6 +193,7 @@ async function resolveSessionDocumentIds(
 export function createSearchDocumentPagesTool(deps: {
   userId: string;
   sessionId: string;
+  projectId?: string | null;
   prisma: SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }) {
@@ -197,6 +214,7 @@ export function createSearchDocumentPagesTool(deps: {
         deps.prisma,
         deps.userId,
         deps.sessionId,
+        deps.projectId,
       );
       if (sessionDocIds.length === 0) {
         return { results: [] };

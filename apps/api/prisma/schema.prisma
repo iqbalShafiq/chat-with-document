@@ -120,6 +120,40 @@ model AgentMemoryError {
   @@index([runId])
 }
 
+// ─── Projects (optional workspace; soft tenant under user) ──────────────────
+
+model Project {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  lastOpenedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  documents Document[]
+  chats     ChatSession[]
+
+  @@index([userId, lastOpenedAt])
+  @@index([userId, updatedAt])
+  @@index([userId, name])
+}
+
+/// Durable chat identity (client UUID). Source of truth for membership + lists.
+/// projectId NULL = standalone chat (default product path).
+model ChatSession {
+  id        String   @id
+  userId    String
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, projectId, updatedAt])
+  @@index([userId, updatedAt])
+}
+
 // ─── Documents (user-owned, session-grouped) ────────────────────────────────
 
 enum DocumentStatus {
@@ -136,6 +170,9 @@ model Document {
   userId           String
   /// Origin chat session where the file was first uploaded (R2 path / audit).
   sessionId        String
+  /// Optional project corpus membership. NULL = standalone (not in a project).
+  projectId        String?
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   filename         String
   mimeType         String
   sizeBytes        Int
@@ -155,6 +192,8 @@ model Document {
   @@index([userId, id])
   @@index([userId, createdAt])
   @@index([userId, status, createdAt])
+  @@index([userId, projectId, createdAt])
+  @@index([userId, projectId, status, createdAt])
 }
 
 /// Many-to-many: a user document can be active in multiple chat sessions.

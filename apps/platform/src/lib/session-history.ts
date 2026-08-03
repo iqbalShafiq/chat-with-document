@@ -98,7 +98,31 @@ export function ensureActiveSession(
       sessionId: activeId,
       updatedAt: new Date().toISOString(),
       title: "New chat",
+      projectId: null,
     },
     ...safe,
   ];
+}
+
+/** Relative time for project cards (e.g. "2 min ago", "Yesterday"). */
+export function formatRelativeUpdatedAt(
+  iso: string,
+  now = new Date(),
+): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = now.getTime() - d.getTime();
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }

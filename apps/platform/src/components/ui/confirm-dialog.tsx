@@ -5,6 +5,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import {
+  DIALOG_PRIMARY_BUTTON_CLASS,
+  DIALOG_SECONDARY_BUTTON_CLASS,
+} from "#/components/ui/dialog-actions";
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -24,10 +28,6 @@ export type ConfirmDialogProps = {
   /** Element to restore focus to when the dialog closes. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
 };
-
-/** Matches Composer.Submit (send) primary treatment. */
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex min-h-9 cursor-pointer items-center rounded-xl bg-accent px-3.5 text-sm font-medium text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40";
 
 /**
  * Accessible modal confirm dialog using the native <dialog> + showModal()
@@ -126,7 +126,7 @@ export function ConfirmDialog({
           <button
             ref={cancelRef}
             type="button"
-            className="inline-flex min-h-9 cursor-pointer items-center rounded-xl px-3.5 text-sm font-medium text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/8 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+            className={DIALOG_SECONDARY_BUTTON_CLASS}
             onClick={onCancel}
             disabled={busy}
           >
@@ -134,7 +134,7 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            className={PRIMARY_BUTTON_CLASS}
+            className={DIALOG_PRIMARY_BUTTON_CLASS}
             onClick={onConfirm}
             disabled={busy}
           >

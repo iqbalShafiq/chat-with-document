@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, Search } from "lucide-react";
+import {
+  DIALOG_PRIMARY_BUTTON_CLASS,
+  DIALOG_SECONDARY_BUTTON_CLASS,
+} from "#/components/ui/dialog-actions";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { DocumentPreviewPane } from "#/components/documents/document-preview-pane";
 import { DocumentRow } from "#/components/documents/document-row";
@@ -18,6 +22,11 @@ export type DocumentLibraryModalProps = {
   onClose: () => void;
   /** Document ids already active in the current session. */
   activeDocumentIds?: ReadonlySet<string>;
+  /**
+   * When set, only list that project's corpus (attach isolation).
+   * When null/omitted, list standalone docs only.
+   */
+  projectId?: string | null;
   onConfirm: (documents: UserLibraryDocument[]) => void | Promise<void>;
   busy?: boolean;
   error?: string | null;
@@ -27,6 +36,7 @@ export function DocumentLibraryModal({
   open,
   onClose,
   activeDocumentIds,
+  projectId = null,
   onConfirm,
   busy = false,
   error = null,
@@ -64,6 +74,8 @@ export function DocumentLibraryModal({
       const page = await listUserDocuments({
         query: debouncedQuery,
         limit: PAGE_SIZE,
+        scope: "attach",
+        projectId,
       });
       setItems(page.items);
       setNextCursor(page.nextCursor);
@@ -78,7 +90,7 @@ export function DocumentLibraryModal({
     } finally {
       setLoading(false);
     }
-  }, [debouncedQuery, resetListState]);
+  }, [debouncedQuery, projectId, resetListState]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadMoreLock.current || loadingMore || loading) return;
@@ -89,6 +101,8 @@ export function DocumentLibraryModal({
         query: debouncedQuery,
         cursor: nextCursor,
         limit: PAGE_SIZE,
+        scope: "attach",
+        projectId,
       });
       setItems((current) => {
         const seen = new Set(current.map((d) => d.id));
@@ -102,7 +116,7 @@ export function DocumentLibraryModal({
       setLoadingMore(false);
       loadMoreLock.current = false;
     }
-  }, [debouncedQuery, loading, loadingMore, nextCursor]);
+  }, [debouncedQuery, loading, loadingMore, nextCursor, projectId]);
 
   // Seed selection with docs already linked to this session when the modal opens.
   useEffect(() => {
@@ -209,7 +223,7 @@ export function DocumentLibraryModal({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="inline-flex min-h-9 cursor-pointer items-center rounded-xl px-3.5 text-sm font-medium text-text-muted transition hover:bg-white/8 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+            className={DIALOG_SECONDARY_BUTTON_CLASS}
           >
             Cancel
           </button>
@@ -219,7 +233,7 @@ export function DocumentLibraryModal({
               void handleConfirm();
             }}
             disabled={busy || selectedIds.size === 0}
-            className="inline-flex min-h-9 cursor-pointer items-center rounded-xl bg-accent px-3.5 text-sm font-medium text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+            className={DIALOG_PRIMARY_BUTTON_CLASS}
           >
             {busy ? "Adding…" : "Add to chat"}
           </button>

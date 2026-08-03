@@ -17,7 +17,17 @@ export type DialogShellProps = {
   className?: string;
   /** Max width utility, default wide library/settings style. */
   size?: "sm" | "md" | "lg" | "xl";
+  /**
+   * viewport — fixed tall panel (library / settings).
+   * content — height follows children (compact forms).
+   */
+  heightMode?: "viewport" | "content";
   restoreFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * Preferred initial focus when the dialog opens (e.g. first field).
+   * Falls back to the close control.
+   */
+  initialFocusRef?: RefObject<HTMLElement | null>;
   /** Disable Esc / backdrop dismiss (e.g. while busy). */
   dismissDisabled?: boolean;
   /** Optional subtitle under the title. */
@@ -31,9 +41,17 @@ const SIZE_CLASS: Record<NonNullable<DialogShellProps["size"]>, string> = {
   xl: "w-[min(100%-1.5rem,56rem)]",
 };
 
+const HEIGHT_CLASS: Record<
+  NonNullable<DialogShellProps["heightMode"]>,
+  string
+> = {
+  viewport: "h-[min(80dvh,44rem)] max-h-[min(90dvh,52rem)]",
+  content: "h-auto max-h-[min(90dvh,40rem)]",
+};
+
 /**
  * Shared accessible modal shell using native `<dialog showModal()>`.
- * Matches ConfirmDialog / SettingsModal patterns.
+ * Provides focus trap, Esc, backdrop dismiss, and labelled chrome (APG).
  */
 export function DialogShell({
   open,
@@ -43,7 +61,9 @@ export function DialogShell({
   footer,
   className = "",
   size = "lg",
+  heightMode = "viewport",
   restoreFocusRef,
+  initialFocusRef,
   dismissDisabled = false,
   description,
 }: DialogShellProps) {
@@ -58,11 +78,18 @@ export function DialogShell({
 
     if (open) {
       if (!dialog.open) dialog.showModal();
-      requestAnimationFrame(() => closeRef.current?.focus());
+      requestAnimationFrame(() => {
+        const preferred = initialFocusRef?.current;
+        if (preferred && typeof preferred.focus === "function") {
+          preferred.focus();
+          return;
+        }
+        closeRef.current?.focus();
+      });
       return;
     }
     if (dialog.open) dialog.close();
-  }, [open]);
+  }, [open, initialFocusRef]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -77,7 +104,7 @@ export function DialogShell({
   return (
     <dialog
       ref={dialogRef}
-      className={`m-auto h-[min(80dvh,44rem)] max-h-[min(90dvh,52rem)] overflow-hidden rounded-2xl border border-hairline bg-canvas-elevated p-0 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col animate-scale-in ${SIZE_CLASS[size]} ${className}`}
+      className={`m-auto overflow-hidden rounded-2xl border border-hairline bg-canvas-elevated p-0 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col animate-scale-in ${HEIGHT_CLASS[heightMode]} ${SIZE_CLASS[size]} ${className}`}
       style={{ transformOrigin: "center center" }}
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
@@ -122,7 +149,13 @@ export function DialogShell({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        className={
+          heightMode === "content"
+            ? "flex flex-col overflow-y-auto"
+            : "flex min-h-0 flex-1 flex-col overflow-hidden"
+        }
+      >
         {children}
       </div>
 

@@ -44,7 +44,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
       await authClient.signOut();
       clearStoredSessionId();
       setOpen(false);
-      await navigate({ to: "/login" });
+      await navigate({ to: "/login", search: { redirect: "/" } });
     } catch {
       setLoggingOut(false);
     }

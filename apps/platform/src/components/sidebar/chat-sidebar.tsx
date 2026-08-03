@@ -3,7 +3,20 @@ import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
-import { PanelLeftClose, SquarePen, X } from "lucide-react";
+import type { ProjectListItem } from "#/lib/api";
+import {
+  FileText,
+  FolderKanban,
+  PanelLeftClose,
+  SquarePen,
+  X,
+} from "lucide-react";
+
+export type WorkspaceViewMode =
+  | "standalone"
+  | "projects-index"
+  | "project-workspace"
+  | "documents-index";
 
 export function ChatSidebar({
   user,
@@ -20,6 +33,12 @@ export function ChatSidebar({
   onCollapse,
   onCloseMobile,
   showClose,
+  viewMode,
+  recentProjects,
+  activeProjectId,
+  onOpenProjects,
+  onOpenDocuments,
+  onOpenRecentProject,
 }: {
   user: SessionUser;
   sessions: SessionSummary[];
@@ -36,6 +55,12 @@ export function ChatSidebar({
   onCollapse?: () => void;
   onCloseMobile?: () => void;
   showClose?: boolean;
+  viewMode: WorkspaceViewMode;
+  recentProjects: ProjectListItem[];
+  activeProjectId: string | null;
+  onOpenProjects: () => void;
+  onOpenDocuments: () => void;
+  onOpenRecentProject: (project: ProjectListItem) => void;
 }) {
   return (
     <aside className="glass-sidebar flex h-full w-full min-h-0 flex-col">
@@ -94,9 +119,86 @@ export function ChatSidebar({
       </div>
 
       <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="px-2 pb-2">
+          <p className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
+            Workspace
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenProjects();
+              onCloseMobile?.();
+            }}
+            className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              viewMode === "projects-index"
+                ? "bg-white/[0.08] text-text"
+                : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+            }`}
+          >
+            <FolderKanban className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">Projects</span>
+          </button>
+
+          {recentProjects.length > 0 ? (
+            <ul className="mt-0.5 space-y-0.5 border-l border-white/[0.06] ml-4 pl-2">
+              {recentProjects.map((project) => {
+                const active =
+                  viewMode === "project-workspace" &&
+                  activeProjectId === project.id;
+                return (
+                  <li key={project.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenRecentProject(project);
+                        onCloseMobile?.();
+                      }}
+                      className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                        active
+                          ? "bg-accent-soft/40 text-accent"
+                          : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 shrink-0 rounded-full ${
+                          active ? "bg-accent" : "bg-white/20"
+                        }`}
+                      />
+                      <span className="truncate">{project.name}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenDocuments();
+              onCloseMobile?.();
+            }}
+            className={`mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              viewMode === "documents-index"
+                ? "bg-white/[0.08] text-text"
+                : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+            }`}
+          >
+            <FileText className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">
+              Documents
+            </span>
+          </button>
+        </div>
+
         <SessionHistoryList
           sessions={sessions}
-          activeSessionId={activeSessionId}
+          activeSessionId={
+            viewMode === "standalone" || viewMode === "project-workspace"
+              ? activeSessionId
+              : ""
+          }
           loading={loading}
           loadingMore={loadingMore}
           error={error}

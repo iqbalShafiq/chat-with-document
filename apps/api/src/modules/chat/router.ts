@@ -17,7 +17,7 @@ import {
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { listSessionDocuments } from "../documents/service.js";
+import { resolveActiveDocuments } from "../documents/service.js";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import {
@@ -32,6 +32,11 @@ import {
   type TruncateMode,
 } from "./truncate-memory.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
+import {
+  ensureChatSession,
+  ProjectMembershipError,
+  touchChatSession,
+} from "./chat-session.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value === "string") {
@@ -45,16 +50,89 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
+function buildProjectWorkspaceContext(input: {
+  name: string;
+  description: string | null;
+}): string {
+  const lines = [
+    "Project workspace",
+    `Name: ${input.name}`,
+  ];
+  if (input.description?.trim()) {
+    lines.push(`Description: ${input.description.trim()}`);
+  }
+  lines.push(
+    "You are answering inside this project workspace.",
+    "Only use the active document catalog and tools for this chat.",
+    "Do not assume access to other projects or the user's standalone library.",
+  );
+  return lines.join("\n");
+}
+
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/sessions", async (c) => {
     const user = c.get("user");
+    const projectIdRaw = c.req.query("projectId");
+    const standalone = c.req.query("standalone");
+
+    let projectId: string | null | undefined;
+    if (projectIdRaw && projectIdRaw.trim()) {
+      projectId = projectIdRaw.trim();
+    } else if (standalone === "0" || standalone === "false") {
+      // Explicit non-filter not supported; default standalone
+      projectId = null;
+    } else {
+      projectId = null;
+    }
+
     const page = await listSessionsPage({
       userId: user.id,
       cursor: c.req.query("cursor") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
+      projectId,
     });
     return c.json(page);
+  })
+  .post("/sessions", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+
+    const sessionId =
+      requireSessionId(body?.sessionId) ?? crypto.randomUUID();
+    const projectIdRaw = body?.projectId;
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : projectIdRaw === null
+          ? null
+          : undefined;
+
+    try {
+      const session = await ensureChatSession({
+        sessionId,
+        userId: user.id,
+        projectId: projectId === undefined ? null : projectId,
+      });
+      return c.json(
+        {
+          sessionId: session.id,
+          projectId: session.projectId,
+          title: session.title,
+          createdAt: session.createdAt.toISOString(),
+          updatedAt: session.updatedAt.toISOString(),
+        },
+        201,
+      );
+    } catch (error) {
+      if (error instanceof ProjectMembershipError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
   })
   .get("/", async (c) => {
     const user = c.get("user");
@@ -62,6 +140,13 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     if (!sessionId) {
       return c.json({ error: "sessionId is required" }, 400);
     }
+
+    // Ensure durable row exists for legacy sessions opened only via memory.
+    await ensureChatSession({
+      sessionId,
+      userId: user.id,
+      projectId: null,
+    });
 
     const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
@@ -158,11 +243,25 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       );
     }
 
+    // Membership from product table — never trust client projectId.
+    const chatSession = await ensureChatSession({
+      sessionId,
+      userId: user.id,
+      projectId: null,
+    });
+    const projectId = chatSession.projectId;
+    await touchChatSession(user.id, sessionId);
+
     const promptMessage = stripUserAttachments(lastMessage);
 
     const prismaMemory = createPrismaMemoryStore(prisma);
-    const sessionDocuments = await listSessionDocuments(sessionId, user.id);
-    const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
+    const sessionDocuments = await resolveActiveDocuments({
+      userId: user.id,
+      sessionId,
+      projectId,
+    });
+    const catalogInstruction =
+      buildDocumentCatalogInstruction(sessionDocuments);
     const hasActiveDocuments = sessionDocuments.length > 0;
 
     // Document tools only when the session has linked ready docs — avoids the
@@ -171,10 +270,27 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       ? createDocumentTools({
           sessionId,
           userId: user.id,
+          projectId,
           prisma,
           searchService: createChunkSearchService(),
         })
       : [];
+
+    let projectContext:
+      | { text: string; id: string }
+      | undefined;
+    if (projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, userId: user.id },
+        select: { name: true, description: true },
+      });
+      if (project) {
+        projectContext = {
+          id: "project_workspace",
+          text: buildProjectWorkspaceContext(project),
+        };
+      }
+    }
 
     const agent = createAgent({
       agentId: "my-agent",
@@ -182,6 +298,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       reasoningEffort,
       tracing: tracing,
       additionalInstructions: [catalogInstruction],
+      additionalContext: projectContext ? [projectContext] : [],
       additionalTools: [...createDataAnalysisTools(), ...documentTools],
       memory: prismaMemory,
     });
@@ -189,7 +306,11 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const stream = agent
       .session(sessionId, { userId: user.id })
       .prompt(promptMessage)
-      .withTrace({ sessionId, userId: user.id })
+      .withTrace({
+        sessionId,
+        userId: user.id,
+        ...(projectId ? { projectId } : {}),
+      })
       .stream();
 
     const auditedStream = tapAgentStreamUsage(stream, {

@@ -29,6 +29,7 @@ export type SessionListItem = {
   sessionId: string;
   updatedAt: string;
   title: string;
+  projectId?: string | null;
 };
 
 export type SessionListPage = {
@@ -39,10 +40,13 @@ export type SessionListPage = {
 export async function listSessions(input?: {
   cursor?: string | null;
   limit?: number;
+  /** When set, list only that project's chats. When omitted, standalone only. */
+  projectId?: string | null;
 }): Promise<SessionListPage> {
   const params = new URLSearchParams();
   if (input?.cursor) params.set("cursor", input.cursor);
   if (input?.limit) params.set("limit", String(input.limit));
+  if (input?.projectId) params.set("projectId", input.projectId);
   const qs = params.toString();
   const response = await apiFetch(
     `${API_BASE}/api/chat/sessions${qs ? `?${qs}` : ""}`,
@@ -76,6 +80,147 @@ export async function listSessions(input?: {
   }
 
   throw new Error("Unexpected sessions response shape");
+}
+
+export async function createChatSession(input?: {
+  sessionId?: string;
+  projectId?: string | null;
+}): Promise<{
+  sessionId: string;
+  projectId: string | null;
+  title: string | null;
+}> {
+  const response = await apiFetch(`${API_BASE}/api/chat/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: input?.sessionId,
+      projectId: input?.projectId ?? null,
+    }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to create chat session");
+  }
+  return (await response.json()) as {
+    sessionId: string;
+    projectId: string | null;
+    title: string | null;
+  };
+}
+
+// ─── Projects ───────────────────────────────────────────────────────────────
+
+export type ProjectListItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  documentCount: number;
+  chatCount: number;
+  lastOpenedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectListPage = {
+  items: ProjectListItem[];
+  nextCursor: string | null;
+};
+
+export async function listProjects(input?: {
+  query?: string;
+  cursor?: string | null;
+  limit?: number;
+  sort?: "lastOpenedAt" | "updatedAt" | "name";
+}): Promise<ProjectListPage> {
+  const params = new URLSearchParams();
+  if (input?.query?.trim()) params.set("q", input.query.trim());
+  if (input?.cursor) params.set("cursor", input.cursor);
+  if (input?.limit) params.set("limit", String(input.limit));
+  if (input?.sort) params.set("sort", input.sort);
+  const qs = params.toString();
+  const response = await apiFetch(
+    `${API_BASE}/api/projects${qs ? `?${qs}` : ""}`,
+  );
+  if (!response.ok) throw new Error("Failed to load projects");
+  const data = (await response.json()) as ProjectListPage;
+  return {
+    items: Array.isArray(data.items) ? data.items : [],
+    nextCursor:
+      typeof data.nextCursor === "string" || data.nextCursor === null
+        ? data.nextCursor
+        : null,
+  };
+}
+
+export async function createProject(input: {
+  name: string;
+  description?: string | null;
+}): Promise<ProjectListItem> {
+  const response = await apiFetch(`${API_BASE}/api/projects`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to create project");
+  }
+  return (await response.json()) as ProjectListItem;
+}
+
+export async function openProject(projectId: string): Promise<ProjectListItem> {
+  const response = await apiFetch(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/open`,
+    { method: "POST" },
+  );
+  if (!response.ok) throw new Error("Failed to open project");
+  return (await response.json()) as ProjectListItem;
+}
+
+export async function updateProject(
+  projectId: string,
+  input: { name?: string; description?: string | null },
+): Promise<ProjectListItem> {
+  const response = await apiFetch(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to update project");
+  }
+  return (await response.json()) as ProjectListItem;
+}
+
+export async function deleteProject(
+  projectId: string,
+): Promise<{ deleted: true; documentCount: number; chatCount: number }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}?confirm=true`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to delete project");
+  }
+  return (await response.json()) as {
+    deleted: true;
+    documentCount: number;
+    chatCount: number;
+  };
 }
 
 export type DocumentStatus =
@@ -169,10 +314,14 @@ export async function getUserUsageSummary(): Promise<UserUsageSummary> {
 export async function uploadDocument(input: {
   sessionId: string;
   file: File;
+  projectId?: string | null;
 }) {
   const form = new FormData();
   form.append("sessionId", input.sessionId);
   form.append("file", input.file);
+  if (input.projectId) {
+    form.append("projectId", input.projectId);
+  }
 
   const response = await apiFetch(`${API_BASE}/api/documents`, {
     method: "POST",
@@ -219,6 +368,8 @@ export type UserLibraryDocument = {
   pageCount: number;
   createdAt: string;
   originSessionId: string;
+  projectId?: string | null;
+  projectName?: string | null;
 };
 
 export type UserLibraryPage = {
@@ -230,11 +381,15 @@ export async function listUserDocuments(input?: {
   query?: string;
   cursor?: string | null;
   limit?: number;
+  scope?: "attach" | "browser";
+  projectId?: string | null;
 }): Promise<UserLibraryPage> {
   const params = new URLSearchParams();
   if (input?.query?.trim()) params.set("q", input.query.trim());
   if (input?.cursor) params.set("cursor", input.cursor);
   if (input?.limit) params.set("limit", String(input.limit));
+  if (input?.scope) params.set("scope", input.scope);
+  if (input?.projectId) params.set("projectId", input.projectId);
   const qs = params.toString();
 
   const response = await apiFetch(

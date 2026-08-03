@@ -14,11 +14,13 @@ const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 
 export function ComposerAttachControl({
   sessionId,
+  projectId = null,
   activeDocumentIds,
   disabled = false,
   onLinkedDocuments,
 }: {
   sessionId: string;
+  projectId?: string | null;
   activeDocumentIds?: ReadonlySet<string>;
   disabled?: boolean;
   /** Called after library docs are linked so the parent can refresh Active. */
@@ -142,6 +144,7 @@ export function ComposerAttachControl({
           if (!linking) setLibraryOpen(false);
         }}
         activeDocumentIds={activeDocumentIds}
+        projectId={projectId}
         onConfirm={handleLibraryConfirm}
         busy={linking}
         error={libraryError}

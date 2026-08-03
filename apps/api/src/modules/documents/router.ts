@@ -35,11 +35,22 @@ export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
   })
   .get("/library", async (c) => {
     const user = c.get("user");
+    const scopeRaw = c.req.query("scope");
+    const scope =
+      scopeRaw === "browser" || scopeRaw === "attach" ? scopeRaw : "attach";
+    const projectIdRaw = c.req.query("projectId");
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : undefined;
+
     const page = await listUserDocuments({
       userId: user.id,
       query: c.req.query("q") ?? undefined,
       cursor: c.req.query("cursor") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
+      scope,
+      projectId: projectId ?? null,
     });
     return c.json(page);
   })
@@ -165,12 +176,18 @@ export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
       if (buffer.byteLength === 0) {
         return c.json({ error: "File is empty" }, 400);
       }
+      const projectIdRaw = body.projectId;
+      const projectId =
+        typeof projectIdRaw === "string" && projectIdRaw.trim()
+          ? projectIdRaw.trim()
+          : undefined;
       const result = await createDocumentUpload({
         userId: user.id,
         sessionId,
         filename: file.name,
         mimeType: file.type || "application/octet-stream",
         data: buffer,
+        projectId,
       });
       return c.json(result, 202);
     } catch (error) {

@@ -118,6 +118,8 @@ export async function createDocumentUpload(input: {
   filename: string;
   mimeType: string;
   data: Uint8Array;
+  /** Optional project corpus membership. Validated against ownership when set. */
+  projectId?: string | null;
 }) {
   if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
     throw new Error("Unsupported file type");
@@ -127,6 +129,29 @@ export async function createDocumentUpload(input: {
   }
   if (input.data.byteLength === 0) {
     throw new Error("File is empty");
+  }
+
+  let projectId: string | null = null;
+  if (input.projectId) {
+    const project = await prisma.project.findFirst({
+      where: { id: input.projectId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    projectId = project.id;
+  }
+
+  // If the chat session is in a project, prefer that membership when client omits projectId.
+  if (!projectId) {
+    const chat = await prisma.chatSession.findFirst({
+      where: { id: input.sessionId, userId: input.userId },
+      select: { projectId: true },
+    });
+    if (chat?.projectId) {
+      projectId = chat.projectId;
+    }
   }
 
   const storage = await getUserStorageUsage(input.userId);
@@ -142,6 +167,7 @@ export async function createDocumentUpload(input: {
     data: {
       userId: input.userId,
       sessionId: input.sessionId,
+      projectId,
       filename: input.filename,
       mimeType: input.mimeType,
       sizeBytes: input.data.byteLength,
@@ -253,6 +279,45 @@ export async function listSessionDocuments(sessionId: string, userId: string) {
   return links.map((link) => link.document);
 }
 
+/**
+ * Active docs for the agent: session links, intersected with project corpus when
+ * the chat belongs to a project. Standalone chats use session links only.
+ */
+export async function resolveActiveDocuments(input: {
+  userId: string;
+  sessionId: string;
+  projectId: string | null;
+}) {
+  const links = await prisma.documentSession.findMany({
+    where: {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      document: {
+        status: "ready",
+        userId: input.userId,
+        ...(input.projectId
+          ? { projectId: input.projectId }
+          : { projectId: null }),
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      document: {
+        select: {
+          id: true,
+          filename: true,
+          firstPageSummary: true,
+          sizeBytes: true,
+          mimeType: true,
+          pageCount: true,
+        },
+      },
+    },
+  });
+
+  return links.map((link) => link.document);
+}
+
 export type UserDocumentLibraryItem = {
   id: string;
   filename: string;
@@ -263,6 +328,8 @@ export type UserDocumentLibraryItem = {
   createdAt: string;
   /** Origin session id (upload site). */
   originSessionId: string;
+  projectId: string | null;
+  projectName: string | null;
 };
 
 export type UserDocumentLibraryPage = {
@@ -270,11 +337,21 @@ export type UserDocumentLibraryPage = {
   nextCursor: string | null;
 };
 
+export type LibraryScope = "attach" | "browser";
+
 export async function listUserDocuments(input: {
   userId: string;
   query?: string;
   cursor?: string;
   limit?: number | string;
+  /**
+   * attach (default): attach modal source.
+   *  - with projectId → only that project corpus
+   *  - without → standalone only (projectId IS NULL)
+   * browser: all ready docs for Documents page (includes project labels)
+   */
+  scope?: LibraryScope;
+  projectId?: string | null;
 }): Promise<UserDocumentLibraryPage> {
   const limit = clampLimit(
     input.limit,
@@ -283,6 +360,7 @@ export async function listUserDocuments(input: {
   );
   const cursor = decodeLibraryCursor(input.cursor);
   const q = input.query?.trim() ?? "";
+  const scope: LibraryScope = input.scope === "browser" ? "browser" : "attach";
 
   const andFilters: Array<Record<string, unknown>> = [];
   if (q) {
@@ -313,6 +391,15 @@ export async function listUserDocuments(input: {
     });
   }
 
+  // Membership filter for attach vs browser
+  if (scope === "attach") {
+    if (input.projectId) {
+      andFilters.push({ projectId: input.projectId });
+    } else {
+      andFilters.push({ projectId: null });
+    }
+  }
+
   const rows = await prisma.document.findMany({
     where: {
       userId: input.userId,
@@ -330,6 +417,8 @@ export async function listUserDocuments(input: {
       pageCount: true,
       createdAt: true,
       sessionId: true,
+      projectId: true,
+      project: { select: { name: true } },
     },
   });
 
@@ -347,6 +436,8 @@ export async function listUserDocuments(input: {
       pageCount: doc.pageCount,
       createdAt: doc.createdAt.toISOString(),
       originSessionId: doc.sessionId,
+      projectId: doc.projectId,
+      projectName: doc.project?.name ?? null,
     })),
     nextCursor:
       hasMore && last
@@ -367,11 +458,20 @@ export async function linkDocumentsToSession(input: {
     return { linked: [] as Awaited<ReturnType<typeof listSessionDocuments>> };
   }
 
+  const chat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+  // No ChatSession yet → treat as standalone (legacy / first open).
+  const projectId = chat?.projectId ?? null;
+
   const owned = await prisma.document.findMany({
     where: {
       userId: input.userId,
       id: { in: uniqueIds },
       status: "ready",
+      // Hard isolation: only same corpus membership may be linked.
+      projectId,
     },
     select: { id: true },
   });

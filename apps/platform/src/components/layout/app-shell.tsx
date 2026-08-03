@@ -1,8 +1,12 @@
 import { AuroraBackground } from "#/components/layout/aurora-background";
 import { ChatTopBar } from "#/components/layout/chat-top-bar";
-import { ChatSidebar } from "#/components/sidebar/chat-sidebar";
+import {
+  ChatSidebar,
+  type WorkspaceViewMode,
+} from "#/components/sidebar/chat-sidebar";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
+import type { ProjectListItem } from "#/lib/api";
 import { useEffect, useState, type ReactNode } from "react";
 
 function useIsMobile(breakpoint = 768) {
@@ -35,6 +39,12 @@ export function AppShell({
   onNewChat,
   onLoadMoreSessions,
   onRetrySessions,
+  viewMode,
+  recentProjects,
+  activeProjectId,
+  onOpenProjects,
+  onOpenDocuments,
+  onOpenRecentProject,
   children,
 }: {
   user: SessionUser;
@@ -49,6 +59,12 @@ export function AppShell({
   onNewChat: () => void;
   onLoadMoreSessions: () => void;
   onRetrySessions: () => void;
+  viewMode: WorkspaceViewMode;
+  recentProjects: ProjectListItem[];
+  activeProjectId: string | null;
+  onOpenProjects: () => void;
+  onOpenDocuments: () => void;
+  onOpenRecentProject: (project: ProjectListItem) => void;
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
@@ -88,6 +104,12 @@ export function AppShell({
     onNewChat,
     onLoadMore: onLoadMoreSessions,
     onRetry: onRetrySessions,
+    viewMode,
+    recentProjects,
+    activeProjectId,
+    onOpenProjects,
+    onOpenDocuments,
+    onOpenRecentProject,
   };
 
   return (

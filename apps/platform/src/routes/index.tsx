@@ -20,15 +20,22 @@ import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import {
   API_BASE,
   ApiAuthError,
+  createChatSession,
+  listProjects,
   listSessionDocuments,
   listSessions,
   loadChatMessages,
+  openProject,
   truncateSessionMemory,
   unlinkDocumentFromSession,
   uploadDocument,
   waitForDocumentReady,
+  type ProjectListItem,
   type SessionDocument,
 } from "#/lib/api";
+import { ProjectsBrowser } from "#/components/projects/projects-browser";
+import { DocumentsBrowser } from "#/components/documents/documents-browser";
+import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
@@ -58,6 +65,7 @@ import type {
 } from "#/lib/chat/models";
 import {
   createSessionId,
+  persistLastStandaloneSessionId,
   persistSessionId,
   readStoredSessionId,
 } from "#/lib/session-storage";
@@ -145,22 +153,57 @@ function Home() {
   const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(
     null,
   );
+  const [viewMode, setViewMode] = useState<WorkspaceViewMode>("standalone");
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectName, setActiveProjectName] = useState<string | null>(
+    null,
+  );
+  const [recentProjects, setRecentProjects] = useState<ProjectListItem[]>([]);
   const loadMoreLock = useRef(false);
   // Always read latest sessionId inside async callbacks without re-creating loaders.
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
 
   const handleAuthFailure = useCallback(() => {
     void navigate({ to: "/login", search: { redirect: "/" } });
   }, [navigate]);
 
+  const refreshRecentProjects = useCallback(async () => {
+    try {
+      const page = await listProjects({ limit: 5, sort: "lastOpenedAt" });
+      setRecentProjects(page.items);
+    } catch (error) {
+      if (error instanceof ApiAuthError) {
+        handleAuthFailure();
+        return;
+      }
+      console.error("[projects] failed to load recent", error);
+    }
+  }, [handleAuthFailure]);
+
   const loadSessionsFirstPage = useCallback(async () => {
     const activeId = sessionIdRef.current;
+    const inProject = viewModeRef.current === "project-workspace";
+    const projectId = inProject ? activeProjectIdRef.current : null;
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const page = await listSessions({ limit: SESSIONS_PAGE_SIZE });
-      setSessions(ensureActiveSession(page.items, activeId));
+      const page = await listSessions({
+        limit: SESSIONS_PAGE_SIZE,
+        projectId: projectId ?? undefined,
+      });
+      // Ensure active row only when the visible list matches current chat mode.
+      const shouldEnsure =
+        inProject || viewModeRef.current === "standalone";
+      setSessions(
+        shouldEnsure
+          ? ensureActiveSession(page.items, activeId)
+          : page.items,
+      );
       setNextCursor(page.nextCursor);
     } catch (error) {
       if (error instanceof ApiAuthError) {
@@ -180,9 +223,14 @@ function Home() {
     loadMoreLock.current = true;
     setSessionsLoadingMore(true);
     try {
+      const projectId =
+        viewModeRef.current === "project-workspace"
+          ? activeProjectIdRef.current
+          : null;
       const page = await listSessions({
         cursor: nextCursor,
         limit: SESSIONS_PAGE_SIZE,
+        projectId: projectId ?? undefined,
       });
       setSessions((current) => {
         const seen = new Set(current.map((s) => s.sessionId));
@@ -201,8 +249,15 @@ function Home() {
   /** After a stream ends, refresh titles/order without wiping local-only drafts. */
   const refreshSessionsQuiet = useCallback(async () => {
     const activeId = sessionIdRef.current;
+    const projectId =
+      viewModeRef.current === "project-workspace"
+        ? activeProjectIdRef.current
+        : null;
     try {
-      const page = await listSessions({ limit: SESSIONS_PAGE_SIZE });
+      const page = await listSessions({
+        limit: SESSIONS_PAGE_SIZE,
+        projectId: projectId ?? undefined,
+      });
       setSessions((current) => {
         const remoteIds = new Set(page.items.map((s) => s.sessionId));
         const localDrafts = current.filter((s) => !remoteIds.has(s.sessionId));
@@ -215,14 +270,34 @@ function Home() {
     }
   }, []);
 
-  // Bootstrap session list once on mount (not on every chat switch).
+  // Bootstrap session list + recent projects.
   useEffect(() => {
     void loadSessionsFirstPage();
-  }, [loadSessionsFirstPage]);
+    void refreshRecentProjects();
+  }, [loadSessionsFirstPage, refreshRecentProjects]);
 
-  // Load messages whenever the active session changes.
+  // Reload session list when view/filter changes (standalone list for browsers).
   useEffect(() => {
+    if (
+      viewMode === "project-workspace" ||
+      viewMode === "standalone" ||
+      viewMode === "projects-index" ||
+      viewMode === "documents-index"
+    ) {
+      // Browsers show standalone history; project workspace filters by project.
+      void loadSessionsFirstPage();
+    }
+  }, [viewMode, activeProjectId, loadSessionsFirstPage]);
+
+  // Load messages whenever the active session changes (chat views only).
+  useEffect(() => {
+    if (viewMode !== "standalone" && viewMode !== "project-workspace") {
+      return;
+    }
     persistSessionId(sessionId);
+    if (viewMode === "standalone") {
+      persistLastStandaloneSessionId(sessionId);
+    }
     let cancelled = false;
     setInitialMessages(null);
 
@@ -246,15 +321,60 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [handleAuthFailure, sessionId]);
+  }, [handleAuthFailure, sessionId, viewMode]);
 
   const handleSelectSession = (nextSessionId: string) => {
-    if (nextSessionId === sessionId) return;
+    if (
+      viewMode !== "standalone" &&
+      viewMode !== "project-workspace"
+    ) {
+      // Selecting a chat from browser views enters the matching mode.
+      if (activeProjectId) {
+        setViewMode("project-workspace");
+      } else {
+        setViewMode("standalone");
+      }
+    }
+    if (nextSessionId === sessionId && (viewMode === "standalone" || viewMode === "project-workspace")) {
+      return;
+    }
     setSessionId(nextSessionId);
+    if (viewMode === "projects-index" || viewMode === "documents-index") {
+      // Prefer standalone when selecting from history while browsing.
+      setActiveProjectId(null);
+      setActiveProjectName(null);
+      setViewMode("standalone");
+    }
   };
 
   const handleNewSession = () => {
     const nextSessionId = createSessionId();
+    if (viewMode === "project-workspace" && activeProjectId) {
+      void (async () => {
+        try {
+          await createChatSession({
+            sessionId: nextSessionId,
+            projectId: activeProjectId,
+          });
+        } catch (error) {
+          console.error("[sessions] create project chat failed", error);
+        }
+        setSessions((current) =>
+          ensureActiveSession(
+            current.filter((s) => s.sessionId !== nextSessionId),
+            nextSessionId,
+          ),
+        );
+        setSessionId(nextSessionId);
+        void loadSessionsFirstPage();
+      })();
+      return;
+    }
+
+    // Standalone (and browser views): new chat outside any project.
+    setActiveProjectId(null);
+    setActiveProjectName(null);
+    setViewMode("standalone");
     setSessions((current) =>
       ensureActiveSession(
         current.filter((s) => s.sessionId !== nextSessionId),
@@ -262,13 +382,90 @@ function Home() {
       ),
     );
     setSessionId(nextSessionId);
+    void createChatSession({ sessionId: nextSessionId, projectId: null }).catch(
+      (error) => {
+        console.error("[sessions] ensure standalone failed", error);
+      },
+    );
   };
 
+  const handleOpenProjects = () => {
+    if (viewMode === "standalone") {
+      persistLastStandaloneSessionId(sessionId);
+    }
+    setViewMode("projects-index");
+  };
+
+  const handleOpenDocuments = () => {
+    if (viewMode === "standalone") {
+      persistLastStandaloneSessionId(sessionId);
+    }
+    setViewMode("documents-index");
+  };
+
+  const handleOpenProject = useCallback(
+    (project: ProjectListItem) => {
+      if (viewModeRef.current === "standalone") {
+        persistLastStandaloneSessionId(sessionIdRef.current);
+      }
+      setActiveProjectId(project.id);
+      setActiveProjectName(project.name);
+      setViewMode("project-workspace");
+      void openProject(project.id)
+        .then((opened) => {
+          setActiveProjectName(opened.name);
+          void refreshRecentProjects();
+        })
+        .catch((error) => {
+          console.error("[projects] open failed", error);
+        });
+
+      void (async () => {
+        try {
+          const page = await listSessions({
+            limit: SESSIONS_PAGE_SIZE,
+            projectId: project.id,
+          });
+          if (page.items[0]) {
+            setSessionId(page.items[0].sessionId);
+            setSessions(page.items);
+            setNextCursor(page.nextCursor);
+          } else {
+            const nextId = createSessionId();
+            await createChatSession({
+              sessionId: nextId,
+              projectId: project.id,
+            });
+            setSessionId(nextId);
+            setSessions(ensureActiveSession([], nextId));
+            setNextCursor(null);
+          }
+        } catch (error) {
+          console.error("[projects] load project chats failed", error);
+          const nextId = createSessionId();
+          setSessionId(nextId);
+          setSessions(ensureActiveSession([], nextId));
+        }
+      })();
+    },
+    [refreshRecentProjects],
+  );
+
   const activeTitle = useMemo(() => {
+    if (viewMode === "projects-index") return "Projects";
+    if (viewMode === "documents-index") return "Documents";
+    if (viewMode === "project-workspace" && activeProjectName) {
+      const chatTitle =
+        sessions.find((s) => s.sessionId === sessionId)?.title ?? "New chat";
+      return `${activeProjectName} · ${chatTitle}`;
+    }
     return (
       sessions.find((s) => s.sessionId === sessionId)?.title ?? "New chat"
     );
-  }, [sessionId, sessions]);
+  }, [activeProjectName, sessionId, sessions, viewMode]);
+
+  const showChatRoom =
+    viewMode === "standalone" || viewMode === "project-workspace";
 
   return (
     <AppShell
@@ -288,35 +485,67 @@ function Home() {
       onRetrySessions={() => {
         void loadSessionsFirstPage();
       }}
+      viewMode={viewMode}
+      recentProjects={recentProjects}
+      activeProjectId={activeProjectId}
+      onOpenProjects={handleOpenProjects}
+      onOpenDocuments={handleOpenDocuments}
+      onOpenRecentProject={handleOpenProject}
     >
-      {initialMessages === null ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-in">
-          <DocChatMark className="opacity-80" />
-          <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-          <p className="text-sm text-text-muted">Loading conversation…</p>
-        </div>
-      ) : (
-        <ChatSession
-          key={sessionId}
-          sessionId={sessionId}
-          initialMessages={initialMessages}
-          onStreamSettled={() => {
-            void refreshSessionsQuiet();
-          }}
-          onAuthFailure={handleAuthFailure}
+      {viewMode === "projects-index" ? (
+        <ProjectsBrowser
+          key="workspace-projects"
+          activeProjectId={activeProjectId}
+          onOpenProject={handleOpenProject}
         />
-      )}
+      ) : null}
+
+      {viewMode === "documents-index" ? (
+        <DocumentsBrowser key="workspace-documents" />
+      ) : null}
+
+      {showChatRoom ? (
+        initialMessages === null ? (
+          <div
+            key="chat-loading"
+            className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
+          >
+            <DocChatMark className="opacity-80" />
+            <div className="skeleton-shimmer h-4 w-40 rounded-full" />
+            <p className="text-sm text-text-muted">Loading conversation…</p>
+          </div>
+        ) : (
+          <div
+            key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
+            className="flex min-h-0 flex-1 flex-col animate-fade-up"
+          >
+            <ChatSession
+              sessionId={sessionId}
+              projectId={
+                viewMode === "project-workspace" ? activeProjectId : null
+              }
+              initialMessages={initialMessages}
+              onStreamSettled={() => {
+                void refreshSessionsQuiet();
+              }}
+              onAuthFailure={handleAuthFailure}
+            />
+          </div>
+        )
+      ) : null}
     </AppShell>
   );
 }
 
 function ChatSession({
   sessionId,
+  projectId,
   initialMessages,
   onStreamSettled,
   onAuthFailure,
 }: {
   sessionId: string;
+  projectId?: string | null;
   initialMessages: UIMessage[];
   onStreamSettled: () => void;
   onAuthFailure: () => void;
@@ -633,6 +862,7 @@ function ChatSession({
                 const uploaded = await uploadDocument({
                   sessionId,
                   file,
+                  projectId,
                 });
 
                 const ready = await waitForDocumentReady({
@@ -805,6 +1035,7 @@ function ChatSession({
 
                   <ChatComposer
                     sessionId={sessionId}
+                    projectId={projectId}
                     activeDocumentIds={sessionDocumentIds}
                     chatStatus={chat.status}
                     isIngesting={isIngesting}
