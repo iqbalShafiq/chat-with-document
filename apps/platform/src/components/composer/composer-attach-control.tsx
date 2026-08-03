@@ -8,6 +8,7 @@ import {
   type SessionDocument,
   type UserLibraryDocument,
 } from "#/lib/api";
+import { ensureUploadableFile } from "#/lib/documents/upload-file";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 
@@ -33,12 +34,13 @@ export function ComposerAttachControl({
 
   const busy = disabled || linking;
 
-  const handleLocalFiles = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0) return;
-      const files = Array.from(fileList);
+  /** Queue on composer only (sidebar Attachments). Upload runs on Submit. */
+  const queueLocalFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
       for (const file of files) {
-        await composer.addAttachment(file);
+        // Fix empty MIME (common for PDF on Windows) before Anvia stores base64.
+        await composer.addAttachment(ensureUploadableFile(file));
       }
     },
     [composer],
@@ -127,9 +129,10 @@ export function ComposerAttachControl({
         aria-hidden
         disabled={busy}
         onChange={(event) => {
-          const files = event.currentTarget.files;
+          // Snapshot first — FileList is live; clearing value empties it.
+          const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = "";
-          void handleLocalFiles(files);
+          void queueLocalFiles(files);
         }}
       />
 

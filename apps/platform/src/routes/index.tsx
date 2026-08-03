@@ -10,7 +10,10 @@ import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
-import { SessionDocumentsRail } from "#/components/chat/session-documents-panel";
+import {
+  SessionDocumentsRail,
+  type IngestionItem,
+} from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { AppShell } from "#/components/layout/app-shell";
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
@@ -24,10 +27,10 @@ import {
   unlinkDocumentFromSession,
   uploadDocument,
   waitForDocumentReady,
-  type DocumentStatus,
   type SessionDocument,
 } from "#/lib/api";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
+import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
   parseMessageCitations,
@@ -102,9 +105,11 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
     if (blob.size === 0) {
       throw new Error(`Attachment is empty: ${attachment.name ?? attachment.id}`);
     }
-    return new File([blob], attachment.name ?? "document", {
-      type: attachment.mediaType ?? "application/octet-stream",
-    });
+    return ensureUploadableFile(
+      new File([blob], attachment.name ?? "document", {
+        type: attachment.mediaType ?? "application/octet-stream",
+      }),
+    );
   }
 
   if (attachment.data) {
@@ -116,9 +121,11 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
     if (blob.size === 0) {
       throw new Error(`Attachment is empty: ${attachment.name ?? attachment.id}`);
     }
-    return new File([blob], attachment.name ?? "document", {
-      type: attachment.mediaType ?? (blob.type || "application/octet-stream"),
-    });
+    return ensureUploadableFile(
+      new File([blob], attachment.name ?? "document", {
+        type: attachment.mediaType ?? (blob.type || "application/octet-stream"),
+      }),
+    );
   }
 
   throw new Error(`Unable to read attachment: ${attachment.name ?? attachment.id}`);
@@ -318,9 +325,7 @@ function ChatSession({
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
   const wasStreamingRef = useRef(false);
-  const [ingestionItems, setIngestionItems] = useState<
-    Array<{ filename: string; status: DocumentStatus }>
-  >([]);
+  const [ingestionItems, setIngestionItems] = useState<IngestionItem[]>([]);
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
   );
@@ -508,6 +513,9 @@ function ChatSession({
 
   useEffect(() => {
     setSessionDocuments([]);
+    setIngestionItems([]);
+    setComposerError(null);
+    setIsIngesting(false);
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
 
@@ -604,6 +612,7 @@ function ChatSession({
 
           const documentIds: string[] = [];
 
+          // Local "Upload from computer" queues on composer; ingest only on submit.
           if (attachments.length > 0) {
             setIsIngesting(true);
             setIngestionItems([]);
@@ -615,9 +624,10 @@ function ChatSession({
                   throw new Error(`File is empty: ${file.name}`);
                 }
 
+                const itemId = attachment.id || crypto.randomUUID();
                 setIngestionItems((current) => [
                   ...current,
-                  { filename: file.name, status: "uploading" },
+                  { id: itemId, filename: file.name, status: "uploading" },
                 ]);
 
                 const uploaded = await uploadDocument({
@@ -631,7 +641,7 @@ function ChatSession({
                   onStatus: (status) => {
                     setIngestionItems((current) =>
                       current.map((item) =>
-                        item.filename === file.name
+                        item.id === itemId
                           ? { ...item, status: status.status }
                           : item,
                       ),

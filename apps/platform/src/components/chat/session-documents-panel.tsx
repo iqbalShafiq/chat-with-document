@@ -13,6 +13,12 @@ import { Quote, X } from "lucide-react";
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
 
+export type IngestionItem = {
+  id: string;
+  filename: string;
+  status: DocumentStatus;
+};
+
 export function useHasSessionDocuments({
   sessionDocuments,
   citedDocuments,
@@ -20,7 +26,7 @@ export function useHasSessionDocuments({
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
-  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+  ingestionItems: IngestionItem[];
 }) {
   const composer = useComposer();
   return (
@@ -32,7 +38,7 @@ export function useHasSessionDocuments({
 }
 
 /**
- * Right-rail document list: Active, Cited, Attachments.
+ * Right-rail document list: Active, Cited, Attachments (queued / processing).
  * Width matches left sidebar (272px). Parent should animate open/close width.
  */
 export function SessionDocumentsPanel({
@@ -44,7 +50,7 @@ export function SessionDocumentsPanel({
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
-  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+  ingestionItems: IngestionItem[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
@@ -59,6 +65,9 @@ export function SessionDocumentsPanel({
   const hasIngestion = ingestionItems.length > 0;
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
+  const pendingCount = hasIngestion
+    ? ingestionItems.length
+    : composer.attachments.length;
   const [removeError, setRemoveError] = useState<string | null>(null);
 
   // Scroll + pulse the focused document when a citation is clicked.
@@ -138,9 +147,7 @@ export function SessionDocumentsPanel({
           {[
             hasActive ? `${sessionDocuments.length} active` : null,
             hasCited ? `${citedDocuments.length} cited` : null,
-            hasPending
-              ? `${ingestionItems.length || composer.attachments.length} pending`
-              : null,
+            hasPending ? `${pendingCount} pending` : null,
           ]
             .filter(Boolean)
             .join(" · ") || "None yet"}
@@ -261,18 +268,22 @@ export function SessionDocumentsPanel({
           ) : null}
 
           {hasPending ? (
-            <CollapsibleDocumentSection title="Attachments">
+            <CollapsibleDocumentSection
+              title={hasIngestion ? "Uploading documents" : "Attachments"}
+            >
               <div className="flex w-full flex-col gap-1.5">
+                {/* After submit: show server-side ingest progress. */}
                 {hasIngestion
                   ? ingestionItems.map((item) => (
                       <IngestionStatusPill
-                        key={`ingest-${item.filename}-${item.status}`}
+                        key={item.id}
                         filename={item.filename}
                         status={item.status}
                       />
                     ))
                   : null}
 
+                {/* Before submit: queued local files (composer.attachments). */}
                 {!hasIngestion && hasAttachments ? (
                   <Composer.Attachments
                     keepMounted
@@ -315,7 +326,7 @@ export function SessionDocumentsRail({
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
-  ingestionItems: Array<{ filename: string; status: DocumentStatus }>;
+  ingestionItems: IngestionItem[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
