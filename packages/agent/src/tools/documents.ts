@@ -8,7 +8,8 @@ export interface FindDocumentsPrisma {
       where: {
         userId: string;
         status: "ready";
-        sessionLinks: { some: { sessionId: string; userId: string } };
+        id?: { in: string[] };
+        sessionLinks?: { some: { sessionId: string; userId: string } };
         OR: Array<{
           filename?: { contains: string; mode: "insensitive" };
           summary?: { contains: string; mode: "insensitive" };
@@ -117,7 +118,8 @@ export interface DocumentToolsDeps {
 export function createFindDocumentsTool(deps: {
   userId: string;
   sessionId: string;
-  prisma: FindDocumentsPrisma;
+  projectId?: string | null;
+  prisma: FindDocumentsPrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
     name: "find_documents",
@@ -128,13 +130,21 @@ export function createFindDocumentsTool(deps: {
       limit: z.number().int().min(1).max(20).optional().default(5),
     }),
     execute: async ({ query, limit }) => {
+      const sessionDocIds = await resolveSessionDocumentIds(
+        deps.prisma,
+        deps.userId,
+        deps.sessionId,
+        deps.projectId,
+      );
+      if (sessionDocIds.length === 0) {
+        return { results: [] };
+      }
+
       const documents = await deps.prisma.document.findMany({
         where: {
           userId: deps.userId,
           status: "ready",
-          sessionLinks: {
-            some: { sessionId: deps.sessionId, userId: deps.userId },
-          },
+          id: { in: sessionDocIds },
           OR: [
             { filename: { contains: query, mode: "insensitive" } },
             { summary: { contains: query, mode: "insensitive" } },
@@ -272,7 +282,8 @@ export function createSearchDocumentPagesTool(deps: {
 export function createGetDocumentNextPageTool(deps: {
   userId: string;
   sessionId: string;
-  prisma: NextPagePrisma;
+  projectId?: string | null;
+  prisma: NextPagePrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
     name: "get_document_next_page",
@@ -283,6 +294,16 @@ export function createGetDocumentNextPageTool(deps: {
       pageIndex: z.number().int().min(0),
     }),
     execute: async ({ documentId, pageIndex }) => {
+      const sessionDocIds = await resolveSessionDocumentIds(
+        deps.prisma,
+        deps.userId,
+        deps.sessionId,
+        deps.projectId,
+      );
+      if (!sessionDocIds.includes(documentId)) {
+        return { found: false, reason: "Document not found in current session" };
+      }
+
       const document = await deps.prisma.document.findFirst({
         where: {
           id: documentId,

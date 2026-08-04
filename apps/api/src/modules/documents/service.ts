@@ -1,6 +1,7 @@
 import { prisma } from "../../utils/prisma.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
+import { ensureChatSession } from "../chat/chat-session.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -112,13 +113,26 @@ async function ensureSessionLink(input: {
   });
 }
 
+export class DocumentProjectMismatchError extends Error {
+  readonly code = "PROJECT_MISMATCH";
+  constructor(
+    message = "projectId does not match this chat session membership",
+  ) {
+    super(message);
+    this.name = "DocumentProjectMismatchError";
+  }
+}
+
 export async function createDocumentUpload(input: {
   userId: string;
   sessionId: string;
   filename: string;
   mimeType: string;
   data: Uint8Array;
-  /** Optional project corpus membership. Validated against ownership when set. */
+  /**
+   * Optional client hint. Existing ChatSession.projectId is source of truth;
+   * mismatch is rejected. Used only when creating a brand-new session row.
+   */
   projectId?: string | null;
 }) {
   if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
@@ -131,27 +145,34 @@ export async function createDocumentUpload(input: {
     throw new Error("File is empty");
   }
 
-  let projectId: string | null = null;
-  if (input.projectId) {
-    const project = await prisma.project.findFirst({
-      where: { id: input.projectId, userId: input.userId },
-      select: { id: true },
-    });
-    if (!project) {
-      throw new Error("Project not found");
-    }
-    projectId = project.id;
-  }
+  const clientProjectId =
+    typeof input.projectId === "string" && input.projectId.trim()
+      ? input.projectId.trim()
+      : null;
 
-  // If the chat session is in a project, prefer that membership when client omits projectId.
-  if (!projectId) {
-    const chat = await prisma.chatSession.findFirst({
-      where: { id: input.sessionId, userId: input.userId },
-      select: { projectId: true },
-    });
-    if (chat?.projectId) {
-      projectId = chat.projectId;
+  // ChatSession membership wins. Never let client override an existing row.
+  const existingChat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+
+  let projectId: string | null;
+  if (existingChat) {
+    if (
+      clientProjectId !== null &&
+      clientProjectId !== existingChat.projectId
+    ) {
+      throw new DocumentProjectMismatchError();
     }
+    projectId = existingChat.projectId;
+  } else {
+    // First touch: register session with optional client project (validated inside).
+    const session = await ensureChatSession({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      projectId: clientProjectId,
+    });
+    projectId = session.projectId;
   }
 
   const storage = await getUserStorageUsage(input.userId);
@@ -253,35 +274,9 @@ export async function getDocumentStatus(input: {
   return document;
 }
 
-/** Ready documents linked to a chat session (active docs). */
-export async function listSessionDocuments(sessionId: string, userId: string) {
-  const links = await prisma.documentSession.findMany({
-    where: {
-      sessionId,
-      userId,
-      document: { status: "ready", userId },
-    },
-    orderBy: { createdAt: "asc" },
-    select: {
-      document: {
-        select: {
-          id: true,
-          filename: true,
-          firstPageSummary: true,
-          sizeBytes: true,
-          mimeType: true,
-          pageCount: true,
-        },
-      },
-    },
-  });
-
-  return links.map((link) => link.document);
-}
-
 /**
- * Active docs for the agent: session links, intersected with project corpus when
- * the chat belongs to a project. Standalone chats use session links only.
+ * Active docs for agent + UI rail: session links, intersected with project
+ * corpus when the chat belongs to a project. Standalone uses projectId null.
  */
 export async function resolveActiveDocuments(input: {
   userId: string;
@@ -316,6 +311,20 @@ export async function resolveActiveDocuments(input: {
   });
 
   return links.map((link) => link.document);
+}
+
+/** Ready documents linked to a chat session (active docs). Same filter as agent. */
+export async function listSessionDocuments(sessionId: string, userId: string) {
+  const chat = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { projectId: true },
+  });
+  // No ChatSession yet → treat as standalone corpus.
+  return resolveActiveDocuments({
+    userId,
+    sessionId,
+    projectId: chat?.projectId ?? null,
+  });
 }
 
 export type UserDocumentLibraryItem = {

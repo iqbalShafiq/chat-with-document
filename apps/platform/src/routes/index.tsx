@@ -20,7 +20,8 @@ import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import {
   API_BASE,
   ApiAuthError,
-  createChatSession,
+  getOrCreateEmptyChatSession,
+  getProject,
   listProjects,
   listSessionDocuments,
   listSessions,
@@ -50,7 +51,10 @@ import {
 } from "#/lib/chat/message-metadata";
 import { getMessageRawText } from "#/lib/chat/message-text";
 import {
-  ensureActiveSession,
+  EMPTY_CHAT_TITLE,
+  findEmptyNewChat,
+  isEmptyNewChat,
+  sessionSummaryFromDraft,
   type SessionSummary,
 } from "#/lib/session-history";
 import {
@@ -64,10 +68,13 @@ import type {
   ReasoningEffort,
 } from "#/lib/chat/models";
 import {
-  createSessionId,
+  clearWorkspaceProjectState,
   persistLastStandaloneSessionId,
   persistSessionId,
+  persistWorkspaceState,
+  readLastStandaloneSessionId,
   readStoredSessionId,
+  readWorkspaceState,
 } from "#/lib/session-storage";
 import {
   useCallback,
@@ -142,8 +149,10 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
 function Home() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
+  const initialWorkspace = useMemo(() => readWorkspaceState(), []);
+  // Prefer stored id; empty means "resolve via list/draft" (never invent UUIDs).
   const [sessionId, setSessionId] = useState(() => {
-    return readStoredSessionId() ?? createSessionId();
+    return readStoredSessionId() ?? "";
   });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -153,12 +162,19 @@ function Home() {
   const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(
     null,
   );
-  const [viewMode, setViewMode] = useState<WorkspaceViewMode>("standalone");
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<WorkspaceViewMode>(
+    () => initialWorkspace.viewMode,
+  );
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    () => initialWorkspace.activeProjectId,
+  );
   const [activeProjectName, setActiveProjectName] = useState<string | null>(
-    null,
+    () => initialWorkspace.activeProjectName,
   );
   const [recentProjects, setRecentProjects] = useState<ProjectListItem[]>([]);
+  const [workspaceReady, setWorkspaceReady] = useState(
+    () => initialWorkspace.viewMode !== "project-workspace",
+  );
   const loadMoreLock = useRef(false);
   // Always read latest sessionId inside async callbacks without re-creating loaders.
   const sessionIdRef = useRef(sessionId);
@@ -188,6 +204,7 @@ function Home() {
   const loadSessionsFirstPage = useCallback(async () => {
     const activeId = sessionIdRef.current;
     const inProject = viewModeRef.current === "project-workspace";
+    const inStandalone = viewModeRef.current === "standalone";
     const projectId = inProject ? activeProjectIdRef.current : null;
     setSessionsLoading(true);
     setSessionsError(null);
@@ -196,15 +213,32 @@ function Home() {
         limit: SESSIONS_PAGE_SIZE,
         projectId: projectId ?? undefined,
       });
-      // Ensure active row only when the visible list matches current chat mode.
-      const shouldEnsure =
-        inProject || viewModeRef.current === "standalone";
-      setSessions(
-        shouldEnsure
-          ? ensureActiveSession(page.items, activeId)
-          : page.items,
-      );
+      let items = page.items;
       setNextCursor(page.nextCursor);
+
+      // In chat views: active session must belong to this list. Never invent
+      // phantom drafts (that stacked "New chat" when switching project↔all).
+      if (inProject || inStandalone) {
+        const activeInList = items.some((s) => s.sessionId === activeId);
+        if (!activeInList) {
+          const empty = findEmptyNewChat(items);
+          if (empty) {
+            setSessionId(empty.sessionId);
+          } else if (items[0]) {
+            setSessionId(items[0].sessionId);
+          } else {
+            const draft = await getOrCreateEmptyChatSession({
+              projectId: inProject ? projectId : null,
+            });
+            const row = sessionSummaryFromDraft(draft);
+            items = [row];
+            setSessionId(draft.sessionId);
+            setNextCursor(null);
+          }
+        }
+      }
+
+      setSessions(items);
     } catch (error) {
       if (error instanceof ApiAuthError) {
         handleAuthFailure();
@@ -212,7 +246,6 @@ function Home() {
       }
       console.error("[sessions] failed to load", error);
       setSessionsError("Could not load conversations");
-      setSessions((current) => ensureActiveSession(current, activeId));
     } finally {
       setSessionsLoading(false);
     }
@@ -246,9 +279,8 @@ function Home() {
     }
   }, [nextCursor, sessionsLoadingMore]);
 
-  /** After a stream ends, refresh titles/order without wiping local-only drafts. */
+  /** After a stream ends, refresh titles/order from the server only. */
   const refreshSessionsQuiet = useCallback(async () => {
-    const activeId = sessionIdRef.current;
     const projectId =
       viewModeRef.current === "project-workspace"
         ? activeProjectIdRef.current
@@ -258,11 +290,7 @@ function Home() {
         limit: SESSIONS_PAGE_SIZE,
         projectId: projectId ?? undefined,
       });
-      setSessions((current) => {
-        const remoteIds = new Set(page.items.map((s) => s.sessionId));
-        const localDrafts = current.filter((s) => !remoteIds.has(s.sessionId));
-        return ensureActiveSession([...localDrafts, ...page.items], activeId);
-      });
+      setSessions(page.items);
       setNextCursor(page.nextCursor);
       setSessionsError(null);
     } catch (error) {
@@ -270,28 +298,95 @@ function Home() {
     }
   }, []);
 
-  // Bootstrap session list + recent projects.
+  // Validate restored project workspace once on mount (B2).
   useEffect(() => {
-    void loadSessionsFirstPage();
-    void refreshRecentProjects();
-  }, [loadSessionsFirstPage, refreshRecentProjects]);
-
-  // Reload session list when view/filter changes (standalone list for browsers).
-  useEffect(() => {
-    if (
-      viewMode === "project-workspace" ||
-      viewMode === "standalone" ||
-      viewMode === "projects-index" ||
-      viewMode === "documents-index"
-    ) {
-      // Browsers show standalone history; project workspace filters by project.
-      void loadSessionsFirstPage();
+    if (initialWorkspace.viewMode !== "project-workspace") {
+      return;
     }
-  }, [viewMode, activeProjectId, loadSessionsFirstPage]);
+    const projectId = initialWorkspace.activeProjectId;
+    if (!projectId) {
+      setViewMode("standalone");
+      setActiveProjectId(null);
+      setActiveProjectName(null);
+      clearWorkspaceProjectState();
+      setWorkspaceReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const project = await getProject(projectId);
+        if (cancelled) return;
+        setActiveProjectId(project.id);
+        setActiveProjectName(project.name);
+        setViewMode("project-workspace");
+        void openProject(project.id).catch(() => {
+          // lastOpenedAt touch is best-effort
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.error("[workspace] restore project failed", error);
+        setViewMode("standalone");
+        setActiveProjectId(null);
+        setActiveProjectName(null);
+        clearWorkspaceProjectState();
+        const lastStandalone = readLastStandaloneSessionId();
+        if (lastStandalone) {
+          setSessionId(lastStandalone);
+        } else {
+          try {
+            const draft = await getOrCreateEmptyChatSession({
+              projectId: null,
+            });
+            if (!cancelled) {
+              setSessionId(draft.sessionId);
+              persistLastStandaloneSessionId(draft.sessionId);
+            }
+          } catch {
+            // loadSessionsFirstPage will recover a draft
+          }
+        }
+      } finally {
+        if (!cancelled) setWorkspaceReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally once on mount from stored workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist workspace chrome for reload restore.
+  useEffect(() => {
+    persistWorkspaceState({
+      viewMode,
+      activeProjectId,
+      activeProjectName,
+    });
+  }, [viewMode, activeProjectId, activeProjectName]);
+
+  // Recent projects once on mount.
+  useEffect(() => {
+    void refreshRecentProjects();
+  }, [refreshRecentProjects]);
+
+  // Single driver for session list (avoids double-fetch on mount).
+  useEffect(() => {
+    if (!workspaceReady) return;
+    void loadSessionsFirstPage();
+  }, [viewMode, activeProjectId, loadSessionsFirstPage, workspaceReady]);
 
   // Load messages whenever the active session changes (chat views only).
   useEffect(() => {
+    if (!workspaceReady) return;
     if (viewMode !== "standalone" && viewMode !== "project-workspace") {
+      return;
+    }
+    if (!sessionId) {
+      setInitialMessages([]);
       return;
     }
     persistSessionId(sessionId);
@@ -321,7 +416,42 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [handleAuthFailure, sessionId, viewMode]);
+  }, [handleAuthFailure, sessionId, viewMode, workspaceReady]);
+
+  const enterStandaloneWorkspace = useCallback(
+    (nextSessionId?: string) => {
+      setActiveProjectId(null);
+      setActiveProjectName(null);
+      setViewMode("standalone");
+      clearWorkspaceProjectState();
+
+      if (nextSessionId) {
+        setSessionId(nextSessionId);
+        persistLastStandaloneSessionId(nextSessionId);
+        return;
+      }
+
+      const last = readLastStandaloneSessionId();
+      if (last) {
+        setSessionId(last);
+        return;
+      }
+
+      // No remembered standalone chat — open the single empty draft (no invent).
+      void (async () => {
+        try {
+          const draft = await getOrCreateEmptyChatSession({ projectId: null });
+          setSessionId(draft.sessionId);
+          persistLastStandaloneSessionId(draft.sessionId);
+          setSessions([sessionSummaryFromDraft(draft)]);
+          setNextCursor(null);
+        } catch (error) {
+          console.error("[sessions] open standalone draft failed", error);
+        }
+      })();
+    },
+    [],
+  );
 
   const handleSelectSession = (nextSessionId: string) => {
     if (
@@ -339,6 +469,9 @@ function Home() {
       return;
     }
     setSessionId(nextSessionId);
+    if (viewMode === "standalone" || viewMode === "projects-index" || viewMode === "documents-index") {
+      persistLastStandaloneSessionId(nextSessionId);
+    }
     if (viewMode === "projects-index" || viewMode === "documents-index") {
       // Prefer standalone when selecting from history while browsing.
       setActiveProjectId(null);
@@ -348,46 +481,56 @@ function Home() {
   };
 
   const handleNewSession = () => {
-    const nextSessionId = createSessionId();
-    if (viewMode === "project-workspace" && activeProjectId) {
-      void (async () => {
-        try {
-          await createChatSession({
-            sessionId: nextSessionId,
-            projectId: activeProjectId,
-          });
-        } catch (error) {
-          console.error("[sessions] create project chat failed", error);
+    const inProject =
+      viewMode === "project-workspace" && Boolean(activeProjectId);
+    const projectId = inProject ? activeProjectId : null;
+
+    // Prefer client-visible empty draft first (fast path).
+    if (viewMode === "standalone" || viewMode === "project-workspace") {
+      const empty = findEmptyNewChat(sessions);
+      if (empty) {
+        if (empty.sessionId !== sessionId) {
+          setSessionId(empty.sessionId);
+          if (!inProject) persistLastStandaloneSessionId(empty.sessionId);
         }
-        setSessions((current) =>
-          ensureActiveSession(
-            current.filter((s) => s.sessionId !== nextSessionId),
-            nextSessionId,
-          ),
-        );
-        setSessionId(nextSessionId);
-        void loadSessionsFirstPage();
-      })();
-      return;
+        return;
+      }
     }
 
-    // Standalone (and browser views): new chat outside any project.
-    setActiveProjectId(null);
-    setActiveProjectName(null);
-    setViewMode("standalone");
-    setSessions((current) =>
-      ensureActiveSession(
-        current.filter((s) => s.sessionId !== nextSessionId),
-        nextSessionId,
-      ),
-    );
-    setSessionId(nextSessionId);
-    void createChatSession({ sessionId: nextSessionId, projectId: null }).catch(
-      (error) => {
-        console.error("[sessions] ensure standalone failed", error);
-      },
-    );
+    // Server is source of truth: one empty draft per scope; prunes duplicates.
+    void (async () => {
+      try {
+        if (!inProject && viewMode !== "standalone") {
+          setActiveProjectId(null);
+          setActiveProjectName(null);
+          setViewMode("standalone");
+        }
+        const draft = await getOrCreateEmptyChatSession({ projectId });
+        setSessionId(draft.sessionId);
+        if (!inProject) {
+          persistLastStandaloneSessionId(draft.sessionId);
+        }
+        setSessionsError(null);
+        void loadSessionsFirstPage();
+      } catch (error) {
+        console.error("[sessions] open empty draft failed", error);
+        setSessionsError(
+          error instanceof Error
+            ? error.message
+            : "Could not open a new chat",
+        );
+      }
+    })();
   };
+
+  const handleOpenAllChats = useCallback(() => {
+    if (viewModeRef.current === "standalone") {
+      // Already in all-chats; keep current session.
+      return;
+    }
+    // Leaving a project chat: restore last standalone (or single empty draft).
+    enterStandaloneWorkspace();
+  }, [enterStandaloneWorkspace]);
 
   const handleOpenProjects = () => {
     if (viewMode === "standalone") {
@@ -403,6 +546,16 @@ function Home() {
     setViewMode("documents-index");
   };
 
+  const handleProjectDeleted = useCallback(
+    (projectId: string) => {
+      void refreshRecentProjects();
+      if (activeProjectIdRef.current === projectId) {
+        enterStandaloneWorkspace();
+      }
+    },
+    [enterStandaloneWorkspace, refreshRecentProjects],
+  );
+
   const handleOpenProject = useCallback(
     (project: ProjectListItem) => {
       if (viewModeRef.current === "standalone") {
@@ -411,6 +564,7 @@ function Home() {
       setActiveProjectId(project.id);
       setActiveProjectName(project.name);
       setViewMode("project-workspace");
+      setSessionsError(null);
       void openProject(project.id)
         .then((opened) => {
           setActiveProjectName(opened.name);
@@ -426,46 +580,71 @@ function Home() {
             limit: SESSIONS_PAGE_SIZE,
             projectId: project.id,
           });
-          if (page.items[0]) {
-            setSessionId(page.items[0].sessionId);
+          if (page.items.length > 0) {
+            // Prefer existing empty draft in this project, else most recent chat.
+            const empty = findEmptyNewChat(page.items);
+            const pick = empty ?? page.items[0]!;
+            setSessionId(pick.sessionId);
             setSessions(page.items);
             setNextCursor(page.nextCursor);
           } else {
-            const nextId = createSessionId();
-            await createChatSession({
-              sessionId: nextId,
+            // Exactly one empty draft for the project (server reuses/prunes).
+            const draft = await getOrCreateEmptyChatSession({
               projectId: project.id,
             });
-            setSessionId(nextId);
-            setSessions(ensureActiveSession([], nextId));
+            setSessionId(draft.sessionId);
+            setSessions([sessionSummaryFromDraft(draft)]);
             setNextCursor(null);
           }
         } catch (error) {
           console.error("[projects] load project chats failed", error);
-          const nextId = createSessionId();
-          setSessionId(nextId);
-          setSessions(ensureActiveSession([], nextId));
+          setSessionsError(
+            error instanceof Error
+              ? error.message
+              : "Could not open project chats",
+          );
+          setSessions([]);
+          setNextCursor(null);
+          setViewMode("projects-index");
+          setActiveProjectId(null);
+          setActiveProjectName(null);
         }
       })();
     },
     [refreshRecentProjects],
   );
 
+  const activeSessionTitle = useMemo(() => {
+    return (
+      sessions.find((s) => s.sessionId === sessionId)?.title?.trim() ||
+      EMPTY_CHAT_TITLE
+    );
+  }, [sessionId, sessions]);
+
   const activeTitle = useMemo(() => {
     if (viewMode === "projects-index") return "Projects";
     if (viewMode === "documents-index") return "Documents";
     if (viewMode === "project-workspace" && activeProjectName) {
-      const chatTitle =
-        sessions.find((s) => s.sessionId === sessionId)?.title ?? "New chat";
-      return `${activeProjectName} · ${chatTitle}`;
+      return `${activeProjectName} · ${activeSessionTitle}`;
     }
-    return (
-      sessions.find((s) => s.sessionId === sessionId)?.title ?? "New chat"
-    );
-  }, [activeProjectName, sessionId, sessions, viewMode]);
+    return activeSessionTitle;
+  }, [activeProjectName, activeSessionTitle, viewMode]);
+
+  /**
+   * Disable New chat only when already viewing an empty draft.
+   * From a filled chat, New chat reuses another empty draft or creates one.
+   */
+  const newChatDisabled = useMemo(() => {
+    if (viewMode !== "standalone" && viewMode !== "project-workspace") {
+      return false;
+    }
+    const active = sessions.find((s) => s.sessionId === sessionId);
+    return active ? isEmptyNewChat(active) : activeSessionTitle === EMPTY_CHAT_TITLE;
+  }, [activeSessionTitle, sessionId, sessions, viewMode]);
 
   const showChatRoom =
-    viewMode === "standalone" || viewMode === "project-workspace";
+    workspaceReady &&
+    (viewMode === "standalone" || viewMode === "project-workspace");
 
   return (
     <AppShell
@@ -473,12 +652,13 @@ function Home() {
       sessions={sessions}
       activeSessionId={sessionId}
       activeTitle={activeTitle}
-      sessionsLoading={sessionsLoading}
+      sessionsLoading={sessionsLoading || !workspaceReady}
       sessionsLoadingMore={sessionsLoadingMore}
       sessionsError={sessionsError}
       hasMoreSessions={Boolean(nextCursor)}
       onSelectSession={handleSelectSession}
       onNewChat={handleNewSession}
+      newChatDisabled={newChatDisabled}
       onLoadMoreSessions={() => {
         void loadMoreSessions();
       }}
@@ -488,19 +668,32 @@ function Home() {
       viewMode={viewMode}
       recentProjects={recentProjects}
       activeProjectId={activeProjectId}
+      onOpenAllChats={handleOpenAllChats}
       onOpenProjects={handleOpenProjects}
       onOpenDocuments={handleOpenDocuments}
       onOpenRecentProject={handleOpenProject}
     >
-      {viewMode === "projects-index" ? (
+      {!workspaceReady ? (
+        <div
+          key="workspace-loading"
+          className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
+        >
+          <DocChatMark className="opacity-80" />
+          <div className="skeleton-shimmer h-4 w-40 rounded-full" />
+          <p className="text-sm text-text-muted">Restoring workspace…</p>
+        </div>
+      ) : null}
+
+      {workspaceReady && viewMode === "projects-index" ? (
         <ProjectsBrowser
           key="workspace-projects"
           activeProjectId={activeProjectId}
           onOpenProject={handleOpenProject}
+          onProjectDeleted={handleProjectDeleted}
         />
       ) : null}
 
-      {viewMode === "documents-index" ? (
+      {workspaceReady && viewMode === "documents-index" ? (
         <DocumentsBrowser key="workspace-documents" />
       ) : null}
 

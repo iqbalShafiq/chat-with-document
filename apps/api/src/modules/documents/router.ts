@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
+import { ProjectMembershipError } from "../chat/chat-session.js";
 import {
   createDocumentUpload,
+  DocumentProjectMismatchError,
   DocumentStorageQuotaError,
   getDocumentPreview,
   getDocumentStatus,
@@ -202,6 +204,15 @@ export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
           },
           413,
         );
+      }
+      if (error instanceof DocumentProjectMismatchError) {
+        return c.json(
+          { error: error.message, code: error.code },
+          400,
+        );
+      }
+      if (error instanceof ProjectMembershipError) {
+        return c.json({ error: error.message, code: error.code }, 404);
       }
       const message =
         error instanceof Error ? error.message : "Upload failed";

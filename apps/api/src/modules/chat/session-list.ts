@@ -130,7 +130,7 @@ async function titlesForSessions(
 
 /**
  * List chat sessions from durable ChatSession rows.
- * - projectId omitted / standalone=1 → projectId IS NULL
+ * - projectId omitted / null → standalone only (projectId IS NULL)
  * - projectId set → that project only
  */
 export async function listSessionsPage(input: {
@@ -138,7 +138,6 @@ export async function listSessionsPage(input: {
   cursor?: string;
   limit?: string;
   projectId?: string | null;
-  standalone?: boolean;
 }): Promise<SessionListPage> {
   const limit = clampLimit(input.limit);
   const cursor = parseCursor(input.cursor);

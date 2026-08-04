@@ -46,7 +46,8 @@ const HEIGHT_CLASS: Record<
   string
 > = {
   viewport: "h-[min(80dvh,44rem)] max-h-[min(90dvh,52rem)]",
-  content: "h-auto max-h-[min(90dvh,40rem)]",
+  // fit-content: native <dialog> often ignores plain h-auto and keeps a tall box
+  content: "h-fit max-h-[min(90dvh,40rem)]",
 };
 
 /**
@@ -101,11 +102,20 @@ export function DialogShell({
     return () => dialog.removeEventListener("close", handleClose);
   }, [restoreFocusRef]);
 
+  const isContentHeight = heightMode === "content";
+
   return (
     <dialog
       ref={dialogRef}
       className={`m-auto overflow-hidden rounded-2xl border border-hairline bg-canvas-elevated p-0 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col animate-scale-in ${HEIGHT_CLASS[heightMode]} ${SIZE_CLASS[size]} ${className}`}
-      style={{ transformOrigin: "center center" }}
+      style={{
+        transformOrigin: "center center",
+        // Belt-and-suspenders: UA stylesheet for <dialog> can keep a tall box
+        // when only Tailwind h-auto is applied.
+        ...(isContentHeight
+          ? { height: "fit-content", maxHeight: "min(90dvh, 40rem)" }
+          : null),
+      }}
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
       onCancel={(event) => {
@@ -151,8 +161,9 @@ export function DialogShell({
 
       <div
         className={
-          heightMode === "content"
-            ? "flex flex-col overflow-y-auto"
+          isContentHeight
+            ? // Grow with children; shrink+scroll only when dialog hits max-height
+              "min-h-0 overflow-y-auto overscroll-contain"
             : "flex min-h-0 flex-1 flex-col overflow-hidden"
         }
       >

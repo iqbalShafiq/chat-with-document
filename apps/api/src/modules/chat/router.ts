@@ -34,7 +34,9 @@ import {
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import {
   ensureChatSession,
+  getOrCreateEmptyChatSession,
   ProjectMembershipError,
+  setChatSessionTitleIfEmpty,
   touchChatSession,
 } from "./chat-session.js";
 
@@ -50,23 +52,35 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
+/** Request facts only (Anvia context). Policy goes in instructions. */
 function buildProjectWorkspaceContext(input: {
   name: string;
   description: string | null;
 }): string {
-  const lines = [
-    "Project workspace",
-    `Name: ${input.name}`,
-  ];
+  const lines = ["Project workspace", `Name: ${input.name}`];
   if (input.description?.trim()) {
     lines.push(`Description: ${input.description.trim()}`);
   }
-  lines.push(
-    "You are answering inside this project workspace.",
-    "Only use the active document catalog and tools for this chat.",
-    "Do not assume access to other projects or the user's standalone library.",
-  );
   return lines.join("\n");
+}
+
+/** Durable project-scoped behavior (Anvia instructions), only when in a project. */
+const PROJECT_WORKSPACE_INSTRUCTION = [
+  "You are answering inside a project workspace.",
+  "Only use the active document catalog and tools for this chat.",
+  "Do not assume access to other projects or the user's standalone library.",
+].join("\n");
+
+function extractUserTextForTitle(message: MessageType): string {
+  if (message.role !== "user") return "";
+  const parts = message.content
+    .filter(
+      (part): part is Extract<(typeof message.content)[number], { type: "text" }> =>
+        part.type === "text",
+    )
+    .map((part) => part.text.trim())
+    .filter(Boolean);
+  return parts.join(" ");
 }
 
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
@@ -74,17 +88,9 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   .get("/sessions", async (c) => {
     const user = c.get("user");
     const projectIdRaw = c.req.query("projectId");
-    const standalone = c.req.query("standalone");
-
-    let projectId: string | null | undefined;
-    if (projectIdRaw && projectIdRaw.trim()) {
-      projectId = projectIdRaw.trim();
-    } else if (standalone === "0" || standalone === "false") {
-      // Explicit non-filter not supported; default standalone
-      projectId = null;
-    } else {
-      projectId = null;
-    }
+    // Default: standalone only. Pass projectId to list that project's chats.
+    const projectId =
+      projectIdRaw && projectIdRaw.trim() ? projectIdRaw.trim() : null;
 
     const page = await listSessionsPage({
       userId: user.id,
@@ -134,6 +140,41 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       throw error;
     }
   })
+  /**
+   * One empty "New chat" draft per scope (standalone or project).
+   * Reuses an existing empty session and prunes duplicate empties.
+   */
+  .post("/sessions/draft", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const projectIdRaw = body?.projectId;
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : null;
+
+    try {
+      const session = await getOrCreateEmptyChatSession({
+        userId: user.id,
+        projectId,
+      });
+      return c.json({
+        sessionId: session.id,
+        projectId: session.projectId,
+        title: session.title,
+        createdAt: session.createdAt.toISOString(),
+        updatedAt: session.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof ProjectMembershipError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
   .get("/", async (c) => {
     const user = c.get("user");
     const sessionId = requireSessionId(c.req.query("sessionId"));
@@ -141,13 +182,9 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "sessionId is required" }, 400);
     }
 
-    // Ensure durable row exists for legacy sessions opened only via memory.
-    await ensureChatSession({
-      sessionId,
-      userId: user.id,
-      projectId: null,
-    });
-
+    // Do not auto-create ChatSession on history load — stale localStorage ids
+    // would stack empty "New chat" rows. Drafts are created via /sessions/draft
+    // (or on first chat POST). Missing session → empty history is fine.
     const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
   })
@@ -254,6 +291,18 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
 
     const promptMessage = stripUserAttachments(lastMessage);
 
+    // Durable list title from first user prompt (no-op if already set).
+    const titleSeed = extractUserTextForTitle(promptMessage);
+    if (titleSeed) {
+      void setChatSessionTitleIfEmpty({
+        userId: user.id,
+        sessionId,
+        title: titleSeed,
+      }).catch((error) => {
+        console.error("[chat] set title failed", error);
+      });
+    }
+
     const prismaMemory = createPrismaMemoryStore(prisma);
     const sessionDocuments = await resolveActiveDocuments({
       userId: user.id,
@@ -279,6 +328,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     let projectContext:
       | { text: string; id: string }
       | undefined;
+    let projectInstruction: string | undefined;
     if (projectId) {
       const project = await prisma.project.findFirst({
         where: { id: projectId, userId: user.id },
@@ -289,6 +339,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
           id: "project_workspace",
           text: buildProjectWorkspaceContext(project),
         };
+        projectInstruction = PROJECT_WORKSPACE_INSTRUCTION;
       }
     }
 
@@ -297,7 +348,10 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       model: createCompletionModel(model),
       reasoningEffort,
       tracing: tracing,
-      additionalInstructions: [catalogInstruction],
+      additionalInstructions: [
+        catalogInstruction,
+        ...(projectInstruction ? [projectInstruction] : []),
+      ],
       additionalContext: projectContext ? [projectContext] : [],
       additionalTools: [...createDataAnalysisTools(), ...documentTools],
       memory: prismaMemory,

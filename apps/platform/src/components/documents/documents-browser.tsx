@@ -149,12 +149,16 @@ export function DocumentsBrowser() {
           </div>
         ) : null}
 
+        {/*
+          Bottom padding lives on the scroll content (not the clipped viewport)
+          so the last row can scroll fully into view — clipToPadding=false style.
+        */}
         <div
           ref={listScrollRef}
           className="chat-scroll mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
           {loading && items.length === 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-2 pb-10">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div
                   key={i}
@@ -175,7 +179,7 @@ export function DocumentsBrowser() {
               </p>
             </div>
           ) : (
-            <div className="space-y-6 pb-8">
+            <div className="space-y-6 pb-10 md:pb-12">
               {groups.map((group) => (
                 <section key={group.key}>
                   <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-text-faint">
@@ -211,7 +215,7 @@ export function DocumentsBrowser() {
                   </ul>
                 </section>
               ))}
-              <div ref={sentinelRef} className="h-4" />
+              <div ref={sentinelRef} className="h-4 shrink-0" aria-hidden />
               {loadingMore ? (
                 <p className="py-2 text-center text-xs text-text-faint">
                   Loading more…

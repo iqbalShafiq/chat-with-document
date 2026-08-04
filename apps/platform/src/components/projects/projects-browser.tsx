@@ -71,9 +71,12 @@ function ProjectCardMenu({
 export function ProjectsBrowser({
   activeProjectId,
   onOpenProject,
+  onProjectDeleted,
 }: {
   activeProjectId?: string | null;
   onOpenProject: (project: ProjectListItem) => void;
+  /** Fired after a successful cascade delete so parent can leave a deleted workspace. */
+  onProjectDeleted?: (projectId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
@@ -150,10 +153,12 @@ export function ProjectsBrowser({
   const handleDelete = async () => {
     if (!deleteTarget || deleting) return;
     setDeleting(true);
+    const deletedId = deleteTarget.id;
     try {
-      await deleteProject(deleteTarget.id);
-      setItems((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+      await deleteProject(deletedId);
+      setItems((prev) => prev.filter((p) => p.id !== deletedId));
       setDeleteTarget(null);
+      onProjectDeleted?.(deletedId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete project");
     } finally {

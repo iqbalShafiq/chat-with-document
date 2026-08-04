@@ -183,11 +183,15 @@ export async function listProjects(input: {
 
   let nextCursor: string | null = null;
   if (hasMore && last && sort !== "name") {
-    const stamp =
-      sort === "lastOpenedAt"
-        ? (last.lastOpenedAt ?? last.updatedAt)
-        : last.updatedAt;
-    nextCursor = encodeCursor(stamp, last.id);
+    // lastOpenedAt sort: only emit cursor when stamp is real lastOpenedAt so
+    // filter field matches encode (null lastOpenedAt rows are not pageable).
+    if (sort === "lastOpenedAt") {
+      if (last.lastOpenedAt) {
+        nextCursor = encodeCursor(last.lastOpenedAt, last.id);
+      }
+    } else {
+      nextCursor = encodeCursor(last.updatedAt, last.id);
+    }
   }
 
   return {
@@ -371,9 +375,13 @@ export async function deleteProject(input: {
       await tx.agentMemorySession.deleteMany({
         where: { userId: input.userId, sessionId: { in: sessionIds } },
       });
+      // DocumentSession has no FK to ChatSession — clear links before chat rows go.
+      await tx.documentSession.deleteMany({
+        where: { userId: input.userId, sessionId: { in: sessionIds } },
+      });
     }
 
-    // Documents cascade pages + session links via FK; ChatSession cascades from Project.
+    // Documents cascade pages + remaining session links via FK; ChatSession cascades from Project.
     // Explicit document delete first so we control order with usage/memory above.
     if (documentIds.length > 0) {
       await tx.document.deleteMany({

@@ -25,6 +25,15 @@ export type ChatSessionRow = {
   updatedAt: Date;
 };
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
+}
+
 /**
  * Ensure a ChatSession row exists for this client session UUID.
  * - New standalone: projectId null
@@ -63,23 +72,47 @@ export async function ensureChatSession(input: {
     projectId = project.id;
   }
 
-  const created = await prisma.chatSession.create({
-    data: {
-      id: sessionId,
-      userId: input.userId,
-      projectId,
-    },
-  });
-
-  if (projectId) {
-    await autoLinkReadyProjectDocuments({
-      userId: input.userId,
-      sessionId,
-      projectId,
+  try {
+    const created = await prisma.chatSession.create({
+      data: {
+        id: sessionId,
+        userId: input.userId,
+        projectId,
+      },
     });
-  }
 
-  return created;
+    if (projectId) {
+      await autoLinkReadyProjectDocuments({
+        userId: input.userId,
+        sessionId,
+        projectId,
+      });
+    }
+
+    return created;
+  } catch (error) {
+    // Concurrent first-touch: another request won the insert.
+    if (isUniqueViolation(error)) {
+      const winner = await prisma.chatSession.findFirst({
+        where: { id: sessionId, userId: input.userId },
+      });
+      if (winner) return winner;
+    }
+    throw error;
+  }
+}
+
+/** Membership for an existing chat, or null if no durable row yet. */
+export async function getSessionProjectId(
+  userId: string,
+  sessionId: string,
+): Promise<string | null | undefined> {
+  const row = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { projectId: true },
+  });
+  if (!row) return undefined;
+  return row.projectId;
 }
 
 /** Bulk-link all ready project corpus docs to a project chat (hybrid default). */
@@ -161,5 +194,101 @@ export async function setChatSessionTitleIfEmpty(input: {
       OR: [{ title: null }, { title: "" }],
     },
     data: { title },
+  });
+}
+
+/**
+ * Hard-delete chat sessions (empty drafts). Cleans memory, usage, and session links.
+ * Does not delete Documents (only DocumentSession links for these session ids).
+ */
+export async function deleteChatSessionsHard(
+  userId: string,
+  sessionIds: string[],
+): Promise<number> {
+  const ids = [...new Set(sessionIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return 0;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.documentSession.deleteMany({
+      where: { userId, sessionId: { in: ids } },
+    });
+    await tx.agentUsageEvent.deleteMany({
+      where: { userId, sessionId: { in: ids } },
+    });
+    await tx.agentMemorySession.deleteMany({
+      where: { sessionId: { in: ids } },
+    });
+    await tx.chatSession.deleteMany({
+      where: { userId, id: { in: ids } },
+    });
+  });
+
+  return ids.length;
+}
+
+/**
+ * Empty draft = ChatSession with zero agent memory messages (true "New chat").
+ * Ordered newest first.
+ */
+export async function findEmptyChatSessions(
+  userId: string,
+  projectId: string | null,
+): Promise<ChatSessionRow[]> {
+  const rows = await prisma.chatSession.findMany({
+    where: {
+      userId,
+      projectId,
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
+  if (rows.length === 0) return [];
+
+  const withMessages = await prisma.agentMemorySession.findMany({
+    where: {
+      sessionId: { in: rows.map((r) => r.id) },
+      messages: { some: {} },
+    },
+    select: { sessionId: true },
+  });
+  const nonEmpty = new Set(withMessages.map((m) => m.sessionId));
+  return rows.filter((r) => !nonEmpty.has(r.id));
+}
+
+/**
+ * One empty draft per (user, project|standalone). Reuses the newest empty;
+ * prunes older empty duplicates so they cannot stack.
+ */
+export async function getOrCreateEmptyChatSession(input: {
+  userId: string;
+  projectId?: string | null;
+}): Promise<ChatSessionRow> {
+  let projectId: string | null = null;
+  if (input.projectId) {
+    const project = await prisma.project.findFirst({
+      where: { id: input.projectId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new ProjectMembershipError("Project not found");
+    }
+    projectId = project.id;
+  }
+
+  const empties = await findEmptyChatSessions(input.userId, projectId);
+  if (empties.length > 0) {
+    const [keeper, ...extras] = empties;
+    if (extras.length > 0) {
+      await deleteChatSessionsHard(
+        input.userId,
+        extras.map((e) => e.id),
+      );
+    }
+    return keeper!;
+  }
+
+  return ensureChatSession({
+    sessionId: crypto.randomUUID(),
+    userId: input.userId,
+    projectId,
   });
 }

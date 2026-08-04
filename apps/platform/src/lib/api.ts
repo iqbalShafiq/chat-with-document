@@ -111,6 +111,41 @@ export async function createChatSession(input?: {
   };
 }
 
+/**
+ * Get or create the single empty "New chat" draft for a scope.
+ * Server reuses existing empties and prunes duplicates.
+ */
+export async function getOrCreateEmptyChatSession(input?: {
+  projectId?: string | null;
+}): Promise<{
+  sessionId: string;
+  projectId: string | null;
+  title: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}> {
+  const response = await apiFetch(`${API_BASE}/api/chat/sessions/draft`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      projectId: input?.projectId ?? null,
+    }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to open empty chat draft");
+  }
+  return (await response.json()) as {
+    sessionId: string;
+    projectId: string | null;
+    title: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type ProjectListItem = {
@@ -169,6 +204,19 @@ export async function createProject(input: {
       error?: string;
     } | null;
     throw new Error(body?.error ?? "Failed to create project");
+  }
+  return (await response.json()) as ProjectListItem;
+}
+
+export async function getProject(projectId: string): Promise<ProjectListItem> {
+  const response = await apiFetch(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}`,
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to load project");
   }
   return (await response.json()) as ProjectListItem;
 }

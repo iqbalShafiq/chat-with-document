@@ -24,8 +24,13 @@ export function WorkspaceMainPane({
         scroll
           ? "chat-scroll overflow-y-auto overscroll-contain"
           : "overflow-hidden",
-        // Top app bar h-14 (3.5rem) + 24px gap — matches chat room chrome
-        "px-4 pb-10 pt-[calc(3.5rem+24px)] md:px-8",
+        // Top app bar h-14 (3.5rem) + 24px gap — matches chat room chrome.
+        // Page-scroll panes keep bottom padding here; inner-list panes (scroll=false)
+        // own bottom padding on the scroll content so items are not clipped
+        // (Android clipToPadding=false equivalent).
+        scroll
+          ? "px-4 pb-10 pt-[calc(3.5rem+24px)] md:px-8"
+          : "px-4 pb-0 pt-[calc(3.5rem+24px)] md:px-8",
         "animate-fade-up",
         className,
       ]

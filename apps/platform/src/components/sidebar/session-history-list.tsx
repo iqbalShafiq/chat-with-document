@@ -14,6 +14,8 @@ export function SessionHistoryList({
   onSelect,
   onLoadMore,
   onRetry,
+  /** Top padding for the first date label (e.g. when Recent projects is above). */
+  firstGroupTopPad = "pt-1",
 }: {
   sessions: SessionSummary[];
   activeSessionId: string;
@@ -24,6 +26,7 @@ export function SessionHistoryList({
   onSelect: (sessionId: string) => void;
   onLoadMore: () => void;
   onRetry: () => void;
+  firstGroupTopPad?: string;
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(() => groupSessionsByDate(sessions), [sessions]);
@@ -89,11 +92,19 @@ export function SessionHistoryList({
   let itemIndex = 0;
 
   return (
-    <div className="flex flex-col gap-4 px-2.5 pb-2.5">
+    <div className="flex flex-col px-2.5 pb-2.5">
       {errorBanner}
-      {groups.map((group) => (
+      {groups.map((group, groupIndex) => (
         <section key={group.label} className="flex flex-col gap-0.5">
-          <h3 className="sticky top-0 z-10 bg-transparent px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
+          {/*
+            No inter-section gap: label top padding alone separates periods so
+            spacing matches label→first-item (symmetric, no extra margin).
+          */}
+          <h3
+            className={`sticky top-0 z-10 bg-transparent px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint ${
+              groupIndex === 0 ? firstGroupTopPad : "pt-2"
+            }`}
+          >
             {group.label}
           </h3>
           <ul className="flex list-none flex-col gap-0.5 p-0">

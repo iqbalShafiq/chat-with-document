@@ -86,22 +86,53 @@ export function groupSessionsByDate(
   }));
 }
 
-/** Ensure the active session appears even if it is not persisted yet. */
+/** UI / list title for an empty draft that has no first user message yet. */
+export const EMPTY_CHAT_TITLE = "New chat";
+
+/** True when the session is still an empty draft (no title from first message). */
+export function isEmptyNewChat(session: Pick<SessionSummary, "title">): boolean {
+  const title = session.title?.trim() || EMPTY_CHAT_TITLE;
+  return title === EMPTY_CHAT_TITLE;
+}
+
+/**
+ * Prefer reusing an existing empty draft in the current list (already
+ * standalone- or project-scoped by the loader) instead of creating another.
+ */
+export function findEmptyNewChat(
+  list: SessionSummary[] | null | undefined,
+): SessionSummary | null {
+  const safe = Array.isArray(list) ? list : [];
+  return safe.find((s) => isEmptyNewChat(s)) ?? null;
+}
+
+/**
+ * Keep list as-is when active is already present.
+ * Does NOT invent phantom "New chat" rows — those stack empties across
+ * project/standalone switches. Callers should set sessionId from the list
+ * or from getOrCreateEmptyChatSession.
+ */
 export function ensureActiveSession(
   list: SessionSummary[] | null | undefined,
-  activeId: string,
+  _activeId: string,
+  _projectId: string | null = null,
 ): SessionSummary[] {
-  const safe = Array.isArray(list) ? list : [];
-  if (safe.some((s) => s.sessionId === activeId)) return safe;
-  return [
-    {
-      sessionId: activeId,
-      updatedAt: new Date().toISOString(),
-      title: "New chat",
-      projectId: null,
-    },
-    ...safe,
-  ];
+  return Array.isArray(list) ? list : [];
+}
+
+/** Map draft API payload into a sidebar list row. */
+export function sessionSummaryFromDraft(draft: {
+  sessionId: string;
+  projectId: string | null;
+  title?: string | null;
+  updatedAt?: string;
+}): SessionSummary {
+  return {
+    sessionId: draft.sessionId,
+    projectId: draft.projectId,
+    title: draft.title?.trim() || EMPTY_CHAT_TITLE,
+    updatedAt: draft.updatedAt ?? new Date().toISOString(),
+  };
 }
 
 /** Relative time for project cards (e.g. "2 min ago", "Yesterday"). */
