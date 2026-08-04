@@ -271,6 +271,22 @@ export async function deleteProject(
   };
 }
 
+export async function deleteUserDocument(
+  documentId: string,
+): Promise<{ deleted: true }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/documents/${encodeURIComponent(documentId)}?confirm=true`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to delete document");
+  }
+  return (await response.json()) as { deleted: true };
+}
+
 export type DocumentStatus =
   | "queued"
   | "uploading"

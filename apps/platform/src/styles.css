@@ -351,6 +351,23 @@ body {
   animation-delay: calc(var(--i, 0) * 40ms);
 }
 
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Removed items (e.g. deleted library card) — subtle exit, same cadence as entry */
+.animate-fade-out {
+  animation: fade-out var(--duration-fast) var(--ease-out-premium) both;
+  pointer-events: none;
+}
+
 .skeleton-shimmer {
   background: linear-gradient(
     90deg,
@@ -690,6 +707,7 @@ body {
   .animate-fade-up,
   .animate-fade-in,
   .animate-scale-in,
+  .animate-fade-out,
   .stagger-item,
   .skeleton-shimmer {
     animation: none !important;
