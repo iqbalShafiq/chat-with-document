@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Eye, FileText, FolderKanban, Search, Trash2 } from "lucide-react";
+import { Eye, FileText, FolderKanban, Search, Trash2 } from "lucide-react";
 import { DocumentPreviewModal } from "#/components/documents/document-preview-modal";
 import { DocumentRow } from "#/components/documents/document-row";
 import { WorkspaceMainPane } from "#/components/layout/workspace-main-pane";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
+import { Select } from "#/components/ui/select";
 import { useDebouncedValue } from "#/hooks/use-debounced-value";
 import { useInfiniteScrollSentinel } from "#/hooks/use-infinite-scroll-sentinel";
 import {
@@ -217,29 +218,20 @@ const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
             />
           </label>
 
-          <label className="relative shrink-0 sm:w-56">
-            <FolderKanban
-              className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-text-faint"
-              strokeWidth={1.75}
-            />
-            <select
-              aria-label="Filter documents by project"
-              value={selectedProjectId}
-              onChange={(event) => setSelectedProjectId(event.target.value)}
-              className="w-full appearance-none rounded-xl bg-white/[0.04] py-2.5 pl-10 pr-9 text-sm text-text outline-none ring-1 ring-white/[0.08] transition focus:bg-white/[0.055] focus:ring-2 focus:ring-accent-ring [&>option]:bg-[#101010]"
-            >
-              <option value={ALL_PROJECTS}>All groups</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-text-faint"
-              strokeWidth={1.75}
-            />
-          </label>
+          <Select
+            ariaLabel="Filter documents by project"
+            value={selectedProjectId}
+            onChange={setSelectedProjectId}
+            leadingIcon={<FolderKanban className="size-4" strokeWidth={1.75} />}
+            className="shrink-0 sm:w-56"
+            options={[
+              { value: ALL_PROJECTS, label: "All groups" },
+              ...projects.map((project) => ({
+                value: project.id,
+                label: project.name,
+              })),
+            ]}
+          />
         </div>
 
         {error ? (
