@@ -44,8 +44,8 @@ export function DocumentsBrowser() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const removeTimerRef = useRef<number | null>(null);
-  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+const removeTimerRef = useRef<number | null>(null);
+const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const loadMoreLock = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const listScrollRef = useRef<HTMLDivElement>(null);
@@ -321,12 +321,15 @@ export function DocumentsBrowser() {
                                 <Eye className="size-4" strokeWidth={1.75} />
                               </Button>
                               <Button
-                                ref={deleteTriggerRef}
                                 variant="danger"
                                 size="icon"
                                 aria-label="Delete document"
                                 title="Delete document"
-                                onClick={() => setDeleteTarget(doc)}
+                                onClick={(event) => {
+                                  lastDeleteTriggerRef.current =
+                                    event.currentTarget;
+                                  setDeleteTarget(doc);
+                                }}
                               >
                                 <Trash2 className="size-4" strokeWidth={1.75} />
                               </Button>
@@ -374,7 +377,7 @@ export function DocumentsBrowser() {
         confirmLabel="Delete document"
         busy={deleting}
         error={deleteError}
-        restoreFocusRef={deleteTriggerRef}
+        restoreFocusRef={lastDeleteTriggerRef}
         onCancel={() => {
           if (deleting) return;
           setDeleteTarget(null);
