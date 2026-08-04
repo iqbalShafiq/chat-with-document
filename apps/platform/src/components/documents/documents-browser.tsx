@@ -139,6 +139,9 @@ export function DocumentsBrowser() {
       setDeleteTarget(null);
       setPreviewDoc((prev) => (prev && prev.id === deletedId ? null : prev));
       setRemovingId(deletedId);
+      if (removeTimerRef.current !== null) {
+        window.clearTimeout(removeTimerRef.current);
+      }
       removeTimerRef.current = window.setTimeout(() => {
         setItems((prev) => prev.filter((d) => d.id !== deletedId));
         setRemovingId((current) => (current === deletedId ? null : current));
