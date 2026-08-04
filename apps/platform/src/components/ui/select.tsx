@@ -156,7 +156,7 @@ export function Select({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-label={ariaLabel}
+        aria-label={selected ? `${ariaLabel}, ${selected.label}` : ariaLabel}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
