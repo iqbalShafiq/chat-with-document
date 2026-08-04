@@ -2,6 +2,8 @@ import { prisma } from "../../utils/prisma.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
 import { ensureChatSession } from "../chat/chat-session.js";
+import { deleteDocumentChunks } from "@assingment/agent";
+import { deleteObject } from "../../lib/r2.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -36,6 +38,22 @@ export class DocumentStorageQuotaError extends Error {
     this.usedBytes = input.usedBytes;
     this.maxBytes = input.maxBytes;
     this.fileBytes = input.fileBytes;
+  }
+}
+
+export class DocumentConfirmRequiredError extends Error {
+  readonly code = "CONFIRM_REQUIRED";
+  constructor(message = "confirm=true is required to delete a document") {
+    super(message);
+    this.name = "DocumentConfirmRequiredError";
+  }
+}
+
+export class DocumentNotFoundError extends Error {
+  readonly code = "DOCUMENT_NOT_FOUND";
+  constructor(message = "Document not found") {
+    super(message);
+    this.name = "DocumentNotFoundError";
   }
 }
 
@@ -407,6 +425,10 @@ export async function listUserDocuments(input: {
     } else {
       andFilters.push({ projectId: null });
     }
+  } else if (input.projectId) {
+    // The browser can narrow the all-documents view without changing the
+    // attach scope's corpus isolation rules above.
+    andFilters.push({ projectId: input.projectId });
   }
 
   const rows = await prisma.document.findMany({
@@ -587,6 +609,49 @@ export async function getDocumentPreview(input: {
     summary: document.summary,
     pages,
   };
+}
+
+/**
+ * Permanently delete a user's document. DB rows (pages + session links) go
+ * first via FK cascade; R2 object + Qdrant chunks are best-effort after
+ * commit — mirroring deleteProject.
+ */
+export async function deleteUserDocument(input: {
+  userId: string;
+  documentId: string;
+  confirm: boolean;
+}): Promise<{ deleted: true }> {
+  if (!input.confirm) throw new DocumentConfirmRequiredError();
+
+  const document = await prisma.document.findFirst({
+    where: { id: input.documentId, userId: input.userId },
+    select: { id: true, r2Key: true },
+  });
+
+  if (!document) throw new DocumentNotFoundError();
+
+  await prisma.document.delete({ where: { id: document.id } });
+
+  if (document.r2Key) {
+    try {
+      await deleteObject(document.r2Key);
+    } catch (error) {
+      console.error("[documents] R2 delete failed", {
+        key: document.r2Key,
+        error,
+      });
+    }
+  }
+  try {
+    await deleteDocumentChunks(document.id);
+  } catch (error) {
+    console.error("[documents] Qdrant delete failed", {
+      documentId: document.id,
+      error,
+    });
+  }
+
+  return { deleted: true };
 }
 
 /** Re-export for call sites that need explicit link after create paths. */
