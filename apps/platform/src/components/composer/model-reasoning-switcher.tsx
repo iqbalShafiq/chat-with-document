@@ -5,9 +5,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
-  type ReactNode,
-  type Ref,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -16,6 +13,10 @@ import {
   type CompletionModelId,
   type ReasoningEffort,
 } from "#/lib/chat/models";
+import {
+  SelectOptionList,
+  type SelectOption,
+} from "#/components/ui/select-list";
 
 /**
  * Single glass shell with two joined dropdowns (model | reasoning).
@@ -119,11 +120,29 @@ export function ModelReasoningSwitcher({
     setOpenMenu((current) => (current === menu ? null : menu));
   };
 
+  const modelOptions: SelectOption[] = MODEL_OPTIONS.map((opt) => ({
+    value: opt.id,
+    label: opt.label,
+    hint: opt.hint,
+    icon: (
+      <Cpu
+        className="size-3.5 shrink-0 opacity-70"
+        strokeWidth={1.75}
+      />
+    ),
+  }));
+
+  const reasoningOptions: SelectOption[] = REASONING_OPTIONS.map((opt) => ({
+    value: opt.id,
+    label: opt.label,
+    icon: <ReasoningEffortIcon effort={opt.id} />,
+  }));
+
   const menu =
     openMenu && menuPos
       ? createPortal(
-          <SwitcherMenu
-            menuRef={menuRef}
+          <SelectOptionList
+            ref={menuRef}
             id={openMenu === "model" ? modelListId : reasoningListId}
             ariaLabel={openMenu === "model" ? "Model" : "Reasoning effort"}
             value={openMenu === "model" ? model : reasoningEffort}
@@ -135,30 +154,12 @@ export function ModelReasoningSwitcher({
               transform: "translateY(-100%)",
               zIndex: 80,
             }}
-            options={
-              openMenu === "model"
-                ? MODEL_OPTIONS.map((opt) => ({
-                    value: opt.id,
-                    label: opt.label,
-                    hint: opt.hint,
-                    icon: (
-                      <Cpu
-                        className="size-3.5 shrink-0 opacity-70"
-                        strokeWidth={1.75}
-                      />
-                    ),
-                  }))
-                : REASONING_OPTIONS.map((opt) => ({
-                    value: opt.id,
-                    label: opt.label,
-                    icon: <ReasoningEffortIcon effort={opt.id} />,
-                  }))
-            }
-            onSelect={(value) => {
+            options={openMenu === "model" ? modelOptions : reasoningOptions}
+            onSelect={(selectedValue) => {
               if (openMenu === "model") {
-                onModelChange(value as CompletionModelId);
+                onModelChange(selectedValue as CompletionModelId);
               } else {
-                onReasoningChange(value as ReasoningEffort);
+                onReasoningChange(selectedValue as ReasoningEffort);
               }
               setOpenMenu(null);
             }}
@@ -279,70 +280,5 @@ export function ReasoningEffortIcon({
         />
       ) : null}
     </svg>
-  );
-}
-
-type MenuOption = {
-  value: string;
-  label: string;
-  hint?: string;
-  icon?: ReactNode;
-};
-
-function SwitcherMenu({
-  menuRef,
-  id,
-  ariaLabel,
-  value,
-  options,
-  onSelect,
-  style,
-}: {
-  menuRef?: Ref<HTMLUListElement>;
-  id: string;
-  ariaLabel: string;
-  value: string;
-  options: MenuOption[];
-  onSelect: (value: string) => void;
-  style?: CSSProperties;
-}) {
-  return (
-    <ul
-      ref={menuRef}
-      id={id}
-      role="listbox"
-      aria-label={ariaLabel}
-      style={style}
-      className="overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
-    >
-      {options.map((opt) => {
-        const isSelected = opt.value === value;
-        return (
-          <li key={opt.value} role="option" aria-selected={isSelected}>
-            <button
-              type="button"
-              className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] ${
-                isSelected ? "bg-white/[0.05]" : ""
-              }`}
-              onClick={() => onSelect(opt.value)}
-            >
-              {opt.icon ? (
-                <span className="mt-0.5 text-text-muted">{opt.icon}</span>
-              ) : null}
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span
-                  className={`text-xs font-medium ${isSelected ? "text-text" : "text-text-muted"}`}
-                >
-                  {opt.label}
-                </span>
-                {opt.hint ? (
-                  <span className="text-[10px] text-text-faint">{opt.hint}</span>
-                ) : null}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
   );
 }
