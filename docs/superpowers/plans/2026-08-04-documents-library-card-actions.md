@@ -316,6 +316,7 @@ git commit -m "feat: add shared Button component and compose dialog action class
 - Modify: `apps/platform/src/components/documents/document-row.tsx` (clamp fix)
 - Modify: `apps/platform/src/components/documents/documents-browser.tsx` (icon buttons + delete flow)
 - Modify: `apps/platform/src/lib/api.ts` (client `deleteUserDocument`)
+- Modify: `apps/platform/src/styles.css` (`animate-fade-out` utility + reduced-motion list)
 
 **Interfaces:**
 - Consumes:
@@ -323,6 +324,17 @@ git commit -m "feat: add shared Button component and compose dialog action class
   - `Button` from `#/components/ui/button` (Task 2)
   - `ConfirmDialog` from `#/components/ui/confirm-dialog` (existing)
 - Produces: none (terminal task).
+
+**Delete state machine (loading / success / error) + standard animations:**
+
+| State | Trigger | UI reaction | Animation |
+|---|---|---|---|
+| `idle` | — | Trash icon button visible | Button default hover/`active:scale-[0.96]` transition |
+| `loading` | trash clicked → `deleteTarget` + `deleting=true` | `ConfirmDialog` opens (busy: buttons disabled, confirm shows "Working…", cancel inert); trigger stays behind modal | `ConfirmDialog`'s existing styles only — no new animation |
+| `success` | `deleteUserDocument` resolves | dialog closes, row fades out then is removed from `items` (after `--duration-fast` 160ms), preview closes if it showed that doc, file-count re-renders | `.animate-fade-out` on the `<li>` (new utility, `fade-out` keyframe: opacity 1→0, scale 1→0.98, `var(--duration-fast)` + `var(--ease-out-premium)`) |
+| `error` | fetch rejects | dialog stays open, inline error text via `ConfirmDialog`'s `error` prop (`role="alert"`, danger color), buttons re-enabled, user can retry or cancel | existing dialog/error styling — matches login/register error pattern |
+
+The new `.animate-fade-out` utility joins the other `animate-*` utilities in `styles.css` and the `prefers-reduced-motion` exclusion list, exactly like the existing ones.
 
 - [ ] **Step 1: Fix the summary clamp in `document-row.tsx`**
 
@@ -358,7 +370,32 @@ export async function deleteUserDocument(
 }
 ```
 
-- [ ] **Step 3: Wire icon buttons + delete state in `documents-browser.tsx`**
+- [ ] **Step 3: Add the `animate-fade-out` utility to `styles.css`**
+
+Add after the `.stagger-item` rule (after line ~352):
+
+```css
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Removed items (e.g. deleted library card) — subtle exit, same cadence as entry */
+.animate-fade-out {
+  animation: fade-out var(--duration-fast) var(--ease-out-premium) both;
+  pointer-events: none;
+}
+```
+
+Then add `.animate-fade-out,` to the `prefers-reduced-motion` exclusion list (line ~690, alongside `.animate-fade-up,` etc.).
+
+- [ ] **Step 4: Wire icon buttons + delete state machine in `documents-browser.tsx`**
 
 1. Update imports:
 
@@ -390,9 +427,24 @@ const [deleteTarget, setDeleteTarget] = useState<UserLibraryDocument | null>(
 );
 const [deleting, setDeleting] = useState(false);
 const [deleteError, setDeleteError] = useState<string | null>(null);
+const [removingId, setRemovingId] = useState<string | null>(null);
+const removeTimerRef = useRef<number | null>(null);
+const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 ```
 
-3. Add the handler after `loadMore`'s closing brace (after line 111):
+3. Add the timer cleanup after the `useEffect` that loads projects (after line 55):
+
+```tsx
+useEffect(() => {
+  return () => {
+    if (removeTimerRef.current !== null) {
+      window.clearTimeout(removeTimerRef.current);
+    }
+  };
+}, []);
+```
+
+4. Add the handler after `loadMore`'s closing brace (after line 111):
 
 ```tsx
 const handleDelete = useCallback(async () => {
@@ -401,11 +453,15 @@ const handleDelete = useCallback(async () => {
   setDeleteError(null);
   try {
     await deleteUserDocument(deleteTarget.id);
-    setItems((prev) => prev.filter((d) => d.id !== deleteTarget.id));
-    setPreviewDoc((prev) =>
-      prev && prev.id === deleteTarget.id ? null : prev,
-    );
+    const deletedId = deleteTarget.id;
     setDeleteTarget(null);
+    setPreviewDoc((prev) => (prev && prev.id === deletedId ? null : prev));
+    setRemovingId(deletedId);
+    removeTimerRef.current = window.setTimeout(() => {
+      setItems((prev) => prev.filter((d) => d.id !== deletedId));
+      setRemovingId((current) => (current === deletedId ? null : current));
+      removeTimerRef.current = null;
+    }, 200);
   } catch (error) {
     setDeleteError(
       error instanceof Error ? error.message : "Could not delete document",
@@ -416,7 +472,16 @@ const handleDelete = useCallback(async () => {
 }, [deleteTarget, deleting]);
 ```
 
-4. Replace the trailing full-width preview button (lines 261-270) with two icon buttons:
+5. Mark the removed row on the `<li>` (line 251):
+
+```tsx
+<li
+  key={doc.id}
+  className={removingId === doc.id ? "animate-fade-out" : undefined}
+>
+```
+
+6. Replace the trailing full-width preview button (lines 261-270) with two icon buttons; the trash button records the trigger ref for focus restore:
 
 ```tsx
 trailing={
@@ -431,6 +496,7 @@ trailing={
       <Eye className="size-4" strokeWidth={1.75} />
     </Button>
     <Button
+      ref={deleteTriggerRef}
       variant="danger"
       size="icon"
       aria-label="Delete document"
@@ -443,7 +509,9 @@ trailing={
 }
 ```
 
-5. Add the `ConfirmDialog` next to `DocumentPreviewModal` (after line 300):
+Note: React 19 forwards `ref` as a regular prop — `Button` spreads `...rest` onto `<button>`, so `ref={deleteTriggerRef}` works with the Task 2 component unchanged. (A single `deleteTriggerRef` is enough for focus restore; per-row refs would be over-engineering.)
+
+7. Add the `ConfirmDialog` next to `DocumentPreviewModal` (after line 300):
 
 ```tsx
 <ConfirmDialog
@@ -457,6 +525,7 @@ trailing={
   confirmLabel="Delete document"
   busy={deleting}
   error={deleteError}
+  restoreFocusRef={deleteTriggerRef}
   onCancel={() => {
     if (deleting) return;
     setDeleteTarget(null);
@@ -466,25 +535,27 @@ trailing={
 />
 ```
 
-- [ ] **Step 4: Verify with typecheck + build**
+- [ ] **Step 5: Verify with typecheck + build**
 
 Run: `pnpm --filter platform exec tsc --noEmit`
 Expected: 0 errors, 0 warnings.
 Run: `pnpm --filter platform build`
 Expected: build succeeds.
 
-- [ ] **Step 5: Manual smoke (dev servers)**
+- [ ] **Step 6: Manual smoke (dev servers)**
 
 Run: `pnpm dev` (root; starts api + worker + platform). In the browser:
 1. Open the Documents library page. Summary text shows max 2 lines with `…` at the end of line 2 — no half-cut third line.
-2. Preview icon button (eye) opens the preview modal.
-3. Trash icon button opens "Delete document?" dialog; Cancel closes it without changes.
-4. Confirm deletes the row from the list; if the document was being previewed, the preview closes.
-5. API check: `DELETE http://localhost:3001/api/documents/<id>?confirm=true` without confirm → 400 `CONFIRM_REQUIRED`; unknown id → 404 `DOCUMENT_NOT_FOUND`.
+2. Preview icon button (eye) opens the preview modal; hover/click shows the standard button transitions.
+3. Trash icon button opens "Delete document?" dialog; Cancel closes it without changes and focus returns to the trash button.
+4. Confirm: dialog closes immediately, the row fades out (≈160ms, `scale(0.98)` + opacity) then disappears; the group file-count updates. If the document was being previewed, the preview closes.
+5. Failure path: temporarily stop the api (`pnpm dev:api` Ctrl+C) and confirm a delete — dialog stays open, inline danger error text appears (`role="alert"`), buttons re-enable; retry after restarting the api succeeds.
+6. API check: `DELETE http://localhost:3001/api/documents/<id>?confirm=true` without confirm → 400 `CONFIRM_REQUIRED`; unknown id → 404 `DOCUMENT_NOT_FOUND`.
+7. With OS reduced-motion on, no row animation plays (utility disabled via media query).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add apps/platform/src/components/documents/document-row.tsx apps/platform/src/components/documents/documents-browser.tsx apps/platform/src/lib/api.ts
-git commit -m "feat: library card icon actions, delete flow, and exact 2-line summary clamp"
+git add apps/platform/src/components/documents/document-row.tsx apps/platform/src/components/documents/documents-browser.tsx apps/platform/src/lib/api.ts apps/platform/src/styles.css
+git commit -m "feat: library card icon actions, animated delete flow, and exact 2-line summary clamp"
 ```
