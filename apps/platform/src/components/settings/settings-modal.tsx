@@ -6,9 +6,18 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Activity, HardDrive, UserRound, X, Zap } from "lucide-react";
+import {
+  Activity,
+  HardDrive,
+  Sparkles,
+  UserRound,
+  X,
+  Zap,
+} from "lucide-react";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
+import { PersonalizationSection } from "#/components/settings/personalization-section";
+import { useProfilePersonalization } from "#/hooks/use-profile";
 import {
   getUserUsageSummary,
   type UserUsageSummary,
@@ -23,7 +32,7 @@ import {
   type ReasoningEffort,
 } from "#/lib/chat/models";
 
-type SettingsSection = "account" | "usage";
+type SettingsSection = "account" | "usage" | "personalization";
 
 export type SettingsModalProps = {
   open: boolean;
@@ -78,6 +87,10 @@ export function SettingsModal({
   const [usage, setUsage] = useState<UserUsageSummary | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
+
+  const profiles = useProfilePersonalization(
+    open && section === "personalization",
+  );
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -191,6 +204,12 @@ export function SettingsModal({
             label="Usage"
             onClick={() => setSection("usage")}
           />
+          <SettingsNavButton
+            active={section === "personalization"}
+            icon={<Sparkles className="size-4" strokeWidth={1.75} />}
+            label="Personalization"
+            onClick={() => setSection("personalization")}
+          />
         </nav>
 
         {/* Same scroll treatment as chat room: hide native bar + InsetScrollbar */}
@@ -223,7 +242,7 @@ export function SettingsModal({
                   </div>
                 </dl>
               </div>
-            ) : (
+            ) : section === "usage" ? (
               <div className="flex flex-col gap-6 animate-fade-in">
                 <div>
                   <h3 className="text-sm font-medium text-text">Usage</h3>
@@ -254,6 +273,15 @@ export function SettingsModal({
                   </>
                 ) : null}
               </div>
+            ) : (
+              <PersonalizationSection
+                data={profiles.data}
+                loading={profiles.loading}
+                error={profiles.error}
+                resetting={profiles.resetting}
+                onResetUser={() => void profiles.resetUser()}
+                onResetProject={(id) => void profiles.resetProject(id)}
+              />
             )}
           </div>
           <InsetScrollbar
