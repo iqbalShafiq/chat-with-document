@@ -39,7 +39,6 @@ import {
 } from "./truncate-memory.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import {
-  enqueueProfileRefresh,
   rescheduleProfileRefresh,
   waitForActiveProfileJob,
 } from "../profiling/queue.js";

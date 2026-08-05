@@ -14,18 +14,19 @@ export async function* tapProfileRefresh<T>(
       yield item;
     }
   } finally {
-    if (!profileConfig().enabled) return;
-    try {
-      await enqueueProfileRefresh({ kind: "user", userId: ctx.userId });
-      if (ctx.projectId) {
-        await enqueueProfileRefresh({
-          kind: "project",
-          userId: ctx.userId,
-          projectId: ctx.projectId,
-        });
+    if (profileConfig().enabled) {
+      try {
+        await enqueueProfileRefresh({ kind: "user", userId: ctx.userId });
+        if (ctx.projectId) {
+          await enqueueProfileRefresh({
+            kind: "project",
+            userId: ctx.userId,
+            projectId: ctx.projectId,
+          });
+        }
+      } catch (error) {
+        console.error("[profile] enqueue after stream failed", error);
       }
-    } catch (error) {
-      console.error("[profile] enqueue after stream failed", error);
     }
   }
 }
