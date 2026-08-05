@@ -13,3 +13,5 @@ export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";
 export * from "./tools/documents.js";
 export * from "./qdrant/chunk-store.js";
+export * from "./profiling/types.js";
+export * from "./profiling/profile-summarizer.js";
