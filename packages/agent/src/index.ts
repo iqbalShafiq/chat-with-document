@@ -15,3 +15,4 @@ export * from "./tools/documents.js";
 export * from "./qdrant/chunk-store.js";
 export * from "./profiling/types.js";
 export * from "./profiling/profile-summarizer.js";
+export * from "./profiling/profile-tool.js";
