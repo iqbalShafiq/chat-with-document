@@ -18,6 +18,7 @@ import {
   type DocumentIngestJobData,
 } from "./lib/queue.js";
 import { getBullmqConnectionOptions } from "./lib/redis.js";
+import { createProfileWorker } from "./modules/profiling/worker.js";
 import { prisma } from "./utils/prisma.js";
 
 console.log("[worker] boot");
@@ -158,6 +159,24 @@ worker.on("failed", (job, error) => {
 
 worker.on("error", (error) => {
   console.error("[worker] error", error);
+});
+
+const profileWorker = createProfileWorker();
+
+profileWorker.on("ready", () => {
+  console.log(`[profile] ready on queue profile-summary`);
+});
+
+profileWorker.on("completed", (job) => {
+  console.log(`[profile] completed ${job.id}`);
+});
+
+profileWorker.on("failed", (job, error) => {
+  console.error(`[profile] failed ${job?.id}`, error);
+});
+
+profileWorker.on("error", (error) => {
+  console.error("[profile] worker error", error);
 });
 
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
