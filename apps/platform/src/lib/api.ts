@@ -669,3 +669,56 @@ export function ingestionStatusLabel(status: DocumentStatus) {
       return "Processing...";
   }
 }
+
+// ─── Profiling (personalization) ─────────────────────────────────────────────
+
+export type ProfileSectionKey =
+  | "facts"
+  | "preferences"
+  | "interests"
+  | "expertise"
+  | "goals";
+
+export type ProfileSections = Record<ProfileSectionKey, string[]>;
+
+export type ExplicitFact = {
+  section: ProfileSectionKey | null;
+  fact: string;
+  createdAt: string;
+};
+
+export type ProfileDto = {
+  sections: ProfileSections;
+  explicitFacts: ExplicitFact[];
+  updatedAt: string;
+};
+
+export type ProfilingPayload = {
+  user: ProfileDto | null;
+  projects: Array<{ id: string; name: string; profile: ProfileDto | null }>;
+};
+
+export async function getProfiling(): Promise<ProfilingPayload> {
+  const response = await apiFetch(`${API_BASE}/api/profiling`);
+  if (!response.ok) throw new Error("Failed to load profiles");
+  return (await response.json()) as ProfilingPayload;
+}
+
+export async function resetUserProfile(): Promise<{ ok: true }> {
+  const response = await apiFetch(`${API_BASE}/api/profiling?scope=user`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error("Failed to reset profile");
+  return (await response.json()) as { ok: true };
+}
+
+export async function resetProjectProfile(
+  projectId: string,
+): Promise<{ ok: true }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/profiling/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error("Failed to reset project profile");
+  return (await response.json()) as { ok: true };
+}
