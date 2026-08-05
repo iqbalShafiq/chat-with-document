@@ -77,7 +77,7 @@ export function PopoverMenu({
       id={listId}
       role="menu"
       aria-label={label}
-      className={`absolute bottom-full z-30 mb-1.5 min-w-[12.5rem] overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated py-0 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${
+      className={`glass-popover absolute bottom-full z-30 mb-1.5 min-w-[12.5rem] overflow-hidden rounded-xl py-0 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${
         align === "end" ? "right-0" : "left-0"
       } ${className}`}
     >

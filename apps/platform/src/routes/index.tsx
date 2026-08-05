@@ -1221,7 +1221,7 @@ function ChatSession({
               >
                 <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
                   <Thread.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
-                    <Thread.ScrollToBottom className="pointer-events-auto glass inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:bg-white/12 hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                    <Thread.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
                       Latest
                     </Thread.ScrollToBottom>
                   </Thread.ViewportFooter>

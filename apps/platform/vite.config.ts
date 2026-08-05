@@ -7,6 +7,11 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const config = defineConfig({
+  server: {
+    // Never silently move the frontend to another port and leave the browser
+    // pointed at a stale instance after a restart.
+    strictPort: true,
+  },
   resolve: {
     tsconfigPaths: true,
     dedupe: ['react', 'react-dom'],

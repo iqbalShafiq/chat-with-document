@@ -1,5 +1,6 @@
 import { ChevronUp, LogOut, Settings } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { SettingsModal } from "#/components/settings/settings-modal";
 import { authClient, userInitials, type SessionUser } from "#/lib/auth-client";
@@ -10,7 +11,13 @@ export function AccountMenu({ user }: { user: SessionUser }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
   const menuId = useId();
   const buttonId = useId();
   const navigate = useNavigate();
@@ -20,9 +27,10 @@ export function AccountMenu({ user }: { user: SessionUser }) {
     if (!open) return;
 
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -34,6 +42,32 @@ export function AccountMenu({ user }: { user: SessionUser }) {
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const rect = root.getBoundingClientRect();
+      setMenuPosition({
+        left: rect.left + 10,
+        bottom: window.innerHeight - rect.top + 8,
+        width: Math.max(0, rect.width - 20),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [open]);
 
@@ -50,18 +84,23 @@ export function AccountMenu({ user }: { user: SessionUser }) {
     }
   };
 
-  return (
-    <div ref={rootRef} className="relative shrink-0 px-2.5 py-3">
-      {open ? (
+  const menu =
+    open && menuPosition
+      ? createPortal(
         <div
+          ref={menuRef}
           id={menuId}
           role="menu"
           aria-labelledby={buttonId}
-          className="absolute bottom-[calc(100%+0.5rem)] left-2.5 right-2.5 z-30 overflow-hidden rounded-2xl bg-canvas-elevated/95 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.65)] ring-1 ring-white/[0.04] animate-scale-in"
-          style={{ transformOrigin: "bottom center" }}
+          className="glass-popover fixed z-[80] overflow-hidden rounded-2xl shadow-[0_12px_40px_-12px_rgb(0_0_0/0.65)] animate-scale-in"
+          style={{
+            left: menuPosition.left,
+            bottom: menuPosition.bottom,
+            width: menuPosition.width,
+            transformOrigin: "bottom center",
+          }}
         >
           <button
-            ref={settingsTriggerRef}
             type="button"
             role="menuitem"
             onClick={() => {
@@ -86,8 +125,14 @@ export function AccountMenu({ user }: { user: SessionUser }) {
             <LogOut className="size-4 shrink-0" strokeWidth={1.75} />
             <span>{loggingOut ? "Signing out…" : "Log out"}</span>
           </button>
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+      : null;
+
+  return (
+    <div ref={rootRef} className="relative shrink-0 px-2.5 py-3">
+      {menu}
 
       <div className="flex min-h-12 items-center gap-3 px-1">
         <span className="glass-pane flex size-9 shrink-0 items-center justify-center rounded-xl text-xs font-semibold tracking-wide text-text">
@@ -102,6 +147,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
           </span>
         </span>
         <button
+          ref={triggerRef}
           id={buttonId}
           type="button"
           aria-haspopup="menu"
@@ -125,7 +171,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
         open={settingsOpen}
         user={user}
         onClose={() => setSettingsOpen(false)}
-        restoreFocusRef={settingsTriggerRef}
+        restoreFocusRef={triggerRef}
       />
     </div>
   );

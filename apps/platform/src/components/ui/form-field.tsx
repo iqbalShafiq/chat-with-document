@@ -7,7 +7,7 @@ import {
 
 /** Shared control chrome (auth + workspace forms). */
 export const FIELD_CONTROL_CLASS =
-  "w-full rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-text outline-none ring-1 ring-white/[0.08] transition-[box-shadow,background-color,ring-color] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:text-text-faint focus:bg-white/[0.055] focus:ring-2 focus:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-50";
+  "glass-field w-full rounded-xl px-3.5 py-2.5 text-sm text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed disabled:opacity-50";
 
 type FieldChromeProps = {
   label: string;

@@ -69,7 +69,7 @@ body {
 */
 .glass-top-bar {
   border: none;
-  background: rgb(5 5 5 / 0.55);
+  background: rgb(5 5 5 / 0.82);
   -webkit-backdrop-filter: blur(24px) saturate(1.2);
   backdrop-filter: blur(24px) saturate(1.2);
 }
@@ -140,8 +140,8 @@ body {
 .glass-composer {
   background: linear-gradient(
     165deg,
-    rgb(18 16 14 / 0.72) 0%,
-    rgb(5 5 5 / 0.64) 100%
+    rgb(10 10 10 / 0.94) 0%,
+    rgb(5 5 5 / 0.91) 100%
   );
   border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow:
@@ -161,8 +161,8 @@ body {
   border-color: rgb(232 163 23 / 0.28);
   background: linear-gradient(
     165deg,
-    rgb(20 17 12 / 0.78) 0%,
-    rgb(6 6 6 / 0.7) 100%
+    rgb(12 12 12 / 0.96) 0%,
+    rgb(6 6 6 / 0.94) 100%
   );
   box-shadow:
     0 20px 52px -14px rgb(0 0 0 / 0.8),
@@ -171,15 +171,57 @@ body {
     0 1px 0 rgb(255 255 255 / 0.06) inset;
 }
 
-/* Small chips (Latest, etc.) */
-.glass {
-  background: rgb(18 16 14 / 0.48);
+/*
+  Interactive glass chrome - keep floating controls and form fields on the
+  same material as the top bar instead of falling back to opaque surfaces.
+*/
+.glass,
+.glass-popover,
+.glass-field {
+  background: rgb(7 7 7 / 0.92);
+  background-clip: padding-box;
   border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow:
-    0 4px 12px -6px rgb(0 0 0 / 0.4),
+    0 8px 24px -12px rgb(0 0 0 / 0.55),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
-  -webkit-backdrop-filter: blur(20px) saturate(1.25);
-  backdrop-filter: blur(20px) saturate(1.25);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.glass-field {
+  will-change: backdrop-filter;
+  transition:
+    border-color 200ms var(--ease-out-premium),
+    box-shadow 200ms var(--ease-out-premium),
+    background 200ms var(--ease-out-premium);
+}
+
+.glass-field:focus,
+.glass-field:focus-visible {
+  border-color: rgb(232 163 23 / 0.28);
+  background: rgb(8 8 8 / 0.95);
+  outline: none;
+  box-shadow:
+    0 8px 24px -12px rgb(0 0 0 / 0.6),
+    0 0 0 3px rgb(232 163 23 / 0.1),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+/*
+  Floating glass lives above scroll/transform layers. Explicit compositor
+  promotion keeps backdrop blur stable after a cold page load, not only HMR.
+*/
+.glass,
+.glass-popover,
+.glass-composer {
+  isolation: isolate;
+  will-change: backdrop-filter;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.glass-interactive:hover {
+  background: rgb(12 12 12 / 0.95);
 }
 
 /*
@@ -334,8 +376,9 @@ body {
   }
 }
 
+/* Do not retain translateY(0): a persistent transform traps backdrop blur. */
 .animate-fade-up {
-  animation: fade-up var(--duration-med) var(--ease-out-premium) both;
+  animation: fade-up var(--duration-med) var(--ease-out-premium) backwards;
 }
 
 .animate-fade-in {
@@ -723,6 +766,8 @@ body {
 
 @media (prefers-reduced-transparency: reduce) {
   .glass,
+  .glass-popover,
+  .glass-field,
   .glass-surface,
   .glass-top-bar,
   .glass-sidebar,
