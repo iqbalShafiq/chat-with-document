@@ -8,12 +8,18 @@ import {
   createCompletionModel,
   createDataAnalysisTools,
   createDocumentTools,
+  createRememberUserProfileTool,
   DEFAULT_COMPLETION_MODEL,
   DEFAULT_COMPLETION_PROVIDER,
   DEFAULT_REASONING_EFFORT,
+  hasProfileContent,
   parseCompletionModel,
   parseReasoningEffort,
+  renderProfileContextText,
   tracing,
+  type AgentContextBlock,
+  type ProfileScope,
+  type ProfileSectionKey,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
@@ -32,6 +38,18 @@ import {
   type TruncateMode,
 } from "./truncate-memory.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
+import {
+  enqueueProfileRefresh,
+  rescheduleProfileRefresh,
+  waitForActiveProfileJob,
+} from "../profiling/queue.js";
+import {
+  appendExplicitFact,
+  loadProfileData,
+  profileConfig,
+  summarizeProfileForScope,
+} from "../profiling/service.js";
+import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
 import {
   ensureChatSession,
   getOrCreateEmptyChatSession,
@@ -69,6 +87,15 @@ const PROJECT_WORKSPACE_INSTRUCTION = [
   "You are answering inside a project workspace.",
   "Only use the active document catalog and tools for this chat.",
   "Do not assume access to other projects or the user's standalone library.",
+].join("\n");
+
+/** Personalization policy (Anvia rule: policy in instructions, facts in context). */
+const PROFILE_INSTRUCTION = [
+  "A user profile may be included in the context.",
+  "Use it to personalize tone, format, and recall of the user's preferences.",
+  "Never reveal the raw profile content to the user.",
+  "If the user explicitly asks you to remember something about them, call the remember_user_profile tool.",
+  "Never invent profile facts not present in the context.",
 ].join("\n");
 
 function extractUserTextForTitle(message: MessageType): string {
@@ -343,6 +370,51 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       }
     }
 
+    const profilingEnabled = profileConfig().enabled;
+
+    const profileContext: AgentContextBlock[] = [];
+    let profileTool: ReturnType<typeof createRememberUserProfileTool> | undefined;
+
+    if (profilingEnabled) {
+      const userProfile = await loadProfileData({ kind: "user", userId: user.id });
+      if (userProfile && hasProfileContent(userProfile)) {
+        profileContext.push({
+          id: "user_profile",
+          text: renderProfileContextText(userProfile, "User profile"),
+        });
+      }
+
+      if (projectId) {
+        const projectProfile = await loadProfileData({
+          kind: "project",
+          userId: user.id,
+          projectId,
+        });
+        if (projectProfile && hasProfileContent(projectProfile)) {
+          profileContext.push({
+            id: "project_profile",
+            text: renderProfileContextText(projectProfile, "Project profile"),
+          });
+        }
+      }
+
+      const profileScope: ProfileScope = projectId
+        ? { kind: "project", userId: user.id, projectId }
+        : { kind: "user", userId: user.id };
+
+      profileTool = createRememberUserProfileTool({
+        scope: profileScope,
+        waitForActiveJob: () => waitForActiveProfileJob(profileScope),
+        appendFact: (input) =>
+          appendExplicitFact(profileScope, {
+            section: input.section as ProfileSectionKey | null,
+            fact: input.fact,
+          }),
+        refreshNow: () => summarizeProfileForScope(profileScope),
+        reschedule: () => rescheduleProfileRefresh(profileScope),
+      });
+    }
+
     const agent = createAgent({
       agentId: "my-agent",
       model: createCompletionModel(model),
@@ -351,9 +423,17 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       additionalInstructions: [
         catalogInstruction,
         ...(projectInstruction ? [projectInstruction] : []),
+        ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
       ],
-      additionalContext: projectContext ? [projectContext] : [],
-      additionalTools: [...createDataAnalysisTools(), ...documentTools],
+      additionalContext: [
+        ...(projectContext ? [projectContext] : []),
+        ...profileContext,
+      ],
+      additionalTools: [
+        ...createDataAnalysisTools(),
+        ...documentTools,
+        ...(profileTool ? [profileTool] : []),
+      ],
       memory: prismaMemory,
     });
 
@@ -377,8 +457,12 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     });
 
     // After the client consumes the stream: dual-write citations metadata + Langfuse score.
-    const tracedStream = tapStreamComplete(auditedStream, () =>
-      finalizeAssistantCitations(sessionId, user.id),
+    // Profile tap runs outermost so it enqueues the background refresh last.
+    const tracedStream = tapProfileRefresh(
+      tapStreamComplete(auditedStream, () =>
+        finalizeAssistantCitations(sessionId, user.id),
+      ),
+      { userId: user.id, projectId },
     );
 
     return createEventStream(tracedStream, {
