@@ -116,6 +116,10 @@ Factory agent yang dipakai API:
    | `PLATFORM_ORIGIN` | Origin frontend untuk CORS + trustedOrigins (default `http://localhost:3000`) |
    | `PORT` | Port API (default `3001`) |
    | `NODE_ENV` | Environment untuk Langfuse (`development`, dll.) |
+   | `PROFILE_ENABLED` | Master toggle for user profiling (default `true`) |
+   | `PROFILE_REFRESH_DELAY_MINUTES` | Debounce window for background profile refresh (default `15`) |
+   | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
+   | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`gpt-5.6-luna`) |
 
 3. **Start Postgres**
 
@@ -207,6 +211,20 @@ Tools ini di-inject ke agent saat handle chat:
 | `linear_regression` | regresi sederhana `y = slope * x + intercept`, residual, prediksi opsional |
 
 Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
+
+## User profiling
+
+- Per-user (all chats) and per-project profiles are summarized in the background
+  (BullMQ `profile-summary` queue) from user messages only — tool calls and
+  assistant replies are excluded.
+- Profiles are injected into every chat as context blocks (`user_profile`,
+  `project_profile`); policy lives in agent instructions.
+- The agent can persist explicit facts immediately via `remember_user_profile`
+  when the user says "remember…".
+- View/reset profiles in Settings → Personalization (`GET`/`DELETE /api/profiling`).
+- Failed summary jobs are not retried forever: after `attempts: 3` the job dies
+  and the next chat re-opens a refresh window (watermark-derived delta keeps
+  nothing lost).
 
 ## Frontend notes
 
