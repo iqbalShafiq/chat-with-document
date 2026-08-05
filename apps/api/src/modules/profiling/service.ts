@@ -129,6 +129,13 @@ export async function saveProfileResult(
   scope: ProfileScope,
   input: { sections: ProfileSections; watermark: Date },
 ): Promise<void> {
+  const current = await loadProfileData(scope);
+  if (current && current.lastProcessedAt > input.watermark) {
+    console.log(
+      `[profile] skip stale save for ${scope.kind} scope (stored watermark newer than computed)`,
+    );
+    return;
+  }
   const data = {
     sections: input.sections as unknown as Prisma.InputJsonValue,
     lastProcessedAt: input.watermark,
@@ -250,11 +257,14 @@ export async function summarizeProfileForScope(scope: ProfileScope): Promise<{
   const delta = await loadProfileDelta(scope, since);
   if (delta.length === 0) return { processed: 0, watermark: existing?.lastProcessedAt ?? null };
 
-  const { sections } = await summarizeProfileDelta({
+  const { sections, usage } = await summarizeProfileDelta({
     model: profileConfig().model,
     existing: existing ?? { sections: EMPTY_PROFILE_SECTIONS, explicitFacts: [] },
     delta,
   });
+  console.log(
+    `[profile] summary usage ${scope.kind} scope: ${usage.inputTokens} in / ${usage.outputTokens} out`,
+  );
 
   const watermark = new Date(delta[delta.length - 1]!.createdAt);
   await saveProfileResult(scope, { sections, watermark });

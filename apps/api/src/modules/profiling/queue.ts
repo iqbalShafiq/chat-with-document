@@ -147,6 +147,9 @@ export async function waitForActiveProfileJob(
   const events = new QueueEvents(PROFILE_QUEUE, {
     connection: getBullmqConnectionOptions(),
   });
+  events.on("error", (error) => {
+    console.error("[profile] queue events error", error);
+  });
   try {
     await job.waitUntilFinished(events, ttlMs);
   } catch {
