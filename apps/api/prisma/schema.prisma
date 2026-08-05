@@ -131,8 +131,9 @@ model Project {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  documents Document[]
-  chats     ChatSession[]
+  documents      Document[]
+  chats          ChatSession[]
+  projectProfiles ProjectProfile[]
 
   @@index([userId, lastOpenedAt])
   @@index([userId, updatedAt])
@@ -152,6 +153,39 @@ model ChatSession {
 
   @@index([userId, projectId, updatedAt])
   @@index([userId, updatedAt])
+}
+
+// ─── User profiling (personalization layer; additive to AgentMemory*) ──────
+
+model UserProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  /// Profile sections from the summarizer: { facts, preferences, interests, expertise, goals }
+  sections        Json     @default("{}")
+  /// Explicit facts from remember_user_profile tool: [{ section, fact, createdAt }]
+  explicitFacts   Json     @default("[]")
+  /// Watermark: user messages with createdAt <= this value are summarized.
+  lastProcessedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("user_profile")
+}
+
+model ProjectProfile {
+  id              String   @id @default(cuid())
+  userId          String
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sections        Json     @default("{}")
+  explicitFacts   Json     @default("[]")
+  lastProcessedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, projectId])
+  @@index([userId])
+  @@map("project_profile")
 }
 
 // ─── Documents (user-owned, session-grouped) ────────────────────────────────
