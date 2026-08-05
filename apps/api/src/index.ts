@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { chatRouter } from "./modules/chat/router.js";
 import { documentsRouter } from "./modules/documents/router.js";
 import { projectsRouter } from "./modules/projects/router.js";
+import { profilingRouter } from "./modules/profiling/router.js";
 import { usageRouter } from "./modules/usage/router.js";
 import { auth } from "./modules/auth/auth.js";
 import { createAppCors } from "./lib/cors.js";
@@ -13,6 +14,7 @@ const app = new Hono()
   .route("/api/chat", chatRouter)
   .route("/api/documents", documentsRouter)
   .route("/api/projects", projectsRouter)
+  .route("/api/profiling", profilingRouter)
   .route("/api/usage", usageRouter);
 
 serve(
