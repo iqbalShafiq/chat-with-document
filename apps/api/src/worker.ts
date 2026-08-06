@@ -10,9 +10,10 @@ import {
   runDocumentOcr,
   upsertDocumentChunks,
   type DocumentChunkMetadata,
+  type DocumentPageImage,
 } from "@assingment/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
-import { getObjectBuffer } from "./lib/r2.js";
+import { buildPageImageR2Key, getObjectBuffer, putObject } from "./lib/r2.js";
 import {
   DOCUMENT_INGEST_QUEUE,
   type DocumentIngestJobData,
@@ -44,6 +45,43 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   const fileBuffer = await getObjectBuffer(r2Key);
   const ocr = await runDocumentOcr({ filename, data: fileBuffer });
 
+  const pageImages = new Map<number, DocumentPageImage[]>();
+
+  for (const page of ocr.pages) {
+    const stored: DocumentPageImage[] = [];
+    await Promise.all(
+      page.images.map(async (image) => {
+        try {
+          const r2Key = buildPageImageR2Key({
+            userId,
+            sessionId,
+            documentId,
+            pageIndex: page.index,
+            imageId: image.id,
+            mediaType: image.mediaType,
+          });
+          await putObject(r2Key, Buffer.from(image.base64, "base64"), image.mediaType);
+          stored.push({
+            id: image.id,
+            r2Key,
+            mediaType: image.mediaType,
+            topLeftX: image.topLeftX,
+            topLeftY: image.topLeftY,
+            bottomRightX: image.bottomRightX,
+            bottomRightY: image.bottomRightY,
+            ...(image.annotation === undefined ? {} : { annotation: image.annotation }),
+          });
+        } catch (error) {
+          console.error(
+            `[worker] page image upload failed ${documentId} page ${page.index} image ${image.id}`,
+            error,
+          );
+        }
+      }),
+    );
+    pageImages.set(page.index, stored);
+  }
+
   const pageSummaries: string[] = [];
 
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -59,6 +97,8 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
           pageIndex: page.index,
           summary,
           rawMarkdown: page.markdown,
+          images: (pageImages.get(page.index) ??
+            []) as unknown as Prisma.InputJsonValue,
         },
       });
     }

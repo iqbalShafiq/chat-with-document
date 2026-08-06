@@ -108,3 +108,32 @@ export async function deleteObject(key: string) {
     }),
   );
 }
+
+export function buildPageImageR2Key(input: {
+  userId: string;
+  sessionId: string;
+  documentId: string;
+  pageIndex: number;
+  imageId: string;
+  mediaType: string;
+}): string {
+  const ext = mediaTypeToExtension(input.mediaType);
+  return `users/${input.userId}/sessions/${input.sessionId}/${input.documentId}/pages/${input.pageIndex}/images/${input.imageId}.${ext}`;
+}
+
+function mediaTypeToExtension(mediaType: string): string {
+  switch (mediaType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/svg+xml":
+      return "svg";
+    default:
+      return "img";
+  }
+}
