@@ -1,19 +1,18 @@
 import { Hono } from "hono";
-import {
-  DEFAULT_COMPLETION_MODEL,
-  DEFAULT_COMPLETION_PROVIDER,
-  DEFAULT_REASONING_EFFORT,
-  parseCompletionModel,
-  parseReasoningEffort,
-} from "@assingment/agent";
-import { createEventStream } from "@anvia/server";
+import { DEFAULT_COMPLETION_MODEL } from "@assingment/agent";
+import { createEventStream, resumeStreamEvents } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
-import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
+import { getRedis } from "../../lib/redis.js";
+import { getStreamStore } from "../../lib/resumable-stream-store.js";
+import { findActiveModel } from "../models/service.js";
 import {
-  finalizeAssistantCitations,
-  tapStreamComplete,
-} from "./finalize-assistant-citations.js";
+  ACTIVE_RUN_KEY,
+  enqueueChatRun,
+  releaseActiveRun,
+  tryAcquireActiveRun,
+} from "./run-queue.js";
+import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import { listSessionsPage } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
@@ -21,9 +20,6 @@ import {
   truncateSessionMemory,
   type TruncateMode,
 } from "./truncate-memory.js";
-import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
-import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
-import { buildChatRunInput } from "./build-run-input.js";
 import { computeContextUsage } from "./context-usage.js";
 import {
   ensureChatSession,
@@ -55,6 +51,42 @@ function extractUserTextForTitle(message: MessageType): string {
     .map((part) => part.text.trim())
     .filter(Boolean);
   return parts.join(" ");
+}
+
+function parseResume(value: unknown): { streamId: string; after: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.streamId !== "string" || !record.streamId) return null;
+  if (typeof record.after !== "number" || !Number.isInteger(record.after) || record.after < 0) return null;
+  return { streamId: record.streamId, after: record.after };
+}
+
+async function* withStartTimeout<T>(
+  source: AsyncIterable<T>,
+  streamId: string,
+  timeoutMs: number,
+): AsyncGenerator<T> {
+  const store = getStreamStore();
+  const iterator = source[Symbol.asyncIterator]();
+  let receivedAny = false;
+  const timer = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
+  while (true) {
+    const outcome = await Promise.race([
+      iterator.next().then((result) => ({ kind: "next" as const, result })),
+      receivedAny ? new Promise<never>(() => {}) : timer,
+    ]);
+    if (outcome === "timeout") {
+      await store.close({ streamId, status: "error" }).catch(() => {});
+      // Let the underlying source observe the closed stream and end.
+      const ended = await iterator.next().catch(() => ({ done: true as const }));
+      if (ended.done) break;
+      continue;
+    }
+    const { result } = outcome;
+    if (result.done) break;
+    receivedAny = true;
+    yield result.value;
+  }
 }
 
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
@@ -228,106 +260,102 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   .post("/", async (c) => {
     const user = c.get("user");
     const body = await c.req.json();
-    const sessionId = requireSessionId(
-      body.sessionId ?? body.metadata?.sessionId,
-    );
-    if (!sessionId) {
-      return c.json({ error: "sessionId is required" }, 400);
+    const sessionId = requireSessionId(body.sessionId ?? body.metadata?.sessionId);
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+
+    const resume = parseResume(body.resume);   // { streamId, after } | null
+    const store = getStreamStore();
+
+    if (resume) {
+      const meta = await store.getMeta(resume.streamId);
+      if (!meta || meta.userId !== user.id || meta.sessionId !== sessionId) {
+        return c.json({ error: "stream not found", code: "STREAM_NOT_FOUND" }, 404);
+      }
+      const events = resumeStreamEvents({ id: resume.streamId, after: resume.after, store });
+      return createEventStream(events, { format: "jsonl" });
+    }
+
+    // New run
+    const modelRaw = body.model;
+    const model = modelRaw && typeof modelRaw === "string" && modelRaw.trim()
+      ? modelRaw.trim()
+      : DEFAULT_COMPLETION_MODEL;
+    const modelInfo = await findActiveModel(model);
+    if (!modelInfo) return c.json({ error: `unknown model: ${model}` }, 400);
+
+    const effortRaw = body.reasoningEffort;
+    let reasoningEffort: string | null = null;
+    if (effortRaw && typeof effortRaw === "string" && effortRaw.trim()) {
+      if (!modelInfo.reasoningEfforts.includes(effortRaw)) {
+        return c.json({ error: `model ${model} does not support reasoning effort: ${effortRaw}` }, 400);
+      }
+      reasoningEffort = effortRaw;
     }
 
     const messages = body.messages as MessageType[];
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) {
-      return c.json({ error: "messages are required" }, 400);
-    }
+    if (!lastMessage) return c.json({ error: "messages are required" }, 400);
 
-    // model / reasoningEffort: omit → defaults; invalid non-empty → 400
-    const modelRaw = body.model;
-    const effortRaw = body.reasoningEffort;
-    const model =
-      modelRaw === undefined || modelRaw === null || modelRaw === ""
-        ? DEFAULT_COMPLETION_MODEL
-        : parseCompletionModel(modelRaw);
-    if (!model) {
-      return c.json(
-        {
-          error:
-            "model must be one of: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol",
-        },
-        400,
-      );
-    }
-    const reasoningEffort =
-      effortRaw === undefined || effortRaw === null || effortRaw === ""
-        ? DEFAULT_REASONING_EFFORT
-        : parseReasoningEffort(effortRaw);
-    if (!reasoningEffort) {
-      return c.json(
-        { error: "reasoningEffort must be one of: low, medium, high" },
-        400,
-      );
-    }
-
-    // Membership from product table — never trust client projectId.
-    const chatSession = await ensureChatSession({
-      sessionId,
-      userId: user.id,
-      projectId: null,
-    });
-    const projectId = chatSession.projectId;
+    const chatSession = await ensureChatSession({ sessionId, userId: user.id, projectId: null });
     await touchChatSession(user.id, sessionId);
 
     const promptMessage = stripUserAttachments(lastMessage);
-
-    // Durable list title from first user prompt (no-op if already set).
     const titleSeed = extractUserTextForTitle(promptMessage);
     if (titleSeed) {
-      void setChatSessionTitleIfEmpty({
-        userId: user.id,
-        sessionId,
-        title: titleSeed,
-      }).catch((error) => {
+      void setChatSessionTitleIfEmpty({ userId: user.id, sessionId, title: titleSeed }).catch((error) => {
         console.error("[chat] set title failed", error);
       });
     }
 
-    const runInput = await buildChatRunInput({
-      sessionId,
-      userId: user.id,
-      model,
-      reasoningEffort,
-    });
-    const agent = runInput.agent;
+    const streamId = crypto.randomUUID();
+    const acquired = await tryAcquireActiveRun(sessionId, streamId, 2 * 60 * 60);
+    if (!acquired) {
+      return c.json({ error: "Session is already processing in another tab", code: "RUN_ACTIVE" }, 409);
+    }
 
-    const stream = agent
-      .session(sessionId, { userId: user.id })
-      .prompt(promptMessage)
-      .withTrace({
-        sessionId,
-        userId: user.id,
-        ...(projectId ? { projectId } : {}),
-      })
-      .stream();
+    try {
+      await store.openWithMeta({ streamId }, {
+        userId: user.id, sessionId, modelId: model, reasoningEffort,
+      });
+    } catch (error) {
+      await releaseActiveRun(sessionId, streamId);
+      throw error;
+    }
 
-    const auditedStream = tapAgentStreamUsage(stream, {
-      userId: user.id,
-      sessionId,
-      provider: DEFAULT_COMPLETION_PROVIDER,
-      model,
-      reasoningEffort,
-      agentId: "my-agent",
+    await enqueueChatRun(`chat:${streamId}`, {
+      streamId, sessionId, userId: user.id, model, reasoningEffort,
+      promptMessage, createdAt: new Date().toISOString(),
     });
 
-    // After the client consumes the stream: dual-write citations metadata + Langfuse score.
-    // Profile tap runs outermost so it enqueues the background refresh last.
-    const tracedStream = tapProfileRefresh(
-      tapStreamComplete(auditedStream, () =>
-        finalizeAssistantCitations(sessionId, user.id),
-      ),
-      { userId: user.id, projectId },
+    const events = withStartTimeout(
+      resumeStreamEvents({ id: streamId, after: 0, store }),
+      streamId,
+      30_000,
     );
-
-    return createEventStream(tracedStream, {
-      format: "jsonl",
+    return createEventStream(events, { format: "jsonl" });
+  })
+  .get("/run-status", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireSessionId(c.req.query("sessionId"));
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    const store = getStreamStore();
+    const streamId = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
+    if (!streamId) return c.json({ streamId: null, status: "idle", lastEventId: null });
+    const state = await store.status({ streamId });
+    return c.json({
+      streamId,
+      status: state.status === "running" ? "running" : state.status,
+      lastEventId: state.lastEventId,
     });
+  })
+  .post("/stop", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.json();
+    const streamId = typeof body.streamId === "string" ? body.streamId : "";
+    if (!streamId) return c.json({ error: "streamId is required" }, 400);
+    const store = getStreamStore();
+    const meta = await store.getMeta(streamId);
+    if (!meta || meta.userId !== user.id) return c.json({ error: "stream not found" }, 404);
+    await store.setStopFlag(streamId);
+    return c.json({ ok: true });
   });
