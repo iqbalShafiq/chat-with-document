@@ -1,6 +1,6 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer } from "@anvia/react-ui";
-import { ArrowUp, Square } from "lucide-react";
+import { FileX, ArrowUp, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
@@ -9,6 +9,10 @@ import type {
   ReasoningEffort,
 } from "#/lib/chat/models";
 import type { SessionDocument } from "#/lib/api";
+import type { AttachmentReject } from "#/lib/documents/upload-file";
+
+/** 3 cards × 2.5rem + 2 gaps × 0.375rem — taller stacks scroll. */
+const ATTACHMENT_ERRORS_MAX_HEIGHT = "max-h-[8.25rem]";
 
 /**
  * Input shell only — must sit inside Composer.Root.
@@ -21,12 +25,15 @@ export function ChatComposer({
   chatStatus,
   isIngesting,
   composerError,
+  attachmentErrors,
   composerInputRef,
   model,
   reasoningEffort,
   onModelChange,
   onReasoningChange,
   onLinkedDocuments,
+  onAttachmentRejected,
+  onDismissAttachmentError,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -34,17 +41,47 @@ export function ChatComposer({
   chatStatus: UseChatStatus;
   isIngesting: boolean;
   composerError: string | null;
+  attachmentErrors: AttachmentReject[];
   composerInputRef: RefObject<HTMLDivElement | null>;
   model: CompletionModelId;
   reasoningEffort: ReasoningEffort;
   onModelChange: (model: CompletionModelId) => void;
   onReasoningChange: (effort: ReasoningEffort) => void;
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
+  onAttachmentRejected?: (rejects: AttachmentReject[]) => void;
+  onDismissAttachmentError: (id: string) => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
+      {attachmentErrors.length > 0 ? (
+        <div
+          className={`chat-scroll flex flex-col gap-1.5 overflow-y-auto overscroll-contain pr-0.5 ${ATTACHMENT_ERRORS_MAX_HEIGHT}`}
+          role="alert"
+        >
+          {attachmentErrors.map((reject) => (
+            <div
+              key={reject.id}
+              className="flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in"
+            >
+              <FileX className="size-4 shrink-0" strokeWidth={1.75} />
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {reject.message}
+              </span>
+              <button
+                type="button"
+                aria-label={`Dismiss error for ${reject.filename}`}
+                onClick={() => onDismissAttachmentError(reject.id)}
+                className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-danger/70 transition hover:bg-white/[0.06] hover:text-danger active:scale-[0.96]"
+              >
+                <X className="size-3.5" strokeWidth={2} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {composerError ? (
         <div className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
           {composerError}
@@ -77,6 +114,7 @@ export function ChatComposer({
               activeDocumentIds={activeDocumentIds}
               disabled={busy}
               onLinkedDocuments={onLinkedDocuments}
+              onRejectedFiles={onAttachmentRejected}
             />
 
             {chatStatus === "streaming" ? (

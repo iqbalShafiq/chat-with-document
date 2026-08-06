@@ -157,7 +157,7 @@ export async function createDocumentUpload(input: {
     throw new Error("Unsupported file type");
   }
   if (input.data.byteLength > MAX_FILE_BYTES) {
-    throw new Error("File exceeds 10MB limit");
+    throw new Error(`${input.filename} exceeds 10MB limit`);
   }
   if (input.data.byteLength === 0) {
     throw new Error("File is empty");
