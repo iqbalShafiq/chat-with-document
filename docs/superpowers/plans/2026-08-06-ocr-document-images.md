@@ -1568,9 +1568,9 @@ Run: `pnpm --filter api db:migrate` (requires local Postgres). If the DB is unav
 
 - [ ] **Step 3: Manual smoke checklist**
 
-1. Upload an image-rich PDF/image in a global chat → poll status until `ready`; confirm worker logs show image uploads and `DocumentPage.images` rows populated.
+1. Upload an image-rich PDF/image in a global chat → poll status until `ready`; confirm worker logs show image uploads and `DocumentPage.images` rows populated. **Also grep a `rawMarkdown` value and a Qdrant chunk for `data:image`** — if Mistral embeds base64 data URLs inside the page markdown itself, file a follow-up to strip them before persist (final-review finding; the memory sanitizer only strips image content PARTS, not base64 inside text).
 2. Ask a question requiring a visual ("what does the chart on page 2 show?") → tool `get_document_page_images` appears with thumbnails; assistant answer may embed `![](...)` mid-stream with skeleton indicator.
-3. Open document preview → images render per page; click → lightbox opens; test zoom buttons, wheel zoom, double-click, `+`/`-`/`0`, `Escape`, focus return.
+3. Open document preview → images render per page; click → lightbox opens; test zoom buttons, wheel zoom, double-click, `+`/`-`/`0`, `Escape`, focus return, drag-pan when zoomed.
 4. Repeat steps 1–3 in a **project chat** — same behavior (shared components/tooling).
 5. Reload chat history → tool cards show text summary (no base64 blobs in network/DB).
 6. Check `memorySession.messages` JSON in Postgres → no `"type":"image"` parts.
