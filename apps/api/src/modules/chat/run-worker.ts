@@ -51,7 +51,7 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
   const status = await store.status({ streamId });
   if (status.status !== "running") {
     console.log(`[chat-run] skip ${streamId} (${status.status})`);
-    await releaseActiveRun(sessionId, streamId);
+    await releaseActiveRun(sessionId, streamId).catch(() => {});
     return;
   }
 
@@ -129,7 +129,7 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     }
 
     await store.close({ streamId, status: "completed" });
-    await releaseActiveRun(sessionId, streamId);
+    await releaseActiveRun(sessionId, streamId).catch(() => {});
     await getRedis().del(STOP_KEY(streamId)).catch(() => {});
   } catch (error) {
     await failChatRun(streamId, error, { sessionId, userId, promptMessage });
@@ -139,7 +139,8 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
 
 /**
  * Idempotent failure handling: mark the stream error (only if still running),
- * persist the failed pair, release the active-run lock.
+ * persist the failed pair (only for runs that were genuinely in-flight),
+ * release the active-run lock.
  */
 export async function failChatRun(
   streamId: string,
@@ -148,9 +149,11 @@ export async function failChatRun(
 ): Promise<void> {
   const store = getStreamStore();
   const message = error instanceof Error ? error.message : String(error);
+  let wasRunning = false;
   try {
     const status = await store.status({ streamId });
     if (status.status === "running") {
+      wasRunning = true;
       await store.append({ streamId, event: { type: "error", error: message } });
       await store.close({ streamId, status: "error" });
     }
@@ -158,10 +161,14 @@ export async function failChatRun(
     console.error("[chat-run] fail close failed", e);
   }
   if (ctx) {
-    try {
-      await writeFailedPair(ctx.sessionId, ctx.userId, ctx.promptMessage, message);
-    } catch (e) {
-      console.error("[chat-run] failed pair write failed", e);
+    // Only runs that were genuinely in-flight get the failed pair; a skipped
+    // or already-completed stream must not gain a spurious error message.
+    if (wasRunning) {
+      try {
+        await writeFailedPair(ctx.sessionId, ctx.userId, ctx.promptMessage, message);
+      } catch (e) {
+        console.error("[chat-run] failed pair write failed", e);
+      }
     }
     try {
       await releaseActiveRun(ctx.sessionId, streamId);
