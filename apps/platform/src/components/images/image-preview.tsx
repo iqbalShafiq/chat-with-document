@@ -3,9 +3,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -33,6 +35,15 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const titleId = useId();
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -59,6 +70,59 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const clampPan = useCallback(
+    (x: number, y: number, currentScale: number) => {
+      const container = containerRef.current;
+      if (!container || currentScale <= 1) return { x: 0, y: 0 };
+      const maxX = ((currentScale - 1) * container.clientWidth) / 2;
+      const maxY = ((currentScale - 1) * container.clientHeight) / 2;
+      return {
+        x: Math.min(maxX, Math.max(-maxX, x)),
+        y: Math.min(maxY, Math.max(-maxY, y)),
+      };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (scale <= 1) setPan({ x: 0, y: 0 });
+  }, [scale]);
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (scale <= 1) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: pan.x,
+      originY: pan.y,
+    };
+  };
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPan(() =>
+      clampPan(
+        drag.originX + (event.clientX - drag.startX),
+        drag.originY + (event.clientY - drag.startY),
+        scale,
+      ),
+    );
+  };
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragStateRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // already released
+    }
+  };
+
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -78,6 +142,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!current) return;
+      if (event.repeat) return;
       if (event.key === "+" || event.key === "=") {
         event.preventDefault();
         zoomBy(ZOOM_STEP);
@@ -93,8 +158,6 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   }, [current, zoomBy, resetView]);
 
   if (typeof window === "undefined") return null;
-
-  const titleId = "image-preview-title";
 
   return (
     <ImagePreviewContext.Provider value={{ open }}>
@@ -119,6 +182,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
               </h2>
 
               <div
+                ref={containerRef}
                 className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden"
                 onWheel={(event) => {
                   event.preventDefault();
@@ -127,6 +191,10 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 onDoubleClick={() => {
                   zoomBy(scale >= 2 ? 1 / ZOOM_STEP : ZOOM_STEP);
                 }}
+                onPointerDown={startDrag}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
               >
                 <img
                   src={current.src}
