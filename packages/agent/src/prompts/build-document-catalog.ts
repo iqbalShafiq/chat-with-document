@@ -13,7 +13,7 @@ export function buildDocumentCatalogInstruction(
 
 Important:
 - There are **no active documents** linked to this chat right now.
-- Document tools (find_documents, search_document_pages, get_document_next_page) are **not available**.
+- Document tools (find_documents, search_document_pages, get_document_next_page, get_document_page_images) are **not available**.
 - Do **not** invent document ids, page numbers, or citations from earlier turns.
 - Prior conversation may mention documents that were since unlinked — treat that as history only; you cannot retrieve their content unless the user re-adds them.
 - Answer from general knowledge, or ask the user to attach/link documents if the question requires source material.`;
