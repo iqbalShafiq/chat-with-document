@@ -2,8 +2,8 @@ import { prisma } from "../../utils/prisma.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
 import { ensureChatSession } from "../chat/chat-session.js";
-import { deleteDocumentChunks } from "@assingment/agent";
-import { deleteObject } from "../../lib/r2.js";
+import { deleteDocumentChunks, normalizePageImages } from "@assingment/agent";
+import { deleteObject, getObjectBuffer } from "../../lib/r2.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -583,7 +583,7 @@ export async function getDocumentPreview(input: {
       ? input.pageIndex
       : 0;
 
-  const pages = await prisma.documentPage.findMany({
+  const rawPages = await prisma.documentPage.findMany({
     where: {
       documentId: document.id,
       pageIndex: {
@@ -596,8 +596,19 @@ export async function getDocumentPreview(input: {
       pageIndex: true,
       summary: true,
       rawMarkdown: true,
+      images: true,
     },
   });
+
+  const pages = rawPages.map((page) => ({
+    pageIndex: page.pageIndex,
+    summary: page.summary,
+    rawMarkdown: page.rawMarkdown,
+    images: normalizePageImages(page.images).map(({ id, mediaType }) => ({
+      id,
+      mediaType,
+    })),
+  }));
 
   return {
     id: document.id,
@@ -630,6 +641,14 @@ export async function deleteUserDocument(input: {
 
   if (!document) throw new DocumentNotFoundError();
 
+  const pages = await prisma.documentPage.findMany({
+    where: { documentId: document.id },
+    select: { images: true },
+  });
+  const imageKeys = pages.flatMap((page) =>
+    normalizePageImages(page.images).map((image) => image.r2Key),
+  );
+
   await prisma.document.delete({ where: { id: document.id } });
 
   if (document.r2Key) {
@@ -642,6 +661,13 @@ export async function deleteUserDocument(input: {
       });
     }
   }
+  for (const key of imageKeys) {
+    try {
+      await deleteObject(key);
+    } catch (error) {
+      console.error("[documents] page image R2 delete failed", { key, error });
+    }
+  }
   try {
     await deleteDocumentChunks(document.id);
   } catch (error) {
@@ -652,6 +678,43 @@ export async function deleteUserDocument(input: {
   }
 
   return { deleted: true };
+}
+
+export async function getPageImage(input: {
+  userId: string;
+  documentId: string;
+  pageIndex: number;
+  imageId: string;
+}): Promise<{ data: Uint8Array; mediaType: string } | null> {
+  const document = await prisma.document.findFirst({
+    where: { id: input.documentId, userId: input.userId, status: "ready" },
+    select: { id: true },
+  });
+  if (!document) return null;
+
+  const page = await prisma.documentPage.findFirst({
+    where: { documentId: document.id, pageIndex: input.pageIndex },
+    select: { images: true },
+  });
+  if (!page) return null;
+
+  const image = normalizePageImages(page.images).find(
+    (entry) => entry.id === input.imageId,
+  );
+  if (!image) return null;
+
+  try {
+    const data = await getObjectBuffer(image.r2Key);
+    return { data, mediaType: image.mediaType };
+  } catch (error) {
+    console.error("[documents] page image fetch failed", {
+      documentId: input.documentId,
+      pageIndex: input.pageIndex,
+      imageId: input.imageId,
+      error,
+    });
+    return null;
+  }
 }
 
 /** Re-export for call sites that need explicit link after create paths. */
