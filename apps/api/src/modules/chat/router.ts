@@ -1,30 +1,13 @@
 import { Hono } from "hono";
-import { prisma } from "../../utils/prisma.js";
-import { getObjectBuffer } from "../../lib/r2.js";
 import {
-  buildDocumentCatalogInstruction,
-  createAgent,
-  createChunkSearchService,
-  createCompletionModel,
-  createDataAnalysisTools,
-  createDocumentTools,
-  createRememberUserProfileTool,
   DEFAULT_COMPLETION_MODEL,
   DEFAULT_COMPLETION_PROVIDER,
   DEFAULT_REASONING_EFFORT,
-  DOCUMENT_IMAGE_INSTRUCTION,
-  hasProfileContent,
   parseCompletionModel,
   parseReasoningEffort,
-  renderProfileContextText,
-  tracing,
-  type AgentContextBlock,
-  type ProfileScope,
-  type ProfileSectionKey,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { resolveActiveDocuments } from "../documents/service.js";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import {
@@ -32,7 +15,6 @@ import {
   tapStreamComplete,
 } from "./finalize-assistant-citations.js";
 import { listSessionsPage } from "./session-list.js";
-import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
   TruncateTargetNotFoundError,
@@ -40,17 +22,8 @@ import {
   type TruncateMode,
 } from "./truncate-memory.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
-import {
-  rescheduleProfileRefresh,
-  waitForActiveProfileJob,
-} from "../profiling/queue.js";
-import {
-  appendExplicitFact,
-  loadProfileData,
-  profileConfig,
-  summarizeProfileForScope,
-} from "../profiling/service.js";
 import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
+import { buildChatRunInput } from "./build-run-input.js";
 import {
   ensureChatSession,
   getOrCreateEmptyChatSession,
@@ -70,34 +43,6 @@ function requireSessionId(value: unknown): string | null {
 function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
-
-/** Request facts only (Anvia context). Policy goes in instructions. */
-function buildProjectWorkspaceContext(input: {
-  name: string;
-  description: string | null;
-}): string {
-  const lines = ["Project workspace", `Name: ${input.name}`];
-  if (input.description?.trim()) {
-    lines.push(`Description: ${input.description.trim()}`);
-  }
-  return lines.join("\n");
-}
-
-/** Durable project-scoped behavior (Anvia instructions), only when in a project. */
-const PROJECT_WORKSPACE_INSTRUCTION = [
-  "You are answering inside a project workspace.",
-  "Only use the active document catalog and tools for this chat.",
-  "Do not assume access to other projects or the user's standalone library.",
-].join("\n");
-
-/** Personalization policy (Anvia rule: policy in instructions, facts in context). */
-const PROFILE_INSTRUCTION = [
-  "A user profile may be included in the context.",
-  "Use it to personalize tone, format, and recall of the user's preferences.",
-  "Never reveal the raw profile content to the user.",
-  "If the user explicitly asks you to remember something about them, call the remember_user_profile tool.",
-  "Never invent profile facts not present in the context.",
-].join("\n");
 
 function extractUserTextForTitle(message: MessageType): string {
   if (message.role !== "user") return "";
@@ -331,114 +276,13 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       });
     }
 
-    const prismaMemory = createSanitizedMemoryStore(prisma);
-    const sessionDocuments = await resolveActiveDocuments({
-      userId: user.id,
+    const runInput = await buildChatRunInput({
       sessionId,
-      projectId,
-    });
-    const catalogInstruction =
-      buildDocumentCatalogInstruction(sessionDocuments);
-    const hasActiveDocuments = sessionDocuments.length > 0;
-
-    // Document tools only when the session has linked ready docs — avoids the
-    // model re-searching unlinked files based on conversation memory.
-    const documentTools = hasActiveDocuments
-      ? createDocumentTools({
-          sessionId,
-          userId: user.id,
-          projectId,
-          prisma,
-          searchService: createChunkSearchService(),
-          fetchPageImage: (r2Key) => getObjectBuffer(r2Key),
-        })
-      : [];
-
-    let projectContext:
-      | { text: string; id: string }
-      | undefined;
-    let projectInstruction: string | undefined;
-    if (projectId) {
-      const project = await prisma.project.findFirst({
-        where: { id: projectId, userId: user.id },
-        select: { name: true, description: true },
-      });
-      if (project) {
-        projectContext = {
-          id: "project_workspace",
-          text: buildProjectWorkspaceContext(project),
-        };
-        projectInstruction = PROJECT_WORKSPACE_INSTRUCTION;
-      }
-    }
-
-    const profilingEnabled = profileConfig().enabled;
-
-    const profileContext: AgentContextBlock[] = [];
-    let profileTool: ReturnType<typeof createRememberUserProfileTool> | undefined;
-
-    if (profilingEnabled) {
-      const userProfile = await loadProfileData({ kind: "user", userId: user.id });
-      if (userProfile && hasProfileContent(userProfile)) {
-        profileContext.push({
-          id: "user_profile",
-          text: renderProfileContextText(userProfile, "User profile"),
-        });
-      }
-
-      if (projectId) {
-        const projectProfile = await loadProfileData({
-          kind: "project",
-          userId: user.id,
-          projectId,
-        });
-        if (projectProfile && hasProfileContent(projectProfile)) {
-          profileContext.push({
-            id: "project_profile",
-            text: renderProfileContextText(projectProfile, "Project profile"),
-          });
-        }
-      }
-
-      const profileScope: ProfileScope = projectId
-        ? { kind: "project", userId: user.id, projectId }
-        : { kind: "user", userId: user.id };
-
-      profileTool = createRememberUserProfileTool({
-        scope: profileScope,
-        waitForActiveJob: () => waitForActiveProfileJob(profileScope),
-        appendFact: (input) =>
-          appendExplicitFact(profileScope, {
-            section: input.section as ProfileSectionKey | null,
-            fact: input.fact,
-          }),
-        refreshNow: () => summarizeProfileForScope(profileScope),
-        reschedule: () => rescheduleProfileRefresh(profileScope),
-      });
-    }
-
-    const agent = createAgent({
-      agentId: "my-agent",
-      model: createCompletionModel(model),
+      userId: user.id,
+      model,
       reasoningEffort,
-      tracing: tracing,
-      additionalInstructions: [
-        catalogInstruction,
-        ...(hasActiveDocuments ? [DOCUMENT_IMAGE_INSTRUCTION] : []),
-        ...(projectInstruction ? [projectInstruction] : []),
-        ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
-      ],
-      additionalContext: [
-        ...(projectContext ? [projectContext] : []),
-        ...profileContext,
-      ],
-      additionalTools: [
-        ...createDataAnalysisTools(),
-        ...documentTools,
-        ...(profileTool ? [profileTool] : []),
-      ],
-      memory: prismaMemory,
     });
+    const agent = runInput.agent;
 
     const stream = agent
       .session(sessionId, { userId: user.id })
