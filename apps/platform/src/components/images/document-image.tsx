@@ -1,57 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { isDocumentImagePath, resolveDocumentImageUrl } from "#/lib/api";
+import { useCallback } from "react";
 import { useImagePreview } from "#/components/images/image-preview";
+import { useDocumentImage } from "#/components/images/use-document-image";
 
-type LoadState = "loading" | "ready" | "error";
-
-export function useDocumentImage(src: string) {
-  const internal = isDocumentImagePath(src);
-  const [state, setState] = useState<LoadState>(() =>
-    internal ? "loading" : "ready",
-  );
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    if (!internal) return;
-    let cancelled = false;
-    let createdUrl: string | null = null;
-    setState("loading");
-
-    fetch(resolveDocumentImageUrl(src), { credentials: "include" })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Image fetch failed: ${response.status}`);
-        return response.blob();
-      })
-      .then((blob) => {
-        if (cancelled) return;
-        createdUrl = URL.createObjectURL(blob);
-        setObjectUrl(createdUrl);
-        setState("ready");
-      })
-      .catch(() => {
-        if (!cancelled) setState("error");
-      });
-
-    return () => {
-      cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
-    };
-  }, [src, internal, retryKey]);
-
-  const retry = useCallback(() => {
-    setObjectUrl(null);
-    setState("loading");
-    setRetryKey((current) => current + 1);
-  }, []);
-
-  return {
-    internal,
-    displaySrc: internal ? (objectUrl ?? src) : src,
-    state,
-    retry,
-  };
-}
+export { useDocumentImage };
 
 export function DocumentImage({
   src,

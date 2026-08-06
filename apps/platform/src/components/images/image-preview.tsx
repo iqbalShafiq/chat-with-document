@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Minus, Plus, RotateCcw, X } from "lucide-react";
+import { useDocumentImage } from "#/components/images/use-document-image";
 
 type ImagePreviewInput = { src: string; alt?: string };
 type ImagePreviewContextValue = { open: (input: ImagePreviewInput) => void };
@@ -44,6 +45,11 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     originY: number;
   } | null>(null);
   const titleId = useId();
+  // Internal document URLs need an authenticated fetch (plain <img> cannot
+  // send the session cookie cross-origin) — same path as inline DocumentImage.
+  const { internal, displaySrc, state, retry } = useDocumentImage(
+    current?.src ?? "",
+  );
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -196,15 +202,37 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
               >
-                <img
-                  src={current.src}
-                  alt={current.alt ?? "Document image"}
-                  draggable={false}
-                  className="max-h-full max-w-full object-contain transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-                  style={{
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
-                  }}
-                />
+                {internal && state === "loading" ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="skeleton-shimmer size-40 rounded-xl" />
+                    <span className="text-[11px] text-text-faint">
+                      Loading image…
+                    </span>
+                  </div>
+                ) : internal && state === "error" ? (
+                  <div className="flex flex-col items-center gap-2.5">
+                    <p className="text-xs text-danger" role="alert">
+                      Image failed to load.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={retry}
+                      className="inline-flex cursor-pointer items-center rounded-lg border border-hairline bg-surface px-3 py-1.5 text-[11px] font-medium text-text transition hover:bg-surface-elevated active:scale-[0.97]"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <img
+                    src={displaySrc}
+                    alt={current.alt ?? "Document image"}
+                    draggable={false}
+                    className="max-h-full max-w-full object-contain transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+                    style={{
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                    }}
+                  />
+                )}
               </div>
 
               <div className="flex shrink-0 items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2.5">
