@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { prisma } from "../../utils/prisma.js";
-import { createPrismaMemoryStore } from "@anvia/memory-prisma";
+import { getObjectBuffer } from "../../lib/r2.js";
 import {
   buildDocumentCatalogInstruction,
   createAgent,
@@ -12,6 +12,7 @@ import {
   DEFAULT_COMPLETION_MODEL,
   DEFAULT_COMPLETION_PROVIDER,
   DEFAULT_REASONING_EFFORT,
+  DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   parseCompletionModel,
   parseReasoningEffort,
@@ -31,6 +32,7 @@ import {
   tapStreamComplete,
 } from "./finalize-assistant-citations.js";
 import { listSessionsPage } from "./session-list.js";
+import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
   TruncateTargetNotFoundError,
@@ -329,7 +331,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       });
     }
 
-    const prismaMemory = createPrismaMemoryStore(prisma);
+    const prismaMemory = createSanitizedMemoryStore(prisma);
     const sessionDocuments = await resolveActiveDocuments({
       userId: user.id,
       sessionId,
@@ -348,6 +350,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
           projectId,
           prisma,
           searchService: createChunkSearchService(),
+          fetchPageImage: (r2Key) => getObjectBuffer(r2Key),
         })
       : [];
 
@@ -421,6 +424,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       tracing: tracing,
       additionalInstructions: [
         catalogInstruction,
+        ...(hasActiveDocuments ? [DOCUMENT_IMAGE_INSTRUCTION] : []),
         ...(projectInstruction ? [projectInstruction] : []),
         ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
       ],
