@@ -24,6 +24,7 @@ import {
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
 import { buildChatRunInput } from "./build-run-input.js";
+import { computeContextUsage } from "./context-usage.js";
 import {
   ensureChatSession,
   getOrCreateEmptyChatSession,
@@ -160,6 +161,20 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     // (or on first chat POST). Missing session → empty history is fine.
     const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
+  })
+  .get("/context-usage", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireSessionId(c.req.query("sessionId"));
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+
+    const modelRaw = c.req.query("model");
+    const model = modelRaw && modelRaw.trim() ? modelRaw.trim() : DEFAULT_COMPLETION_MODEL;
+    const effortRaw = c.req.query("reasoningEffort");
+    const reasoningEffort = effortRaw && effortRaw.trim() ? effortRaw.trim() : null;
+
+    return c.json(
+      await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
+    );
   })
   .post("/truncate", async (c) => {
     const user = c.get("user");
