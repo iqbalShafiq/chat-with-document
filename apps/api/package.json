@@ -11,6 +11,7 @@
     "db:studio": "pnpm with-env prisma studio",
     "db:generate": "pnpm with-env prisma generate",
     "db:deploy": "pnpm with-env prisma migrate deploy",
+    "db:seed": "pnpm with-env tsx prisma/seed.ts",
     "smoke:auth": "pnpm with-env tsx scripts/smoke-auth.ts",
     "with-env": "dotenv -e ../../.env -- "
   },
