@@ -1,8 +1,12 @@
 import { AuroraBackground } from "#/components/layout/aurora-background";
 import { ChatTopBar } from "#/components/layout/chat-top-bar";
-import { ChatSidebar } from "#/components/sidebar/chat-sidebar";
+import {
+  ChatSidebar,
+  type WorkspaceViewMode,
+} from "#/components/sidebar/chat-sidebar";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
+import type { ProjectListItem } from "#/lib/api";
 import { useEffect, useState, type ReactNode } from "react";
 
 function useIsMobile(breakpoint = 768) {
@@ -33,8 +37,16 @@ export function AppShell({
   hasMoreSessions,
   onSelectSession,
   onNewChat,
+  newChatDisabled = false,
   onLoadMoreSessions,
   onRetrySessions,
+  viewMode,
+  recentProjects,
+  activeProjectId,
+  onOpenAllChats,
+  onOpenProjects,
+  onOpenDocuments,
+  onOpenRecentProject,
   children,
 }: {
   user: SessionUser;
@@ -47,8 +59,16 @@ export function AppShell({
   hasMoreSessions: boolean;
   onSelectSession: (sessionId: string) => void;
   onNewChat: () => void;
+  newChatDisabled?: boolean;
   onLoadMoreSessions: () => void;
   onRetrySessions: () => void;
+  viewMode: WorkspaceViewMode;
+  recentProjects: ProjectListItem[];
+  activeProjectId: string | null;
+  onOpenAllChats: () => void;
+  onOpenProjects: () => void;
+  onOpenDocuments: () => void;
+  onOpenRecentProject: (project: ProjectListItem) => void;
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
@@ -86,8 +106,16 @@ export function AppShell({
     hasMore: hasMoreSessions,
     onSelect: onSelectSession,
     onNewChat,
+    newChatDisabled,
     onLoadMore: onLoadMoreSessions,
     onRetry: onRetrySessions,
+    viewMode,
+    recentProjects,
+    activeProjectId,
+    onOpenAllChats,
+    onOpenProjects,
+    onOpenDocuments,
+    onOpenRecentProject,
   };
 
   return (
@@ -137,6 +165,7 @@ export function AppShell({
             isMobile={isMobile}
             onToggleSidebar={toggleSidebar}
             onNewChat={onNewChat}
+            newChatDisabled={newChatDisabled}
           />
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {/*

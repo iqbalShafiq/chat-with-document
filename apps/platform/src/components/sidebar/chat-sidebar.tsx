@@ -3,7 +3,23 @@ import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
-import { PanelLeftClose, SquarePen, X } from "lucide-react";
+import type { ProjectListItem } from "#/lib/api";
+import {
+  FileText,
+  FolderKanban,
+  MessagesSquare,
+  PanelLeftClose,
+  SquarePen,
+  X,
+} from "lucide-react";
+
+export type WorkspaceViewMode =
+  | "standalone"
+  | "projects-index"
+  | "project-workspace"
+  | "documents-index";
+
+const RECENT_PROJECTS_MAX = 5;
 
 export function ChatSidebar({
   user,
@@ -15,11 +31,19 @@ export function ChatSidebar({
   hasMore,
   onSelect,
   onNewChat,
+  newChatDisabled = false,
   onLoadMore,
   onRetry,
   onCollapse,
   onCloseMobile,
   showClose,
+  viewMode,
+  recentProjects,
+  activeProjectId,
+  onOpenAllChats,
+  onOpenProjects,
+  onOpenDocuments,
+  onOpenRecentProject,
 }: {
   user: SessionUser;
   sessions: SessionSummary[];
@@ -30,13 +54,25 @@ export function ChatSidebar({
   hasMore: boolean;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
+  /** True when the active chat is still an empty "New chat" draft. */
+  newChatDisabled?: boolean;
   onLoadMore: () => void;
   onRetry: () => void;
   /** Desktop: collapse sidebar. Hidden on mobile drawer. */
   onCollapse?: () => void;
   onCloseMobile?: () => void;
   showClose?: boolean;
+  viewMode: WorkspaceViewMode;
+  recentProjects: ProjectListItem[];
+  activeProjectId: string | null;
+  /** Leave project / browser views and return to standalone chat history. */
+  onOpenAllChats: () => void;
+  onOpenProjects: () => void;
+  onOpenDocuments: () => void;
+  onOpenRecentProject: (project: ProjectListItem) => void;
 }) {
+  const visibleProjects = recentProjects.slice(0, RECENT_PROJECTS_MAX);
+
   return (
     <aside className="glass-sidebar flex h-full w-full min-h-0 flex-col">
       <div className="flex h-14 shrink-0 items-center gap-1.5 px-2.5">
@@ -71,12 +107,18 @@ export function ChatSidebar({
         <button
           type="button"
           onClick={() => {
+            if (newChatDisabled) return;
             onNewChat();
             onCloseMobile?.();
           }}
+          disabled={newChatDisabled}
           aria-label="New chat"
-          title="New chat"
-          className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+          title={
+            newChatDisabled
+              ? "Already on a new chat — send a message first"
+              : "New chat"
+          }
+          className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-text-muted disabled:active:scale-100"
         >
           <SquarePen className="size-4" strokeWidth={1.75} />
         </button>
@@ -94,13 +136,120 @@ export function ChatSidebar({
       </div>
 
       <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {/* Workspace nav — compact spacing (same as original menu rhythm) */}
+        <div className="px-2 pb-2">
+          <p className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
+            Workspace
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenAllChats();
+              onCloseMobile?.();
+            }}
+            className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              viewMode === "standalone"
+                ? "bg-white/[0.08] text-text"
+                : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+            }`}
+          >
+            <MessagesSquare className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">
+              All chats
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenProjects();
+              onCloseMobile?.();
+            }}
+            className={`mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              viewMode === "projects-index"
+                ? "bg-white/[0.08] text-text"
+                : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+            }`}
+          >
+            <FolderKanban className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">Projects</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onOpenDocuments();
+              onCloseMobile?.();
+            }}
+            className={`mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              viewMode === "documents-index"
+                ? "bg-white/[0.08] text-text"
+                : "text-text-muted hover:bg-white/[0.05] hover:text-text"
+            }`}
+          >
+            <FileText className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">
+              Documents
+            </span>
+          </button>
+        </div>
+
+        {/* Recent projects sit above date groups (TODAY / …), history-list style */}
+        {visibleProjects.length > 0 ? (
+          <div className="flex flex-col px-2.5">
+            <section className="flex flex-col gap-0.5">
+              <h3 className="sticky top-0 z-10 bg-transparent px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-[0.12em] text-text-faint">
+                Recent projects
+              </h3>
+              <ul className="flex list-none flex-col gap-0.5 p-0">
+                {visibleProjects.map((project, i) => {
+                  const selected =
+                    viewMode === "project-workspace" &&
+                    activeProjectId === project.id;
+                  return (
+                    <li
+                      key={project.id}
+                      className="stagger-item"
+                      style={{ ["--i" as string]: Math.min(i, 12) }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onOpenRecentProject(project);
+                          onCloseMobile?.();
+                        }}
+                        title={project.name}
+                        aria-current={selected ? "page" : undefined}
+                        className={`flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
+                          selected
+                            ? "glass-pane font-medium text-text"
+                            : "text-text-muted hover:bg-white/[0.035] hover:text-text"
+                        }`}
+                      >
+                        <span className="truncate">{project.name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+        ) : null}
+
         <SessionHistoryList
           sessions={sessions}
-          activeSessionId={activeSessionId}
+          activeSessionId={
+            viewMode === "standalone" || viewMode === "project-workspace"
+              ? activeSessionId
+              : ""
+          }
           loading={loading}
           loadingMore={loadingMore}
           error={error}
           hasMore={hasMore}
+          /** Slightly more top pad when Recent projects sits above TODAY */
+          firstGroupTopPad={visibleProjects.length > 0 ? "pt-2" : "pt-1"}
           onSelect={(id) => {
             onSelect(id);
             onCloseMobile?.();

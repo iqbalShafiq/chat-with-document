@@ -1,8 +1,8 @@
 import { Eye, EyeOff } from "lucide-react";
+import { FIELD_CONTROL_CLASS } from "#/components/ui/form-field";
 import { useId, useState, type InputHTMLAttributes } from "react";
 
-const FIELD_CLASS =
-  "w-full rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-text outline-none ring-1 ring-white/[0.08] transition-[box-shadow,background-color,ring-color] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] placeholder:text-text-faint focus:bg-white/[0.055] focus:ring-2 focus:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-50";
+const FIELD_CLASS = FIELD_CONTROL_CLASS;
 
 export function AuthTextField({
   label,

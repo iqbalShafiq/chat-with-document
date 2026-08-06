@@ -4,6 +4,7 @@ export type SessionListItem = {
   sessionId: string;
   updatedAt: string;
   title: string;
+  projectId: string | null;
 };
 
 export type SessionListPage = {
@@ -37,16 +38,6 @@ function parseCursor(
 
 function encodeCursor(updatedAt: Date, sessionId: string): string {
   return `${updatedAt.toISOString()}|${sessionId}`;
-}
-
-/** True if `row` comes after `cursor` in desc (updatedAt, sessionId) order. */
-function isAfterCursor(
-  row: { updatedAt: Date; sessionId: string },
-  cursor: { updatedAt: Date; sessionId: string },
-): boolean {
-  if (row.updatedAt.getTime() < cursor.updatedAt.getTime()) return true;
-  if (row.updatedAt.getTime() > cursor.updatedAt.getTime()) return false;
-  return row.sessionId.localeCompare(cursor.sessionId) < 0;
 }
 
 function extractTextFromMessageJson(message: unknown): string | null {
@@ -96,12 +87,25 @@ function truncateTitle(text: string): string {
 async function titlesForSessions(
   userId: string,
   sessionIds: string[],
+  cached: Map<string, string | null>,
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (sessionIds.length === 0) return map;
 
+  const needMemory: string[] = [];
+  for (const id of sessionIds) {
+    const title = cached.get(id);
+    if (title && title.trim()) {
+      map.set(id, title.trim());
+    } else {
+      needMemory.push(id);
+    }
+  }
+
+  if (needMemory.length === 0) return map;
+
   const sessions = await prisma.agentMemorySession.findMany({
-    where: { userId, sessionId: { in: sessionIds } },
+    where: { userId, sessionId: { in: needMemory } },
     select: {
       sessionId: true,
       messages: {
@@ -125,59 +129,78 @@ async function titlesForSessions(
 }
 
 /**
- * Distinct sessions ordered by latest updatedAt desc, with pagination cursor.
- *
- * Pragmatic note: we read a capped window (MAX_SCAN), dedupe in memory, then
- * page. True SQL DISTINCT+cursor is more work than this app needs while
- * session counts stay small (personal / assignment scale).
+ * List chat sessions from durable ChatSession rows.
+ * - projectId omitted / null → standalone only (projectId IS NULL)
+ * - projectId set → that project only
  */
-const MAX_SCAN = 300;
-
 export async function listSessionsPage(input: {
   userId: string;
   cursor?: string;
   limit?: string;
+  projectId?: string | null;
 }): Promise<SessionListPage> {
   const limit = clampLimit(input.limit);
   const cursor = parseCursor(input.cursor);
 
-  const rows = await prisma.agentMemorySession.findMany({
-    where: { userId: input.userId },
-    select: { sessionId: true, updatedAt: true },
-    orderBy: [{ updatedAt: "desc" }, { sessionId: "desc" }],
-    take: MAX_SCAN,
+  const where: {
+    userId: string;
+    projectId?: string | null;
+    OR?: Array<Record<string, unknown>>;
+  } = { userId: input.userId };
+
+  if (input.projectId) {
+    where.projectId = input.projectId;
+  } else {
+    // Standalone only (default product list)
+    where.projectId = null;
+  }
+
+  if (cursor) {
+    where.OR = [
+      { updatedAt: { lt: cursor.updatedAt } },
+      {
+        AND: [
+          { updatedAt: cursor.updatedAt },
+          { id: { lt: cursor.sessionId } },
+        ],
+      },
+    ];
+  }
+
+  const rows = await prisma.chatSession.findMany({
+    where,
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    select: {
+      id: true,
+      updatedAt: true,
+      title: true,
+      projectId: true,
+    },
   });
 
-  const seen = new Set<string>();
-  const unique: Array<{ sessionId: string; updatedAt: Date }> = [];
-  for (const row of rows) {
-    if (seen.has(row.sessionId)) continue;
-    seen.add(row.sessionId);
-    unique.push({ sessionId: row.sessionId, updatedAt: row.updatedAt });
-  }
+  const page = rows.slice(0, limit);
+  const hasMore = rows.length > limit;
 
-  let start = 0;
-  if (cursor) {
-    const idx = unique.findIndex((row) => isAfterCursor(row, cursor));
-    start = idx < 0 ? unique.length : idx;
-  }
-
-  const page = unique.slice(start, start + limit);
+  const cachedTitles = new Map(
+    page.map((r) => [r.id, r.title] as const),
+  );
   const titles = await titlesForSessions(
     input.userId,
-    page.map((p) => p.sessionId),
+    page.map((p) => p.id),
+    cachedTitles,
   );
 
   const items: SessionListItem[] = page.map((row) => ({
-    sessionId: row.sessionId,
+    sessionId: row.id,
     updatedAt: row.updatedAt.toISOString(),
-    title: titles.get(row.sessionId) ?? "New chat",
+    title: titles.get(row.id) ?? row.title ?? "New chat",
+    projectId: row.projectId,
   }));
 
   const last = page[page.length - 1];
-  const hasMore = start + limit < unique.length;
   const nextCursor =
-    hasMore && last ? encodeCursor(last.updatedAt, last.sessionId) : null;
+    hasMore && last ? encodeCursor(last.updatedAt, last.id) : null;
 
   return { items, nextCursor };
 }

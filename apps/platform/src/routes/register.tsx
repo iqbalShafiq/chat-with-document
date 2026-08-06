@@ -108,6 +108,7 @@ function RegisterPage() {
           Already have an account?{" "}
           <Link
             to="/login"
+            search={{ redirect: undefined }}
             className="font-medium text-accent transition hover:text-accent-hover"
           >
             Sign in

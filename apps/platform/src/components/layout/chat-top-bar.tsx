@@ -7,12 +7,14 @@ export function ChatTopBar({
   isMobile,
   onToggleSidebar,
   onNewChat,
+  newChatDisabled = false,
 }: {
   title: string;
   sidebarOpen: boolean;
   isMobile: boolean;
   onToggleSidebar: () => void;
   onNewChat: () => void;
+  newChatDisabled?: boolean;
 }) {
   const showLeftControl = isMobile || !sidebarOpen;
   const showNewChat = isMobile || !sidebarOpen;
@@ -63,10 +65,18 @@ export function ChatTopBar({
       {showNewChat ? (
         <button
           type="button"
-          onClick={onNewChat}
+          onClick={() => {
+            if (newChatDisabled) return;
+            onNewChat();
+          }}
+          disabled={newChatDisabled}
           aria-label="New chat"
-          title="New chat"
-          className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
+          title={
+            newChatDisabled
+              ? "Already on a new chat — send a message first"
+              : "New chat"
+          }
+          className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-text-muted disabled:active:scale-100"
         >
           <SquarePen className="size-4" strokeWidth={1.75} />
         </button>

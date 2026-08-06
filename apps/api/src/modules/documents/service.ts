@@ -1,6 +1,9 @@
 import { prisma } from "../../utils/prisma.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
+import { ensureChatSession } from "../chat/chat-session.js";
+import { deleteDocumentChunks } from "@assingment/agent";
+import { deleteObject } from "../../lib/r2.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -35,6 +38,22 @@ export class DocumentStorageQuotaError extends Error {
     this.usedBytes = input.usedBytes;
     this.maxBytes = input.maxBytes;
     this.fileBytes = input.fileBytes;
+  }
+}
+
+export class DocumentConfirmRequiredError extends Error {
+  readonly code = "CONFIRM_REQUIRED";
+  constructor(message = "confirm=true is required to delete a document") {
+    super(message);
+    this.name = "DocumentConfirmRequiredError";
+  }
+}
+
+export class DocumentNotFoundError extends Error {
+  readonly code = "DOCUMENT_NOT_FOUND";
+  constructor(message = "Document not found") {
+    super(message);
+    this.name = "DocumentNotFoundError";
   }
 }
 
@@ -112,12 +131,27 @@ async function ensureSessionLink(input: {
   });
 }
 
+export class DocumentProjectMismatchError extends Error {
+  readonly code = "PROJECT_MISMATCH";
+  constructor(
+    message = "projectId does not match this chat session membership",
+  ) {
+    super(message);
+    this.name = "DocumentProjectMismatchError";
+  }
+}
+
 export async function createDocumentUpload(input: {
   userId: string;
   sessionId: string;
   filename: string;
   mimeType: string;
   data: Uint8Array;
+  /**
+   * Optional client hint. Existing ChatSession.projectId is source of truth;
+   * mismatch is rejected. Used only when creating a brand-new session row.
+   */
+  projectId?: string | null;
 }) {
   if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
     throw new Error("Unsupported file type");
@@ -127,6 +161,36 @@ export async function createDocumentUpload(input: {
   }
   if (input.data.byteLength === 0) {
     throw new Error("File is empty");
+  }
+
+  const clientProjectId =
+    typeof input.projectId === "string" && input.projectId.trim()
+      ? input.projectId.trim()
+      : null;
+
+  // ChatSession membership wins. Never let client override an existing row.
+  const existingChat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+
+  let projectId: string | null;
+  if (existingChat) {
+    if (
+      clientProjectId !== null &&
+      clientProjectId !== existingChat.projectId
+    ) {
+      throw new DocumentProjectMismatchError();
+    }
+    projectId = existingChat.projectId;
+  } else {
+    // First touch: register session with optional client project (validated inside).
+    const session = await ensureChatSession({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      projectId: clientProjectId,
+    });
+    projectId = session.projectId;
   }
 
   const storage = await getUserStorageUsage(input.userId);
@@ -142,6 +206,7 @@ export async function createDocumentUpload(input: {
     data: {
       userId: input.userId,
       sessionId: input.sessionId,
+      projectId,
       filename: input.filename,
       mimeType: input.mimeType,
       sizeBytes: input.data.byteLength,
@@ -227,13 +292,26 @@ export async function getDocumentStatus(input: {
   return document;
 }
 
-/** Ready documents linked to a chat session (active docs). */
-export async function listSessionDocuments(sessionId: string, userId: string) {
+/**
+ * Active docs for agent + UI rail: session links, intersected with project
+ * corpus when the chat belongs to a project. Standalone uses projectId null.
+ */
+export async function resolveActiveDocuments(input: {
+  userId: string;
+  sessionId: string;
+  projectId: string | null;
+}) {
   const links = await prisma.documentSession.findMany({
     where: {
-      sessionId,
-      userId,
-      document: { status: "ready", userId },
+      sessionId: input.sessionId,
+      userId: input.userId,
+      document: {
+        status: "ready",
+        userId: input.userId,
+        ...(input.projectId
+          ? { projectId: input.projectId }
+          : { projectId: null }),
+      },
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -253,6 +331,20 @@ export async function listSessionDocuments(sessionId: string, userId: string) {
   return links.map((link) => link.document);
 }
 
+/** Ready documents linked to a chat session (active docs). Same filter as agent. */
+export async function listSessionDocuments(sessionId: string, userId: string) {
+  const chat = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { projectId: true },
+  });
+  // No ChatSession yet → treat as standalone corpus.
+  return resolveActiveDocuments({
+    userId,
+    sessionId,
+    projectId: chat?.projectId ?? null,
+  });
+}
+
 export type UserDocumentLibraryItem = {
   id: string;
   filename: string;
@@ -263,6 +355,8 @@ export type UserDocumentLibraryItem = {
   createdAt: string;
   /** Origin session id (upload site). */
   originSessionId: string;
+  projectId: string | null;
+  projectName: string | null;
 };
 
 export type UserDocumentLibraryPage = {
@@ -270,11 +364,21 @@ export type UserDocumentLibraryPage = {
   nextCursor: string | null;
 };
 
+export type LibraryScope = "attach" | "browser";
+
 export async function listUserDocuments(input: {
   userId: string;
   query?: string;
   cursor?: string;
   limit?: number | string;
+  /**
+   * attach (default): attach modal source.
+   *  - with projectId → only that project corpus
+   *  - without → standalone only (projectId IS NULL)
+   * browser: all ready docs for Documents page (includes project labels)
+   */
+  scope?: LibraryScope;
+  projectId?: string | null;
 }): Promise<UserDocumentLibraryPage> {
   const limit = clampLimit(
     input.limit,
@@ -283,6 +387,7 @@ export async function listUserDocuments(input: {
   );
   const cursor = decodeLibraryCursor(input.cursor);
   const q = input.query?.trim() ?? "";
+  const scope: LibraryScope = input.scope === "browser" ? "browser" : "attach";
 
   const andFilters: Array<Record<string, unknown>> = [];
   if (q) {
@@ -313,6 +418,19 @@ export async function listUserDocuments(input: {
     });
   }
 
+  // Membership filter for attach vs browser
+  if (scope === "attach") {
+    if (input.projectId) {
+      andFilters.push({ projectId: input.projectId });
+    } else {
+      andFilters.push({ projectId: null });
+    }
+  } else if (input.projectId) {
+    // The browser can narrow the all-documents view without changing the
+    // attach scope's corpus isolation rules above.
+    andFilters.push({ projectId: input.projectId });
+  }
+
   const rows = await prisma.document.findMany({
     where: {
       userId: input.userId,
@@ -330,6 +448,8 @@ export async function listUserDocuments(input: {
       pageCount: true,
       createdAt: true,
       sessionId: true,
+      projectId: true,
+      project: { select: { name: true } },
     },
   });
 
@@ -347,6 +467,8 @@ export async function listUserDocuments(input: {
       pageCount: doc.pageCount,
       createdAt: doc.createdAt.toISOString(),
       originSessionId: doc.sessionId,
+      projectId: doc.projectId,
+      projectName: doc.project?.name ?? null,
     })),
     nextCursor:
       hasMore && last
@@ -367,11 +489,20 @@ export async function linkDocumentsToSession(input: {
     return { linked: [] as Awaited<ReturnType<typeof listSessionDocuments>> };
   }
 
+  const chat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+  // No ChatSession yet → treat as standalone (legacy / first open).
+  const projectId = chat?.projectId ?? null;
+
   const owned = await prisma.document.findMany({
     where: {
       userId: input.userId,
       id: { in: uniqueIds },
       status: "ready",
+      // Hard isolation: only same corpus membership may be linked.
+      projectId,
     },
     select: { id: true },
   });
@@ -478,6 +609,49 @@ export async function getDocumentPreview(input: {
     summary: document.summary,
     pages,
   };
+}
+
+/**
+ * Permanently delete a user's document. DB rows (pages + session links) go
+ * first via FK cascade; R2 object + Qdrant chunks are best-effort after
+ * commit — mirroring deleteProject.
+ */
+export async function deleteUserDocument(input: {
+  userId: string;
+  documentId: string;
+  confirm: boolean;
+}): Promise<{ deleted: true }> {
+  if (!input.confirm) throw new DocumentConfirmRequiredError();
+
+  const document = await prisma.document.findFirst({
+    where: { id: input.documentId, userId: input.userId },
+    select: { id: true, r2Key: true },
+  });
+
+  if (!document) throw new DocumentNotFoundError();
+
+  await prisma.document.delete({ where: { id: document.id } });
+
+  if (document.r2Key) {
+    try {
+      await deleteObject(document.r2Key);
+    } catch (error) {
+      console.error("[documents] R2 delete failed", {
+        key: document.r2Key,
+        error,
+      });
+    }
+  }
+  try {
+    await deleteDocumentChunks(document.id);
+  } catch (error) {
+    console.error("[documents] Qdrant delete failed", {
+      documentId: document.id,
+      error,
+    });
+  }
+
+  return { deleted: true };
 }
 
 /** Re-export for call sites that need explicit link after create paths. */

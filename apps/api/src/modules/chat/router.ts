@@ -8,16 +8,22 @@ import {
   createCompletionModel,
   createDataAnalysisTools,
   createDocumentTools,
+  createRememberUserProfileTool,
   DEFAULT_COMPLETION_MODEL,
   DEFAULT_COMPLETION_PROVIDER,
   DEFAULT_REASONING_EFFORT,
+  hasProfileContent,
   parseCompletionModel,
   parseReasoningEffort,
+  renderProfileContextText,
   tracing,
+  type AgentContextBlock,
+  type ProfileScope,
+  type ProfileSectionKey,
 } from "@assingment/agent";
 import { createEventStream } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { listSessionDocuments } from "../documents/service.js";
+import { resolveActiveDocuments } from "../documents/service.js";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import {
@@ -32,6 +38,24 @@ import {
   type TruncateMode,
 } from "./truncate-memory.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
+import {
+  rescheduleProfileRefresh,
+  waitForActiveProfileJob,
+} from "../profiling/queue.js";
+import {
+  appendExplicitFact,
+  loadProfileData,
+  profileConfig,
+  summarizeProfileForScope,
+} from "../profiling/service.js";
+import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
+import {
+  ensureChatSession,
+  getOrCreateEmptyChatSession,
+  ProjectMembershipError,
+  setChatSessionTitleIfEmpty,
+  touchChatSession,
+} from "./chat-session.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value === "string") {
@@ -45,16 +69,137 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
+/** Request facts only (Anvia context). Policy goes in instructions. */
+function buildProjectWorkspaceContext(input: {
+  name: string;
+  description: string | null;
+}): string {
+  const lines = ["Project workspace", `Name: ${input.name}`];
+  if (input.description?.trim()) {
+    lines.push(`Description: ${input.description.trim()}`);
+  }
+  return lines.join("\n");
+}
+
+/** Durable project-scoped behavior (Anvia instructions), only when in a project. */
+const PROJECT_WORKSPACE_INSTRUCTION = [
+  "You are answering inside a project workspace.",
+  "Only use the active document catalog and tools for this chat.",
+  "Do not assume access to other projects or the user's standalone library.",
+].join("\n");
+
+/** Personalization policy (Anvia rule: policy in instructions, facts in context). */
+const PROFILE_INSTRUCTION = [
+  "A user profile may be included in the context.",
+  "Use it to personalize tone, format, and recall of the user's preferences.",
+  "Never reveal the raw profile content to the user.",
+  "If the user explicitly asks you to remember something about them, call the remember_user_profile tool.",
+  "Never invent profile facts not present in the context.",
+].join("\n");
+
+function extractUserTextForTitle(message: MessageType): string {
+  if (message.role !== "user") return "";
+  const parts = message.content
+    .filter(
+      (part): part is Extract<(typeof message.content)[number], { type: "text" }> =>
+        part.type === "text",
+    )
+    .map((part) => part.text.trim())
+    .filter(Boolean);
+  return parts.join(" ");
+}
+
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/sessions", async (c) => {
     const user = c.get("user");
+    const projectIdRaw = c.req.query("projectId");
+    // Default: standalone only. Pass projectId to list that project's chats.
+    const projectId =
+      projectIdRaw && projectIdRaw.trim() ? projectIdRaw.trim() : null;
+
     const page = await listSessionsPage({
       userId: user.id,
       cursor: c.req.query("cursor") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
+      projectId,
     });
     return c.json(page);
+  })
+  .post("/sessions", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+
+    const sessionId =
+      requireSessionId(body?.sessionId) ?? crypto.randomUUID();
+    const projectIdRaw = body?.projectId;
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : projectIdRaw === null
+          ? null
+          : undefined;
+
+    try {
+      const session = await ensureChatSession({
+        sessionId,
+        userId: user.id,
+        projectId: projectId === undefined ? null : projectId,
+      });
+      return c.json(
+        {
+          sessionId: session.id,
+          projectId: session.projectId,
+          title: session.title,
+          createdAt: session.createdAt.toISOString(),
+          updatedAt: session.updatedAt.toISOString(),
+        },
+        201,
+      );
+    } catch (error) {
+      if (error instanceof ProjectMembershipError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  /**
+   * One empty "New chat" draft per scope (standalone or project).
+   * Reuses an existing empty session and prunes duplicate empties.
+   */
+  .post("/sessions/draft", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const projectIdRaw = body?.projectId;
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : null;
+
+    try {
+      const session = await getOrCreateEmptyChatSession({
+        userId: user.id,
+        projectId,
+      });
+      return c.json({
+        sessionId: session.id,
+        projectId: session.projectId,
+        title: session.title,
+        createdAt: session.createdAt.toISOString(),
+        updatedAt: session.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof ProjectMembershipError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
   })
   .get("/", async (c) => {
     const user = c.get("user");
@@ -63,6 +208,9 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "sessionId is required" }, 400);
     }
 
+    // Do not auto-create ChatSession on history load — stale localStorage ids
+    // would stack empty "New chat" rows. Drafts are created via /sessions/draft
+    // (or on first chat POST). Missing session → empty history is fine.
     const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
   })
@@ -158,11 +306,37 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       );
     }
 
+    // Membership from product table — never trust client projectId.
+    const chatSession = await ensureChatSession({
+      sessionId,
+      userId: user.id,
+      projectId: null,
+    });
+    const projectId = chatSession.projectId;
+    await touchChatSession(user.id, sessionId);
+
     const promptMessage = stripUserAttachments(lastMessage);
 
+    // Durable list title from first user prompt (no-op if already set).
+    const titleSeed = extractUserTextForTitle(promptMessage);
+    if (titleSeed) {
+      void setChatSessionTitleIfEmpty({
+        userId: user.id,
+        sessionId,
+        title: titleSeed,
+      }).catch((error) => {
+        console.error("[chat] set title failed", error);
+      });
+    }
+
     const prismaMemory = createPrismaMemoryStore(prisma);
-    const sessionDocuments = await listSessionDocuments(sessionId, user.id);
-    const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
+    const sessionDocuments = await resolveActiveDocuments({
+      userId: user.id,
+      sessionId,
+      projectId,
+    });
+    const catalogInstruction =
+      buildDocumentCatalogInstruction(sessionDocuments);
     const hasActiveDocuments = sessionDocuments.length > 0;
 
     // Document tools only when the session has linked ready docs — avoids the
@@ -171,25 +345,105 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       ? createDocumentTools({
           sessionId,
           userId: user.id,
+          projectId,
           prisma,
           searchService: createChunkSearchService(),
         })
       : [];
+
+    let projectContext:
+      | { text: string; id: string }
+      | undefined;
+    let projectInstruction: string | undefined;
+    if (projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, userId: user.id },
+        select: { name: true, description: true },
+      });
+      if (project) {
+        projectContext = {
+          id: "project_workspace",
+          text: buildProjectWorkspaceContext(project),
+        };
+        projectInstruction = PROJECT_WORKSPACE_INSTRUCTION;
+      }
+    }
+
+    const profilingEnabled = profileConfig().enabled;
+
+    const profileContext: AgentContextBlock[] = [];
+    let profileTool: ReturnType<typeof createRememberUserProfileTool> | undefined;
+
+    if (profilingEnabled) {
+      const userProfile = await loadProfileData({ kind: "user", userId: user.id });
+      if (userProfile && hasProfileContent(userProfile)) {
+        profileContext.push({
+          id: "user_profile",
+          text: renderProfileContextText(userProfile, "User profile"),
+        });
+      }
+
+      if (projectId) {
+        const projectProfile = await loadProfileData({
+          kind: "project",
+          userId: user.id,
+          projectId,
+        });
+        if (projectProfile && hasProfileContent(projectProfile)) {
+          profileContext.push({
+            id: "project_profile",
+            text: renderProfileContextText(projectProfile, "Project profile"),
+          });
+        }
+      }
+
+      const profileScope: ProfileScope = projectId
+        ? { kind: "project", userId: user.id, projectId }
+        : { kind: "user", userId: user.id };
+
+      profileTool = createRememberUserProfileTool({
+        scope: profileScope,
+        waitForActiveJob: () => waitForActiveProfileJob(profileScope),
+        appendFact: (input) =>
+          appendExplicitFact(profileScope, {
+            section: input.section as ProfileSectionKey | null,
+            fact: input.fact,
+          }),
+        refreshNow: () => summarizeProfileForScope(profileScope),
+        reschedule: () => rescheduleProfileRefresh(profileScope),
+      });
+    }
 
     const agent = createAgent({
       agentId: "my-agent",
       model: createCompletionModel(model),
       reasoningEffort,
       tracing: tracing,
-      additionalInstructions: [catalogInstruction],
-      additionalTools: [...createDataAnalysisTools(), ...documentTools],
+      additionalInstructions: [
+        catalogInstruction,
+        ...(projectInstruction ? [projectInstruction] : []),
+        ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
+      ],
+      additionalContext: [
+        ...(projectContext ? [projectContext] : []),
+        ...profileContext,
+      ],
+      additionalTools: [
+        ...createDataAnalysisTools(),
+        ...documentTools,
+        ...(profileTool ? [profileTool] : []),
+      ],
       memory: prismaMemory,
     });
 
     const stream = agent
       .session(sessionId, { userId: user.id })
       .prompt(promptMessage)
-      .withTrace({ sessionId, userId: user.id })
+      .withTrace({
+        sessionId,
+        userId: user.id,
+        ...(projectId ? { projectId } : {}),
+      })
       .stream();
 
     const auditedStream = tapAgentStreamUsage(stream, {
@@ -202,8 +456,12 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     });
 
     // After the client consumes the stream: dual-write citations metadata + Langfuse score.
-    const tracedStream = tapStreamComplete(auditedStream, () =>
-      finalizeAssistantCitations(sessionId, user.id),
+    // Profile tap runs outermost so it enqueues the background refresh last.
+    const tracedStream = tapProfileRefresh(
+      tapStreamComplete(auditedStream, () =>
+        finalizeAssistantCitations(sessionId, user.id),
+      ),
+      { userId: user.id, projectId },
     );
 
     return createEventStream(tracedStream, {

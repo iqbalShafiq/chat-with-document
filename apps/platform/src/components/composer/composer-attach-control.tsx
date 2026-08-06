@@ -14,11 +14,13 @@ const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 
 export function ComposerAttachControl({
   sessionId,
+  projectId = null,
   activeDocumentIds,
   disabled = false,
   onLinkedDocuments,
 }: {
   sessionId: string;
+  projectId?: string | null;
   activeDocumentIds?: ReadonlySet<string>;
   disabled?: boolean;
   /** Called after library docs are linked so the parent can refresh Active. */
@@ -82,7 +84,7 @@ export function ComposerAttachControl({
           aria-expanded={menuOpen}
           disabled={busy}
           onClick={() => setMenuOpen((open) => !open)}
-          className="glass inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+          className="glass glass-interactive inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Paperclip className="size-4" strokeWidth={1.75} />
         </button>
@@ -142,6 +144,7 @@ export function ComposerAttachControl({
           if (!linking) setLibraryOpen(false);
         }}
         activeDocumentIds={activeDocumentIds}
+        projectId={projectId}
         onConfirm={handleLibraryConfirm}
         busy={linking}
         error={libraryError}
