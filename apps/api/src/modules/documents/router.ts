@@ -10,6 +10,7 @@ import {
   DocumentStorageQuotaError,
   getDocumentPreview,
   getDocumentStatus,
+  getPageImage,
   getUserStorageUsage,
   linkDocumentsToSession,
   listSessionDocuments,
@@ -146,6 +147,26 @@ export const documentsRouter = new Hono<{ Variables: AuthVariables }>()
     }
 
     return c.json(preview);
+  })
+  .get("/:id/pages/:pageIndex/images/:imageId", async (c) => {
+    const user = c.get("user");
+    const pageIndex = Number(c.req.param("pageIndex"));
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+    const image = await getPageImage({
+      userId: user.id,
+      documentId: c.req.param("id"),
+      pageIndex,
+      imageId: c.req.param("imageId"),
+    });
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+    return c.body(new Uint8Array(image.data), 200, {
+      "content-type": image.mediaType,
+      "cache-control": "private, max-age=3600",
+    });
   })
   .delete("/:id", async (c) => {
     const user = c.get("user");

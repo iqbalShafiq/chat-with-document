@@ -1,6 +1,7 @@
 import type { UIMessagePart } from "@anvia/react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useImagePreview } from "#/components/images/image-preview";
 import {
   formatToolInput,
   formatToolOutput,
@@ -15,6 +16,7 @@ const TOOL_LABELS: Record<string, string> = {
   descriptive_stats: "Computing statistics",
   pearson_correlation: "Computing correlation",
   linear_regression: "Fitting regression",
+  get_document_page_images: "Inspecting page images",
 };
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
@@ -78,6 +80,57 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
       {!section.summary && !hasFields && !hasItems && section.emptyText ? (
         <p className="text-[12px] text-text-faint">{section.emptyText}</p>
       ) : null}
+    </div>
+  );
+}
+
+function extractToolImageParts(
+  output: unknown,
+): Array<{ data: string; mediaType: string }> {
+  if (!Array.isArray(output)) return [];
+  return output
+    .filter(
+      (part): part is { type: "image"; data: string; mediaType?: string } =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as { type?: unknown }).type === "image" &&
+        typeof (part as { data?: unknown }).data === "string",
+    )
+    .map((part) => ({
+      data: part.data,
+      mediaType: part.mediaType ?? "image/png",
+    }));
+}
+
+function ToolResultImages({ output }: { output: unknown }) {
+  const { open } = useImagePreview();
+  const images = extractToolImageParts(output);
+  if (images.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-3 gap-2" role="list" aria-label="Result images">
+      {images.map((image, index) => (
+        <button
+          key={`${image.mediaType}-${index}`}
+          type="button"
+          role="listitem"
+          aria-label={`View result image ${index + 1}`}
+          onClick={() =>
+            open({
+              src: `data:${image.mediaType};base64,${image.data}`,
+              alt: `Result image ${index + 1}`,
+            })
+          }
+          className="cursor-zoom-in overflow-hidden rounded-lg border border-white/[0.06] transition hover:border-white/[0.14] active:scale-[0.98]"
+        >
+          <img
+            src={`data:${image.mediaType};base64,${image.data}`}
+            alt=""
+            loading="lazy"
+            className="aspect-video w-full object-cover"
+          />
+        </button>
+      ))}
     </div>
   );
 }
@@ -200,6 +253,7 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         >
           <ToolSectionView section={requestSection} />
           <ToolSectionView section={resultSection} />
+          {isDone ? <ToolResultImages output={parseToolValue(part.output)} /> : null}
         </div>
       ) : (
         <div id={panelId} hidden />

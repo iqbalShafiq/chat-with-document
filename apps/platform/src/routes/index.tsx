@@ -17,6 +17,7 @@ import {
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { AppShell } from "#/components/layout/app-shell";
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
@@ -36,6 +37,7 @@ import {
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
+import { ImagePreviewProvider } from "#/components/images/image-preview";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
@@ -647,86 +649,88 @@ function Home() {
     (viewMode === "standalone" || viewMode === "project-workspace");
 
   return (
-    <AppShell
-      user={user}
-      sessions={sessions}
-      activeSessionId={sessionId}
-      activeTitle={activeTitle}
-      sessionsLoading={sessionsLoading || !workspaceReady}
-      sessionsLoadingMore={sessionsLoadingMore}
-      sessionsError={sessionsError}
-      hasMoreSessions={Boolean(nextCursor)}
-      onSelectSession={handleSelectSession}
-      onNewChat={handleNewSession}
-      newChatDisabled={newChatDisabled}
-      onLoadMoreSessions={() => {
-        void loadMoreSessions();
-      }}
-      onRetrySessions={() => {
-        void loadSessionsFirstPage();
-      }}
-      viewMode={viewMode}
-      recentProjects={recentProjects}
-      activeProjectId={activeProjectId}
-      onOpenAllChats={handleOpenAllChats}
-      onOpenProjects={handleOpenProjects}
-      onOpenDocuments={handleOpenDocuments}
-      onOpenRecentProject={handleOpenProject}
-    >
-      {!workspaceReady ? (
-        <div
-          key="workspace-loading"
-          className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
-        >
-          <DocChatMark className="opacity-80" />
-          <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-          <p className="text-sm text-text-muted">Restoring workspace…</p>
-        </div>
-      ) : null}
-
-      {workspaceReady && viewMode === "projects-index" ? (
-        <ProjectsBrowser
-          key="workspace-projects"
-          activeProjectId={activeProjectId}
-          onOpenProject={handleOpenProject}
-          onProjectDeleted={handleProjectDeleted}
-        />
-      ) : null}
-
-      {workspaceReady && viewMode === "documents-index" ? (
-        <DocumentsBrowser key="workspace-documents" />
-      ) : null}
-
-      {showChatRoom ? (
-        initialMessages === null ? (
+    <ImagePreviewProvider>
+      <AppShell
+        user={user}
+        sessions={sessions}
+        activeSessionId={sessionId}
+        activeTitle={activeTitle}
+        sessionsLoading={sessionsLoading || !workspaceReady}
+        sessionsLoadingMore={sessionsLoadingMore}
+        sessionsError={sessionsError}
+        hasMoreSessions={Boolean(nextCursor)}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewSession}
+        newChatDisabled={newChatDisabled}
+        onLoadMoreSessions={() => {
+          void loadMoreSessions();
+        }}
+        onRetrySessions={() => {
+          void loadSessionsFirstPage();
+        }}
+        viewMode={viewMode}
+        recentProjects={recentProjects}
+        activeProjectId={activeProjectId}
+        onOpenAllChats={handleOpenAllChats}
+        onOpenProjects={handleOpenProjects}
+        onOpenDocuments={handleOpenDocuments}
+        onOpenRecentProject={handleOpenProject}
+      >
+        {!workspaceReady ? (
           <div
-            key="chat-loading"
+            key="workspace-loading"
             className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
           >
             <DocChatMark className="opacity-80" />
             <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-            <p className="text-sm text-text-muted">Loading conversation…</p>
+            <p className="text-sm text-text-muted">Restoring workspace…</p>
           </div>
-        ) : (
-          <div
-            key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
-            className="flex min-h-0 flex-1 flex-col animate-fade-up"
-          >
-            <ChatSession
-              sessionId={sessionId}
-              projectId={
-                viewMode === "project-workspace" ? activeProjectId : null
-              }
-              initialMessages={initialMessages}
-              onStreamSettled={() => {
-                void refreshSessionsQuiet();
-              }}
-              onAuthFailure={handleAuthFailure}
-            />
-          </div>
-        )
-      ) : null}
-    </AppShell>
+        ) : null}
+
+        {workspaceReady && viewMode === "projects-index" ? (
+          <ProjectsBrowser
+            key="workspace-projects"
+            activeProjectId={activeProjectId}
+            onOpenProject={handleOpenProject}
+            onProjectDeleted={handleProjectDeleted}
+          />
+        ) : null}
+
+        {workspaceReady && viewMode === "documents-index" ? (
+          <DocumentsBrowser key="workspace-documents" />
+        ) : null}
+
+        {showChatRoom ? (
+          initialMessages === null ? (
+            <div
+              key="chat-loading"
+              className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
+            >
+              <DocChatMark className="opacity-80" />
+              <div className="skeleton-shimmer h-4 w-40 rounded-full" />
+              <p className="text-sm text-text-muted">Loading conversation…</p>
+            </div>
+          ) : (
+            <div
+              key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
+              className="flex min-h-0 flex-1 flex-col animate-fade-up"
+            >
+              <ChatSession
+                sessionId={sessionId}
+                projectId={
+                  viewMode === "project-workspace" ? activeProjectId : null
+                }
+                initialMessages={initialMessages}
+                onStreamSettled={() => {
+                  void refreshSessionsQuiet();
+                }}
+                onAuthFailure={handleAuthFailure}
+              />
+            </div>
+          )
+        ) : null}
+      </AppShell>
+    </ImagePreviewProvider>
   );
 }
 
@@ -755,6 +759,9 @@ function ChatSession({
     null,
   );
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [attachmentErrors, setAttachmentErrors] = useState<AttachmentReject[]>(
+    [],
+  );
   const [isIngesting, setIsIngesting] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<CompletionModelId>(() =>
@@ -798,6 +805,17 @@ function ChatSession({
 
   const handleLinkedDocuments = useCallback((documents: SessionDocument[]) => {
     setSessionDocuments(documents);
+  }, []);
+
+  /** Guardrail rejects (size limit…) reported at attach time by the composer. */
+  const handleAttachmentRejected = useCallback((rejects: AttachmentReject[]) => {
+    setAttachmentErrors((current) => [...current, ...rejects]);
+  }, []);
+
+  const handleDismissAttachmentError = useCallback((id: string) => {
+    setAttachmentErrors((current) =>
+      current.filter((item) => item.id !== id),
+    );
   }, []);
 
   const handleRemoveActiveDocument = useCallback(
@@ -937,6 +955,7 @@ function ChatSession({
     setSessionDocuments([]);
     setIngestionItems([]);
     setComposerError(null);
+    setAttachmentErrors([]);
     setIsIngesting(false);
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
@@ -1233,12 +1252,15 @@ function ChatSession({
                     chatStatus={chat.status}
                     isIngesting={isIngesting}
                     composerError={composerError}
+                    attachmentErrors={attachmentErrors}
                     composerInputRef={composerInputRef}
                     model={selectedModel}
                     reasoningEffort={selectedReasoningEffort}
                     onModelChange={handleModelChange}
                     onReasoningChange={handleReasoningChange}
                     onLinkedDocuments={handleLinkedDocuments}
+                    onAttachmentRejected={handleAttachmentRejected}
+                    onDismissAttachmentError={handleDismissAttachmentError}
                   />
                 </div>
               </div>
