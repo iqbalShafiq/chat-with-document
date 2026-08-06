@@ -10,6 +10,7 @@ export function useDocumentImage(src: string) {
     internal ? "loading" : "ready",
   );
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!internal) return;
@@ -36,11 +37,12 @@ export function useDocumentImage(src: string) {
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [src, internal]);
+  }, [src, internal, retryKey]);
 
   const retry = useCallback(() => {
     setObjectUrl(null);
     setState("loading");
+    setRetryKey((current) => current + 1);
   }, []);
 
   return {
