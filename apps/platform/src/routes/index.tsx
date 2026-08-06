@@ -36,6 +36,7 @@ import {
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
+import { ImagePreviewProvider } from "#/components/images/image-preview";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
@@ -647,86 +648,88 @@ function Home() {
     (viewMode === "standalone" || viewMode === "project-workspace");
 
   return (
-    <AppShell
-      user={user}
-      sessions={sessions}
-      activeSessionId={sessionId}
-      activeTitle={activeTitle}
-      sessionsLoading={sessionsLoading || !workspaceReady}
-      sessionsLoadingMore={sessionsLoadingMore}
-      sessionsError={sessionsError}
-      hasMoreSessions={Boolean(nextCursor)}
-      onSelectSession={handleSelectSession}
-      onNewChat={handleNewSession}
-      newChatDisabled={newChatDisabled}
-      onLoadMoreSessions={() => {
-        void loadMoreSessions();
-      }}
-      onRetrySessions={() => {
-        void loadSessionsFirstPage();
-      }}
-      viewMode={viewMode}
-      recentProjects={recentProjects}
-      activeProjectId={activeProjectId}
-      onOpenAllChats={handleOpenAllChats}
-      onOpenProjects={handleOpenProjects}
-      onOpenDocuments={handleOpenDocuments}
-      onOpenRecentProject={handleOpenProject}
-    >
-      {!workspaceReady ? (
-        <div
-          key="workspace-loading"
-          className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
-        >
-          <DocChatMark className="opacity-80" />
-          <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-          <p className="text-sm text-text-muted">Restoring workspace…</p>
-        </div>
-      ) : null}
-
-      {workspaceReady && viewMode === "projects-index" ? (
-        <ProjectsBrowser
-          key="workspace-projects"
-          activeProjectId={activeProjectId}
-          onOpenProject={handleOpenProject}
-          onProjectDeleted={handleProjectDeleted}
-        />
-      ) : null}
-
-      {workspaceReady && viewMode === "documents-index" ? (
-        <DocumentsBrowser key="workspace-documents" />
-      ) : null}
-
-      {showChatRoom ? (
-        initialMessages === null ? (
+    <ImagePreviewProvider>
+      <AppShell
+        user={user}
+        sessions={sessions}
+        activeSessionId={sessionId}
+        activeTitle={activeTitle}
+        sessionsLoading={sessionsLoading || !workspaceReady}
+        sessionsLoadingMore={sessionsLoadingMore}
+        sessionsError={sessionsError}
+        hasMoreSessions={Boolean(nextCursor)}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewSession}
+        newChatDisabled={newChatDisabled}
+        onLoadMoreSessions={() => {
+          void loadMoreSessions();
+        }}
+        onRetrySessions={() => {
+          void loadSessionsFirstPage();
+        }}
+        viewMode={viewMode}
+        recentProjects={recentProjects}
+        activeProjectId={activeProjectId}
+        onOpenAllChats={handleOpenAllChats}
+        onOpenProjects={handleOpenProjects}
+        onOpenDocuments={handleOpenDocuments}
+        onOpenRecentProject={handleOpenProject}
+      >
+        {!workspaceReady ? (
           <div
-            key="chat-loading"
+            key="workspace-loading"
             className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
           >
             <DocChatMark className="opacity-80" />
             <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-            <p className="text-sm text-text-muted">Loading conversation…</p>
+            <p className="text-sm text-text-muted">Restoring workspace…</p>
           </div>
-        ) : (
-          <div
-            key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
-            className="flex min-h-0 flex-1 flex-col animate-fade-up"
-          >
-            <ChatSession
-              sessionId={sessionId}
-              projectId={
-                viewMode === "project-workspace" ? activeProjectId : null
-              }
-              initialMessages={initialMessages}
-              onStreamSettled={() => {
-                void refreshSessionsQuiet();
-              }}
-              onAuthFailure={handleAuthFailure}
-            />
-          </div>
-        )
-      ) : null}
-    </AppShell>
+        ) : null}
+
+        {workspaceReady && viewMode === "projects-index" ? (
+          <ProjectsBrowser
+            key="workspace-projects"
+            activeProjectId={activeProjectId}
+            onOpenProject={handleOpenProject}
+            onProjectDeleted={handleProjectDeleted}
+          />
+        ) : null}
+
+        {workspaceReady && viewMode === "documents-index" ? (
+          <DocumentsBrowser key="workspace-documents" />
+        ) : null}
+
+        {showChatRoom ? (
+          initialMessages === null ? (
+            <div
+              key="chat-loading"
+              className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
+            >
+              <DocChatMark className="opacity-80" />
+              <div className="skeleton-shimmer h-4 w-40 rounded-full" />
+              <p className="text-sm text-text-muted">Loading conversation…</p>
+            </div>
+          ) : (
+            <div
+              key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
+              className="flex min-h-0 flex-1 flex-col animate-fade-up"
+            >
+              <ChatSession
+                sessionId={sessionId}
+                projectId={
+                  viewMode === "project-workspace" ? activeProjectId : null
+                }
+                initialMessages={initialMessages}
+                onStreamSettled={() => {
+                  void refreshSessionsQuiet();
+                }}
+                onAuthFailure={handleAuthFailure}
+              />
+            </div>
+          )
+        ) : null}
+      </AppShell>
+    </ImagePreviewProvider>
   );
 }
 
