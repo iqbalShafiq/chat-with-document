@@ -519,11 +519,37 @@ export async function unlinkDocumentFromSession(input: {
   return (await response.json()) as { ok: true; removed: boolean };
 }
 
+export type DocumentPageImageInfo = {
+  id: string;
+  mediaType: string;
+};
+
 export type DocumentPreviewPage = {
   pageIndex: number;
   summary: string;
   rawMarkdown: string;
+  images?: DocumentPageImageInfo[];
 };
+
+export function buildDocumentImageUrl(
+  documentId: string,
+  pageIndex: number,
+  imageId: string,
+): string {
+  return `${API_BASE}/api/documents/${encodeURIComponent(documentId)}/pages/${pageIndex}/images/${encodeURIComponent(imageId)}`;
+}
+
+export function isDocumentImagePath(value: string): boolean {
+  return (
+    value.startsWith("/api/documents/") ||
+    value.startsWith(`${API_BASE}/api/documents/`)
+  );
+}
+
+/** Resolve a document-image src (relative or absolute) to a fetchable URL. */
+export function resolveDocumentImageUrl(value: string): string {
+  return value.startsWith("/api/documents/") ? `${API_BASE}${value}` : value;
+}
 
 export type DocumentPreview = {
   id: string;
