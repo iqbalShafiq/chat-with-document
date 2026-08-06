@@ -235,47 +235,42 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2.5">
-                <p className="min-w-0 flex-1 truncate text-[11px] text-text-faint">
-                  {current.alt || "Document image"}
-                </p>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Zoom out"
-                    onClick={() => zoomBy(1 / ZOOM_STEP)}
-                    className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                    disabled={scale <= MIN_SCALE}
-                  >
-                    <Minus className="size-4" strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Reset zoom"
-                    onClick={resetView}
-                    className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                    disabled={scale <= MIN_SCALE}
-                  >
-                    <RotateCcw className="size-4" strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Zoom in"
-                    onClick={() => zoomBy(ZOOM_STEP)}
-                    className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                    disabled={scale >= MAX_SCALE}
-                  >
-                    <Plus className="size-4" strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Close image preview"
-                    onClick={close}
-                    className="ml-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96]"
-                  >
-                    <X className="size-4" strokeWidth={1.75} />
-                  </button>
-                </div>
+              <div className="flex shrink-0 items-center justify-end gap-1 border-t border-white/[0.06] px-3 py-2.5">
+                <button
+                  type="button"
+                  aria-label="Zoom out"
+                  onClick={() => zoomBy(1 / ZOOM_STEP)}
+                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
+                  disabled={scale <= MIN_SCALE}
+                >
+                  <Minus className="size-4" strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Reset zoom"
+                  onClick={resetView}
+                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
+                  disabled={scale <= MIN_SCALE}
+                >
+                  <RotateCcw className="size-4" strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Zoom in"
+                  onClick={() => zoomBy(ZOOM_STEP)}
+                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
+                  disabled={scale >= MAX_SCALE}
+                >
+                  <Plus className="size-4" strokeWidth={1.75} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close image preview"
+                  onClick={close}
+                  className="ml-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96]"
+                >
+                  <X className="size-4" strokeWidth={1.75} />
+                </button>
               </div>
             </dialog>,
             window.document.body,
