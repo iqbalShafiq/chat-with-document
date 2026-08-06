@@ -1,14 +1,8 @@
 import type { CompletionModel } from "@anvia/core";
 import { OpenAIClient } from "@anvia/openai";
 
-/** Cheap → expensive. Keep in sync with platform UI allow-list. */
-export const COMPLETION_MODELS = [
-  "gpt-5.6-luna",
-  "gpt-5.6-terra",
-  "gpt-5.6-sol",
-] as const;
-
-export type CompletionModelId = (typeof COMPLETION_MODELS)[number];
+/** Model ids are registered in the DB registry; any non-empty id is structurally valid. */
+export type CompletionModelId = string;
 
 export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "gpt-5.6-luna";
 export const DEFAULT_COMPLETION_PROVIDER = "openai";
@@ -18,10 +12,7 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
 export function isCompletionModelId(value: unknown): value is CompletionModelId {
-  return (
-    typeof value === "string" &&
-    (COMPLETION_MODELS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 export function isReasoningEffort(value: unknown): value is ReasoningEffort {
@@ -31,7 +22,6 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
   );
 }
 
-/** Returns null when value is missing or not in the allow-list. */
 export function parseCompletionModel(value: unknown): CompletionModelId | null {
   return isCompletionModelId(value) ? value : null;
 }
