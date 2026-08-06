@@ -378,7 +378,7 @@ git commit -m "feat(worker): persist OCR page images to R2 with metadata"
 
 **Interfaces:**
 - Consumes: `getObjectBuffer` (existing), `normalizePageImages` from `@assingment/agent`, `deleteObject` (existing).
-- Produces: `getPageImage(input: { userId; documentId; pageIndex; imageId }): Promise<{ data: Uint8Array; mediaType: string } | null>`; preview pages now include `images: DocumentPageImage[]` (metadata only, `r2Key` included server-side — the router returns it; the platform client will ignore/not use `r2Key`).
+- Produces: `getPageImage(input: { userId; documentId; pageIndex; imageId }): Promise<{ data: Uint8Array; mediaType: string } | null>`; preview pages now include `images: Array<{ id: string; mediaType: string }>` (metadata only — no `r2Key`).
 
 - [ ] **Step 1: Add `getPageImage` to `apps/api/src/modules/documents/service.ts`**
 
@@ -434,14 +434,17 @@ select: {
 },
 ```
 
-After the query, map pages:
+After the query, map pages — strip internal `r2Key` from the response (clients never need storage keys):
 
 ```ts
 const pages = rawPages.map((page) => ({
   pageIndex: page.pageIndex,
   summary: page.summary,
   rawMarkdown: page.rawMarkdown,
-  images: normalizePageImages(page.images),
+  images: normalizePageImages(page.images).map(({ id, mediaType }) => ({
+    id,
+    mediaType,
+  })),
 }));
 ```
 
