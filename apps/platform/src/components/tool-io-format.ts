@@ -501,6 +501,87 @@ function formatGenericOutput(output: unknown): FormattedSection {
   };
 }
 
+function formatGetDocumentPageImagesInput(input: unknown): FormattedSection {
+  const record = isRecord(input) ? input : {};
+  const fields: FormattedField[] = [];
+
+  const documentId = asString(record.documentId);
+  if (documentId) fields.push({ label: "Document", value: shortId(documentId) });
+
+  const pageIndex = asNumber(record.pageIndex);
+  if (pageIndex !== null) {
+    fields.push({ label: "Page", value: formatPage(pageIndex) });
+  }
+
+  const limit = asNumber(record.limit);
+  if (limit !== null) fields.push({ label: "Limit", value: String(limit) });
+
+  return {
+    title: "Request",
+    fields,
+    emptyText: fields.length === 0 ? "Waiting for request…" : undefined,
+  };
+}
+
+function formatGetDocumentPageImagesOutput(output: unknown): FormattedSection {
+  if (!Array.isArray(output)) return formatGenericOutput(output);
+
+  const textPart = output.find(
+    (part): part is { type: "text"; text: string } =>
+      isRecord(part) && part.type === "text" && typeof part.text === "string",
+  );
+
+  if (textPart) {
+    try {
+      const parsed = JSON.parse(textPart.text) as unknown;
+      if (isRecord(parsed)) {
+        if (parsed.found === false) {
+          const reason = asString(parsed.reason) ?? "Not available";
+          return {
+            title: "Result",
+            summary: "Not found",
+            fields: [{ label: "Reason", value: reason }],
+          };
+        }
+
+        const imageList = asArray(parsed.images);
+        const pageIndex = asNumber(parsed.pageIndex);
+        const items: FormattedItem[] = imageList.slice(0, 8).map((entry) => {
+          const record = isRecord(entry) ? entry : {};
+          const id = asString(record.id) ?? "image";
+          const mediaType = asString(record.mediaType) ?? "image";
+          return {
+            title: id,
+            meta: mediaType,
+            detail: asString(record.annotation) ?? undefined,
+          };
+        });
+
+        return {
+          title: "Result",
+          summary:
+            imageList.length === 0
+              ? "No images on this page"
+              : `${countLabel(imageList.length, "image")}${pageIndex !== null ? ` · ${formatPage(pageIndex)}` : ""}`,
+          items: items.length > 0 ? items : undefined,
+          emptyText:
+            imageList.length === 0 ? "No images extracted for this page." : undefined,
+        };
+      }
+    } catch {
+      // Fall through to generic rendering.
+    }
+  }
+
+  const imageCount = output.filter(
+    (part) => isRecord(part) && part.type === "image",
+  ).length;
+  return {
+    title: "Result",
+    summary: `${countLabel(imageCount, "image")} returned`,
+  };
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -518,6 +599,8 @@ export function formatToolInput(
       return formatPearsonInput(input);
     case "linear_regression":
       return formatLinearRegressionInput(input);
+    case "get_document_page_images":
+      return formatGetDocumentPageImagesInput(input);
     default:
       return formatGenericInput(input);
   }
@@ -540,6 +623,8 @@ export function formatToolOutput(
       return formatPearsonOutput(output);
     case "linear_regression":
       return formatLinearRegressionOutput(output);
+    case "get_document_page_images":
+      return formatGetDocumentPageImagesOutput(output);
     default:
       return formatGenericOutput(output);
   }

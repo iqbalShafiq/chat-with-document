@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import {
+  buildDocumentImageUrl,
   getDocumentPreview,
+  type DocumentPageImageInfo,
   type DocumentPreviewPage,
 } from "#/lib/api";
+import { DocumentImage } from "#/components/images/document-image";
 import { DocumentMarkdown } from "#/components/documents/document-markdown";
 import { formatBytes } from "#/lib/documents/format-bytes";
 import type { PreviewableDocument } from "#/lib/documents/previewable-document";
@@ -440,6 +443,26 @@ export function DocumentPreviewPane({
                   <p className="text-[11px] text-text-faint">
                     No content on this page.
                   </p>
+                ) : null}
+
+                {page.images && page.images.length > 0 ? (
+                  <div
+                    className="grid grid-cols-2 gap-2"
+                    aria-label={`Images on page ${page.pageIndex + 1}`}
+                  >
+                    {page.images.map((image: DocumentPageImageInfo) => (
+                      <DocumentImage
+                        key={image.id}
+                        src={buildDocumentImageUrl(
+                          document.id,
+                          page.pageIndex,
+                          image.id,
+                        )}
+                        alt={`Image ${image.id} — page ${page.pageIndex + 1}`}
+                        className="aspect-video w-full object-cover"
+                      />
+                    ))}
+                  </div>
                 ) : null}
               </section>
             ))}

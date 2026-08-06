@@ -8,6 +8,29 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 /**
+ * Client-side mirror of the documents API cap
+ * (apps/api/src/modules/documents/service.ts MAX_FILE_BYTES).
+ * Kept in sync so oversized files are rejected at attach time, before they
+ * ever reach the composer queue or the upload pipeline.
+ */
+export const MAX_DOCUMENT_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Rejected at attach time (client-side guardrail, not an ingest failure). */
+export type AttachmentReject = {
+  id: string;
+  filename: string;
+  message: string;
+};
+
+/** Returns a human message when the file must be rejected, else null. */
+export function validateDocumentFile(file: File): string | null {
+  if (file.size > MAX_DOCUMENT_FILE_BYTES) {
+    return `${file.name} exceeds 10MB limit`;
+  }
+  return null;
+}
+
+/**
  * Windows / some browsers leave `File.type` empty for PDFs.
  * Infer from extension so the API does not reject as octet-stream.
  */

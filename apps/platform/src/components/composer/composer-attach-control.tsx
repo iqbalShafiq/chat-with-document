@@ -8,7 +8,11 @@ import {
   type SessionDocument,
   type UserLibraryDocument,
 } from "#/lib/api";
-import { ensureUploadableFile } from "#/lib/documents/upload-file";
+import {
+  ensureUploadableFile,
+  validateDocumentFile,
+  type AttachmentReject,
+} from "#/lib/documents/upload-file";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 
@@ -18,6 +22,7 @@ export function ComposerAttachControl({
   activeDocumentIds,
   disabled = false,
   onLinkedDocuments,
+  onRejectedFiles,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -25,6 +30,8 @@ export function ComposerAttachControl({
   disabled?: boolean;
   /** Called after library docs are linked so the parent can refresh Active. */
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
+  /** Called with client-side rejects (e.g. size limit) — never queued. */
+  onRejectedFiles?: (rejects: AttachmentReject[]) => void;
 }) {
   const composer = useComposer();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -36,16 +43,35 @@ export function ComposerAttachControl({
 
   const busy = disabled || linking;
 
-  /** Queue on composer only (sidebar Attachments). Upload runs on Submit. */
+  /**
+   * Guardrail checks (size limit, …) run here — right when the user drops the
+   * files — so invalid files are rejected immediately instead of failing on
+   * submit. Rejects never enter the composer queue / Uploading documents rail.
+   */
   const queueLocalFiles = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
+
+      const rejects: AttachmentReject[] = [];
       for (const file of files) {
+        const message = validateDocumentFile(file);
+        if (message !== null) {
+          rejects.push({
+            id: crypto.randomUUID(),
+            filename: file.name,
+            message,
+          });
+          continue;
+        }
         // Fix empty MIME (common for PDF on Windows) before Anvia stores base64.
         await composer.addAttachment(ensureUploadableFile(file));
       }
+
+      if (rejects.length > 0) {
+        onRejectedFiles?.(rejects);
+      }
     },
-    [composer],
+    [composer, onRejectedFiles],
   );
 
   const handleLibraryConfirm = useCallback(

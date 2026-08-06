@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CitationChip } from "#/components/chat/citation-chip";
+import { DocumentImage } from "#/components/images/document-image";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
 import {
   citationIdFromHref,
@@ -153,6 +154,9 @@ function buildMarkdownComponents(
       </pre>
     ),
     code: ChatCode,
+    img: ({ src, alt, node: _node }) => (
+      <DocumentImage src={src ?? ""} alt={alt ?? ""} />
+    ),
   };
 }
 

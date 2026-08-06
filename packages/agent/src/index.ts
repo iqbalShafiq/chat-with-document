@@ -9,6 +9,7 @@ export * from "./document/chunking.js";
 export * from "./document/types.js";
 export * from "./prompts/build-document-catalog.js";
 export * from "./prompts/citation-instructions.js";
+export * from "./prompts/document-image-instructions.js";
 export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";
 export * from "./tools/documents.js";

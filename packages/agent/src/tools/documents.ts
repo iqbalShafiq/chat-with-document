@@ -1,6 +1,8 @@
 import type { AnyTool } from "@anvia/core";
 import { createTool } from "@anvia/core";
 import z from "zod";
+import type { ToolResultContent } from "@anvia/core";
+import { normalizePageImages } from "../document/types.js";
 
 export interface FindDocumentsPrisma {
   document: {
@@ -111,8 +113,12 @@ export interface DocumentToolsDeps {
   sessionId: string;
   /** When set, only project corpus docs may be resolved (defense in depth). */
   projectId?: string | null;
-  prisma: FindDocumentsPrisma & NextPagePrisma & SessionDocumentIdsPrisma;
+  prisma: FindDocumentsPrisma &
+    NextPagePrisma &
+    SessionDocumentIdsPrisma &
+    PageImagesPrisma;
   searchService: ChunkSearchService;
+  fetchPageImage: FetchPageImage;
 }
 
 export function createFindDocumentsTool(deps: {
@@ -367,5 +373,116 @@ export function createDocumentTools(deps: DocumentToolsDeps): AnyTool[] {
     createFindDocumentsTool(deps),
     createSearchDocumentPagesTool(deps),
     createGetDocumentNextPageTool(deps),
+    createGetDocumentPageImagesTool(deps),
   ];
+}
+
+export interface PageImagesPrisma {
+  documentPage: {
+    findFirst(args: {
+      where: { documentId: string; pageIndex: number };
+      select: { id: true; images: true };
+    }): Promise<{ id: string; images: unknown } | null>;
+  };
+}
+
+export interface FetchPageImage {
+  (r2Key: string): Promise<Uint8Array>;
+}
+
+export function createGetDocumentPageImagesTool(deps: {
+  userId: string;
+  sessionId: string;
+  projectId?: string | null;
+  prisma: PageImagesPrisma & SessionDocumentIdsPrisma;
+  fetchPageImage: FetchPageImage;
+  maxImages?: number;
+}) {
+  return createTool({
+    name: "get_document_page_images",
+    description:
+      "Fetch images extracted from a document page (charts, photos, diagrams). Use when the answer depends on visual content in the document. Returns the images together with markdown references you can embed inline in your answer at the most relevant position.",
+    input: z.object({
+      documentId: z.string().min(1).describe("Document id from the session catalog"),
+      pageIndex: z.number().int().min(0).describe("0-based page index"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(8)
+        .optional()
+        .default(5)
+        .describe("Max images to return"),
+    }),
+    execute: async ({ documentId, pageIndex, limit }) => {
+      const sessionDocIds = await resolveSessionDocumentIds(
+        deps.prisma,
+        deps.userId,
+        deps.sessionId,
+        deps.projectId,
+      );
+      if (!sessionDocIds.includes(documentId)) {
+        return [
+          {
+            type: "text",
+            text: JSON.stringify({
+              found: false,
+              reason: "Document not found in current session",
+            }),
+          },
+        ] satisfies ToolResultContent[];
+      }
+
+      const page = await deps.prisma.documentPage.findFirst({
+        where: { documentId, pageIndex },
+        select: { id: true, images: true },
+      });
+      const images = normalizePageImages(page?.images).slice(0, limit);
+
+      if (images.length === 0) {
+        return [
+          {
+            type: "text",
+            text: JSON.stringify({ found: true, pageIndex, imageCount: 0 }),
+          },
+        ] satisfies ToolResultContent[];
+      }
+
+      const content: ToolResultContent[] = [
+        {
+          type: "text",
+          text: JSON.stringify({
+            found: true,
+            pageIndex,
+            images: images.map((image) => ({
+              id: image.id,
+              mediaType: image.mediaType,
+              markdown: `![${image.id}](/api/documents/${documentId}/pages/${pageIndex}/images/${image.id})`,
+              ...(image.annotation === null || image.annotation === undefined
+                ? {}
+                : { annotation: image.annotation }),
+            })),
+          }),
+        },
+      ];
+
+      const toFetch = images.slice(0, deps.maxImages ?? 5);
+      const results = await Promise.allSettled(
+        toFetch.map(async (image) => ({
+          image,
+          data: await deps.fetchPageImage(image.r2Key),
+        })),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") continue;
+        content.push({
+          type: "image",
+          data: Buffer.from(result.value.data).toString("base64"),
+          mediaType: result.value.image.mediaType,
+        });
+      }
+
+      return content;
+    },
+  });
 }
