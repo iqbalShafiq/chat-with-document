@@ -30,7 +30,8 @@
     "bullmq": "^5.58.5",
     "hono": "^4.12.32",
     "ioredis": "^5.7.0",
-    "prisma": "^7.9.0"
+    "prisma": "^7.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
