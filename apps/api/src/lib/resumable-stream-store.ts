@@ -8,6 +8,7 @@ import type {
   ResumableStreamStatus,
   ResumableStreamSubscribeInput,
 } from "@anvia/server";
+import { getRedis } from "./redis.js";
 
 export type StreamMeta = {
   userId: string;
@@ -205,4 +206,18 @@ export function createRedisResumableStreamStore(
       await redis.set(STOP_KEY(streamId), "1", "EX", 600);
     },
   };
+}
+
+export type ResumableStreamStoreWithMeta = ReturnType<
+  typeof createRedisResumableStreamStore
+>;
+
+let streamStore: ResumableStreamStoreWithMeta | null = null;
+
+/** Process-wide singleton store; shared by the chat router and run worker. */
+export function getStreamStore(): ResumableStreamStoreWithMeta {
+  if (!streamStore) {
+    streamStore = createRedisResumableStreamStore(getRedis());
+  }
+  return streamStore;
 }

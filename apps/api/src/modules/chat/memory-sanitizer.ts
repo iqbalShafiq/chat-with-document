@@ -44,12 +44,24 @@ function sanitizeMessages(messages: unknown[]): unknown[] {
   });
 }
 
+/** The agent must never see error artifacts (kind:"error" rows). */
+function isErrorArtifact(message: unknown): boolean {
+  return (
+    isRecord(message) &&
+    isRecord(message.metadata) &&
+    message.metadata.kind === "error"
+  );
+}
+
 export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
   const inner = createPrismaMemoryStore(prisma);
   return {
     kind: inner.kind,
     inspector: inner.inspector,
-    load: (context) => inner.load(context),
+    load: async (context) => {
+      const loaded = await inner.load(context);
+      return loaded.filter((message) => !isErrorArtifact(message));
+    },
     append: async (input) => {
       await inner.append({
         ...input,

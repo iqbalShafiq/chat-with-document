@@ -1,7 +1,7 @@
 import { prisma } from "../../utils/prisma.js";
 import { estimateMessagesTokens, estimateTextTokens } from "../../lib/token-estimate.js";
 import { findActiveModel } from "../models/service.js";
-import { buildChatRunInput } from "./build-run-input.js";
+import { buildChatRunInput, type ChatRunInput } from "./build-run-input.js";
 
 function envRatio(name: string, fallback: number): number {
   const value = Number(process.env[name]);
@@ -14,6 +14,30 @@ export const compactionConfig = {
   keepTurns: Number(process.env.COMPACTION_KEEP_TURNS ?? 8) || 8,
   summaryBudgetRatio: envRatio("COMPACTION_SUMMARY_BUDGET_RATIO", 0.08),
 };
+
+/**
+ * Static context cost shared by the usage endpoint and the chat-run worker:
+ * instructions + context blocks + tools (same math both places must use).
+ */
+export function estimateStaticContextTokens(runInput: ChatRunInput): number {
+  let instructionsTokens = 0;
+  for (const instruction of runInput.instructions) {
+    instructionsTokens += estimateTextTokens(instruction);
+  }
+  let contextTokens = 0;
+  for (const block of runInput.contextBlocks) {
+    contextTokens += estimateTextTokens(block.text);
+  }
+  let toolsTokens = 0;
+  for (const tool of runInput.tools) {
+    try {
+      toolsTokens += estimateTextTokens(JSON.stringify(tool));
+    } catch {
+      toolsTokens += 0;
+    }
+  }
+  return instructionsTokens + contextTokens + toolsTokens;
+}
 
 export type ContextUsageInfo = {
   modelId: string;
@@ -51,25 +75,8 @@ export async function computeContextUsage(input: {
     userId: input.userId,
   });
 
-  let instructionsTokens = 0;
-  for (const instruction of runInput.instructions) {
-    instructionsTokens += estimateTextTokens(instruction);
-  }
-  let contextTokens = 0;
-  for (const block of runInput.contextBlocks) {
-    contextTokens += estimateTextTokens(block.text);
-  }
-  let toolsTokens = 0;
-  for (const tool of runInput.tools) {
-    try {
-      toolsTokens += estimateTextTokens(JSON.stringify(tool));
-    } catch {
-      toolsTokens += 0;
-    }
-  }
-
   const estimatedTokens =
-    estimateMessagesTokens(memoryMessages) + instructionsTokens + contextTokens + toolsTokens;
+    estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);
 
   const lastRun = await prisma.agentUsageEvent.findFirst({
     where: { userId: input.userId, sessionId: input.sessionId },
