@@ -253,6 +253,8 @@ model DocumentPage {
   pageIndex   Int
   summary     String   @db.Text
   rawMarkdown String   @db.Text
+  /// OCR-extracted images for this page: DocumentPageImage[] metadata (no base64).
+  images      Json?
   createdAt   DateTime @default(now())
 
   @@unique([documentId, pageIndex])
