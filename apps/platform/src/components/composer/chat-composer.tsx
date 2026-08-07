@@ -3,6 +3,7 @@ import { Composer } from "@anvia/react-ui";
 import { FileX, ArrowUp, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
+import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import type {
   ContextUsageInfo,
@@ -40,6 +41,8 @@ export function ChatComposer({
   modelsStatus = "loading",
   modelsError = null,
   onRetryModels = () => {},
+  compaction = { phase: "idle" },
+  contextUsage = null,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -140,6 +143,12 @@ export function ChatComposer({
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
+            <ContextUsageIndicator
+              models={models}
+              contextUsage={contextUsage ?? null}
+              compaction={compaction ?? { phase: "idle" }}
+            />
+
             <ComposerAttachControl
               sessionId={sessionId}
               projectId={projectId}
