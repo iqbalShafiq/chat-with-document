@@ -150,6 +150,8 @@ model ChatSession {
   title     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  /// When the user last opened/read this session (clears the sidebar unread marker).
+  lastReadAt DateTime?
 
   @@index([userId, projectId, updatedAt])
   @@index([userId, updatedAt])

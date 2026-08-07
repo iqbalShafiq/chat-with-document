@@ -13,7 +13,7 @@ import {
   tryAcquireActiveRun,
 } from "./run-queue.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
-import { listSessionsPage } from "./session-list.js";
+import { listSessionsPage, markChatSessionRead } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
   TruncateTargetNotFoundError,
@@ -207,6 +207,17 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     return c.json(
       await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
     );
+  })
+  .post("/sessions/mark-read", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const sessionId = requireSessionId(body?.sessionId);
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    await markChatSessionRead({ userId: user.id, sessionId });
+    return c.json({ ok: true });
   })
   .post("/truncate", async (c) => {
     const user = c.get("user");
