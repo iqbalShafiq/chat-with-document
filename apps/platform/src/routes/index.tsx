@@ -1286,14 +1286,24 @@ function ChatSession({
    * Shared path for revert (same text) and edit (new text):
    * truncate memory to exclude the target user message, drop later UI messages,
    * then send a fresh user turn so the agent appends a single clean prompt.
+   *
+   * Reads chat through `chatRef` so the callback identity is stable (the
+   * useChat result object is recreated every render) — memoized message rows
+   * depend on the stability of onSubmitEdit/onRevert.
    */
   const resubmitFromUserMessage = useCallback(
     async (message: UIMessage, text: string) => {
-      if (chat.status === "streaming") {
+      const currentChat = chatRef.current;
+      if (!currentChat) {
+        throw new Error("Chat is not ready");
+      }
+      if (currentChat.status === "streaming") {
         throw new Error("Wait for the current reply to finish");
       }
 
-      const index = chat.messages.findIndex((item) => item.id === message.id);
+      const index = currentChat.messages.findIndex(
+        (item) => item.id === message.id,
+      );
       if (index === -1) {
         throw new Error("Message is no longer in this conversation");
       }
@@ -1315,10 +1325,10 @@ function ChatSession({
         clientMessageId: meta.clientMessageId,
       });
 
-      chat.setMessages(chat.messages.slice(0, index));
+      currentChat.setMessages(currentChat.messages.slice(0, index));
       setEditingMessageId(null);
 
-      await chat.sendMessage({
+      await currentChat.sendMessage({
         text: trimmed,
         metadata: withChatMessageMeta(undefined, {
           sessionId,
@@ -1328,7 +1338,7 @@ function ChatSession({
         }),
       });
     },
-    [chat, sessionId],
+    [sessionId],
   );
 
   const handleRevert = useCallback(
@@ -1344,6 +1354,19 @@ function ChatSession({
     },
     [resubmitFromUserMessage],
   );
+
+  // Stable callbacks so memoized ChatMessageRow rows skip re-renders on
+  // unrelated state changes (e.g. model switches).
+  const handleStartEdit = useCallback(
+    (message: UIMessage) => {
+      if (chat.status === "streaming") return;
+      setEditingMessageId(message.id);
+    },
+    [chat.status],
+  );
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+  }, []);
 
   const citedDocuments = useMemo(
     () => collectCitedDocuments(chat.messages),
@@ -1541,16 +1564,14 @@ function ChatSession({
                       "[&>*+[data-role=user]]:mt-4",
                     ].join(" ")}
                   >
-                    {() => (
+                    {(message) => (
                       <ChatMessageRow
+                        message={message}
                         chatStatus={chat.status}
                         lastMessageId={chat.messages.at(-1)?.id}
                         editingMessageId={editingMessageId}
-                        onStartEdit={(message) => {
-                          if (chat.status === "streaming") return;
-                          setEditingMessageId(message.id);
-                        }}
-                        onCancelEdit={() => setEditingMessageId(null)}
+                        onStartEdit={handleStartEdit}
+                        onCancelEdit={handleCancelEdit}
                         onSubmitEdit={handleSubmitEdit}
                         onRevert={handleRevert}
                       />

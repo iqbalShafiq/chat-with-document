@@ -1,4 +1,4 @@
-import { prisma } from "../src/utils/prisma.js";
+﻿import { prisma } from "../src/utils/prisma.js";
 
 const PROVIDERS = [
   { slug: "openai", name: "OpenAI", sortOrder: 0 },
@@ -13,7 +13,7 @@ const DEEPSEEK_ICON_SVG = `<svg viewBox="0 0 60 42" fill="none" aria-hidden="tru
 
 /**
  * Model ids follow the OpenRouter convention (provider/model-slug). Prices are
- * per 1M tokens. supportsReasoningEfforts=false → no junction rows → the UI
+ * per 1M tokens. supportsReasoningEfforts=false â†’ no junction rows â†’ the UI
  * shows "None" for the reasoning dropdown (OpenAI-style effort levels are not
  * applicable to DeepSeek).
  */
@@ -21,8 +21,9 @@ const MODELS = [
   {
     providerSlug: "openai",
     modelId: "openai/gpt-5.6-luna",
+    name: "GPT 5.6 Luna",
     label: "Luna",
-    hint: "Fastest · lowest cost",
+    hint: "Fastest Â· lowest cost",
     description: "GPT-5.6 optimized for cost-sensitive, high-volume workloads.",
     contextWindowTokens: 1_050_000,
     maxInputTokens: 922_000,
@@ -37,6 +38,7 @@ const MODELS = [
   {
     providerSlug: "openai",
     modelId: "openai/gpt-5.6-terra",
+    name: "GPT 5.6 Terra",
     label: "Terra",
     hint: "Balanced",
     description: "GPT-5.6 that balances intelligence and cost.",
@@ -53,6 +55,7 @@ const MODELS = [
   {
     providerSlug: "openai",
     modelId: "openai/gpt-5.6-sol",
+    name: "GPT 5.6 Sol",
     label: "Sol",
     hint: "Highest quality",
     description: "GPT-5.6 frontier model for complex professional work.",
@@ -69,10 +72,11 @@ const MODELS = [
   {
     providerSlug: "deepseek",
     modelId: "deepseek/deepseek-v4-flash-0731",
+    name: "DeepSeek V4 Flash 0731",
     label: "V4 Flash 0731",
-    hint: "Fast · cheapest · 1M context",
+    hint: "Fast Â· cheapest Â· 1M context",
     description:
-      "DeepSeek V4 Flash 0731 — sparse MoE (13B active / 284B total), 1M-token context, released Jul 31 2026.",
+      "DeepSeek V4 Flash 0731 â€” sparse MoE (13B active / 284B total), 1M-token context, released Jul 31 2026.",
     contextWindowTokens: 1_048_576,
     maxInputTokens: undefined,
     maxOutputTokens: 65_536,
@@ -137,7 +141,7 @@ async function main() {
   }
 
   // Deactivate models that are no longer part of the seed catalog (id migration,
-  // e.g. bare "gpt-5.6-luna" → "openai/gpt-5.6-luna").
+  // e.g. bare "gpt-5.6-luna" â†’ "openai/gpt-5.6-luna").
   const seedIds = MODELS.map((model) => model.modelId);
   const deactivated = await prisma.chatModel.updateMany({
     where: { modelId: { notIn: seedIds } },
@@ -155,3 +159,4 @@ main()
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());
+

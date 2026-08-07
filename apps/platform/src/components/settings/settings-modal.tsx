@@ -486,7 +486,7 @@ function RequestMixCard({
       const found = byModel.find((r) => r.model === m.modelId);
       return {
         id: m.modelId,
-        label: m.label,
+            label: m.name ?? m.label,
         requestCount: found?.requestCount ?? 0,
         totalTokens: found?.totalTokens ?? 0,
         colorClass: MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],

@@ -125,7 +125,7 @@ export function ModelReasoningSwitcher({
 
   const modelOptions: SelectOption[] = models.map((m) => ({
     value: m.modelId,
-    label: m.label,
+    label: m.name,
     hint: m.hint ?? undefined,
     icon: (
       <ModelIcon svg={m.iconSvg} className="size-3.5 shrink-0 opacity-70" />
@@ -196,7 +196,7 @@ export function ModelReasoningSwitcher({
           aria-controls={modelListId}
           title={
             selectedModel
-              ? `${selectedModel.label} — ${selectedModel.hint}`
+              ? `${selectedModel.name} — ${selectedModel.hint}`
               : "Model"
           }
           onClick={() => toggle("model")}
@@ -210,7 +210,7 @@ export function ModelReasoningSwitcher({
           ) : (
             <Cpu className="size-3.5 shrink-0" strokeWidth={1.75} />
           )}
-          <span className="min-w-0 truncate">{selectedModel?.label}</span>
+          <span className="min-w-0 truncate">{selectedModel?.name}</span>
           <ChevronDown
             className={`size-3 shrink-0 opacity-60 transition-transform duration-200 ${openMenu === "model" ? "rotate-180" : ""}`}
             strokeWidth={2}

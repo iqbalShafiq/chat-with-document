@@ -6,6 +6,8 @@ type Decimal = Prisma.Decimal;
 export type ModelInfo = {
   modelId: string;
   label: string;
+  /** Full display name, e.g. "GPT 5.6 Luna" (falls back to label). */
+  name: string;
   hint: string | null;
   description: string | null;
   iconSvg: string;
@@ -40,6 +42,7 @@ function toNumber(value: Decimal | null | undefined): number | null {
 function toModelInfo(row: {
   modelId: string;
   label: string;
+  name: string;
   hint: string | null;
   description: string | null;
   iconSvg: string;
@@ -60,6 +63,7 @@ function toModelInfo(row: {
   return {
     modelId: row.modelId,
     label: row.label,
+    name: row.name || row.label,
     hint: row.hint,
     description: row.description,
     iconSvg: row.iconSvg,
@@ -86,6 +90,7 @@ function toModelInfo(row: {
 const MODEL_SELECT = {
   modelId: true,
   label: true,
+  name: true,
   hint: true,
   description: true,
   iconSvg: true,

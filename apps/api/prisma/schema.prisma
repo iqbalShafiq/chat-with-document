@@ -313,6 +313,8 @@ model ChatModel {
   providerId                 String
   provider                   ModelProvider         @relation(fields: [providerId], references: [id])
   label                      String
+  /// Full display name, e.g. "GPT 5.6 Luna" (falls back to label).
+  name                       String                @default("")
   hint                       String?
   description                String?
   /// Raw SVG (sanitized client-side before render). Empty = default icon.

@@ -20,7 +20,7 @@ export function modelById(
 }
 
 export function modelLabel(models: ModelInfo[], modelId: string): string {
-  return modelById(models, modelId)?.label ?? modelId;
+  return modelById(models, modelId)?.name ?? modelId;
 }
 
 export function reasoningLabel(

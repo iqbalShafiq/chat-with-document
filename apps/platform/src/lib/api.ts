@@ -754,6 +754,8 @@ export async function resetProjectProfile(
 export type ModelInfo = {
   modelId: string;
   label: string;
+  /** Full display name, e.g. "GPT 5.6 Luna" (server falls back to label). */
+  name: string;
   hint: string | null;
   description: string | null;
   iconSvg: string;

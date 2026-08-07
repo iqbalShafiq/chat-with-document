@@ -235,7 +235,7 @@ function ContextUsageRow({
       <div className="flex min-w-0 items-center gap-1.5">
         <ModelIcon svg={model.iconSvg} className="size-3.5 shrink-0 opacity-70" />
         <span className="min-w-0 truncate text-xs font-medium text-text">
-          {model.label}
+          {model.name}
         </span>
         <span className="shrink-0 text-[10px] text-text-faint">
           {model.provider.slug}
