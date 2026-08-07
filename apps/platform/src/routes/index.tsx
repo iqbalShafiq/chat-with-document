@@ -72,7 +72,6 @@ import {
   readSelectedReasoningEffort,
 } from "#/lib/chat-preferences";
 import {
-  isKnownModel,
   modelById,
   resolveReasoningFallback,
 } from "#/lib/chat/models";
@@ -1130,13 +1129,13 @@ function ChatSession({
   }, [sessionId]);
 
   // Reconcile the selected model once the catalog arrives:
-  // stored preference > first active model > default.
+  // stored preference > first active model > default. Always apply the
+  // storage-aware read — at mount the catalog is still empty (loading), so
+  // without this the stored preference would never be restored.
   useEffect(() => {
     if (modelsStatus !== "success") return;
-    const current = selectedModelRef.current;
-    if (isKnownModel(models, current)) return;
     const next = readSelectedModel(models);
-    if (next !== current) {
+    if (next !== selectedModelRef.current) {
       setSelectedModel(next);
       persistSelectedModel(next);
     }
