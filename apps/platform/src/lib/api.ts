@@ -955,3 +955,24 @@ export async function stopChatRun(streamId: string): Promise<void> {
     throw new Error(body?.error ?? "Failed to stop chat run");
   }
 }
+
+export type WebCapabilities = {
+  webSearchAvailable: boolean;
+  context7Available: boolean;
+};
+
+export async function fetchChatCapabilities(): Promise<WebCapabilities> {
+  const response = await apiFetch(`${API_BASE}/api/chat/capabilities`);
+  if (!response.ok) throw new Error("Failed to load chat capabilities");
+
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
+    typeof (data as WebCapabilities).context7Available !== "boolean"
+  ) {
+    throw new Error("Unexpected capabilities response shape");
+  }
+  return data as WebCapabilities;
+}
