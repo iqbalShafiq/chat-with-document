@@ -27,9 +27,11 @@ import {
   fetchRunStatus,
   getOrCreateEmptyChatSession,
   getProject,
+  listActiveRuns,
   listProjects,
   listSessionDocuments,
   listSessions,
+  markSessionRead,
   loadChatMessages,
   openProject,
   stopChatRun,
@@ -214,6 +216,9 @@ function Home() {
   viewModeRef.current = viewMode;
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
+  const [activeRuns, setActiveRuns] = useState<ReadonlySet<string>>(new Set());
+  const activeRunsRef = useRef<ReadonlySet<string>>(new Set());
+  activeRunsRef.current = activeRuns;
 
   const handleAuthFailure = useCallback(() => {
     void navigate({ to: "/login", search: { redirect: "/" } });
@@ -281,6 +286,52 @@ function Home() {
       setSessionsLoading(false);
     }
   }, [handleAuthFailure]);
+
+  // Sidebar status: which sessions have a running worker, and refresh the list
+  // so unread markers appear once a run completes in the background.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const runs = await listActiveRuns();
+        if (cancelled) return;
+        const next = new Set(runs.map((run) => run.sessionId));
+        const changed =
+          next.size !== activeRunsRef.current.size ||
+          [...next].some((id) => !activeRunsRef.current.has(id));
+        setActiveRuns(next);
+        if (changed) {
+          await loadSessionsFirstPage();
+        }
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
+        // Transient poll failure — keep the last known state.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [loadSessionsFirstPage, handleAuthFailure]);
+
+  // Opening a session clears its unread marker (server + local list, so the
+  // dot does not reappear after navigating away before the next refetch).
+  useEffect(() => {
+    if (!sessionId) return;
+    setSessions((current) =>
+      current.map((s) =>
+        s.sessionId === sessionId ? { ...s, unread: false } : s,
+      ),
+    );
+    void markSessionRead(sessionId).catch(() => {});
+  }, [sessionId]);
 
   const loadMoreSessions = useCallback(async () => {
     if (!nextCursor || loadMoreLock.current || sessionsLoadingMore) return;
@@ -683,6 +734,7 @@ function Home() {
         user={user}
         sessions={sessions}
         activeSessionId={sessionId}
+        activeRuns={activeRuns}
         activeTitle={activeTitle}
         sessionsLoading={sessionsLoading || !workspaceReady}
         sessionsLoadingMore={sessionsLoadingMore}
@@ -1136,6 +1188,7 @@ function ChatSession({
         );
       });
       onStreamSettled();
+      void markSessionRead(sessionId).catch(() => {});
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
         setComposerInputText(pendingFailedTextRef.current);
