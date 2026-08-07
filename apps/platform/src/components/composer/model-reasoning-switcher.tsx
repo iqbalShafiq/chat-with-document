@@ -3,37 +3,41 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  MODEL_OPTIONS,
-  REASONING_OPTIONS,
-  type CompletionModelId,
-  type ReasoningEffort,
-} from "#/lib/chat/models";
+import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
+import { modelById, reasoningLabel } from "#/lib/chat/models";
 import {
   SelectOptionList,
   type SelectOption,
 } from "#/components/ui/select-list";
+
+/** Used only to order the icon fill; the actual list comes from props. */
+const EFFORT_ORDER = ["low", "medium", "high"];
 
 /**
  * Single glass shell with two joined dropdowns (model | reasoning).
  * Menu is portaled so it is not clipped by composer overflow / stacking.
  */
 export function ModelReasoningSwitcher({
+  models,
+  reasoningEfforts,
   model,
   reasoningEffort,
   disabled,
   onModelChange,
   onReasoningChange,
 }: {
-  model: CompletionModelId;
-  reasoningEffort: ReasoningEffort;
+  models: ModelInfo[];
+  reasoningEfforts: ReasoningEffortInfo[];
+  model: string;
+  reasoningEffort: string | null;
   disabled?: boolean;
-  onModelChange: (model: CompletionModelId) => void;
-  onReasoningChange: (effort: ReasoningEffort) => void;
+  onModelChange: (model: string) => void;
+  onReasoningChange: (effort: string | null) => void;
 }) {
   const [openMenu, setOpenMenu] = useState<"model" | "reasoning" | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -48,11 +52,10 @@ export function ModelReasoningSwitcher({
     minWidth: number;
   } | null>(null);
 
-  const selectedModel =
-    MODEL_OPTIONS.find((o) => o.id === model) ?? MODEL_OPTIONS[0];
-  const selectedReasoning =
-    REASONING_OPTIONS.find((o) => o.id === reasoningEffort) ??
-    REASONING_OPTIONS[1];
+  const selectedModel = modelById(models, model) ?? models[0] ?? null;
+  const supportedEfforts = selectedModel?.reasoningEfforts ?? [];
+  const selectedReasoningLabel =
+    reasoningEffort === null ? "None" : reasoningLabel(reasoningEfforts, reasoningEffort);
 
   const updateMenuPosition = () => {
     const shell = rootRef.current;
@@ -120,23 +123,30 @@ export function ModelReasoningSwitcher({
     setOpenMenu((current) => (current === menu ? null : menu));
   };
 
-  const modelOptions: SelectOption[] = MODEL_OPTIONS.map((opt) => ({
-    value: opt.id,
-    label: opt.label,
-    hint: opt.hint,
+  const modelOptions: SelectOption[] = models.map((m) => ({
+    value: m.modelId,
+    label: m.label,
+    hint: m.hint ?? undefined,
     icon: (
-      <Cpu
-        className="size-3.5 shrink-0 opacity-70"
-        strokeWidth={1.75}
-      />
+      <ModelIcon svg={m.iconSvg} className="size-3.5 shrink-0 opacity-70" />
     ),
   }));
 
-  const reasoningOptions: SelectOption[] = REASONING_OPTIONS.map((opt) => ({
-    value: opt.id,
-    label: opt.label,
-    icon: <ReasoningEffortIcon effort={opt.id} />,
-  }));
+  const reasoningOptions: SelectOption[] =
+    supportedEfforts.length === 0
+      ? [{ value: "", label: "None", disabled: true }]
+      : reasoningEfforts
+          .filter((effort) => supportedEfforts.includes(effort.key))
+          .map((effort) => ({
+            value: effort.key,
+            label: effort.label,
+            icon: (
+              <ReasoningEffortIcon
+                effort={effort.key}
+                total={supportedEfforts.length}
+              />
+            ),
+          }));
 
   const menu =
     openMenu && menuPos
@@ -145,7 +155,7 @@ export function ModelReasoningSwitcher({
             ref={menuRef}
             id={openMenu === "model" ? modelListId : reasoningListId}
             ariaLabel={openMenu === "model" ? "Model" : "Reasoning effort"}
-            value={openMenu === "model" ? model : reasoningEffort}
+            value={openMenu === "model" ? model : (reasoningEffort ?? "")}
             style={{
               position: "fixed",
               top: menuPos.top,
@@ -157,9 +167,9 @@ export function ModelReasoningSwitcher({
             options={openMenu === "model" ? modelOptions : reasoningOptions}
             onSelect={(selectedValue) => {
               if (openMenu === "model") {
-                onModelChange(selectedValue as CompletionModelId);
+                onModelChange(selectedValue);
               } else {
-                onReasoningChange(selectedValue as ReasoningEffort);
+                onReasoningChange(selectedValue === "" ? null : selectedValue);
               }
               setOpenMenu(null);
             }}
@@ -192,7 +202,14 @@ export function ModelReasoningSwitcher({
           onClick={() => toggle("model")}
           className="inline-flex min-w-0 max-w-[7.25rem] cursor-pointer items-center gap-1.5 rounded-l-xl px-2 transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.99] disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
         >
-          <Cpu className="size-3.5 shrink-0" strokeWidth={1.75} />
+          {selectedModel ? (
+            <ModelIcon
+              svg={selectedModel.iconSvg}
+              className="size-3.5 shrink-0"
+            />
+          ) : (
+            <Cpu className="size-3.5 shrink-0" strokeWidth={1.75} />
+          )}
           <span className="min-w-0 truncate">{selectedModel?.label}</span>
           <ChevronDown
             className={`size-3 shrink-0 opacity-60 transition-transform duration-200 ${openMenu === "model" ? "rotate-180" : ""}`}
@@ -213,12 +230,15 @@ export function ModelReasoningSwitcher({
           aria-haspopup="listbox"
           aria-expanded={openMenu === "reasoning"}
           aria-controls={reasoningListId}
-          title={`Reasoning · ${selectedReasoning?.label ?? reasoningEffort}`}
+          title={`Reasoning · ${selectedReasoningLabel}`}
           onClick={() => toggle("reasoning")}
           className="inline-flex min-w-0 max-w-[6.5rem] cursor-pointer items-center gap-1.5 rounded-r-xl px-2 transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.99] disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
         >
-          <ReasoningEffortIcon effort={reasoningEffort} />
-          <span className="min-w-0 truncate">{selectedReasoning?.label}</span>
+          <ReasoningEffortIcon
+            effort={reasoningEffort}
+            total={supportedEfforts.length}
+          />
+          <span className="min-w-0 truncate">{selectedReasoningLabel}</span>
           <ChevronDown
             className={`size-3 shrink-0 opacity-60 transition-transform duration-200 ${openMenu === "reasoning" ? "rotate-180" : ""}`}
             strokeWidth={2}
@@ -232,44 +252,45 @@ export function ModelReasoningSwitcher({
 }
 
 /**
- * Gauge icon: low = outline, medium = half filled, high = solid fill.
+ * Gauge icon: fill = (index of effort + 1) / total supported efforts.
+ * `null` (no reasoning) renders an empty outline with a small inner dot.
  */
 export function ReasoningEffortIcon({
   effort,
+  total,
   className = "size-3.5 shrink-0",
 }: {
-  effort: ReasoningEffort;
+  effort: string | null;
+  total: number;
   className?: string;
 }) {
-  const fill =
-    effort === "high" ? "full" : effort === "medium" ? "half" : "none";
+  const radius = 6.25;
+  const circumference = 2 * Math.PI * radius;
+  const index = effort === null ? -1 : EFFORT_ORDER.indexOf(effort);
+  const fill = effort === null || total <= 0 ? 0 : Math.min(1, (index + 1) / total);
 
   return (
-    <svg
-      viewBox="0 0 16 16"
-      className={className}
-      aria-hidden
-      fill="none"
-    >
+    <svg viewBox="0 0 16 16" className={className} aria-hidden fill="none">
       <circle
         cx="8"
         cy="8"
-        r="6.25"
+        r={radius}
         stroke="currentColor"
         strokeWidth="1.4"
         opacity={0.9}
       />
-      {fill === "full" ? (
-        <circle cx="8" cy="8" r="4.1" fill="currentColor" opacity={0.92} />
-      ) : null}
-      {fill === "half" ? (
-        <path
-          d="M8 3.9a4.1 4.1 0 0 0 0 8.2V3.9Z"
-          fill="currentColor"
-          opacity={0.92}
-        />
-      ) : null}
-      {fill === "none" ? (
+      <circle
+        cx="8"
+        cy="8"
+        r={radius}
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeDasharray={`${circumference * fill} ${circumference}`}
+        strokeLinecap="round"
+        transform="rotate(-90 8 8)"
+        opacity={0.92}
+      />
+      {effort === null ? (
         <circle
           cx="8"
           cy="8"
@@ -281,4 +302,28 @@ export function ReasoningEffortIcon({
       ) : null}
     </svg>
   );
+}
+
+/**
+ * Renders a server-provided model icon (SVG string) through a minimal
+ * sanitizer, falling back to the lucide `Cpu` icon when empty or invalid.
+ */
+export function ModelIcon({
+  svg,
+  className,
+}: {
+  svg: string;
+  className?: string;
+}) {
+  const sanitized = useMemo(() => sanitizeSvg(svg), [svg]);
+  if (!sanitized) return <Cpu className={className} strokeWidth={1.75} />;
+  return <span className={className} dangerouslySetInnerHTML={{ __html: sanitized }} />;
+}
+
+function sanitizeSvg(raw: string): string {
+  if (typeof raw !== "string" || raw.trim().length === 0) return "";
+  const trimmed = raw.trim();
+  if (!/^<svg[\s>]/i.test(trimmed)) return "";
+  if (/<script|onload|onerror|javascript:/i.test(trimmed)) return "";
+  return trimmed;
 }

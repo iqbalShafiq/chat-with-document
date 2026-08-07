@@ -7,6 +7,7 @@ import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
 
 export const DEFAULT_COMPLETION_MODEL = "gpt-5.6-luna";
 export type ReasoningEffort = string;
+export type CompletionModelId = string;
 
 export function isKnownModel(models: ModelInfo[], modelId: string): boolean {
   return models.some((model) => model.modelId === modelId);
@@ -19,37 +20,16 @@ export function modelById(
   return models.find((model) => model.modelId === modelId) ?? null;
 }
 
-/** @deprecated — single-arg form kept for legacy callers; remove in Task 13. */
-export function modelLabel(modelId: string): string;
-export function modelLabel(models: ModelInfo[], modelId: string): string;
-export function modelLabel(
-  models: ModelInfo[] | string,
-  modelId?: string,
-): string {
-  if (typeof models === "string") {
-    return MODEL_OPTIONS.find((m) => m.id === models)?.label ?? models;
-  }
-  return modelById(models, modelId ?? "")?.label ?? (modelId ?? "");
+export function modelLabel(models: ModelInfo[], modelId: string): string {
+  return modelById(models, modelId)?.label ?? modelId;
 }
 
-/** @deprecated — single-arg form kept for legacy callers; remove in Task 13. */
-export function reasoningLabel(effort: string): string;
 export function reasoningLabel(
   efforts: ReasoningEffortInfo[],
   key: string | null,
-): string;
-export function reasoningLabel(
-  efforts: ReasoningEffortInfo[] | string,
-  key?: string | null,
 ): string {
-  if (typeof efforts === "string") {
-    return (
-      REASONING_OPTIONS.find((r) => r.id === efforts)?.label ??
-      efforts.charAt(0).toUpperCase() + efforts.slice(1)
-    );
-  }
   if (key === null) return "None";
-  return efforts.find((effort) => effort.key === key)?.label ?? (key ?? "");
+  return efforts.find((effort) => effort.key === key)?.label ?? key;
 }
 
 /**
@@ -82,66 +62,20 @@ export function resolveReasoningFallback(
   return sortedSupported[0] ?? null;
 }
 
-// ─── Deprecated legacy exports — remove in Task 13 ──────────────────────────
-// Kept so the switcher / settings modal keep compiling until Task 13 rewires
-// them onto the API catalog.
+// ─── Legacy allow-list helpers ──────────────────────────────────────────────
+// Kept (with private literal arrays) because `chat-preferences.ts` still uses
+// them for its no-arg overloads until Task 15 rewires `routes/index.tsx`.
+// The public allow-list constants themselves are gone.
 
-/** @deprecated — remove in Task 13; use `string` directly. */
-export type CompletionModelId = string;
+const LEGACY_MODEL_IDS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+const LEGACY_EFFORT_KEYS = ["low", "medium", "high"];
 
-/** @deprecated — remove in Task 13. */
-export type ModelOption = {
-  id: string;
-  label: string;
-  /** Short subtitle for menus (tier / relative cost). */
-  hint: string;
-};
-
-/** @deprecated — remove in Task 13; use `listModels()`. */
-export const MODEL_OPTIONS: ModelOption[] = [
-  { id: "gpt-5.6-luna", label: "Luna", hint: "Fastest · lowest cost" },
-  { id: "gpt-5.6-terra", label: "Terra", hint: "Balanced" },
-  { id: "gpt-5.6-sol", label: "Sol", hint: "Highest quality" },
-];
-
-/** @deprecated — remove in Task 13. */
-export type ReasoningOption = {
-  id: string;
-  label: string;
-};
-
-/** @deprecated — remove in Task 13; use `listModels()`. */
-export const REASONING_OPTIONS: ReasoningOption[] = [
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-];
-
-/** @deprecated — remove in Task 13. */
-export const COMPLETION_MODELS = [
-  "gpt-5.6-luna",
-  "gpt-5.6-terra",
-  "gpt-5.6-sol",
-] as const;
-
-/** @deprecated — remove in Task 13. */
-export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
-
-/** @deprecated — remove in Task 13. */
 export const DEFAULT_REASONING_EFFORT = "medium";
 
-/** @deprecated — remove in Task 13; single-arg form kept for legacy callers. */
 export function isCompletionModelId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    (COMPLETION_MODELS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && LEGACY_MODEL_IDS.includes(value);
 }
 
-/** @deprecated — remove in Task 13. */
 export function isReasoningEffort(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    (REASONING_EFFORTS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && LEGACY_EFFORT_KEYS.includes(value);
 }
