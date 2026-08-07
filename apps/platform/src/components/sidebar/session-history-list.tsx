@@ -126,6 +126,7 @@ export function SessionHistoryList({
                     onClick={() => onSelect(session.sessionId)}
                     title={session.title}
                     aria-current={selected ? "page" : undefined}
+                    aria-busy={running || undefined}
                     className={`relative flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
                       selected
                         ? "glass-pane font-medium text-text"
@@ -144,10 +145,34 @@ export function SessionHistoryList({
                     ) : null}
                     {running ? (
                       <span
-                        className="absolute inset-x-3 bottom-[0.35rem] h-0.5 overflow-hidden rounded-full bg-white/[0.08]"
-                        aria-hidden
+                        className="ml-2 size-4 shrink-0 text-accent"
+                        aria-label="Running"
+                        title="Running"
                       >
-                        <span className="block h-full w-1/3 rounded-full bg-accent/80 animate-[sidebar-progress_1.2s_ease-in-out_infinite]" />
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          className="size-full animate-spin"
+                          aria-hidden
+                        >
+                          <circle
+                            cx="8"
+                            cy="8"
+                            r="6.5"
+                            stroke="currentColor"
+                            strokeOpacity="0.15"
+                            strokeWidth="2"
+                          />
+                          <circle
+                            cx="8"
+                            cy="8"
+                            r="6.5"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeWidth="2"
+                            strokeDasharray="12 29"
+                          />
+                        </svg>
                       </span>
                     ) : null}
                   </button>
