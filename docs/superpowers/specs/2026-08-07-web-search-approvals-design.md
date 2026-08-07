@@ -28,7 +28,7 @@ Branch: `feat/web-search-tools`
 | Web backend | Tavily `search` + `extract` as two tools: `web_search` and `web_fetch` |
 | Context7 integration | **MCP via `@anvia/core`** (`mcp.http` + `connectMcp` + `AgentBuilder.mcp`) — semantic SDK path, cached singleton server in the worker, graceful degrade when unreachable, env-gated |
 | Approval mechanism | Anvia `approval` policy per tool (`when: () => !enabled`) + `AgentBuilder.approvals({ handler })`; `reason` derived from agent-provided `reason` arg (dynamic) |
-| Approval wait | Redis-backed pending-approval registry; decision route resolves via Redis pub/sub; timeout 5 min → auto-reject (`timed_out`); worker restart → run fails (existing `failChatRun` path) |
+| Approval wait | Redis-backed pending-approval registry; decision route writes a decision key, worker polls it (500ms) — chosen over pub/sub for zero extra connections and testability; timeout 5 min → auto-reject (`timed_out`); worker restart → run fails (existing `failChatRun` path) |
 | Toggle | Globe icon pill, no label, in composer dock next to Model/Reasoning switcher; per-session state, default off; disabled + tooltip when `TAVILY_API_KEY` unset |
 | Toggle transport | `webSearchEnabled: boolean` in `POST /api/chat` body → job payload → `buildChatRunInput` (same pattern as model/effort) |
 | Approval UI | `@anvia/react-ui` `HumanInput` primitives wrapped in `<ChatProvider controller={chat}>`, styled as a glass card pinned above the composer |
