@@ -153,7 +153,7 @@ Flow per request:
 
 - `TAVILY_API_KEY` unset → tools never registered → model cannot call them; toggle disabled in UI.
 - Approval never answered → 5 min timeout → auto-reject with `timed_out`; agent continues without web data.
-- Worker crash mid-approval → handler never resolves → agent run errors → existing `failChatRun` (stream error + failed pair + lock release).
+- Worker crash mid-approval → a process crash (vs an in-process handler failure) leaves the stream running until TTL, same as any pre-existing run crash; in-process failures (e.g. an append error) do hit `failChatRun` (stream error + failed pair + lock release).
 - Context7 down → `connectMcp` fails → logged, agent runs without it.
 - Stop pressed during approval wait → stop flag only checked between stream events; run continues until approval/timeout (accepted for v1, capped by timeout).
 - Rejoin/resume during pending approval → stream replay re-delivers `tool_approval_request` → client re-renders the card (idempotent decision route).
