@@ -133,8 +133,19 @@ describe("createWebSearchTools", () => {
       const output = (await tools[0]!.call({
         query: QUERY,
         reason: REASON,
+        timeRange: "week",
+        maxResults: 3,
       })) as SearchOutput;
 
+      expect(search).toHaveBeenCalledWith(
+        QUERY,
+        expect.objectContaining({
+          searchDepth: "basic",
+          includeAnswer: "basic",
+          maxResults: 3,
+          timeRange: "week",
+        }),
+      );
       expect(output.query).toBe(QUERY);
       expect(output.answer).toBe("Gold is trading at record highs");
       expect(output.results).toHaveLength(3);
@@ -164,6 +175,10 @@ describe("createWebSearchTools", () => {
         reason: REASON,
       })) as SearchOutput;
 
+      expect(search).toHaveBeenCalledWith(
+        QUERY,
+        expect.objectContaining({ maxResults: 5 }),
+      );
       expect(output.results).toHaveLength(5);
     });
 
@@ -218,6 +233,10 @@ describe("createWebSearchTools", () => {
         reason: REASON,
       })) as FetchOutput;
 
+      expect(extract).toHaveBeenCalledWith(
+        ["https://example.com/article"],
+        expect.objectContaining({ format: "markdown" }),
+      );
       expect(output.url).toBe("https://example.com/article");
       expect(output.title).toBe("Example Article");
       expect(output.content).toBe("Full page content here");
