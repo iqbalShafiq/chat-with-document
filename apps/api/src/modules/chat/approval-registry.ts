@@ -73,7 +73,8 @@ async function waitForDecision(
       try {
         return JSON.parse(raw) as ApprovalDecision;
       } catch {
-        return "timeout";
+        // Corrupt value — not a decision yet; drop it and keep polling.
+        await redis.del(DECISION_KEY(approvalId));
       }
     }
     if (Date.now() >= deadline) return "timeout";
@@ -82,6 +83,11 @@ async function waitForDecision(
 }
 
 export function createApprovalRegistry(redis: ApprovalRedis) {
+  /** Forget a resolved/expired approval (also called after a decision). */
+  const removeApproval = async (approvalId: string): Promise<void> => {
+    await redis.del(APPROVAL_KEY(approvalId), DECISION_KEY(approvalId));
+  };
+
   return {
     /**
      * Build an AgentBuilder.approvals handler bound to one stream run.
@@ -150,6 +156,7 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
               resolvedAt,
             },
           });
+          await removeApproval(approvalId);
           return {
             approved: false,
             reason:
@@ -175,6 +182,7 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
             ...(decision.reason ? { reason: decision.reason } : {}),
           },
         });
+        await removeApproval(approvalId);
 
         return decision.approved
           ? { approved: true }
@@ -224,9 +232,7 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
     },
 
     /** Forget a resolved/expired approval (called after a decision). */
-    async removeApproval(approvalId: string): Promise<void> {
-      await redis.del(APPROVAL_KEY(approvalId), DECISION_KEY(approvalId));
-    },
+    removeApproval,
   };
 }
 

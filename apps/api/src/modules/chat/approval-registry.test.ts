@@ -59,6 +59,10 @@ function makeRequest(
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Map-backed fake for the narrow ApprovalRedis surface. */
 function createFakeRedis() {
   const store = new Map<string, string>();
@@ -150,6 +154,19 @@ describe("createApprovalRegistry", () => {
       (await recorder.requestEvent) as ToolApprovalRequestEvent;
     const approvalId = requestEvent.approval.id;
 
+    const storedRecord = fake.hset.mock.calls[0]?.[1];
+    expect(storedRecord).toMatchObject({
+      approvalId,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      streamId: STREAM_ID,
+      toolName: "web_search",
+      args: JSON.stringify({ query: "anvia approval registry" }),
+      reason: "web toggle is off",
+      status: "pending",
+      requestedAt: expect.any(String),
+    });
+
     await registry.publishDecision(approvalId, { approved: true });
     await pending;
 
@@ -188,19 +205,6 @@ describe("createApprovalRegistry", () => {
       APPROVAL_KEY(approvalId),
       APPROVAL_TTL_SECONDS,
     );
-
-    const stored = await registry.getApproval(approvalId);
-    expect(stored).toMatchObject({
-      approvalId,
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      streamId: STREAM_ID,
-      toolName: "web_search",
-      args: JSON.stringify({ query: "anvia approval registry" }),
-      reason: "web toggle is off",
-      status: "approved",
-      requestedAt: expect.any(String),
-    });
   });
 
   it("resolves approved when a decision is published", async () => {
@@ -239,7 +243,7 @@ describe("createApprovalRegistry", () => {
   });
 
   it("resolves rejected when a negative decision is published", async () => {
-    const { recorder, registry } = setup();
+    const { fake, recorder, registry } = setup();
 
     const pending = createHandler(registry, recorder)(makeRequest());
     const requestEvent =
@@ -265,8 +269,13 @@ describe("createApprovalRegistry", () => {
       reason: "not needed",
     });
 
-    const stored = await registry.getApproval(approvalId);
-    expect(stored?.status).toBe("rejected");
+    expect(fake.hset).toHaveBeenLastCalledWith(
+      APPROVAL_KEY(approvalId),
+      expect.objectContaining({
+        status: "rejected",
+        decisionReason: "not needed",
+      }),
+    );
   });
 
   it("times out and rejects when no decision arrives", async () => {
@@ -292,11 +301,20 @@ describe("createApprovalRegistry", () => {
     });
 
     expect(fake.get).toHaveBeenCalledWith(DECISION_KEY(approvalId));
-    const stored = await registry.getApproval(approvalId);
-    expect(stored?.status).toBe("timed_out");
+    expect(fake.hset).toHaveBeenLastCalledWith(
+      APPROVAL_KEY(approvalId),
+      expect.objectContaining({
+        status: "timed_out",
+        resolvedAt: expect.any(String),
+      }),
+    );
+    expect(fake.del).toHaveBeenCalledWith(
+      APPROVAL_KEY(approvalId),
+      DECISION_KEY(approvalId),
+    );
   });
 
-  it("returns the resolved record and removeApproval deletes both keys", async () => {
+  it("deletes both keys once the decision is processed", async () => {
     const { fake, recorder, registry } = setup();
 
     const pending = createHandler(registry, recorder)(makeRequest());
@@ -307,24 +325,15 @@ describe("createApprovalRegistry", () => {
     await registry.publishDecision(approvalId, { approved: true });
     await pending;
 
-    const stored = await registry.getApproval(approvalId);
-    expect(stored).toMatchObject({
-      approvalId,
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      streamId: STREAM_ID,
-      toolName: "web_search",
-      args: JSON.stringify({ query: "anvia approval registry" }),
-      status: "approved",
-      requestedAt: expect.any(String),
-    });
-
-    await registry.removeApproval(approvalId);
     expect(fake.del).toHaveBeenCalledWith(
       APPROVAL_KEY(approvalId),
       DECISION_KEY(approvalId),
     );
     await expect(registry.getApproval(approvalId)).resolves.toBeNull();
+    await expect(fake.get(DECISION_KEY(approvalId))).resolves.toBeNull();
+
+    await registry.removeApproval(approvalId);
+    expect(fake.del).toHaveBeenCalledTimes(2);
   });
 
   it("ignores duplicate publishes of the same decision", async () => {
@@ -345,5 +354,70 @@ describe("createApprovalRegistry", () => {
 
     const resultEvent = recorder.events[1] as ToolApprovalResultEvent;
     expect(resultEvent.approval.status).toBe("approved");
+  });
+
+  it("resolves approved when the decision arrives after the first poll", async () => {
+    const { recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 2000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    // The first poll (~0ms) has missed by now; the second poll (~500ms)
+    // will see the decision long before the 2000ms deadline.
+    await sleep(150);
+    await registry.publishDecision(approvalId, { approved: true });
+
+    await expect(pending).resolves.toEqual({ approved: true });
+    const resultEvent = recorder.events[1] as ToolApprovalResultEvent;
+    expect(resultEvent.approval.status).toBe("approved");
+  });
+
+  it("rejects when append fails and leaves the record pending", async () => {
+    const { fake, registry } = setup();
+    const error = new Error("stream down");
+    const append = vi.fn(async () => {
+      throw error;
+    });
+
+    const handler = registry.createHandler({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      streamId: STREAM_ID,
+      append,
+      timeoutMs: 50,
+    });
+    await expect(handler(makeRequest())).rejects.toThrow("stream down");
+
+    const approvalKey = fake.hset.mock.calls[0]?.[0];
+    expect(approvalKey).toMatch(/^chat-approval:/);
+    const approvalId = approvalKey!.slice("chat-approval:".length);
+    const stored = await registry.getApproval(approvalId);
+    expect(stored?.status).toBe("pending");
+    expect(fake.del).not.toHaveBeenCalled();
+  });
+
+  it("deletes a corrupt decision key and keeps polling for the real decision", async () => {
+    const { fake, recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 2000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    // Land the corrupt value before the handler's first poll, then publish
+    // the real decision after that poll has dropped it.
+    await fake.set(DECISION_KEY(approvalId), "this is not json");
+    await sleep(150);
+    await registry.publishDecision(approvalId, { approved: true });
+
+    await expect(pending).resolves.toEqual({ approved: true });
+    expect(fake.del).toHaveBeenNthCalledWith(1, DECISION_KEY(approvalId));
+    expect(fake.del).toHaveBeenNthCalledWith(
+      2,
+      APPROVAL_KEY(approvalId),
+      DECISION_KEY(approvalId),
+    );
   });
 });
