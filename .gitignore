@@ -41,6 +41,7 @@ Thumbs.db
 
 # Agent tooling (local only)
 .superpowers/
+.playwright-mcp/
 
 # IDE (local only)
 .idea/
