@@ -107,6 +107,31 @@ describe("collectWebSources", () => {
     ]);
   });
 
+  it("parses output that arrives as a JSON string (streaming shape)", () => {
+    const messages = [
+      message([
+        toolPart(
+          "web_search",
+          JSON.stringify({
+            query: "bitcoin price",
+            results: [
+              { title: "Fortune", url: "https://fortune.com/btc", content: "$64k" },
+            ],
+          }),
+        ),
+      ]),
+    ];
+
+    expect(collectWebSources(messages)).toEqual([
+      {
+        url: "https://fortune.com/btc",
+        title: "Fortune",
+        content: "$64k",
+        source: "web_search",
+      },
+    ]);
+  });
+
   it("ignores parts without output-available state", () => {
     const messages = [
       message([

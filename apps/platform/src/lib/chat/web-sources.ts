@@ -17,6 +17,18 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** Tool parts may carry output as a JSON string during/after streaming. */
+function parseToolOutput(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 /**
  * Collect unique web sources from completed web tool parts in the session's
  * messages. First appearance wins (a repeated search keeps its first spot).
@@ -30,7 +42,9 @@ export function collectWebSources(messages: UIMessage[]): WebSourceSummary[] {
       if (!WEB_TOOL_NAMES.has(part.toolName)) continue;
       if (part.state !== "output-available") continue;
 
-      const output = isRecord(part.output) ? part.output : {};
+      const output = isRecord(parseToolOutput(part.output))
+        ? (parseToolOutput(part.output) as Record<string, unknown>)
+        : {};
       // web_search returns { results: [...] }; web_fetch returns a single
       // { url, title, content } shape with no results array — synthesize
       // one entry so fetched pages also land in the rail.
