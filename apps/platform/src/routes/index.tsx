@@ -237,55 +237,78 @@ function Home() {
     }
   }, [handleAuthFailure]);
 
-  const loadSessionsFirstPage = useCallback(async () => {
-    const activeId = sessionIdRef.current;
-    const inProject = viewModeRef.current === "project-workspace";
-    const inStandalone = viewModeRef.current === "standalone";
-    const projectId = inProject ? activeProjectIdRef.current : null;
-    setSessionsLoading(true);
-    setSessionsError(null);
-    try {
-      const page = await listSessions({
-        limit: SESSIONS_PAGE_SIZE,
-        projectId: projectId ?? undefined,
-      });
-      let items = page.items;
-      setNextCursor(page.nextCursor);
+  const loadSessionsFirstPage = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const { silent = false } = options ?? {};
+      const activeId = sessionIdRef.current;
+      const inProject = viewModeRef.current === "project-workspace";
+      const inStandalone = viewModeRef.current === "standalone";
+      const projectId = inProject ? activeProjectIdRef.current : null;
+      if (!silent) setSessionsLoading(true);
+      setSessionsError(null);
+      try {
+        const page = await listSessions({
+          limit: SESSIONS_PAGE_SIZE,
+          projectId: projectId ?? undefined,
+        });
+        // Never show an unread dot on the active session: a background
+        // refresh can land before the mark-read POST commits.
+        let items = page.items.map((session) =>
+          session.sessionId === sessionIdRef.current
+            ? { ...session, unread: false }
+            : session,
+        );
+        setNextCursor(page.nextCursor);
 
-      // In chat views: active session must belong to this list. Never invent
-      // phantom drafts (that stacked "New chat" when switching project↔all).
-      if (inProject || inStandalone) {
-        const activeInList = items.some((s) => s.sessionId === activeId);
-        if (!activeInList) {
-          const empty = findEmptyNewChat(items);
-          if (empty) {
-            setSessionId(empty.sessionId);
-          } else if (items[0]) {
-            setSessionId(items[0].sessionId);
-          } else {
-            const draft = await getOrCreateEmptyChatSession({
-              projectId: inProject ? projectId : null,
-            });
-            const row = sessionSummaryFromDraft(draft);
-            items = [row];
-            setSessionId(draft.sessionId);
-            setNextCursor(null);
+        // In chat views: active session must belong to this list. Never invent
+        // phantom drafts (that stacked "New chat" when switching project↔all).
+        // Skipped on silent refreshes so a poll never switches the session.
+        if (!silent && (inProject || inStandalone)) {
+          const activeInList = items.some((s) => s.sessionId === activeId);
+          if (!activeInList) {
+            const empty = findEmptyNewChat(items);
+            if (empty) {
+              setSessionId(empty.sessionId);
+            } else if (items[0]) {
+              setSessionId(items[0].sessionId);
+            } else {
+              const draft = await getOrCreateEmptyChatSession({
+                projectId: inProject ? projectId : null,
+              });
+              const row = sessionSummaryFromDraft(draft);
+              items = [row];
+              setSessionId(draft.sessionId);
+              setNextCursor(null);
+            }
           }
         }
-      }
 
-      setSessions(items);
-    } catch (error) {
-      if (error instanceof ApiAuthError) {
-        handleAuthFailure();
-        return;
+        if (silent) {
+          // In-place merge: fetched page replaces/appends/drops the ids it
+          // covers, preserving items beyond the first page still in state.
+          setSessions((current) => {
+            const fetchedIds = new Set(items.map((s) => s.sessionId));
+            const extras = current.filter(
+              (s) => !fetchedIds.has(s.sessionId),
+            );
+            return [...items, ...extras];
+          });
+        } else {
+          setSessions(items);
+        }
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
+        console.error("[sessions] failed to load", error);
+        if (!silent) setSessionsError("Could not load conversations");
+      } finally {
+        if (!silent) setSessionsLoading(false);
       }
-      console.error("[sessions] failed to load", error);
-      setSessionsError("Could not load conversations");
-    } finally {
-      setSessionsLoading(false);
-    }
-  }, [handleAuthFailure]);
+    },
+    [handleAuthFailure],
+  );
 
   // Sidebar status: which sessions have a running worker, and refresh the list
   // so unread markers appear once a run completes in the background.
@@ -301,7 +324,7 @@ function Home() {
           [...next].some((id) => !activeRunsRef.current.has(id));
         setActiveRuns(next);
         if (changed) {
-          await loadSessionsFirstPage();
+          await loadSessionsFirstPage({ silent: true });
         }
       } catch (error) {
         if (error instanceof ApiAuthError) {
