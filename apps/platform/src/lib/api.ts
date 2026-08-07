@@ -30,6 +30,8 @@ export type SessionListItem = {
   updatedAt: string;
   title: string;
   projectId?: string | null;
+  /** True when a completed run exists after the user last read this session. */
+  unread: boolean;
 };
 
 export type SessionListPage = {
@@ -71,7 +73,10 @@ export async function listSessions(input?: {
           typeof item.sessionId === "string" &&
           typeof item.updatedAt === "string" &&
           typeof item.title === "string",
-      ),
+      ).map((item) => ({
+        ...item,
+        unread: item.unread === true,
+      })),
       nextCursor:
         typeof page.nextCursor === "string" || page.nextCursor === null
           ? page.nextCursor
@@ -80,6 +85,47 @@ export async function listSessions(input?: {
   }
 
   throw new Error("Unexpected sessions response shape");
+}
+
+export type ActiveRunInfo = {
+  sessionId: string;
+  streamId: string;
+  status: string;
+  lastEventId: number;
+};
+
+export async function listActiveRuns(): Promise<ActiveRunInfo[]> {
+  const response = await apiFetch(`${API_BASE}/api/chat/runs`);
+  if (!response.ok) throw new Error("Failed to load active runs");
+  const data: unknown = await response.json();
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { runs?: unknown }).runs)
+  ) {
+    const runs = (data as { runs: unknown[] }).runs.filter(
+      (run): run is ActiveRunInfo =>
+        !!run &&
+        typeof run === "object" &&
+        typeof (run as ActiveRunInfo).sessionId === "string" &&
+        typeof (run as ActiveRunInfo).streamId === "string",
+    );
+    return runs;
+  }
+  throw new Error("Unexpected active runs response shape");
+}
+
+export async function markSessionRead(sessionId: string): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/mark-read`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    },
+  );
+  if (!response.ok) throw new Error("Failed to mark session read");
 }
 
 export async function createChatSession(input?: {
