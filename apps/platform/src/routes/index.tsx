@@ -1221,6 +1221,13 @@ function ChatSession({
     return () => window.clearInterval(timer);
   }, [modelsStatus, refreshContextUsage]);
 
+  // Refetch context usage whenever the selected model / effort changes so the
+  // ring and popover always reflect the ACTIVE model's window and ratio.
+  useEffect(() => {
+    if (modelsStatus !== "success") return;
+    void refreshContextUsage();
+  }, [selectedModel, selectedReasoningEffort, modelsStatus, refreshContextUsage]);
+
   // Rejoin a still-running run on load (closed-tab recovery) and surface a
   // banner for a run that failed server-side. "missing" behaves as idle.
   useEffect(() => {
