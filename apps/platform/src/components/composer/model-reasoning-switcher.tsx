@@ -279,6 +279,8 @@ export function ReasoningEffortIcon({
 
   return (
     <svg viewBox="0 0 16 16" className={className} aria-hidden fill="none">
+      {/* Track stays muted (currentColor); the filled arc uses the primary
+          accent so low → max is clearly distinguishable. */}
       <circle
         cx="8"
         cy="8"
@@ -291,7 +293,7 @@ export function ReasoningEffortIcon({
         cx="8"
         cy="8"
         r={radius}
-        stroke="currentColor"
+        style={{ stroke: "var(--color-accent)" }}
         strokeWidth="1.4"
         strokeDasharray={`${circumference * fill} ${circumference}`}
         strokeLinecap="round"
