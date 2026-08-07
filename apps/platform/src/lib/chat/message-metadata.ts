@@ -11,6 +11,8 @@ export type ChatMessageMeta = {
   attachedDocuments?: Array<{ name: string; mediaType?: string }>;
   /** Dual-written structured citations (server and/or client). */
   citations?: MessageCitation[];
+  /** UI-only classification: failed run (error) or compaction boundary (summary). */
+  kind?: "summary" | "error";
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -51,6 +53,10 @@ export function readChatMessageMeta(
         ? [{ name: item.name, mediaType: item.mediaType }]
         : [{ name: item.name }];
     });
+  }
+
+  if (metadata.kind === "summary" || metadata.kind === "error") {
+    meta.kind = metadata.kind;
   }
 
   const citations = parseCitationsFromMetadata(metadata);
@@ -99,6 +105,7 @@ export function withChatMessageMeta(
       return row;
     });
   }
+  if (patch.kind !== undefined) current.kind = patch.kind;
 
   return current as NonNullable<UIMessage["metadata"]>;
 }

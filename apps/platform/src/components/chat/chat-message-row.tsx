@@ -3,6 +3,8 @@ import { Message, useMessage } from "@anvia/react-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
 import { MessageCitationProvider } from "#/components/chat/message-citation-context";
+import { ConversationSummaryDivider } from "#/components/chat/conversation-summary-divider";
+import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
@@ -68,6 +70,34 @@ export function ChatMessageRow({
   onRevert: (message: UIMessage) => Promise<void>;
 }) {
   const { message } = useMessage();
+  const messageKind = readChatMessageMeta(message.metadata).kind;
+
+  if (messageKind === "summary") {
+    return (
+      <div
+        data-role={message.role}
+        data-message-id={message.id}
+        className="relative flex w-full min-w-0 flex-col"
+      >
+        <ConversationSummaryDivider />
+      </div>
+    );
+  }
+
+  if (messageKind === "error") {
+    return (
+      <div
+        data-role={message.role}
+        data-message-id={message.id}
+        className="relative flex w-full min-w-0 flex-col"
+      >
+        <ErrorMessageBubble
+          text={getMessageRawText(message) || "Something went wrong"}
+        />
+      </div>
+    );
+  }
+
   const contentRef = useRef<HTMLDivElement>(null);
   const [editWidthPx, setEditWidthPx] = useState<number | null>(null);
   const intermediate = isIntermediateStepMessage(message);
