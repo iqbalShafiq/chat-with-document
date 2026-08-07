@@ -37,6 +37,14 @@ function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 export function truncate(text: string, max = 280): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
@@ -623,7 +631,7 @@ function formatWebSearchOutput(output: unknown): FormattedSection {
       ...(url || score !== null
         ? {
             meta: [
-              url ? new URL(url).hostname : null,
+              url ? safeHostname(url) : null,
               score !== null ? formatScore(score) : null,
             ]
               .filter(Boolean)

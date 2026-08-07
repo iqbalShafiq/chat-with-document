@@ -447,7 +447,9 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const registry = getApprovalRegistry();
     const approval = await registry.getApproval(approvalId);
     if (!approval) {
-      return c.json({ error: "approval not found", code: "APPROVAL_NOT_FOUND" }, 404);
+      // Idempotent: the approval was already resolved and cleaned up (or TTL'd),
+      // so a late decision is a no-op success — the client must not throw.
+      return c.json({ ok: true, alreadyResolved: true });
     }
     if (approval.userId !== user.id) {
       return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);

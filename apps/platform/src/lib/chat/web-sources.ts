@@ -31,7 +31,14 @@ export function collectWebSources(messages: UIMessage[]): WebSourceSummary[] {
       if (part.state !== "output-available") continue;
 
       const output = isRecord(part.output) ? part.output : {};
-      const results = Array.isArray(output.results) ? output.results : [];
+      // web_search returns { results: [...] }; web_fetch returns a single
+      // { url, title, content } shape with no results array — synthesize
+      // one entry so fetched pages also land in the rail.
+      const results = Array.isArray(output.results)
+        ? output.results
+        : typeof output.url === "string"
+          ? [output]
+          : [];
 
       for (const result of results) {
         if (!isRecord(result)) continue;

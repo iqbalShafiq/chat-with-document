@@ -19,8 +19,8 @@ const TOOL_LABELS: Record<string, string> = {
   get_document_page_images: "Inspecting page images",
   web_search: "Searching the web",
   web_fetch: "Fetching web page",
-  resolve_library_id: "Looking up library",
-  query_docs: "Reading library docs",
+  "resolve-library-id": "Looking up library",
+  "query-docs": "Reading library docs",
 };
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
