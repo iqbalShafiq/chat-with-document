@@ -17,12 +17,21 @@ const TOOL_LABELS: Record<string, string> = {
   pearson_correlation: "Computing correlation",
   linear_regression: "Fitting regression",
   get_document_page_images: "Inspecting page images",
+  web_search: "Searching the web",
+  web_fetch: "Fetching web page",
+  resolve_library_id: "Looking up library",
+  query_docs: "Reading library docs",
 };
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
 
 export function getToolActivityLabel(part: ToolPart) {
   return TOOL_LABELS[part.toolName] ?? `Running ${part.toolName}`;
+}
+
+/** Label for a bare tool name (e.g. approval cards) without a full part. */
+export function toolActivityLabelForName(toolName: string) {
+  return TOOL_LABELS[toolName] ?? `Running ${toolName}`;
 }
 
 function statusLabel(part: ToolPart) {

@@ -7,8 +7,9 @@ import { ComposerAttachmentChip } from "#/components/composer-attachment";
 import { DocumentRow } from "#/components/documents/document-row";
 import { IngestionStatusPill } from "#/components/ingestion-status-pill";
 import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
+import type { WebSourceSummary } from "#/lib/chat/web-sources";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
-import { Quote, X } from "lucide-react";
+import { Globe, Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
@@ -23,16 +24,19 @@ export function useHasSessionDocuments({
   sessionDocuments,
   citedDocuments,
   ingestionItems,
+  webSources = [],
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
+  webSources?: WebSourceSummary[];
 }) {
   const composer = useComposer();
   return (
     sessionDocuments.length > 0 ||
     citedDocuments.length > 0 ||
     ingestionItems.length > 0 ||
+    webSources.length > 0 ||
     composer.attachments.length > 0
   );
 }
@@ -45,12 +49,14 @@ export function SessionDocumentsPanel({
   sessionDocuments,
   citedDocuments,
   ingestionItems,
+  webSources = [],
   onRemoveActiveDocument,
   removingDocumentId = null,
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
+  webSources?: WebSourceSummary[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
@@ -62,6 +68,7 @@ export function SessionDocumentsPanel({
   const citedListRef = useRef<HTMLUListElement>(null);
   const hasActive = sessionDocuments.length > 0;
   const hasCited = citedDocuments.length > 0;
+  const hasWebSources = webSources.length > 0;
   const hasIngestion = ingestionItems.length > 0;
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
@@ -147,6 +154,7 @@ export function SessionDocumentsPanel({
           {[
             hasActive ? `${sessionDocuments.length} active` : null,
             hasCited ? `${citedDocuments.length} cited` : null,
+            hasWebSources ? `${webSources.length} web` : null,
             hasPending ? `${pendingCount} pending` : null,
           ]
             .filter(Boolean)
@@ -267,6 +275,35 @@ export function SessionDocumentsPanel({
             </CollapsibleDocumentSection>
           ) : null}
 
+          {hasWebSources ? (
+            <CollapsibleDocumentSection title="Web sources">
+              <ul className="flex w-full list-none flex-col gap-1.5 p-0">
+                {webSources.map((source) => {
+                  const domain = safeHostname(source.url);
+                  return (
+                    <li key={source.url} className="w-full min-w-0">
+                      <DocumentRow
+                        filename={source.title || source.url}
+                        summary={source.content}
+                        meta={domain ?? null}
+                        title={`Open ${source.url} in a new tab`}
+                        onClick={() => {
+                          window.open(source.url, "_blank", "noopener,noreferrer");
+                        }}
+                        leading={
+                          <Globe
+                            className="mt-0.5 size-4 shrink-0 text-accent"
+                            strokeWidth={1.75}
+                          />
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </CollapsibleDocumentSection>
+          ) : null}
+
           {hasPending ? (
             <CollapsibleDocumentSection
               title={hasIngestion ? "Uploading documents" : "Attachments"}
@@ -301,7 +338,7 @@ export function SessionDocumentsPanel({
             </CollapsibleDocumentSection>
           ) : null}
 
-          {!hasActive && !hasCited && !hasPending ? (
+          {!hasActive && !hasCited && !hasWebSources && !hasPending ? (
             <p className="px-1 py-6 text-center text-[11px] text-text-faint">
               Attach a file or pick from your library to ground this chat.
             </p>
@@ -310,6 +347,14 @@ export function SessionDocumentsPanel({
       </div>
     </aside>
   );
+}
+
+function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -321,12 +366,14 @@ export function SessionDocumentsRail({
   sessionDocuments,
   citedDocuments,
   ingestionItems,
+  webSources = [],
   onRemoveActiveDocument,
   removingDocumentId,
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
+  webSources?: WebSourceSummary[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
@@ -334,6 +381,7 @@ export function SessionDocumentsRail({
     sessionDocuments,
     citedDocuments,
     ingestionItems,
+    webSources,
   });
 
   return (
@@ -354,6 +402,7 @@ export function SessionDocumentsRail({
             sessionDocuments={sessionDocuments}
             citedDocuments={citedDocuments}
             ingestionItems={ingestionItems}
+            webSources={webSources}
             onRemoveActiveDocument={onRemoveActiveDocument}
             removingDocumentId={removingDocumentId}
           />

@@ -5,6 +5,7 @@ import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
+import { WebSearchToggle } from "#/components/composer/web-search-toggle";
 import type {
   ContextUsageInfo,
   ModelInfo,
@@ -45,6 +46,9 @@ export function ChatComposer({
   compaction = { phase: "idle" },
   contextUsage = null,
   contextUsageError = false,
+  webSearchEnabled = false,
+  webSearchAvailable = true,
+  onWebSearchToggle = () => {},
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -73,6 +77,11 @@ export function ChatComposer({
   contextUsage?: ContextUsageInfo | null;
   /** Latest context-usage refresh failed (ring shows a transient hint). */
   contextUsageError?: boolean;
+  /** Per-session web-search toggle state (default off). */
+  webSearchEnabled?: boolean;
+  /** Server has web tools configured (TAVILY_API_KEY). */
+  webSearchAvailable?: boolean;
+  onWebSearchToggle?: (enabled: boolean) => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
@@ -139,15 +148,23 @@ export function ChatComposer({
         />
 
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2">
-          <ModelReasoningSwitcher
-            models={models}
-            reasoningEfforts={reasoningEfforts}
-            model={model}
-            reasoningEffort={reasoningEffort}
-            disabled={busy || modelsUnavailable}
-            onModelChange={onModelChange}
-            onReasoningChange={onReasoningChange}
-          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <WebSearchToggle
+              enabled={webSearchEnabled}
+              available={webSearchAvailable}
+              disabled={busy || modelsUnavailable}
+              onToggle={onWebSearchToggle}
+            />
+            <ModelReasoningSwitcher
+              models={models}
+              reasoningEfforts={reasoningEfforts}
+              model={model}
+              reasoningEffort={reasoningEffort}
+              disabled={busy || modelsUnavailable}
+              onModelChange={onModelChange}
+              onReasoningChange={onReasoningChange}
+            />
+          </div>
 
           <div className="flex shrink-0 items-center gap-1.5">
             {contextUsageError ? (
