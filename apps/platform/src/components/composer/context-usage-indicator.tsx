@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ContextUsageInfo, ModelInfo } from "#/lib/api";
+import { modelById } from "#/lib/chat/models";
 import { ModelIcon } from "#/components/composer/model-reasoning-switcher";
 
 /** Shared session-context window height, so every model's bar uses the same ratio. */
@@ -180,27 +181,32 @@ export function ContextUsageIndicator({
 
               {models.length === 0 ? (
                 <div className="flex flex-col gap-2">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="size-3.5 shrink-0 rounded bg-white/[0.08] skeleton-shimmer" />
-                      <div className="h-2.5 w-28 rounded bg-white/[0.08] skeleton-shimmer" />
-                      <div className="ml-auto h-2.5 w-10 rounded bg-white/[0.08] skeleton-shimmer" />
-                    </div>
-                  ))}
+                  <div className="flex items-center gap-2">
+                    <div className="size-3.5 shrink-0 rounded bg-white/[0.08] skeleton-shimmer" />
+                    <div className="h-2.5 w-28 rounded bg-white/[0.08] skeleton-shimmer" />
+                    <div className="ml-auto h-2.5 w-10 rounded bg-white/[0.08] skeleton-shimmer" />
+                  </div>
                 </div>
               ) : contextUsage === null ? (
                 <p className="text-xs text-text-muted">Usage data unavailable</p>
               ) : (
                 <div className="flex flex-col gap-2.5">
-                  {models.map((model) => (
-                    <ContextUsageRow
-                      key={model.modelId}
-                      model={model}
-                      estimatedTokens={contextUsage.estimatedTokens}
-                      ratio={ratio}
-                      colorClass={ringColor}
-                    />
-                  ))}
+                  {(() => {
+                    const active = modelById(models, contextUsage.modelId);
+                    return active ? (
+                      <ContextUsageRow
+                        key={active.modelId}
+                        model={active}
+                        estimatedTokens={contextUsage.estimatedTokens}
+                        ratio={ratio}
+                        colorClass={ringColor}
+                      />
+                    ) : (
+                      <p className="text-xs text-text-muted">
+                        No usage for the selected model
+                      </p>
+                    );
+                  })()}
                 </div>
               )}
             </div>,

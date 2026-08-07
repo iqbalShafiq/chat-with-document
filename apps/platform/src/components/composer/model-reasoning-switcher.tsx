@@ -16,7 +16,7 @@ import {
 } from "#/components/ui/select-list";
 
 /** Used only to order the icon fill; the actual list comes from props. */
-const EFFORT_ORDER = ["low", "medium", "high"];
+const EFFORT_ORDER = ["low", "medium", "high", "max"];
 
 /**
  * Single glass shell with two joined dropdowns (model | reasoning).
@@ -143,7 +143,7 @@ export function ModelReasoningSwitcher({
             icon: (
               <ReasoningEffortIcon
                 effort={effort.key}
-                total={supportedEfforts.length}
+                efforts={supportedEfforts}
               />
             ),
           }));
@@ -236,7 +236,7 @@ export function ModelReasoningSwitcher({
         >
           <ReasoningEffortIcon
             effort={reasoningEffort}
-            total={supportedEfforts.length}
+            efforts={supportedEfforts}
           />
           <span className="min-w-0 truncate">{selectedReasoningLabel}</span>
           <ChevronDown
@@ -252,22 +252,30 @@ export function ModelReasoningSwitcher({
 }
 
 /**
- * Gauge icon: fill = (index of effort + 1) / total supported efforts.
+ * Gauge icon: fill = position of the effort within the model's OWN sorted
+ * effort list (e.g. DeepSeek [low, high, max] → 1/3, 2/3, 3/3), so the
+ * levels are always visually distinct regardless of the model's set.
  * `null` (no reasoning) renders an empty outline with a small inner dot.
  */
 export function ReasoningEffortIcon({
   effort,
-  total,
+  efforts,
   className = "size-3.5 shrink-0",
 }: {
   effort: string | null;
-  total: number;
+  efforts: string[];
   className?: string;
 }) {
   const radius = 6.25;
   const circumference = 2 * Math.PI * radius;
-  const index = effort === null ? -1 : EFFORT_ORDER.indexOf(effort);
-  const fill = effort === null || total <= 0 ? 0 : Math.min(1, (index + 1) / total);
+  const sorted = [...efforts].sort(
+    (a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b),
+  );
+  const index = effort === null ? -1 : sorted.indexOf(effort);
+  const fill =
+    effort === null || sorted.length === 0
+      ? 0
+      : Math.min(1, (index + 1) / sorted.length);
 
   return (
     <svg viewBox="0 0 16 16" className={className} aria-hidden fill="none">
@@ -307,6 +315,9 @@ export function ReasoningEffortIcon({
 /**
  * Renders a server-provided model icon (SVG string) through a minimal
  * sanitizer, falling back to the lucide `Cpu` icon when empty or invalid.
+ * The wrapper is an inline-flex box so the `size-*` classes apply even when
+ * nested inside another flex item, and the SVG fills the box (see
+ * `.model-icon svg` in styles.css) with preserveAspectRatio centering.
  */
 export function ModelIcon({
   svg,
@@ -317,7 +328,12 @@ export function ModelIcon({
 }) {
   const sanitized = useMemo(() => sanitizeSvg(svg), [svg]);
   if (!sanitized) return <Cpu className={className} strokeWidth={1.75} />;
-  return <span className={className} dangerouslySetInnerHTML={{ __html: sanitized }} />;
+  return (
+    <span
+      className={`model-icon inline-flex items-center justify-center ${className ?? ""}`}
+      dangerouslySetInnerHTML={{ __html: sanitized }}
+    />
+  );
 }
 
 function sanitizeSvg(raw: string): string {

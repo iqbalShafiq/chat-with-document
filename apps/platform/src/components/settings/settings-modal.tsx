@@ -51,6 +51,7 @@ const REASONING_BAR_COLORS: Record<ReasoningEffort, string> = {
   low: "bg-emerald-400/70",
   medium: "bg-amber-400/75",
   high: "bg-rose-400/75",
+  max: "bg-violet-400/75",
 };
 
 function formatBytes(bytes: number): string {
@@ -637,7 +638,7 @@ function RequestMixCard({
                     />
                     <ReasoningEffortIcon
                       effort={s.id === "none" ? null : (s.id as ReasoningEffort)}
-                      total={reasoningEfforts.length}
+                      efforts={reasoningEfforts.map((effort) => effort.key)}
                       className="size-3.5 shrink-0"
                     />
                     {s.label}
