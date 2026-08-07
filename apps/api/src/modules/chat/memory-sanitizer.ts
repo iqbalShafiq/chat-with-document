@@ -66,6 +66,22 @@ async function persistedSessionMetadata(
   return { ...persisted, ...callerMetadata };
 }
 
+/**
+ * Drop `reasoning` parts from assistant messages in the agent view. Replaying
+ * stored reasoning text makes Anvia emit `reasoning` items with a non-empty
+ * `content` array, which some providers (e.g. DeepSeek via OpenRouter) reject
+ * ("expected an array with maximum length 0"). The reasoning text is UI-only —
+ * the model gets the summary alongside it and does not need the raw chain.
+ */
+function stripReasoningParts(message: Message): Message {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return message;
+  }
+  const content = message.content.filter((part) => part.type !== "reasoning");
+  if (content.length === message.content.length) return message;
+  return { ...message, content };
+}
+
 /** The agent must never see error artifacts (kind:"error" rows). */
 export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
   const inner = createPrismaMemoryStore(prisma);
@@ -88,7 +104,10 @@ export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
         select: { position: true, message: true },
       });
       const filtered = rows
-        .map((row) => ({ position: row.position, message: row.message as Message }))
+        .map((row) => ({
+          position: row.position,
+          message: stripReasoningParts(row.message as Message),
+        }))
         .filter(
           (row) =>
             !(

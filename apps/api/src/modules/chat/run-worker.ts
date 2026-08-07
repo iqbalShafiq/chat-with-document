@@ -227,6 +227,27 @@ export async function writeFailedPair(
     }
   }
 
+  // The agent's memory store (savePolicy "message") already appended the
+  // prompt at run start, so only write it when the tail isn't that prompt
+  // (matched by clientMessageId, falling back to exact content equality).
+  const promptMetadata = isRecord(promptMessage.metadata)
+    ? promptMessage.metadata
+    : undefined;
+  const promptClientId =
+    typeof promptMetadata?.clientMessageId === "string"
+      ? promptMetadata.clientMessageId
+      : null;
+  const tailIsPrompt =
+    tail?.role === "user" &&
+    (promptClientId !== null
+      ? (() => {
+          const meta = (tail.message as Message).metadata;
+          return (
+            isRecord(meta) && meta.clientMessageId === promptClientId
+          );
+        })()
+      : JSON.stringify(tail.message) === JSON.stringify(promptMessage));
+
   const nextPosition = rows.length === 0 ? 1 : tail!.position + 1;
   const errorMessage: Message = {
     role: "assistant",
@@ -242,20 +263,24 @@ export async function writeFailedPair(
   const runId = `failed:${Date.now()}`;
   await prisma.agentMemoryMessage.createMany({
     data: [
+      ...(tailIsPrompt
+        ? []
+        : [
+            {
+              memorySessionId: session.id,
+              runId,
+              turn: 0,
+              position: nextPosition,
+              role: "user",
+              message: promptMessage as unknown as Prisma.InputJsonValue,
+              createdAt: new Date(),
+            },
+          ]),
       {
         memorySessionId: session.id,
         runId,
         turn: 0,
-        position: nextPosition,
-        role: "user",
-        message: promptMessage as unknown as Prisma.InputJsonValue,
-        createdAt: new Date(),
-      },
-      {
-        memorySessionId: session.id,
-        runId,
-        turn: 0,
-        position: nextPosition + 1,
+        position: nextPosition + (tailIsPrompt ? 0 : 1),
         role: "assistant",
         message: errorMessage as unknown as Prisma.InputJsonValue,
         createdAt: new Date(),
