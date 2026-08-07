@@ -219,6 +219,49 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     await markChatSessionRead({ userId: user.id, sessionId });
     return c.json({ ok: true });
   })
+  .get("/runs", async (c) => {
+    const user = c.get("user");
+    const redis = getRedis();
+    const store = getStreamStore();
+
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, found] = await redis.scan(
+        cursor,
+        "MATCH",
+        "rs-active:*",
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      keys.push(...found);
+    } while (cursor !== "0");
+
+    const runs: Array<{
+      sessionId: string;
+      streamId: string;
+      status: string;
+      lastEventId: number;
+    }> = [];
+    for (const key of keys) {
+      const sessionId = key.slice("rs-active:".length);
+      if (!sessionId) continue;
+      const streamId = await redis.get(key);
+      if (!streamId) continue;
+      const meta = await store.getMeta(streamId);
+      if (!meta || meta.userId !== user.id) continue;
+      const state = await store.status({ streamId });
+      if (state.status !== "running") continue;
+      runs.push({
+        sessionId,
+        streamId,
+        status: state.status,
+        lastEventId: state.lastEventId,
+      });
+    }
+    return c.json({ runs });
+  })
   .post("/truncate", async (c) => {
     const user = c.get("user");
     const body = (await c.req.json()) as Record<string, unknown>;
