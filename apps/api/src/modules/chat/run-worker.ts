@@ -45,6 +45,96 @@ async function* tapStreamStopFlag<T>(
   }
 }
 
+/**
+ * OpenRouter intermittently returns "The requested model '...' does not exist"
+ * for catalogued models (routing to a degraded provider / snapshot sync). The
+ * model exists — the very same request succeeds seconds later. When the FIRST
+ * event of a run is this transient error, drop the attempt (nothing was
+ * generated or appended to the stream yet) and retry the run once. Any other
+ * error — or a second occurrence — flows through the normal failure path.
+ */
+function isTransientModelNotFoundError(event: unknown): boolean {
+  if (!isRecord(event) || event.type !== "error") return false;
+  const raw = event.error;
+  const message =
+    typeof raw === "string"
+      ? raw
+      : raw instanceof Error
+        ? raw.message
+        : isRecord(raw) && typeof raw.message === "string"
+          ? raw.message
+          : "";
+  return /does not exist/i.test(message);
+}
+
+async function* withTransientModelRetry<T>(
+  sourceFactory: () => AsyncIterable<T>,
+  onRetry: () => Promise<void>,
+): AsyncGenerator<T> {
+  let retried = false;
+  for (;;) {
+    let hitTransient = false;
+    let first = true;
+    for await (const item of sourceFactory()) {
+      if (first && !retried && isTransientModelNotFoundError(item)) {
+        hitTransient = true;
+        break;
+      }
+      first = false;
+      yield item;
+    }
+    if (!hitTransient) return;
+    retried = true;
+    console.log("[chat-run] transient 'model does not exist', retrying run once");
+    await onRetry();
+  }
+}
+
+/**
+ * The agent's memory store (savePolicy "message") appends the prompt at run
+ * start; a retried run would append it again. Delete the failed attempt's
+ * prompt row (matched by clientMessageId, falling back to content equality).
+ */
+async function removeAppendedPromptRow(
+  sessionId: string,
+  userId: string,
+  promptMessage: Message,
+): Promise<void> {
+  const scopeKey = createDefaultMemoryScopeKey(sessionId, userId);
+  const session = await prisma.agentMemorySession.findUnique({
+    where: { scopeKey },
+    select: { id: true },
+  });
+  if (!session) return;
+  const rows = await prisma.agentMemoryMessage.findMany({
+    where: { memorySessionId: session.id },
+    select: { id: true, role: true, message: true },
+  });
+  const promptMetadata = isRecord(promptMessage.metadata)
+    ? promptMessage.metadata
+    : undefined;
+  const promptClientId =
+    typeof promptMetadata?.clientMessageId === "string"
+      ? promptMetadata.clientMessageId
+      : null;
+  const targets = rows.filter((row) => {
+    if (row.role !== "user") return false;
+    const message = row.message as Message;
+    if (promptClientId !== null) {
+      return (
+        isRecord(message.metadata) &&
+        message.metadata.clientMessageId === promptClientId
+      );
+    }
+    return JSON.stringify(message) === JSON.stringify(promptMessage);
+  });
+  if (targets.length > 0) {
+    await prisma.agentMemoryMessage.deleteMany({
+      where: { id: { in: targets.map((row) => row.id) } },
+    });
+  }
+}
+
 export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void> {
   const { streamId, sessionId, userId, model, reasoningEffort, promptMessage } = job.data;
   const store = getStreamStore();
@@ -109,15 +199,24 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       }
     }
 
-    const stream = runInput.agent
-      .session(sessionId, { userId })
-      .prompt(promptMessage)
-      .withTrace({
-        sessionId,
-        userId,
-        ...(runInput.projectId ? { projectId: runInput.projectId } : {}),
-      })
-      .stream();
+    // The transient-retry wrapper sits between the raw agent stream and the
+    // audit taps, so a dropped attempt records nothing (no usage, no stream
+    // events, no citations) — only the retried stream flows into the taps.
+    const rawFactory = () =>
+      runInput.agent
+        .session(sessionId, { userId })
+        .prompt(promptMessage)
+        .withTrace({
+          sessionId,
+          userId,
+          ...(runInput.projectId ? { projectId: runInput.projectId } : {}),
+        })
+        .stream();
+
+    const stream = withTransientModelRetry(
+      rawFactory,
+      () => removeAppendedPromptRow(sessionId, userId, promptMessage),
+    );
 
     // Chain (outermost → raw stream): profile refresh → finalize citations →
     // usage audit → stop flag. Profile tap outermost so the background
