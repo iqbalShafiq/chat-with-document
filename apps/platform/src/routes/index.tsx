@@ -1,5 +1,6 @@
 import {
   createChatTransport,
+  EventStreamHttpError,
   initialMessagesFromMemory,
   useChat,
 } from "@anvia/react";
@@ -31,6 +32,7 @@ import {
   listSessions,
   loadChatMessages,
   openProject,
+  stopChatRun,
   truncateSessionMemory,
   unlinkDocumentFromSession,
   uploadDocument,
@@ -826,6 +828,8 @@ function ChatSession({
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
   const messagesRef = useRef<UIMessage[]>([]);
+  /** Latest chat controller for stable event handlers (see onError / stop). */
+  const chatRef = useRef<ReturnType<typeof useChat> | null>(null);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
@@ -1010,9 +1014,35 @@ function ChatSession({
     onError: (error) => {
       if (error instanceof ApiAuthError) {
         onAuthFailure();
+        return;
+      }
+      if (error instanceof EventStreamHttpError && error.response.status === 409) {
+        // Another tab already holds the active-run lock for this session.
+        let runActive = true;
+        try {
+          const parsed: unknown = JSON.parse(error.body);
+          runActive =
+            typeof parsed === "object" &&
+            parsed !== null &&
+            (parsed as { code?: unknown }).code === "RUN_ACTIVE";
+        } catch {
+          // Unparseable body — fall back to the status check alone.
+        }
+        if (runActive) {
+          setComposerError(
+            "This session is already being processed in another tab.",
+          );
+          chatRef.current?.setMessages((current) => {
+            const last = current.at(-1);
+            if (!last || last.role !== "user") return current;
+            return current.slice(0, -1);
+          });
+        }
       }
     },
   });
+
+  chatRef.current = chat;
 
   // Keep the latest messages readable from stable event handlers.
   useEffect(() => {
@@ -1021,6 +1051,19 @@ function ChatSession({
 
   const resumeChatRef = useRef(chat.resume);
   resumeChatRef.current = chat.resume;
+
+  /**
+   * Stop button: abort the local fetch (Composer.Stop → chat.stop()) AND ask
+   * the worker to end the run early, so a second tab never keeps it running
+   * to completion. Fire-and-forget; the local abort always proceeds.
+   */
+  const handleStopRun = useCallback(() => {
+    const streamId = chatRef.current?.streamId;
+    if (!streamId) return;
+    void stopChatRun(streamId).catch(() => {
+      // best-effort: the local abort still stops the client stream
+    });
+  }, []);
 
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
@@ -1562,6 +1605,7 @@ function ChatSession({
                     reasoningEffort={selectedReasoningEffort}
                     onModelChange={handleModelChange}
                     onReasoningChange={handleReasoningChange}
+                    onStopRun={handleStopRun}
                     onLinkedDocuments={handleLinkedDocuments}
                     onAttachmentRejected={handleAttachmentRejected}
                     onDismissAttachmentError={handleDismissAttachmentError}

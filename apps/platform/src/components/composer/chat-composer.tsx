@@ -33,6 +33,7 @@ export function ChatComposer({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
+  onStopRun,
   onLinkedDocuments,
   onAttachmentRejected,
   onDismissAttachmentError,
@@ -57,6 +58,8 @@ export function ChatComposer({
   reasoningEffort: string | null;
   onModelChange: (model: string) => void;
   onReasoningChange: (effort: string | null) => void;
+  /** Wired in routes/index.tsx — stops the run server-side (worker stop flag). */
+  onStopRun?: () => void;
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   onAttachmentRejected?: (rejects: AttachmentReject[]) => void;
   onDismissAttachmentError: (id: string) => void;
@@ -171,6 +174,7 @@ export function ChatComposer({
               <Composer.Stop
                 aria-label="Stop"
                 title="Stop"
+                onClick={onStopRun}
                 className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-text text-canvas transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96]"
               >
                 <Square className="size-3 fill-current" strokeWidth={0} />

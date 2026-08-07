@@ -7,6 +7,7 @@ import { getStreamStore } from "../../lib/resumable-stream-store.js";
 import { estimateMessagesTokens } from "../../lib/token-estimate.js";
 import { prisma } from "../../utils/prisma.js";
 import { findActiveModel } from "../models/service.js";
+import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import { buildChatRunInput } from "./build-run-input.js";
 import { compactSessionMemory } from "./compaction.js";
@@ -93,11 +94,18 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
           streamId,
           event: { type: "compaction", phase: "complete", stats: result.stats },
         });
-      } else {
+      } else if (result.reason === "summarize-failed") {
         await store.append({
           streamId,
           event: { type: "compaction", phase: "error", reason: result.reason },
         });
+      } else {
+        // below-threshold: the trigger estimate (memory + static context) can
+        // exceed the memory-only check inside compactSessionMemory — nothing
+        // went wrong, so surface no compaction event at all.
+        console.log(
+          `[chat-run] compaction skipped for ${streamId}: ${result.reason}`,
+        );
       }
     }
 
@@ -111,20 +119,25 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       })
       .stream();
 
-    const audited = tapAgentStreamUsage(stream, {
-      userId,
-      sessionId,
-      provider: DEFAULT_COMPLETION_PROVIDER,
-      model,
-      reasoningEffort,
-      agentId: "my-agent",
-    });
-    const finalTap = tapStreamComplete(audited, () =>
-      finalizeAssistantCitations(sessionId, userId),
+    // Chain (outermost → raw stream): profile refresh → finalize citations →
+    // usage audit → stop flag. Profile tap outermost so the background
+    // refresh is enqueued last, after the stream fully settles.
+    const profiled = tapProfileRefresh(
+      tapStreamComplete(
+        tapAgentStreamUsage(tapStreamStopFlag(stream, streamId), {
+          userId,
+          sessionId,
+          provider: DEFAULT_COMPLETION_PROVIDER,
+          model,
+          reasoningEffort,
+          agentId: "my-agent",
+        }),
+        () => finalizeAssistantCitations(sessionId, userId),
+      ),
+      { userId, projectId: runInput.projectId },
     );
-    const stopChecked = tapStreamStopFlag(finalTap, streamId);
 
-    for await (const event of stopChecked) {
+    for await (const event of profiled) {
       await store.append({ streamId, event });
     }
 
