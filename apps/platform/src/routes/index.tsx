@@ -995,7 +995,10 @@ function ChatSession({
   const chat = useChat({
     transport: chatTransport,
     initialMessages,
-    resume: { key: sessionId, storage: "sessionStorage", auto: true },
+        // Resume is driven explicitly by the run-status join effect: a stale
+        // snapshot must never replace the fresh history load (which carries
+        // compaction dividers / final messages).
+        resume: { key: sessionId, storage: "sessionStorage", auto: false },
     createRequest: ({ coreMessages, uiMessages, resume }) => {
       const last = uiMessages.at(-1);
       const documentIds = documentIdsFromMetadata(last?.metadata);
@@ -1229,8 +1232,8 @@ function ChatSession({
         if (status.status === "error") {
           setPreviousRunError(true);
         }
+        const key = `anvia:chat-resume:${sessionId}`;
         if (status.status === "running" && status.streamId) {
-          const key = `anvia:chat-resume:${sessionId}`;
           const stored = sessionStorage.getItem(key);
           if (!stored) {
             sessionStorage.setItem(
@@ -1242,8 +1245,15 @@ function ChatSession({
                 messages: messagesRef.current,
               }),
             );
-            void resumeChatRef.current();
           }
+          // Join regardless of whether a state snapshot already exists
+          // (auto-resume is off; this is the only rejoin path).
+          void resumeChatRef.current();
+        } else {
+          // No active run: drop any leftover resume snapshot so it can never
+          // replace the fresh history load (e.g. compaction dividers) on a
+          // later mount.
+          sessionStorage.removeItem(key);
         }
       } catch {
         // ignore — resume state (if any) still handles rejoin
