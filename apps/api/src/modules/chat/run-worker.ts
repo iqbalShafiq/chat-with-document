@@ -9,6 +9,8 @@ import { prisma } from "../../utils/prisma.js";
 import { findActiveModel } from "../models/service.js";
 import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
+import { getContext7McpServer } from "../../lib/context7-server.js";
+import { getApprovalRegistry } from "./approval-registry.js";
 import { buildChatRunInput } from "./build-run-input.js";
 import { compactSessionMemory } from "./compaction.js";
 import { compactionConfig, estimateStaticContextTokens } from "./context-usage.js";
@@ -136,7 +138,15 @@ async function removeAppendedPromptRow(
 }
 
 export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void> {
-  const { streamId, sessionId, userId, model, reasoningEffort, promptMessage } = job.data;
+  const {
+    streamId,
+    sessionId,
+    userId,
+    model,
+    reasoningEffort,
+    webSearchEnabled,
+    promptMessage,
+  } = job.data;
   const store = getStreamStore();
 
   const status = await store.status({ streamId });
@@ -151,7 +161,25 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
   await getRedis().del(STOP_KEY(streamId)).catch(() => {});
 
   try {
-    const runInput = await buildChatRunInput({ sessionId, userId, model, reasoningEffort });
+    // Approval handler routes web-tool confirmations through the stream so
+    // the UI can ask the user; decisions arrive via the API route.
+    const approvalHandler = getApprovalRegistry().createHandler({
+      userId,
+      sessionId,
+      streamId,
+      append: (event) =>
+        store.append({ streamId, event }).then(() => undefined),
+    });
+
+    const runInput = await buildChatRunInput({
+      sessionId,
+      userId,
+      model,
+      reasoningEffort,
+      webSearchEnabled,
+      approvals: { handler: approvalHandler },
+      context7Server: await getContext7McpServer(),
+    });
 
     const memoryMessages = await runInput.memory.load({ sessionId, userId });
     const estimated = estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);

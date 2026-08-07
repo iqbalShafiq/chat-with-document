@@ -10,6 +10,8 @@ export type ChatRunJobData = {
   userId: string;
   model: string;
   reasoningEffort: string | null;
+  /** Per-session web-search toggle state (default false). */
+  webSearchEnabled: boolean;
   promptMessage: Message;
   createdAt: string;
 };

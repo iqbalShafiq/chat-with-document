@@ -2,22 +2,27 @@ import { prisma } from "../../utils/prisma.js";
 import { getObjectBuffer } from "../../lib/r2.js";
 import {
   buildDocumentCatalogInstruction,
+  CONTEXT7_INSTRUCTION,
   createAgent,
   createChunkSearchService,
   createCompletionModel,
   createDataAnalysisTools,
   createDocumentTools,
   createRememberUserProfileTool,
+  createTavilyClient,
+  createWebSearchTools,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   renderProfileContextText,
   tracing,
+  WEB_SEARCH_INSTRUCTION,
   type AgentContextBlock,
   type ProfileScope,
   type ProfileSectionKey,
   type ReasoningEffort,
 } from "@assingment/agent";
-import type { AnyTool, MemoryStore } from "@anvia/core";
+import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
+import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
 import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
 import {
@@ -59,6 +64,11 @@ const PROFILE_INSTRUCTION = [
   "Never invent profile facts not present in the context.",
 ].join("\n");
 
+export function webSearchConfig() {
+  const apiKey = process.env.TAVILY_API_KEY?.trim();
+  return apiKey ? { apiKey } : null;
+}
+
 export type ChatRunInput = {
   agent: ReturnType<typeof createAgent>;
   sessionId: string;
@@ -71,6 +81,10 @@ export type ChatRunInput = {
   tools: AnyTool[];
   memory: MemoryStore;
   hasActiveDocuments: boolean;
+  /** Web tools registered (TAVILY_API_KEY set). */
+  webSearchAvailable: boolean;
+  /** Context7 MCP tools available (configured + connected). */
+  context7Available: boolean;
 };
 
 export async function buildChatRunInput(input: {
@@ -79,8 +93,23 @@ export async function buildChatRunInput(input: {
   model: string;
   reasoningEffort: string | null;
   agentId?: string;
+  /** Per-session web-search toggle (default false). */
+  webSearchEnabled?: boolean;
+  /** Approval handler suspending web tools for user confirmation. */
+  approvals?: ToolApprovalsOptions;
+  /** Connected context7 MCP server (nullable when unavailable). */
+  context7Server?: McpServer | null;
 }): Promise<ChatRunInput> {
-  const { sessionId, userId, model, reasoningEffort, agentId } = input;
+  const {
+    sessionId,
+    userId,
+    model,
+    reasoningEffort,
+    agentId,
+    webSearchEnabled = false,
+    approvals,
+    context7Server,
+  } = input;
 
   const memory = createSanitizedMemoryStore(prisma);
 
@@ -190,6 +219,25 @@ export async function buildChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
+  // Web tools: registered only when TAVILY_API_KEY is set; the per-session
+  // toggle decides whether approval is required for each call.
+  const tavilyConfig = webSearchConfig();
+  const webSearchAvailable = tavilyConfig !== null;
+  if (webSearchAvailable) {
+    tools.push(
+      ...createWebSearchTools({
+        tavilyClient: createTavilyClient(tavilyConfig.apiKey),
+        enabled: webSearchEnabled,
+      }),
+    );
+    instructions.push(WEB_SEARCH_INSTRUCTION);
+  }
+
+  const context7Available = context7Server !== null && context7Server !== undefined;
+  if (context7Available) {
+    instructions.push(CONTEXT7_INSTRUCTION);
+  }
+
   const agent = createAgent({
     agentId: agentId ?? "my-agent",
     model: createCompletionModel(model),
@@ -200,6 +248,8 @@ export async function buildChatRunInput(input: {
     additionalInstructions: instructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
+    ...(webSearchAvailable && approvals ? { approvals } : {}),
+    ...(context7Available ? { mcpServers: [context7Server] } : {}),
     memory,
   });
 
@@ -215,5 +265,7 @@ export async function buildChatRunInput(input: {
     tools,
     memory,
     hasActiveDocuments,
+    webSearchAvailable,
+    context7Available,
   };
 }
