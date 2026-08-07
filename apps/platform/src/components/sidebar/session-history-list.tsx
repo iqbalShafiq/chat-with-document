@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef } from "react";
 export function SessionHistoryList({
   sessions,
   activeSessionId,
+  activeRuns,
   loading,
   loadingMore,
   error,
@@ -19,6 +20,7 @@ export function SessionHistoryList({
 }: {
   sessions: SessionSummary[];
   activeSessionId: string;
+  activeRuns: ReadonlySet<string>;
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
@@ -110,6 +112,8 @@ export function SessionHistoryList({
           <ul className="flex list-none flex-col gap-0.5 p-0">
             {group.items.map((session) => {
               const selected = session.sessionId === activeSessionId;
+              const running = activeRuns.has(session.sessionId);
+              const unread = session.unread && !selected;
               const i = itemIndex++;
               return (
                 <li
@@ -122,13 +126,30 @@ export function SessionHistoryList({
                     onClick={() => onSelect(session.sessionId)}
                     title={session.title}
                     aria-current={selected ? "page" : undefined}
-                    className={`flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
+                    className={`relative flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
                       selected
                         ? "glass-pane font-medium text-text"
                         : "text-text-muted hover:bg-white/[0.035] hover:text-text"
                     }`}
                   >
-                    <span className="truncate">{session.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {session.title}
+                    </span>
+                    {unread ? (
+                      <span
+                        className="ml-2 size-1.5 shrink-0 rounded-full bg-accent"
+                        aria-label="Unread messages"
+                        title="Unread"
+                      />
+                    ) : null}
+                    {running ? (
+                      <span
+                        className="absolute inset-x-3 bottom-[0.35rem] h-0.5 overflow-hidden rounded-full bg-white/[0.08]"
+                        aria-hidden
+                      >
+                        <span className="block h-full w-1/3 rounded-full bg-accent/80 animate-[sidebar-progress_1.2s_ease-in-out_infinite]" />
+                      </span>
+                    ) : null}
                   </button>
                 </li>
               );

@@ -25,6 +25,7 @@ export function ChatSidebar({
   user,
   sessions,
   activeSessionId,
+  activeRuns,
   loading,
   loadingMore,
   error,
@@ -48,6 +49,7 @@ export function ChatSidebar({
   user: SessionUser;
   sessions: SessionSummary[];
   activeSessionId: string;
+  activeRuns: ReadonlySet<string>;
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
@@ -239,6 +241,7 @@ export function ChatSidebar({
 
         <SessionHistoryList
           sessions={sessions}
+          activeRuns={activeRuns}
           activeSessionId={
             viewMode === "standalone" || viewMode === "project-workspace"
               ? activeSessionId

@@ -30,6 +30,7 @@ export function AppShell({
   user,
   sessions,
   activeSessionId,
+  activeRuns = new Set(),
   activeTitle,
   sessionsLoading,
   sessionsLoadingMore,
@@ -52,6 +53,8 @@ export function AppShell({
   user: SessionUser;
   sessions: SessionSummary[];
   activeSessionId: string;
+  /** Task 5 wires this from Home; defaults to empty so the sidebar renders without it. */
+  activeRuns?: ReadonlySet<string>;
   activeTitle: string;
   sessionsLoading: boolean;
   sessionsLoadingMore: boolean;
@@ -100,6 +103,7 @@ export function AppShell({
     user,
     sessions,
     activeSessionId,
+    activeRuns,
     loading: sessionsLoading,
     loadingMore: sessionsLoadingMore,
     error: sessionsError,

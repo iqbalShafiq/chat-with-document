@@ -799,3 +799,13 @@ body {
     display: none;
   }
 }
+
+/* Sidebar running-session progress bar (indeterminate sweep). */
+@keyframes sidebar-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
