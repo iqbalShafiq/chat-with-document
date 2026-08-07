@@ -1,5 +1,7 @@
 import { useChatContext, useHumanInput } from "@anvia/react-ui";
+import type { ToolApproval } from "@anvia/react";
 import { Loader2 } from "lucide-react";
+import { useState } from "react";
 import { toolActivityLabelForName } from "#/components/tool-activity-panel";
 
 /**
@@ -12,6 +14,20 @@ export function ApprovalPanel() {
   const chat = useChatContext();
   const { approvals } = useHumanInput();
   const pending = approvals.pending;
+  const [decisionErrorId, setDecisionErrorId] = useState<string | null>(null);
+
+  const decide = async (approval: ToolApproval, approved: boolean) => {
+    setDecisionErrorId(null);
+    try {
+      if (approved) {
+        await chat.approveTool(approval.id);
+      } else {
+        await chat.rejectTool(approval.id);
+      }
+    } catch {
+      setDecisionErrorId(approval.id);
+    }
+  };
 
   if (pending.length === 0) return null;
 
@@ -26,7 +42,7 @@ export function ApprovalPanel() {
           <div
             key={approval.id}
             className="glass rounded-xl border border-accent/25 px-3 py-2.5 animate-fade-in"
-            role="dialog"
+            role="region"
             aria-label={`Approve ${toolActivityLabelForName(approval.toolName).toLowerCase()}`}
           >
             <div className="flex items-center justify-between gap-2">
@@ -52,7 +68,7 @@ export function ApprovalPanel() {
               <button
                 type="button"
                 disabled={deciding}
-                onClick={() => void chat.rejectTool(approval.id)}
+                onClick={() => void decide(approval, false)}
                 className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-lg border border-danger/30 bg-danger-soft px-2.5 text-[11px] font-medium text-danger transition duration-150 hover:bg-danger/15 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Reject
@@ -60,7 +76,7 @@ export function ApprovalPanel() {
               <button
                 type="button"
                 disabled={deciding}
-                onClick={() => void chat.approveTool(approval.id)}
+                onClick={() => void decide(approval, true)}
                 className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Allow
@@ -72,6 +88,12 @@ export function ApprovalPanel() {
                 <Loader2 className="size-3 animate-spin" strokeWidth={2} />
                 Sending decision…
               </span>
+            ) : null}
+
+            {decisionErrorId === approval.id ? (
+              <p aria-live="polite" className="mt-1.5 text-[10px] text-danger">
+                Couldn't send decision — try again.
+              </p>
             ) : null}
           </div>
         );

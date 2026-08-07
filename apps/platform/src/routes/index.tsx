@@ -24,6 +24,7 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
+  apiFetch,
   fetchContextUsage,
   fetchRunStatus,
   fetchChatCapabilities,
@@ -1097,7 +1098,33 @@ function ChatSession({
         ...(resume ? { resume } : {}),
       };
     },
-    humanInput: { endpoint: `${API_BASE}/api/chat` },
+    humanInput: {
+      // Custom decideApproval: defaultDecideApproval fetches without
+      // credentials, which 401s cross-origin (platform :3000 → API :3001).
+      // apiFetch sends credentials: "include" and maps 401 → ApiAuthError.
+      decideApproval: async ({ approvalId, approved, reason }) => {
+        const response = await apiFetch(
+          `${API_BASE}/api/chat/approvals/${encodeURIComponent(approvalId)}/decision`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              approved,
+              ...(reason !== undefined ? { reason } : {}),
+            }),
+          },
+        );
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(body?.error ?? "Failed to send approval decision");
+        }
+        // Server replies { ok: true } — not a ToolApproval. The stream event
+        // carries the resolved approval state, so nothing to return here.
+        return undefined;
+      },
+    },
     onEvent: handleChatEvent,
     onError: (error) => {
       if (error instanceof ApiAuthError) {
@@ -1256,7 +1283,8 @@ function ChatSession({
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
 
-  // Capabilities are global (not per-session) — best-effort fetch once.
+  // Capabilities are global (not per-session) — best-effort fetch; the
+  // module-wide promise cache in lib/api makes this cheap on remounts.
   useEffect(() => {
     void fetchChatCapabilities()
       .then(setCapabilities)

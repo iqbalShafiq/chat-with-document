@@ -961,7 +961,20 @@ export type WebCapabilities = {
   context7Available: boolean;
 };
 
+let capabilitiesPromise: Promise<WebCapabilities> | null = null;
+
 export async function fetchChatCapabilities(): Promise<WebCapabilities> {
+  if (capabilitiesPromise === null) {
+    capabilitiesPromise = fetchChatCapabilitiesRemote();
+    capabilitiesPromise.catch(() => {
+      // Drop the cache on failure so a transient error retries next call.
+      capabilitiesPromise = null;
+    });
+  }
+  return capabilitiesPromise;
+}
+
+async function fetchChatCapabilitiesRemote(): Promise<WebCapabilities> {
   const response = await apiFetch(`${API_BASE}/api/chat/capabilities`);
   if (!response.ok) throw new Error("Failed to load chat capabilities");
 

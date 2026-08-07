@@ -45,7 +45,7 @@ export function collectWebSources(messages: UIMessage[]): WebSourceSummary[] {
           url,
           title,
           content,
-          source: "web_search",
+          source: part.toolName === "web_fetch" ? "web_fetch" : "web_search",
         });
       }
     }
