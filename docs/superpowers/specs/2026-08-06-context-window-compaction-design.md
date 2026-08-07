@@ -83,7 +83,7 @@ Processor steps:
 2. Build run input from a shared module `modules/chat/build-run-input.ts` (extracted from the current router: session docs, catalog instruction, project context/instruction, profile context/tool, document tools, agent construction). Used by both worker and context-usage endpoint.
 3. Estimate tokens (chars/4 + per-message overhead + tools JSON + instructions). If > trigger (0.7 × window):
    - Append `{ type: "compaction", phase: "start", reason: "threshold"|"model-switch", model, threshold, estimated }` to the store.
-   - Compaction (`modules/chat/compaction.ts`): load memory → keep 8 recent turns + system messages → summarize the prefix with Luna (`createCompletionModel("gpt-5.6-luna")` + COMPACTION_SUMMARY_INSTRUCTIONS, bounded ≤8% window) → rewrite memory (clear + append [summary message `metadata.kind="summary"`] + kept suffix) → if still > 30% window, truncate oldest kept atomic groups until ≤ target → if the summary itself exceeds 30% window, re-summarize tighter.
+   - Compaction (`modules/chat/compaction.ts`): load memory → keep 8 recent turns + system messages → summarize the prefix with Luna (`createCompletionModel("gpt-5.6-luna")` + COMPACTION_SUMMARY_INSTRUCTIONS, bounded ≤8% window) → **non-destructive: record coverage as `CompactionSegment`s in `AgentMemorySession.metadata.compaction` — a `summarized` segment (with the summary text) per pass, plus a `dropped` segment when the truncation backstop removes oldest kept atomic groups; memory rows are never deleted or rewritten** → if the summary itself exceeds 30% window, re-summarize tighter. The agent's `memory.load` view = one system summary message per `summarized` segment (in order) + rows beyond the last segment's `upToPosition`; UI history keeps ALL rows and injects a synthetic divider per segment boundary.
    - **If summarization throws: abort compaction entirely, log, append `{ type: "compaction", phase: "error" }`, continue the run uncompacted. No truncate-only fallback.**
    - Append `{ type: "compaction", phase: "complete", stats }`.
 4. Run the agent stream; append every event to the store; wrap with existing taps (usage recording, citations finalize); check `rs-stop` flag between events.
@@ -91,7 +91,7 @@ Processor steps:
 6. On failure: append `{ type: "error", error }`, write the failed pair to memory ([user prompt with its clientMessageId metadata, assistant error message with `metadata.kind="error"`]), close store `error`, release active-run key.
 7. BullMQ `failed`/`stalled` handlers → same failure path (idempotent close).
 
-Sanitized memory store used by the agent's `load` also strips messages with `metadata.kind === "error"` (UI-only artifacts; model never sees them). `loadEnrichedMemoryMessages` passes `kind: "summary"` through so the UI can render the summary divider.
+Sanitized memory store used by the agent's `load` filters `metadata.kind === "error"` artifacts (UI-only; model never sees them) and builds the compacted view from `metadata.compaction` segments (summaries + uncovered rows). `loadEnrichedMemoryMessages` returns all rows unchanged and injects synthetic `kind: "summary"` divider rows at segment boundaries so the UI renders the summary dividers.
 
 ## 8. Frontend
 
@@ -104,7 +104,7 @@ Sanitized memory store used by the agent's `load` also strips messages with `met
   - SVG ring: ratio = estimatedTokens / activeModel.contextWindowTokens (cap 100%); colors: normal → amber ≥70% → red ≥90%.
   - States: loading (skeleton ring), error (warning icon + tooltip, composer still usable), compacting (ring pulse + blink "Compacting context…"), idle.
   - Hover popover (portaled, reuses `select-list` patterns): table of all models — icon, label, provider, current/max tokens with mini progress bar, ratio %, prices, threshold marker. Loading/error/empty states inside the popover too.
-- Summary divider: history rows with `metadata.kind === "summary"` render as a subtle "Earlier conversation summarized" divider (Claude.ai style), not a system bubble.
+- Summary divider: the API injects a synthetic system row (`metadata.kind === "summary"`, content = the segment's summary, `""` for dropped segments) after the row at each compaction segment boundary; history rows with `metadata.kind === "summary"` render as a subtle "Earlier conversation summarized" divider (Claude.ai style), not a system bubble. All original chat bubbles stay in the list (compaction never touches rows).
 - Error bubble: assistant message with `metadata.kind === "error"` renders with danger styling (reuse `danger-soft`/`text-danger` patterns).
 - Reused components/utilities: `SelectOptionList`, glass shell classes, portal positioning from the switcher, `truncateSessionMemory`/`clientMessageId` metadata, existing error/composerError rendering, `tapAgentStreamUsage`, `tapStreamComplete`, profile-tap pattern.
 

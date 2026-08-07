@@ -1,6 +1,8 @@
-import type { MemoryStore, Message } from "@anvia/core";
+import type { JsonObject, MemoryStore, Message } from "@anvia/core";
 import { createPrismaMemoryStore } from "@anvia/memory-prisma";
 import type { PrismaClient } from "../../generated/prisma/client.js";
+import { buildCompactedView, loadCompactionSegments } from "./compaction.js";
+import { createDefaultMemoryScopeKey } from "./memory-scope.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,31 +46,82 @@ function sanitizeMessages(messages: unknown[]): unknown[] {
   });
 }
 
-/** The agent must never see error artifacts (kind:"error" rows). */
-function isErrorArtifact(message: unknown): boolean {
-  return (
-    isRecord(message) &&
-    isRecord(message.metadata) &&
-    message.metadata.kind === "error"
-  );
+/**
+ * memory-prisma's append/recordError upsert the session with
+ * `metadata: context.metadata ?? {}`, which would clobber the compaction
+ * segments stored in AgentMemorySession.metadata. Re-read the persisted
+ * metadata and pass it through so segments survive every write.
+ */
+async function persistedSessionMetadata(
+  prisma: PrismaClient,
+  context: { sessionId: string; userId?: string | null; metadata?: unknown },
+): Promise<JsonObject> {
+  const scopeKey = createDefaultMemoryScopeKey(context.sessionId, context.userId);
+  const session = await prisma.agentMemorySession.findUnique({
+    where: { scopeKey },
+    select: { metadata: true },
+  });
+  const persisted = session && isRecord(session.metadata) ? (session.metadata as JsonObject) : {};
+  const callerMetadata = isRecord(context.metadata) ? (context.metadata as JsonObject) : {};
+  return { ...persisted, ...callerMetadata };
 }
 
+/** The agent must never see error artifacts (kind:"error" rows). */
 export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
   const inner = createPrismaMemoryStore(prisma);
   return {
     kind: inner.kind,
     inspector: inner.inspector,
     load: async (context) => {
-      const loaded = await inner.load(context);
-      return loaded.filter((message) => !isErrorArtifact(message));
+      const scopeKey = createDefaultMemoryScopeKey(
+        context.sessionId,
+        context.userId,
+      );
+      const session = await prisma.agentMemorySession.findUnique({
+        where: { scopeKey },
+        select: { id: true },
+      });
+      if (!session) return [];
+      const rows = await prisma.agentMemoryMessage.findMany({
+        where: { memorySessionId: session.id },
+        orderBy: { position: "asc" },
+        select: { position: true, message: true },
+      });
+      const filtered = rows
+        .map((row) => ({ position: row.position, message: row.message as Message }))
+        .filter(
+          (row) =>
+            !(
+              isRecord(row.message) &&
+              isRecord(row.message.metadata) &&
+              row.message.metadata.kind === "error"
+            ),
+        );
+      const segments = await loadCompactionSegments(
+        context.sessionId,
+        context.userId,
+      );
+      return buildCompactedView(filtered, segments);
     },
     append: async (input) => {
       await inner.append({
         ...input,
+        context: {
+          ...input.context,
+          metadata: await persistedSessionMetadata(prisma, input.context),
+        },
         messages: sanitizeMessages(input.messages) as Message[],
       });
     },
     clear: (context) => inner.clear(context),
-    recordError: (input) => inner.recordError(input),
+    recordError: async (input) => {
+      await inner.recordError({
+        ...input,
+        context: {
+          ...input.context,
+          metadata: await persistedSessionMetadata(prisma, input.context),
+        },
+      });
+    },
   } as MemoryStore;
 }

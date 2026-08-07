@@ -16,6 +16,16 @@ export type MemoryGroup = {
 };
 
 /**
+ * One compaction record. Segments are stored in
+ * `AgentMemorySession.metadata.compaction` — memory rows are never deleted or
+ * rewritten. `upToPosition` values are strictly increasing across the list:
+ * each pass covers the uncovered range, and the truncate backstop extends it.
+ */
+export type CompactionSegment =
+  | { kind: "summarized"; upToPosition: number; summary: string; createdAt: string }
+  | { kind: "dropped"; upToPosition: number; createdAt: string };
+
+/**
  * Sequential pass over memory messages:
  * - system messages each form their own group
  * - user starts a new group
@@ -120,6 +130,91 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Loads this session's compaction segments from
+ * `AgentMemorySession.metadata.compaction`. Defensive: entries with a wrong
+ * shape/kind or non-integer `upToPosition` are dropped; results are sorted by
+ * `upToPosition` ascending. Returns [] when the session or segments are
+ * missing.
+ */
+export async function loadCompactionSegments(
+  sessionId: string,
+  userId?: string | null,
+): Promise<CompactionSegment[]> {
+  const scopeKey = createDefaultMemoryScopeKey(sessionId, userId);
+  const session = await prisma.agentMemorySession.findUnique({
+    where: { scopeKey },
+    select: { metadata: true },
+  });
+  if (!session) return [];
+
+  const metadata = session.metadata;
+  if (!isRecord(metadata) || !Array.isArray(metadata.compaction)) return [];
+
+  const segments: CompactionSegment[] = [];
+  for (const entry of metadata.compaction) {
+    if (!isRecord(entry)) continue;
+    if (
+      typeof entry.upToPosition !== "number" ||
+      !Number.isInteger(entry.upToPosition) ||
+      entry.upToPosition < 1
+    ) {
+      continue;
+    }
+    const createdAt =
+      typeof entry.createdAt === "string" && entry.createdAt.length > 0
+        ? entry.createdAt
+        : new Date().toISOString();
+    if (entry.kind === "summarized") {
+      if (typeof entry.summary !== "string") continue;
+      segments.push({
+        kind: "summarized",
+        upToPosition: entry.upToPosition,
+        summary: entry.summary,
+        createdAt,
+      });
+    } else if (entry.kind === "dropped") {
+      segments.push({
+        kind: "dropped",
+        upToPosition: entry.upToPosition,
+        createdAt,
+      });
+    }
+  }
+
+  segments.sort((a, b) => a.upToPosition - b.upToPosition);
+  return segments;
+}
+
+/**
+ * Pure view builder for the agent context: one system summary message per
+ * `summarized` segment (in order; `dropped` segments contribute nothing),
+ * followed by the rows with `position > max(upToPosition)` in original order.
+ */
+export function buildCompactedView(
+  rows: Array<{ position: number; message: Message }>,
+  segments: CompactionSegment[],
+): Message[] {
+  const sorted = [...segments].sort((a, b) => a.upToPosition - b.upToPosition);
+  const coveredUpTo =
+    sorted.length === 0 ? -1 : sorted[sorted.length - 1]!.upToPosition;
+
+  const view: Message[] = [];
+  for (const segment of sorted) {
+    if (segment.kind === "summarized") {
+      view.push({
+        role: "system",
+        content: segment.summary,
+        metadata: { kind: "summary" },
+      } as Message);
+    }
+  }
+  for (const row of rows) {
+    if (row.position > coveredUpTo) view.push(row.message);
+  }
+  return view;
+}
+
 /** `[role] text` line; falls back to JSON when the message has no extractable text. */
 function renderMessageForSummary(
   message: Message,
@@ -171,10 +266,12 @@ async function summarizeMessages(input: {
 }
 
 /**
- * Compacts a session's memory: summarizes the prefix with Luna and rewrites
- * the memory rows as [summary, ...kept suffix]. Truncation is only a
- * backstop after a successful summarize — a summarize failure aborts
- * compaction entirely (returns skipped). Throws only on DB errors.
+ * Compacts a session's memory without touching rows: summarizes the prefix
+ * with Luna and records the coverage as `CompactionSegment`s in
+ * `AgentMemorySession.metadata.compaction`. Truncation is only a backstop
+ * after a successful summarize (recorded as a `dropped` segment) — a
+ * summarize failure aborts compaction entirely (returns skipped). Throws only
+ * on DB errors.
  */
 export async function compactSessionMemory(input: {
   sessionId: string;
@@ -188,35 +285,57 @@ export async function compactSessionMemory(input: {
   const scopeKey = createDefaultMemoryScopeKey(input.sessionId, input.userId);
   const session = await prisma.agentMemorySession.findUnique({
     where: { scopeKey },
-    select: { id: true },
+    select: { id: true, metadata: true },
   });
   if (!session) return { skipped: true, reason: "below-threshold" };
 
   const rows = await prisma.agentMemoryMessage.findMany({
     where: { memorySessionId: session.id },
     orderBy: { position: "asc" },
-    select: { position: true, message: true, createdAt: true },
+    select: { position: true, message: true },
   });
-  const messages = rows
-    .map((row) => row.message as Message)
-    .filter((message) => !(isRecord(message.metadata) && message.metadata.kind === "error"));
+  const filteredRows = rows
+    .map((row) => ({ position: row.position, message: row.message as Message }))
+    .filter(
+      (row) =>
+        !(isRecord(row.message.metadata) && row.message.metadata.kind === "error"),
+    );
 
-  const beforeTokens = estimateMessagesTokens(messages);
+  const segments = await loadCompactionSegments(input.sessionId, input.userId);
+  const coveredUpTo =
+    segments.length === 0 ? -1 : segments[segments.length - 1]!.upToPosition;
+
   const triggerTokens = Math.floor(input.windowTokens * input.triggerRatio);
   const targetTokens = Math.floor(input.windowTokens * input.targetRatio);
+  const beforeTokens = estimateMessagesTokens(
+    buildCompactedView(filteredRows, segments),
+  );
   if (beforeTokens <= triggerTokens) return { skipped: true, reason: "below-threshold" };
 
-  const groups = groupMemoryMessages(messages);
+  const activeRows = filteredRows.filter((row) => row.position > coveredUpTo);
+  const groups = groupMemoryMessages(activeRows.map((row) => row.message));
   const boundary = findCompactionBoundary(groups, input.keepTurns);
-  const prefix = groups.slice(0, boundary).flatMap((group) => group.messages);
-  const suffix = groups.slice(boundary).flatMap((group) => group.messages);
+  const prefixCount = groups
+    .slice(0, boundary)
+    .reduce((total, group) => total + group.messages.length, 0);
+  if (prefixCount === 0) {
+    // Nothing above the covered range to summarize (e.g. only system rows
+    // remain uncovered, or everything is already covered) — the compacted
+    // view estimate is driven by summaries alone, which is not compactable.
+    console.log(
+      `[compaction] skipped below-threshold ${input.sessionId}: no rows above covered range (coveredUpTo=${coveredUpTo})`,
+    );
+    return { skipped: true, reason: "below-threshold" };
+  }
+  const prefixRows = activeRows.slice(0, prefixCount);
+  const suffixRows = activeRows.slice(prefixCount);
 
   const summaryBudget = Math.floor(input.windowTokens * input.summaryBudgetRatio);
   let summaryText: string;
   try {
     const summarized = await summarizeMessages({
       model: await lunaModel(),
-      messages: prefix,
+      messages: prefixRows.map((row) => row.message),
       budgetTokens: summaryBudget,
     });
     summaryText = summarized.summary;
@@ -226,25 +345,46 @@ export async function compactSessionMemory(input: {
     return { skipped: true, reason: "summarize-failed", error: message };
   }
 
+  let truncatedGroups = 0;
+  let droppedSegment: CompactionSegment | null = null;
   const summaryMessage: Message = {
     role: "system",
     content: summaryText,
     metadata: { kind: "summary" },
   } as Message;
 
-  let keptSuffix = suffix;
-  let truncatedGroups = 0;
-  const afterSummaryTokens = estimateMessagesTokens([summaryMessage, ...suffix]);
+  const afterSummaryTokens = estimateMessagesTokens([
+    summaryMessage,
+    ...suffixRows.map((row) => row.message),
+  ]);
   if (afterSummaryTokens > targetTokens) {
-    const result = truncateGroupsToTarget(groups.slice(boundary), targetTokens);
-    keptSuffix = result.kept.flatMap((group) => group.messages);
+    const suffixGroups = groups.slice(boundary);
+    const result = truncateGroupsToTarget(suffixGroups, targetTokens);
     truncatedGroups = result.removed.length;
+    if (truncatedGroups > 0) {
+      // Removed groups are a contiguous prefix of the suffix (system groups
+      // in between are never removed but are covered by the dropped range).
+      const lastRemovedIndex = Math.max(
+        ...result.removed.map((group) => suffixGroups.indexOf(group)),
+      );
+      const droppedMessageCount = suffixGroups
+        .slice(0, lastRemovedIndex + 1)
+        .reduce((total, group) => total + group.messages.length, 0);
+      const droppedEndRow = activeRows[prefixCount + droppedMessageCount - 1];
+      if (droppedEndRow && droppedEndRow.position > coveredUpTo) {
+        droppedSegment = {
+          kind: "dropped",
+          upToPosition: droppedEndRow.position,
+          createdAt: new Date().toISOString(),
+        };
+      }
+    }
     // Safety: if the summary alone still exceeds the target, summarize tighter once.
     if (estimateMessagesTokens([summaryMessage]) > targetTokens) {
       try {
         const tighter = await summarizeMessages({
           model: await lunaModel(),
-          messages: prefix,
+          messages: prefixRows.map((row) => row.message),
           budgetTokens: Math.max(64, Math.floor(targetTokens * 0.5)),
         });
         summaryText = tighter.summary;
@@ -254,64 +394,39 @@ export async function compactSessionMemory(input: {
     }
   }
 
-  const finalSummary: Message = {
-    role: "system",
-    content: summaryText,
-    metadata: { kind: "summary" },
-  } as Message;
-  const finalMessages = [finalSummary, ...keptSuffix];
-  const afterTokens = estimateMessagesTokens(finalMessages);
+  const lastPrefixRow = prefixRows[prefixRows.length - 1]!;
+  const newSegments: CompactionSegment[] = [
+    ...segments,
+    {
+      kind: "summarized",
+      upToPosition: lastPrefixRow.position,
+      summary: summaryText,
+      createdAt: new Date().toISOString(),
+    },
+    ...(droppedSegment ? [droppedSegment] : []),
+  ];
 
-  const runId = `compaction:${Date.now()}`;
-  // Kept messages are the same object references that came from `rows`
-  // (grouping only slices/flatMaps), so identity lookup works; a
-  // JSON.stringify equality scan guards against any identity break.
-  const createdAtByMessage = new WeakMap<object, Date>();
-  rows.forEach((row) => createdAtByMessage.set(row.message as object, row.createdAt));
-  const originalCreatedAtFor = (message: Message): Date => {
-    const direct = createdAtByMessage.get(message as object);
-    if (direct) return direct;
-    const json = JSON.stringify(message);
-    const row = rows.find((candidate) => JSON.stringify(candidate.message) === json);
-    return row ? row.createdAt : new Date();
-  };
-
-  await prisma.$transaction(async (tx) => {
-    await tx.agentMemoryMessage.deleteMany({
-      where: { memorySessionId: session.id },
-    });
-    await tx.agentMemoryMessage.create({
-      data: {
-        memorySessionId: session.id,
-        runId,
-        turn: 0,
-        position: 1,
-        role: "system",
-        message: finalSummary as unknown as Prisma.InputJsonValue,
-        createdAt: new Date(),
-      },
-    });
-    for (const [index, message] of keptSuffix.entries()) {
-      await tx.agentMemoryMessage.create({
-        data: {
-          memorySessionId: session.id,
-          runId,
-          turn: 0,
-          position: index + 2,
-          role: message.role,
-          message: message as unknown as Prisma.InputJsonValue,
-          createdAt: originalCreatedAtFor(message),
-        },
-      });
-    }
+  const existingMetadata = isRecord(session.metadata) ? session.metadata : {};
+  await prisma.agentMemorySession.update({
+    where: { id: session.id },
+    data: {
+      metadata: {
+        ...existingMetadata,
+        compaction: newSegments,
+      } as Prisma.InputJsonValue,
+    },
   });
+
+  const afterTokens = estimateMessagesTokens(
+    buildCompactedView(filteredRows, newSegments),
+  );
 
   return {
     skipped: false,
     stats: {
       beforeTokens,
       afterTokens,
-      summarizedMessages: prefix.length,
+      summarizedMessages: prefixRows.length,
       truncatedGroups,
       summaryTokens: estimateTextTokens(summaryText),
     },

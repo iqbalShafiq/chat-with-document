@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@anvia/core";
 import {
+  buildCompactedView,
   findCompactionBoundary,
   groupMemoryMessages,
   truncateGroupsToTarget,
+  type CompactionSegment,
 } from "./compaction.js";
 import { estimateMessagesTokens } from "../../lib/token-estimate.js";
 
@@ -43,6 +45,22 @@ function toolResult(id: string): Message {
 
 function systemMessage(text: string): Message {
   return { role: "system", content: text } as Message;
+}
+
+function summaryMessage(text: string): Message {
+  return { role: "system", content: text, metadata: { kind: "summary" } } as Message;
+}
+
+function row(position: number, message: Message): { position: number; message: Message } {
+  return { position, message };
+}
+
+function summarized(upToPosition: number, summary: string): CompactionSegment {
+  return { kind: "summarized", upToPosition, summary, createdAt: "2026-08-07T00:00:00.000Z" };
+}
+
+function dropped(upToPosition: number): CompactionSegment {
+  return { kind: "dropped", upToPosition, createdAt: "2026-08-07T00:00:00.000Z" };
 }
 
 function turns(count: number): Message[] {
@@ -173,5 +191,66 @@ describe("truncateGroupsToTarget", () => {
     expect(removed).toHaveLength(2);
     expect(kept.map((group) => group.kind)).toEqual(["system"]);
     expect(removed[0]).toBe(groups[0]);
+  });
+});
+
+describe("buildCompactedView", () => {
+  it("returns the rows' messages unchanged when there are no segments", () => {
+    const rows = [row(1, user("a")), row(2, assistant("b")), row(3, user("c"))];
+    expect(buildCompactedView(rows, [])).toEqual([
+      user("a"),
+      assistant("b"),
+      user("c"),
+    ]);
+  });
+
+  it("emits the summary message then rows beyond the boundary for one summarized segment", () => {
+    const rows = [row(1, user("a")), row(2, assistant("b")), row(3, user("c"))];
+    const view = buildCompactedView(rows, [summarized(2, "earlier")]);
+    expect(view).toEqual([summaryMessage("earlier"), user("c")]);
+  });
+
+  it("emits the summary then rows after the dropped boundary, excluding dropped rows", () => {
+    const rows = [
+      row(1, user("a")),
+      row(2, assistant("b")),
+      row(3, user("c")),
+      row(4, assistant("d")),
+    ];
+    const view = buildCompactedView(rows, [
+      summarized(2, "earlier"),
+      dropped(3),
+    ]);
+    expect(view).toEqual([summaryMessage("earlier"), assistant("d")]);
+  });
+
+  it("emits multiple summaries in order then rows after the last boundary", () => {
+    const rows = [
+      row(1, user("a")),
+      row(2, assistant("b")),
+      row(3, user("c")),
+      row(4, assistant("d")),
+      row(5, user("e")),
+    ];
+    const view = buildCompactedView(rows, [
+      summarized(2, "first"),
+      summarized(4, "second"),
+    ]);
+    expect(view).toEqual([summaryMessage("first"), summaryMessage("second"), user("e")]);
+  });
+
+  it("returns only summaries when segments cover the last row", () => {
+    const rows = [row(1, user("a")), row(2, assistant("b"))];
+    const view = buildCompactedView(rows, [summarized(2, "all")]);
+    expect(view).toEqual([summaryMessage("all")]);
+  });
+
+  it("ignores segment order and treats uncovered rows by the max upToPosition", () => {
+    const rows = [row(1, user("a")), row(2, assistant("b")), row(3, user("c"))];
+    const view = buildCompactedView(rows, [
+      summarized(3, "later"),
+      summarized(1, "earlier"),
+    ]);
+    expect(view).toEqual([summaryMessage("earlier"), summaryMessage("later")]);
   });
 });
