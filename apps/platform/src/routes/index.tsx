@@ -8,6 +8,7 @@ import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
+import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { EmptyState } from "#/components/chat/empty-state";
@@ -23,8 +24,10 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
+  apiFetch,
   fetchContextUsage,
   fetchRunStatus,
+  fetchChatCapabilities,
   getOrCreateEmptyChatSession,
   getProject,
   listActiveRuns,
@@ -44,12 +47,14 @@ import {
   type ProjectListItem,
   type ReasoningEffortInfo,
   type SessionDocument,
+  type WebCapabilities,
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
 import { ImagePreviewProvider } from "#/components/images/image-preview";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
+import { collectWebSources } from "#/lib/chat/web-sources";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
@@ -886,6 +891,8 @@ function ChatSession({
   const [selectedModel, setSelectedModel] = useState<string>(() =>
     readSelectedModel(models),
   );
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
   const [compaction, setCompaction] = useState<{
@@ -899,8 +906,10 @@ function ChatSession({
   /** Latest model/effort for createRequest (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
+  const webSearchEnabledRef = useRef(webSearchEnabled);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
+  webSearchEnabledRef.current = webSearchEnabled;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
   const messagesRef = useRef<UIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
@@ -1085,8 +1094,36 @@ function ChatSession({
         documentIds,
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
+        webSearchEnabled: webSearchEnabledRef.current,
         ...(resume ? { resume } : {}),
       };
+    },
+    humanInput: {
+      // Custom decideApproval: defaultDecideApproval fetches without
+      // credentials, which 401s cross-origin (platform :3000 → API :3001).
+      // apiFetch sends credentials: "include" and maps 401 → ApiAuthError.
+      decideApproval: async ({ approvalId, approved, reason }) => {
+        const response = await apiFetch(
+          `${API_BASE}/api/chat/approvals/${encodeURIComponent(approvalId)}/decision`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              approved,
+              ...(reason !== undefined ? { reason } : {}),
+            }),
+          },
+        );
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(body?.error ?? "Failed to send approval decision");
+        }
+        // Server replies { ok: true } — not a ToolApproval. The stream event
+        // carries the resolved approval state, so nothing to return here.
+        return undefined;
+      },
     },
     onEvent: handleChatEvent,
     onError: (error) => {
@@ -1245,6 +1282,16 @@ function ChatSession({
     setPreviousRunError(false);
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
+
+  // Capabilities are global (not per-session) — best-effort fetch; the
+  // module-wide promise cache in lib/api makes this cheap on remounts.
+  useEffect(() => {
+    void fetchChatCapabilities()
+      .then(setCapabilities)
+      .catch(() => {
+        // capabilities stay null; toggles render as unavailable
+      });
+  }, []);
 
   useEffect(() => {
     setEditingMessageId(null);
@@ -1453,6 +1500,11 @@ function ChatSession({
 
   const citedDocuments = useMemo(
     () => collectCitedDocuments(chat.messages),
+    [chat.messages],
+  );
+
+  const webSources = useMemo(
+    () => collectWebSources(chat.messages),
     [chat.messages],
   );
 
@@ -1706,6 +1758,8 @@ function ChatSession({
                     </div>
                   ) : null}
 
+                  <ApprovalPanel />
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -1731,6 +1785,9 @@ function ChatSession({
                     compaction={compaction}
                     contextUsage={contextUsage}
                     contextUsageError={contextUsageError}
+                    webSearchEnabled={webSearchEnabled}
+                    webSearchAvailable={capabilities?.webSearchAvailable ?? false}
+                    onWebSearchToggle={setWebSearchEnabled}
                   />
                 </div>
               </div>
@@ -1741,6 +1798,7 @@ function ChatSession({
           <SessionDocumentsRail
             sessionDocuments={sessionDocuments}
             citedDocuments={citedDocuments}
+            webSources={webSources}
             ingestionItems={ingestionItems}
             onRemoveActiveDocument={handleRemoveActiveDocument}
             removingDocumentId={removingDocumentId}

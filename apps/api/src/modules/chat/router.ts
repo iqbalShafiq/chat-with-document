@@ -16,6 +16,11 @@ import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
 import { listSessionsPage, markChatSessionRead } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
+  getApprovalRegistry,
+} from "./approval-registry.js";
+import { getContext7McpServer, isContext7Configured } from "../../lib/context7-server.js";
+import { webSearchConfig } from "./build-run-input.js";
+import {
   TruncateTargetNotFoundError,
   truncateSessionMemory,
   type TruncateMode,
@@ -39,6 +44,10 @@ function requireSessionId(value: unknown): string | null {
 
 function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
+}
+
+function parseBoolean(value: unknown): boolean {
+  return value === true;
 }
 
 function extractUserTextForTitle(message: MessageType): string {
@@ -337,6 +346,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const modelInfo = await findActiveModel(model);
     if (!modelInfo) return c.json({ error: `unknown model: ${model}` }, 400);
 
+    const webSearchEnabled = parseBoolean(body.webSearchEnabled);
+
     const effortRaw = body.reasoningEffort;
     let reasoningEffort: string | null = null;
     if (effortRaw && typeof effortRaw === "string" && effortRaw.trim()) {
@@ -378,7 +389,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
 
     await enqueueChatRun(`chat:${streamId}`, {
       streamId, sessionId, userId: user.id, model, reasoningEffort,
-      promptMessage, createdAt: new Date().toISOString(),
+      webSearchEnabled, promptMessage, createdAt: new Date().toISOString(),
     });
 
     const events = withStartTimeout(
@@ -411,5 +422,48 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const meta = await store.getMeta(streamId);
     if (!meta || meta.userId !== user.id) return c.json({ error: "stream not found" }, 404);
     await store.setStopFlag(streamId);
+    return c.json({ ok: true });
+  })
+  .get("/capabilities", async (c) => {
+    const context7Server = await getContext7McpServer();
+    return c.json({
+      webSearchAvailable: webSearchConfig() !== null,
+      context7Available: isContext7Configured() && context7Server !== null,
+    });
+  })
+  .post("/approvals/:approvalId/decision", async (c) => {
+    const user = c.get("user");
+    const approvalId = c.req.param("approvalId");
+    if (!approvalId) return c.json({ error: "approvalId is required" }, 400);
+
+    const body = (await c.req.json().catch(() => null)) as {
+      approved?: unknown;
+      reason?: unknown;
+    } | null;
+    if (body === null || typeof body.approved !== "boolean") {
+      return c.json({ error: "approved (boolean) is required" }, 400);
+    }
+
+    const registry = getApprovalRegistry();
+    const approval = await registry.getApproval(approvalId);
+    if (!approval) {
+      // Idempotent: the approval was already resolved and cleaned up (or TTL'd),
+      // so a late decision is a no-op success — the client must not throw.
+      return c.json({ ok: true, alreadyResolved: true });
+    }
+    if (approval.userId !== user.id) {
+      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
+    }
+    if (approval.status !== "pending") {
+      // Idempotent: an already-resolved approval is a no-op.
+      return c.json({ ok: true, alreadyResolved: true });
+    }
+
+    await registry.publishDecision(approvalId, {
+      approved: body.approved,
+      ...(typeof body.reason === "string" && body.reason.trim()
+        ? { reason: body.reason.trim() }
+        : {}),
+    });
     return c.json({ ok: true });
   });

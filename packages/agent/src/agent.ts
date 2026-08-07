@@ -3,7 +3,9 @@ import {
   type AnyTool,
   type CompletionModel,
   type MemoryStore,
+  type ToolApprovalsOptions,
 } from "@anvia/core";
+import type { McpServer } from "@anvia/core/mcp";
 import type { LangfuseTracing } from "@anvia/langfuse";
 import {
   DEFAULT_REASONING_EFFORT,
@@ -27,6 +29,10 @@ interface CreateAgentOptions {
   additionalContext?: AgentContextBlock[];
   tracing: LangfuseTracing;
   memory?: MemoryStore;
+  /** Optional approval handler (e.g. human approval for web tools). */
+  approvals?: ToolApprovalsOptions;
+  /** Optional MCP servers (e.g. context7) to expose to the agent. */
+  mcpServers?: McpServer[];
 }
 
 export function createAgent(
@@ -57,6 +63,14 @@ export function createAgent(
 
   if (opts.memory) {
     agent.memory(opts.memory);
+  }
+
+  if (opts.approvals) {
+    agent.approvals(opts.approvals);
+  }
+
+  if (opts.mcpServers && opts.mcpServers.length > 0) {
+    agent.mcp(opts.mcpServers);
   }
 
   return agent.build();

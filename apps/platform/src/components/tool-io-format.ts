@@ -37,6 +37,14 @@ function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 export function truncate(text: string, max = 280): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
@@ -582,6 +590,106 @@ function formatGetDocumentPageImagesOutput(output: unknown): FormattedSection {
   };
 }
 
+function formatWebSearchInput(input: unknown): FormattedSection {
+  const record = isRecord(input) ? input : {};
+  const fields: FormattedField[] = [];
+
+  const query = asString(record.query);
+  if (query) fields.push({ label: "Query", value: truncate(query, 400) });
+
+  const reason = asString(record.reason);
+  if (reason) fields.push({ label: "Reason", value: truncate(reason, 320) });
+
+  const maxResults = asNumber(record.maxResults);
+  if (maxResults !== null) fields.push({ label: "Max results", value: String(maxResults) });
+
+  const timeRange = asString(record.timeRange);
+  if (timeRange) fields.push({ label: "Time range", value: humanizeKey(timeRange) });
+
+  return {
+    title: "Request",
+    fields,
+    emptyText: fields.length === 0 ? "Waiting for request…" : undefined,
+  };
+}
+
+function formatWebSearchOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const results = asArray(record.results);
+  const items: FormattedItem[] = [];
+
+  for (const result of results.slice(0, 5)) {
+    if (!isRecord(result)) continue;
+    const title = asString(result.title) ?? asString(result.url) ?? "Result";
+    const url = asString(result.url);
+    const score = asNumber(result.score);
+    const content = asString(result.content);
+
+    items.push({
+      title,
+      detail: content ? truncate(content, 220) : undefined,
+      ...(url || score !== null
+        ? {
+            meta: [
+              url ? safeHostname(url) : null,
+              score !== null ? formatScore(score) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined,
+          }
+        : {}),
+    });
+  }
+
+  return {
+    title: "Result",
+    summary:
+      results.length === 0
+        ? (asString(record.error) ?? "No results")
+        : countLabel(results.length, "result"),
+    items: items.length > 0 ? items : undefined,
+    emptyText: results.length === 0 ? "No web results returned." : undefined,
+  };
+}
+
+function formatWebFetchInput(input: unknown): FormattedSection {
+  const record = isRecord(input) ? input : {};
+  const fields: FormattedField[] = [];
+
+  const url = asString(record.url);
+  if (url) fields.push({ label: "URL", value: truncate(url, 320) });
+
+  const reason = asString(record.reason);
+  if (reason) fields.push({ label: "Reason", value: truncate(reason, 320) });
+
+  return {
+    title: "Request",
+    fields,
+    emptyText: fields.length === 0 ? "Waiting for request…" : undefined,
+  };
+}
+
+function formatWebFetchOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const fields: FormattedField[] = [];
+
+  const title = asString(record.title);
+  if (title) fields.push({ label: "Title", value: truncate(title, 200) });
+
+  const url = asString(record.url);
+  if (url) fields.push({ label: "URL", value: truncate(url, 200) });
+
+  const content = asString(record.content);
+  if (content) fields.push({ label: "Content", value: truncate(content, 400) });
+
+  return {
+    title: "Result",
+    summary: title ? "Page fetched" : "Not fetched",
+    fields,
+    emptyText: fields.length === 0 ? "No page content." : undefined,
+  };
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -601,6 +709,10 @@ export function formatToolInput(
       return formatLinearRegressionInput(input);
     case "get_document_page_images":
       return formatGetDocumentPageImagesInput(input);
+    case "web_search":
+      return formatWebSearchInput(input);
+    case "web_fetch":
+      return formatWebFetchInput(input);
     default:
       return formatGenericInput(input);
   }
@@ -625,6 +737,10 @@ export function formatToolOutput(
       return formatLinearRegressionOutput(output);
     case "get_document_page_images":
       return formatGetDocumentPageImagesOutput(output);
+    case "web_search":
+      return formatWebSearchOutput(output);
+    case "web_fetch":
+      return formatWebFetchOutput(output);
     default:
       return formatGenericOutput(output);
   }

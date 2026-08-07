@@ -110,6 +110,9 @@ Factory agent yang dipakai API:
    | --- | --- |
    | `OPENAI_BASE_URL` / `OPENAI_API_KEY` | LLM provider (wajib untuk chat) |
    | `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Observability (opsional) |
+   | `TAVILY_API_KEY` | API key Tavily untuk tool `web_search`/`web_fetch` (wajib untuk web search) |
+   | `CONTEXT7_API_KEY` | API key context7 untuk tool dokumentasi library/API (opsional; gratis di context7.com/dashboard) |
+   | `CONTEXT7_URL` | Endpoint MCP context7 (default `https://mcp.context7.com/mcp`) |
    | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
    | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
    | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
@@ -209,8 +212,14 @@ Tools ini di-inject ke agent saat handle chat:
 | `descriptive_stats` | count, mean, median, mode, min/max, range, quartiles, IQR, variance, stdDev, skewness |
 | `pearson_correlation` | korelasi Pearson, covariance, arah, kekuatan, R² |
 | `linear_regression` | regresi sederhana `y = slope * x + intercept`, residual, prediksi opsional |
+| `web_search` | Cari web (Tavily) — butuh persetujuan saat toggle off |
+| `web_fetch` | Ambil isi halaman web tertentu (Tavily) |
 
 Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
+
+### Web search
+
+Web search aktif per-session lewat toggle di composer (ikon globe, tanpa label, default **off**). Saat toggle off, agent tetap bisa memanggil tool web lalu *suspend* dan meminta persetujuan user via *glass approval card* dengan alasan dinamis yang dihasilkan agent — user bisa **approve** atau **reject**. Sumber web yang dikumpulkan dari pencarian tampil di sidebar kanan (bagian **Web sources**). Tool web hanya terdaftar jika `TAVILY_API_KEY` diisi (toggle nonaktif jika kosong). Dokumentasi library/API via MCP context7 (`resolve-library-id`, `query-docs`) opsional dengan `CONTEXT7_API_KEY`.
 
 ## User profiling
 
