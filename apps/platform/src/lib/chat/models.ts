@@ -7,7 +7,6 @@ import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
 
 export const DEFAULT_COMPLETION_MODEL = "gpt-5.6-luna";
 export type ReasoningEffort = string;
-export type CompletionModelId = string;
 
 export function isKnownModel(models: ModelInfo[], modelId: string): boolean {
   return models.some((model) => model.modelId === modelId);
@@ -62,20 +61,3 @@ export function resolveReasoningFallback(
   return sortedSupported[0] ?? null;
 }
 
-// ─── Legacy allow-list helpers ──────────────────────────────────────────────
-// Kept (with private literal arrays) because `chat-preferences.ts` still uses
-// them for its no-arg overloads until Task 15 rewires `routes/index.tsx`.
-// The public allow-list constants themselves are gone.
-
-const LEGACY_MODEL_IDS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
-const LEGACY_EFFORT_KEYS = ["low", "medium", "high"];
-
-export const DEFAULT_REASONING_EFFORT = "medium";
-
-export function isCompletionModelId(value: unknown): value is string {
-  return typeof value === "string" && LEGACY_MODEL_IDS.includes(value);
-}
-
-export function isReasoningEffort(value: unknown): value is string {
-  return typeof value === "string" && LEGACY_EFFORT_KEYS.includes(value);
-}

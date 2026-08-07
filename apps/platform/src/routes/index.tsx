@@ -6,6 +6,7 @@ import {
 import type { UIAttachment, UIMessage } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { X } from "lucide-react";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { EmptyState } from "#/components/chat/empty-state";
@@ -21,6 +22,8 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
+  fetchContextUsage,
+  fetchRunStatus,
   getOrCreateEmptyChatSession,
   getProject,
   listProjects,
@@ -32,7 +35,10 @@ import {
   unlinkDocumentFromSession,
   uploadDocument,
   waitForDocumentReady,
+  type ContextUsageInfo,
+  type ModelInfo,
   type ProjectListItem,
+  type ReasoningEffortInfo,
   type SessionDocument,
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
@@ -65,10 +71,12 @@ import {
   readSelectedModel,
   readSelectedReasoningEffort,
 } from "#/lib/chat-preferences";
-import type {
-  CompletionModelId,
-  ReasoningEffort,
+import {
+  isKnownModel,
+  modelById,
+  resolveReasoningFallback,
 } from "#/lib/chat/models";
+import { useModels } from "#/hooks/use-models";
 import {
   clearWorkspaceProjectState,
   persistLastStandaloneSessionId,
@@ -109,6 +117,25 @@ export const Route = createFileRoute("/")({
 
 function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
   return readChatMessageMeta(metadata).documentIds ?? [];
+}
+
+/**
+ * `kind` joins `ChatMessageMeta` in a later task; for now read it straight
+ * from the raw metadata object.
+ */
+function metadataKind(metadata: UIMessage["metadata"]): string | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const kind = (metadata as Record<string, unknown>).kind;
+  return typeof kind === "string" ? kind : undefined;
+}
+
+/** Raw text of the most recent user message, for prefill after a failed run. */
+function failedUserMessageText(messages: UIMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") return getMessageRawText(message);
+  }
+  return null;
 }
 
 function createClientMessageId() {
@@ -152,6 +179,7 @@ function Home() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
   const initialWorkspace = useMemo(() => readWorkspaceState(), []);
+  const modelsState = useModels();
   // Prefer stored id; empty means "resolve via list/draft" (never invent UUIDs).
   const [sessionId, setSessionId] = useState(() => {
     return readStoredSessionId() ?? "";
@@ -721,6 +749,11 @@ function Home() {
                   viewMode === "project-workspace" ? activeProjectId : null
                 }
                 initialMessages={initialMessages}
+                models={modelsState.models}
+                reasoningEfforts={modelsState.reasoningEfforts}
+                modelsStatus={modelsState.status}
+                modelsError={modelsState.error}
+                modelsRetry={modelsState.retry}
                 onStreamSettled={() => {
                   void refreshSessionsQuiet();
                 }}
@@ -738,12 +771,22 @@ function ChatSession({
   sessionId,
   projectId,
   initialMessages,
+  models,
+  reasoningEfforts,
+  modelsStatus,
+  modelsError,
+  modelsRetry,
   onStreamSettled,
   onAuthFailure,
 }: {
   sessionId: string;
   projectId?: string | null;
   initialMessages: UIMessage[];
+  models: ModelInfo[];
+  reasoningEfforts: ReasoningEffortInfo[];
+  modelsStatus: "loading" | "success" | "error";
+  modelsError: string | null;
+  modelsRetry: () => void;
   onStreamSettled: () => void;
   onAuthFailure: () => void;
 }) {
@@ -764,16 +807,32 @@ function ChatSession({
   );
   const [isIngesting, setIsIngesting] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<CompletionModelId>(() =>
-    readSelectedModel(),
+  const [selectedModel, setSelectedModel] = useState<string>(() =>
+    readSelectedModel(models),
   );
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
-    useState<ReasoningEffort>(() => readSelectedReasoningEffort());
+    useState<string | null>(null);
+  const [compaction, setCompaction] = useState<{
+    phase: "idle" | "start" | "complete" | "error";
+  }>({ phase: "idle" });
+  const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
+    null,
+  );
+  const [contextUsageError, setContextUsageError] = useState(false);
+  const [previousRunError, setPreviousRunError] = useState(false);
   /** Latest model/effort for createRequest (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
+  /** Latest chat messages for stable event handlers (see handleChatEvent). */
+  const messagesRef = useRef<UIMessage[]>([]);
+  const modelsStatusRef = useRef(modelsStatus);
+  modelsStatusRef.current = modelsStatus;
+  const reasoningInitializedRef = useRef(false);
+  const contextUsageVersionRef = useRef(0);
+  /** Deferred composer prefill after a streamed run failure (editor is read-only while streaming). */
+  const pendingFailedTextRef = useRef<string | null>(null);
   /** Shared with doc rail so its bottom band matches the textfield dock. */
   const [composerDockH, setComposerDockH] = useState(120);
 
@@ -845,10 +904,96 @@ function ChatSession({
     [],
   );
 
+  /** Writes failed-run text into the composer editor (same selector as focusComposer). */
+  const setComposerInputText = useCallback((text: string) => {
+    let attempts = 0;
+
+    const trySet = () => {
+      const editor = composerInputRef.current?.querySelector<HTMLElement>(
+        "[data-anvia-composer-editor]",
+      );
+      if (editor) {
+        editor.textContent = text;
+        editor.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            inputType: "insertText",
+            data: text,
+          }),
+        );
+        return;
+      }
+      if (attempts++ < 20) {
+        requestAnimationFrame(trySet);
+      }
+    };
+
+    trySet();
+  }, []);
+
+  /** Fetch context usage once; shared by the polling effect and message_end. */
+  const refreshContextUsage = useCallback(async () => {
+    if (modelsStatusRef.current !== "success") return;
+    const version = ++contextUsageVersionRef.current;
+    try {
+      const usage = await fetchContextUsage({
+        sessionId,
+        model: selectedModelRef.current,
+        reasoningEffort: selectedReasoningEffortRef.current,
+      });
+      if (version !== contextUsageVersionRef.current) return;
+      setContextUsage(usage);
+      setContextUsageError(false);
+    } catch {
+      if (version === contextUsageVersionRef.current) {
+        setContextUsageError(true);
+      }
+    }
+  }, [sessionId]);
+
+  const handleChatEvent = useCallback(
+    (event: unknown) => {
+      if (!event || typeof event !== "object") return;
+      const record = event as Record<string, unknown>;
+      if (record.type === "compaction") {
+        const phase =
+          record.phase === "start"
+            ? "start"
+            : record.phase === "complete"
+              ? "complete"
+              : record.phase === "error"
+                ? "error"
+                : "idle";
+        setCompaction({ phase });
+        return;
+      }
+      if (record.type === "message_end") {
+        void refreshContextUsage();
+        return;
+      }
+      if (record.type === "error") {
+        const errorText =
+          record.error instanceof Error
+            ? record.error.message
+            : typeof record.error === "string"
+              ? record.error
+              : "The agent run failed";
+        setComposerError(`Run failed: ${errorText}`);
+        const failedText = failedUserMessageText(messagesRef.current);
+        if (failedText !== null) {
+          // The editor is read-only while streaming; apply once the stream ends.
+          pendingFailedTextRef.current = failedText;
+        }
+      }
+    },
+    [refreshContextUsage],
+  );
+
   const chat = useChat({
     transport: chatTransport,
     initialMessages,
-    createRequest: ({ coreMessages, uiMessages }) => {
+    resume: { key: sessionId, storage: "sessionStorage", auto: true },
+    createRequest: ({ coreMessages, uiMessages, resume }) => {
       const last = uiMessages.at(-1);
       const documentIds = documentIdsFromMetadata(last?.metadata);
 
@@ -859,8 +1004,10 @@ function ChatSession({
         documentIds,
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
+        ...(resume ? { resume } : {}),
       };
     },
+    onEvent: handleChatEvent,
     onError: (error) => {
       if (error instanceof ApiAuthError) {
         onAuthFailure();
@@ -868,12 +1015,20 @@ function ChatSession({
     },
   });
 
-  const handleModelChange = useCallback((model: CompletionModelId) => {
+  // Keep the latest messages readable from stable event handlers.
+  useEffect(() => {
+    messagesRef.current = chat.messages;
+  }, [chat.messages]);
+
+  const resumeChatRef = useRef(chat.resume);
+  resumeChatRef.current = chat.resume;
+
+  const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
     persistSelectedModel(model);
   }, []);
 
-  const handleReasoningChange = useCallback((effort: ReasoningEffort) => {
+  const handleReasoningChange = useCallback((effort: string | null) => {
     setSelectedReasoningEffort(effort);
     persistSelectedReasoningEffort(effort);
   }, []);
@@ -936,6 +1091,11 @@ function ChatSession({
         );
       });
       onStreamSettled();
+      // A failed run defers its composer prefill until the editor is editable.
+      if (pendingFailedTextRef.current !== null) {
+        setComposerInputText(pendingFailedTextRef.current);
+        pendingFailedTextRef.current = null;
+      }
       focusComposer();
     }
     wasStreamingRef.current = chat.status === "streaming";
@@ -945,6 +1105,7 @@ function ChatSession({
     focusComposer,
     onStreamSettled,
     sessionDocuments,
+    setComposerInputText,
   ]);
 
   useEffect(() => {
@@ -957,12 +1118,117 @@ function ChatSession({
     setComposerError(null);
     setAttachmentErrors([]);
     setIsIngesting(false);
+    setContextUsage(null);
+    setContextUsageError(false);
+    setCompaction({ phase: "idle" });
+    setPreviousRunError(false);
     void refreshSessionDocuments();
   }, [refreshSessionDocuments]);
 
   useEffect(() => {
     setEditingMessageId(null);
   }, [sessionId]);
+
+  // Reconcile the selected model once the catalog arrives:
+  // stored preference > first active model > default.
+  useEffect(() => {
+    if (modelsStatus !== "success") return;
+    const current = selectedModelRef.current;
+    if (isKnownModel(models, current)) return;
+    const next = readSelectedModel(models);
+    if (next !== current) {
+      setSelectedModel(next);
+      persistSelectedModel(next);
+    }
+  }, [models, modelsStatus]);
+
+  const activeModel = useMemo(
+    () => modelById(models, selectedModel),
+    [models, selectedModel],
+  );
+
+  // Init the reasoning effort from storage on first catalog arrival; on model
+  // change, resolve a supported fallback for the new model and persist both.
+  useEffect(() => {
+    if (!activeModel) return;
+    const base = reasoningInitializedRef.current
+      ? selectedReasoningEffortRef.current
+      : readSelectedReasoningEffort(activeModel.reasoningEfforts);
+    reasoningInitializedRef.current = true;
+    const next = resolveReasoningFallback(
+      base,
+      activeModel.reasoningEfforts,
+      reasoningEfforts,
+    );
+    if (next !== selectedReasoningEffortRef.current) {
+      setSelectedReasoningEffort(next);
+      persistSelectedReasoningEffort(next);
+    }
+  }, [activeModel, reasoningEfforts]);
+
+  // Poll context usage every 30s while the catalog is available.
+  useEffect(() => {
+    if (modelsStatus !== "success") return;
+    void refreshContextUsage();
+    const timer = window.setInterval(() => {
+      void refreshContextUsage();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [modelsStatus, refreshContextUsage]);
+
+  // Rejoin a still-running run on load (closed-tab recovery) and surface a
+  // banner for a run that failed server-side. "missing" behaves as idle.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await fetchRunStatus(sessionId);
+        if (cancelled) return;
+        if (status.status === "error") {
+          setPreviousRunError(true);
+        }
+        if (status.status === "running" && status.streamId) {
+          const key = `anvia:chat-resume:${sessionId}`;
+          const stored = sessionStorage.getItem(key);
+          if (!stored) {
+            sessionStorage.setItem(
+              key,
+              JSON.stringify({
+                version: 1,
+                streamId: status.streamId,
+                lastEventId: 0,
+                messages: messagesRef.current,
+              }),
+            );
+            void resumeChatRef.current();
+          }
+        }
+      } catch {
+        // ignore — resume state (if any) still handles rejoin
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once per sessionId
+  }, [sessionId]);
+
+  // Prefill the composer from a persisted failed [user, assistant error] tail.
+  useEffect(() => {
+    if (modelsStatus !== "success" || initialMessages.length < 2) return;
+    const last = initialMessages.at(-1);
+    const secondLast = initialMessages.at(-2);
+    if (
+      !last ||
+      last.role !== "assistant" ||
+      !secondLast ||
+      secondLast.role !== "user"
+    ) {
+      return;
+    }
+    if (metadataKind(last.metadata) !== "error") return;
+    setComposerInputText(getMessageRawText(secondLast));
+  }, [initialMessages, modelsStatus, setComposerInputText]);
 
   /**
    * Shared path for revert (same text) and edit (new text):
@@ -1047,9 +1313,31 @@ function ChatSession({
           chat: chatController,
           clear,
         }) => {
+          if (modelsStatus !== "success") return;
           setComposerError(null);
           const trimmed = input.trim();
           if (!trimmed && attachments.length === 0) return;
+
+          // Truncate-before-send: a persisted failed tail [user, assistant
+          // kind:"error"] would re-enter memory — drop it first.
+          const messages = chatController.messages;
+          const last = messages.at(-1);
+          const secondLast = messages.at(-2);
+          if (
+            last?.role === "assistant" &&
+            metadataKind(last.metadata) === "error" &&
+            secondLast?.role === "user"
+          ) {
+            const userMeta = readChatMessageMeta(secondLast.metadata);
+            if (userMeta.clientMessageId) {
+              void truncateSessionMemory({
+                sessionId,
+                mode: "exclude",
+                clientMessageId: userMeta.clientMessageId,
+              }).catch(() => {});
+            }
+            chatController.setMessages(messages.slice(0, -2));
+          }
 
           const documentIds: string[] = [];
 
@@ -1245,6 +1533,23 @@ function ChatSession({
                     </Thread.ScrollToBottom>
                   </Thread.ViewportFooter>
 
+                  {previousRunError ? (
+                    <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
+                      <span className="min-w-0">
+                        The previous run failed — review the conversation and
+                        send again.
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Dismiss failed run notice"
+                        onClick={() => setPreviousRunError(false)}
+                        className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-danger/70 transition hover:bg-white/[0.06] hover:text-danger active:scale-[0.96]"
+                      >
+                        <X className="size-3.5" strokeWidth={2} />
+                      </button>
+                    </div>
+                  ) : null}
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -1261,6 +1566,14 @@ function ChatSession({
                     onLinkedDocuments={handleLinkedDocuments}
                     onAttachmentRejected={handleAttachmentRejected}
                     onDismissAttachmentError={handleDismissAttachmentError}
+                    models={models}
+                    reasoningEfforts={reasoningEfforts}
+                    modelsStatus={modelsStatus}
+                    modelsError={modelsError}
+                    onRetryModels={modelsRetry}
+                    compaction={compaction}
+                    contextUsage={contextUsage}
+                    contextUsageError={contextUsageError}
                   />
                 </div>
               </div>

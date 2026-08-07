@@ -43,6 +43,7 @@ export function ChatComposer({
   onRetryModels = () => {},
   compaction = { phase: "idle" },
   contextUsage = null,
+  contextUsageError = false,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -55,7 +56,7 @@ export function ChatComposer({
   model: string;
   reasoningEffort: string | null;
   onModelChange: (model: string) => void;
-  onReasoningChange: (effort: string) => void;
+  onReasoningChange: (effort: string | null) => void;
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   onAttachmentRejected?: (rejects: AttachmentReject[]) => void;
   onDismissAttachmentError: (id: string) => void;
@@ -67,9 +68,12 @@ export function ChatComposer({
   /** Wired in Task 14 — declared now so `routes/index.tsx` can pass them. */
   compaction?: { phase: "idle" | "start" | "complete" | "error" };
   contextUsage?: ContextUsageInfo | null;
+  /** Latest context-usage refresh failed (ring shows a transient hint). */
+  contextUsageError?: boolean;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
+  const modelsUnavailable = modelsStatus !== "success";
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
@@ -128,7 +132,7 @@ export function ChatComposer({
           minRows={1}
           maxRows={8}
           placeholder="Ask about your documents…"
-          disabled={isIngesting}
+          disabled={isIngesting || modelsUnavailable}
         />
 
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2">
@@ -137,12 +141,17 @@ export function ChatComposer({
             reasoningEfforts={reasoningEfforts}
             model={model}
             reasoningEffort={reasoningEffort}
-            disabled={busy || modelsStatus !== "success"}
+            disabled={busy || modelsUnavailable}
             onModelChange={onModelChange}
-            onReasoningChange={(effort) => onReasoningChange(effort ?? "")}
+            onReasoningChange={onReasoningChange}
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
+            {contextUsageError ? (
+              <span className="shrink-0 text-[10px] font-medium text-danger/80 animate-fade-in">
+                Usage unavailable
+              </span>
+            ) : null}
             <ContextUsageIndicator
               models={models}
               contextUsage={contextUsage ?? null}
@@ -153,7 +162,7 @@ export function ChatComposer({
               sessionId={sessionId}
               projectId={projectId}
               activeDocumentIds={activeDocumentIds}
-              disabled={busy}
+              disabled={busy || modelsUnavailable}
               onLinkedDocuments={onLinkedDocuments}
               onRejectedFiles={onAttachmentRejected}
             />

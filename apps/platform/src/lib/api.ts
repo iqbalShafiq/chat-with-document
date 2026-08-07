@@ -870,7 +870,8 @@ export async function fetchContextUsage(input: {
 
 export type RunStatusInfo = {
   streamId: string | null;
-  status: "idle" | "running" | "completed" | "error";
+  /** "missing": stream hash expired while the active-run key still lingers — clients treat it as idle. */
+  status: "idle" | "running" | "completed" | "error" | "missing";
   lastEventId: number | null;
 };
 
