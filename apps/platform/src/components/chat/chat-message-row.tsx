@@ -1,8 +1,10 @@
 import type { UIMessage, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
 import { MessageCitationProvider } from "#/components/chat/message-citation-context";
+import { ConversationSummaryDivider } from "#/components/chat/conversation-summary-divider";
+import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
@@ -50,7 +52,14 @@ function messageStartsWithActivity(message: UIMessage): boolean {
   return false;
 }
 
-export function ChatMessageRow({
+/**
+ * Memoized row: re-renders only when its own message (or the passed-in
+ * stream/edit state) changes. @anvia/react keeps unchanged message objects
+ * by reference, so a model switch — which re-renders the parent thread —
+ * no longer re-parses markdown/formatting for every message.
+ */
+export const ChatMessageRow = memo(function ChatMessageRow({
+  message: messageProp,
   chatStatus,
   lastMessageId,
   editingMessageId,
@@ -59,6 +68,7 @@ export function ChatMessageRow({
   onSubmitEdit,
   onRevert,
 }: {
+  message: UIMessage;
   chatStatus: UseChatStatus;
   lastMessageId?: string;
   editingMessageId: string | null;
@@ -67,7 +77,35 @@ export function ChatMessageRow({
   onSubmitEdit: (message: UIMessage, text: string) => Promise<void>;
   onRevert: (message: UIMessage) => Promise<void>;
 }) {
-  const { message } = useMessage();
+  const message = messageProp;
+  const messageKind = readChatMessageMeta(message.metadata).kind;
+
+  if (messageKind === "summary") {
+    return (
+      <div
+        data-role={message.role}
+        data-message-id={message.id}
+        className="relative flex w-full min-w-0 flex-col"
+      >
+        <ConversationSummaryDivider />
+      </div>
+    );
+  }
+
+  if (messageKind === "error") {
+    return (
+      <div
+        data-role={message.role}
+        data-message-id={message.id}
+        className="relative flex w-full min-w-0 flex-col"
+      >
+        <ErrorMessageBubble
+          text={getMessageRawText(message) || "Something went wrong"}
+        />
+      </div>
+    );
+  }
+
   const contentRef = useRef<HTMLDivElement>(null);
   const [editWidthPx, setEditWidthPx] = useState<number | null>(null);
   const intermediate = isIntermediateStepMessage(message);
@@ -173,7 +211,7 @@ export function ChatMessageRow({
   }
 
   return row;
-}
+});
 
 type MessagePart = UIMessage["parts"][number];
 

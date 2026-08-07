@@ -3,6 +3,14 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
+/* Server-provided model icons fill their sized box and center via
+   preserveAspectRatio (the wrapper is inline-flex; see ModelIcon). */
+.model-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 @theme {
   --font-sans: "Geist Variable", "Geist", "SF Pro Display", ui-sans-serif,
     system-ui, sans-serif;

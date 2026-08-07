@@ -81,7 +81,7 @@ Factory agent yang dipakai API:
 - `createAgent()` — `AgentBuilder` + base instructions + optional tools/memory/tracing
 - `createDataAnalysisTool()` — tiga tool statistik numerik
 - `tracing` — instance Langfuse dari env
-- Default model: OpenAI Responses API (`gpt-5.6-luna`), konfigurasi via `OPENAI_*`
+- Default model: OpenAI via OpenRouter Responses API (`openai/gpt-5.6-luna`), konfigurasi via `OPENAI_*`
 
 ## Prerequisites
 
@@ -119,7 +119,7 @@ Factory agent yang dipakai API:
    | `PROFILE_ENABLED` | Master toggle for user profiling (default `true`) |
    | `PROFILE_REFRESH_DELAY_MINUTES` | Debounce window for background profile refresh (default `15`) |
    | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
-   | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`gpt-5.6-luna`) |
+   | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`openai/gpt-5.6-luna`) |
 
 3. **Start Postgres**
 

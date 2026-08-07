@@ -29,6 +29,12 @@ import {
   scopeFromJobData,
 } from "./modules/profiling/worker.js";
 import { prisma } from "./utils/prisma.js";
+import {
+  CHAT_RUN_QUEUE,
+  failChatRun,
+  processChatRunJob,
+  type ChatRunJobData,
+} from "./modules/chat/run-worker.js";
 
 console.log("[worker] boot");
 
@@ -241,3 +247,39 @@ if (profileConfig().enabled) {
 }
 
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
+
+const chatRunWorker = new Worker<ChatRunJobData>(
+  CHAT_RUN_QUEUE,
+  async (job) => {
+    try {
+      await processChatRunJob(job);
+    } catch (error) {
+      // failChatRun already ran inside the processor; keep BullMQ bookkeeping.
+      throw error;
+    }
+  },
+  {
+    connection: getBullmqConnectionOptions(),
+    concurrency: 2,
+    lockDuration: 300_000,
+    stalledInterval: 120_000,
+  },
+);
+
+chatRunWorker.on("ready", () =>
+  console.log(`[chat-run] ready on queue ${CHAT_RUN_QUEUE}`),
+);
+
+chatRunWorker.on("failed", async (job, error) => {
+  if (job?.data) {
+    await failChatRun(job.data.streamId, error, {
+      sessionId: job.data.sessionId,
+      userId: job.data.userId,
+      promptMessage: job.data.promptMessage,
+    });
+  }
+});
+
+chatRunWorker.on("error", (error) =>
+  console.error("[chat-run] worker error", error),
+);

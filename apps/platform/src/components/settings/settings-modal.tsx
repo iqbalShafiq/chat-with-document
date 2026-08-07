@@ -20,13 +20,13 @@ import { PersonalizationSection } from "#/components/settings/personalization-se
 import { useProfilePersonalization } from "#/hooks/use-profile";
 import {
   getUserUsageSummary,
+  type ModelInfo,
+  type ReasoningEffortInfo,
   type UserUsageSummary,
 } from "#/lib/api";
+import { useModels } from "#/hooks/use-models";
 import type { SessionUser } from "#/lib/auth-client";
 import {
-  COMPLETION_MODELS,
-  MODEL_OPTIONS,
-  REASONING_EFFORTS,
   modelLabel,
   reasoningLabel,
   type ReasoningEffort,
@@ -51,6 +51,7 @@ const REASONING_BAR_COLORS: Record<ReasoningEffort, string> = {
   low: "bg-emerald-400/70",
   medium: "bg-amber-400/75",
   high: "bg-rose-400/75",
+  max: "bg-violet-400/75",
 };
 
 function formatBytes(bytes: number): string {
@@ -91,6 +92,8 @@ export function SettingsModal({
   const profiles = useProfilePersonalization(
     open && section === "personalization",
   );
+
+  const { models, reasoningEfforts } = useModels();
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -269,6 +272,8 @@ export function SettingsModal({
                       byModel={usage.byModel ?? []}
                       byReasoningEffort={usage.byReasoningEffort ?? []}
                       requestCount={usage.tokens.requestCount}
+                      models={models}
+                      reasoningEfforts={reasoningEfforts}
                     />
                   </>
                 ) : null}
@@ -467,32 +472,35 @@ function RequestMixCard({
   byModel,
   byReasoningEffort,
   requestCount,
+  models,
+  reasoningEfforts,
 }: {
   byModel: UserUsageSummary["byModel"];
   byReasoningEffort: UserUsageSummary["byReasoningEffort"];
   requestCount: number;
+  models: ModelInfo[];
+  reasoningEfforts: ReasoningEffortInfo[];
 }) {
-  // Prefer known order; include only models with activity when any data exists
-  const activeModels =
-    byModel.length === 0
-      ? []
-      : MODEL_OPTIONS.map((opt, index) => {
-          const found = byModel.find((r) => r.model === opt.id);
-          return {
-            id: opt.id,
-            label: opt.label,
-            requestCount: found?.requestCount ?? 0,
-            totalTokens: found?.totalTokens ?? 0,
-            colorClass: MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],
-          };
-        }).filter((r) => r.requestCount > 0);
+  // Catalog order first; include only models with activity when any data exists
+  const activeModels = models
+    .map((m, index) => {
+      const found = byModel.find((r) => r.model === m.modelId);
+      return {
+        id: m.modelId,
+            label: m.name ?? m.label,
+        requestCount: found?.requestCount ?? 0,
+        totalTokens: found?.totalTokens ?? 0,
+        colorClass: MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],
+      };
+    })
+    .filter((r) => r.requestCount > 0);
 
-  // Any unexpected models not in allow-list
+  // Any models in usage not present in the catalog (raw id labels).
   const extraModels = byModel
-    .filter((r) => !(COMPLETION_MODELS as readonly string[]).includes(r.model))
+    .filter((r) => !models.some((m) => m.modelId === r.model))
     .map((r, index) => ({
       id: r.model,
-      label: modelLabel(r.model),
+      label: modelLabel(models, r.model),
       requestCount: r.requestCount,
       totalTokens: r.totalTokens,
       colorClass:
@@ -502,16 +510,54 @@ function RequestMixCard({
   const modelSegments = [...activeModels, ...extraModels];
   const modelTotal = modelSegments.reduce((s, r) => s + r.requestCount, 0);
 
-  const reasoningSegments = REASONING_EFFORTS.map((effort) => {
-    const found = byReasoningEffort.find((r) => r.reasoningEffort === effort);
-    return {
-      id: effort,
-      label: reasoningLabel(effort),
-      requestCount: found?.requestCount ?? 0,
-      totalTokens: found?.totalTokens ?? 0,
-      colorClass: REASONING_BAR_COLORS[effort],
-    };
-  }).filter((r) => r.requestCount > 0);
+  const knownEffortKeys = new Set(reasoningEfforts.map((e) => e.key));
+  const noneEntry = byReasoningEffort.find(
+    (r) => r.reasoningEffort === null || r.reasoningEffort === "",
+  );
+
+  const reasoningSegments = [
+    ...reasoningEfforts.map((effort, index) => {
+      const found = byReasoningEffort.find(
+        (r) => r.reasoningEffort === effort.key,
+      );
+      return {
+        id: effort.key,
+        label: effort.label,
+        requestCount: found?.requestCount ?? 0,
+        totalTokens: found?.totalTokens ?? 0,
+        colorClass:
+          REASONING_BAR_COLORS[effort.key] ??
+          MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],
+      };
+    }),
+    ...(noneEntry
+      ? [
+          {
+            id: "none",
+            label: "None",
+            requestCount: noneEntry.requestCount,
+            totalTokens: noneEntry.totalTokens,
+            colorClass: "bg-white/40",
+          },
+        ]
+      : []),
+    ...byReasoningEffort
+      .filter(
+        (r) =>
+          r.reasoningEffort !== null &&
+          r.reasoningEffort !== "" &&
+          !knownEffortKeys.has(r.reasoningEffort),
+      )
+      .map((r, index) => ({
+        id: r.reasoningEffort,
+        label: reasoningLabel(reasoningEfforts, r.reasoningEffort),
+        requestCount: r.requestCount,
+        totalTokens: r.totalTokens,
+        colorClass:
+          REASONING_BAR_COLORS[r.reasoningEffort] ??
+          MODEL_BAR_COLORS[index % MODEL_BAR_COLORS.length],
+      })),
+  ].filter((r) => r.requestCount > 0);
 
   const reasoningTotal = reasoningSegments.reduce(
     (s, r) => s + r.requestCount,
@@ -591,7 +637,8 @@ function RequestMixCard({
                       aria-hidden
                     />
                     <ReasoningEffortIcon
-                      effort={s.id as ReasoningEffort}
+                      effort={s.id === "none" ? null : (s.id as ReasoningEffort)}
+                      efforts={reasoningEfforts.map((effort) => effort.key)}
                       className="size-3.5 shrink-0"
                     />
                     {s.label}

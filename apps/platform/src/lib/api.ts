@@ -30,6 +30,8 @@ export type SessionListItem = {
   updatedAt: string;
   title: string;
   projectId?: string | null;
+  /** True when a completed run exists after the user last read this session. */
+  unread: boolean;
 };
 
 export type SessionListPage = {
@@ -71,7 +73,10 @@ export async function listSessions(input?: {
           typeof item.sessionId === "string" &&
           typeof item.updatedAt === "string" &&
           typeof item.title === "string",
-      ),
+      ).map((item) => ({
+        ...item,
+        unread: item.unread === true,
+      })),
       nextCursor:
         typeof page.nextCursor === "string" || page.nextCursor === null
           ? page.nextCursor
@@ -80,6 +85,47 @@ export async function listSessions(input?: {
   }
 
   throw new Error("Unexpected sessions response shape");
+}
+
+export type ActiveRunInfo = {
+  sessionId: string;
+  streamId: string;
+  status: string;
+  lastEventId: number;
+};
+
+export async function listActiveRuns(): Promise<ActiveRunInfo[]> {
+  const response = await apiFetch(`${API_BASE}/api/chat/runs`);
+  if (!response.ok) throw new Error("Failed to load active runs");
+  const data: unknown = await response.json();
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { runs?: unknown }).runs)
+  ) {
+    const runs = (data as { runs: unknown[] }).runs.filter(
+      (run): run is ActiveRunInfo =>
+        !!run &&
+        typeof run === "object" &&
+        typeof (run as ActiveRunInfo).sessionId === "string" &&
+        typeof (run as ActiveRunInfo).streamId === "string",
+    );
+    return runs;
+  }
+  throw new Error("Unexpected active runs response shape");
+}
+
+export async function markSessionRead(sessionId: string): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/mark-read`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    },
+  );
+  if (!response.ok) throw new Error("Failed to mark session read");
 }
 
 export async function createChatSession(input?: {
@@ -747,4 +793,165 @@ export async function resetProjectProfile(
   );
   if (!response.ok) throw new Error("Failed to reset project profile");
   return (await response.json()) as { ok: true };
+}
+
+// ─── Model registry ─────────────────────────────────────────────────────────
+
+export type ModelInfo = {
+  modelId: string;
+  label: string;
+  /** Full display name, e.g. "GPT 5.6 Luna" (server falls back to label). */
+  name: string;
+  hint: string | null;
+  description: string | null;
+  iconSvg: string;
+  provider: { slug: string; name: string };
+  contextWindowTokens: number;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  prices: {
+    input: number | null;
+    cachedInput: number | null;
+    output: number | null;
+    cacheWriteMultiplier: number | null;
+    longPromptThresholdTokens: number | null;
+    longPromptInputMultiplier: number | null;
+    longPromptOutputMultiplier: number | null;
+  };
+  reasoningEfforts: string[];
+  sortOrder: number;
+};
+
+export type ReasoningEffortInfo = {
+  key: string;
+  label: string;
+  description: string | null;
+  sortOrder: number;
+};
+
+export type ModelCatalog = {
+  models: ModelInfo[];
+  reasoningEfforts: ReasoningEffortInfo[];
+};
+
+let modelsCache: ModelCatalog | null = null;
+
+export async function listModels(input?: {
+  force?: boolean;
+}): Promise<ModelCatalog> {
+  if (modelsCache !== null && !input?.force) return modelsCache;
+
+  const response = await apiFetch(`${API_BASE}/api/models`);
+  if (!response.ok) throw new Error("Failed to load models");
+
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !Array.isArray((data as ModelCatalog).models)
+  ) {
+    throw new Error("Unexpected models response shape");
+  }
+
+  const catalog: ModelCatalog = {
+    models: (data as ModelCatalog).models.filter(
+      (model): model is ModelInfo =>
+        !!model &&
+        typeof model.modelId === "string" &&
+        typeof model.label === "string",
+    ),
+    reasoningEfforts: Array.isArray(
+      (data as ModelCatalog).reasoningEfforts,
+    )
+      ? (data as ModelCatalog).reasoningEfforts
+      : [],
+  };
+  modelsCache = catalog;
+  return catalog;
+}
+
+export type ContextUsageInfo = {
+  modelId: string;
+  modelLabel: string;
+  contextWindowTokens: number;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  estimatedTokens: number;
+  ratio: number;
+  thresholdRatio: number;
+  targetRatio: number;
+  thresholdTokens: number;
+  targetTokens: number;
+  lastRunInputTokens: number | null;
+  reasoningEffort: string | null;
+  estimatedAt: string;
+};
+
+export async function fetchContextUsage(input: {
+  sessionId: string;
+  model: string;
+  reasoningEffort: string | null;
+}): Promise<ContextUsageInfo> {
+  const params = new URLSearchParams();
+  params.set("sessionId", input.sessionId);
+  params.set("model", input.model);
+  if (input.reasoningEffort) {
+    params.set("reasoningEffort", input.reasoningEffort);
+  }
+
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/context-usage?${params.toString()}`,
+  );
+  if (!response.ok) throw new Error("Failed to load context usage");
+
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof (data as ContextUsageInfo).modelId !== "string" ||
+    typeof (data as ContextUsageInfo).estimatedTokens !== "number"
+  ) {
+    throw new Error("Unexpected context usage response shape");
+  }
+  return data as ContextUsageInfo;
+}
+
+export type RunStatusInfo = {
+  streamId: string | null;
+  /** "missing": stream hash expired while the active-run key still lingers — clients treat it as idle. */
+  status: "idle" | "running" | "completed" | "error" | "missing";
+  lastEventId: number | null;
+};
+
+export async function fetchRunStatus(sessionId: string): Promise<RunStatusInfo> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/run-status?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load run status");
+
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof (data as RunStatusInfo).status !== "string" ||
+    ((data as RunStatusInfo).streamId !== null &&
+      typeof (data as RunStatusInfo).streamId !== "string")
+  ) {
+    throw new Error("Unexpected run status response shape");
+  }
+  return data as RunStatusInfo;
+}
+
+export async function stopChatRun(streamId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/api/chat/stop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ streamId }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to stop chat run");
+  }
 }

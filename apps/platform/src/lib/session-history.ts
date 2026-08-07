@@ -132,6 +132,7 @@ export function sessionSummaryFromDraft(draft: {
     projectId: draft.projectId,
     title: draft.title?.trim() || EMPTY_CHAT_TITLE,
     updatedAt: draft.updatedAt ?? new Date().toISOString(),
+    unread: false,
   };
 }
 

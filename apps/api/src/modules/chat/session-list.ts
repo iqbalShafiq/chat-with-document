@@ -5,6 +5,7 @@ export type SessionListItem = {
   updatedAt: string;
   title: string;
   projectId: string | null;
+  unread: boolean;
 };
 
 export type SessionListPage = {
@@ -176,6 +177,7 @@ export async function listSessionsPage(input: {
       updatedAt: true,
       title: true,
       projectId: true,
+      lastReadAt: true,
     },
   });
 
@@ -191,16 +193,47 @@ export async function listSessionsPage(input: {
     cachedTitles,
   );
 
-  const items: SessionListItem[] = page.map((row) => ({
-    sessionId: row.id,
-    updatedAt: row.updatedAt.toISOString(),
-    title: titles.get(row.id) ?? row.title ?? "New chat",
-    projectId: row.projectId,
-  }));
+  const pageIds = page.map((row) => row.id);
+  const completedRuns = await prisma.agentUsageEvent.groupBy({
+    by: ["sessionId"],
+    where: {
+      userId: input.userId,
+      sessionId: { in: pageIds },
+      status: "completed",
+    },
+    _max: { createdAt: true },
+  });
+  const lastCompletedBySession = new Map(
+    completedRuns.map((row) => [row.sessionId, row._max.createdAt]),
+  );
+
+  const items: SessionListItem[] = page.map((row) => {
+    const lastCompleted = lastCompletedBySession.get(row.id) ?? null;
+    const unread =
+      lastCompleted !== null &&
+      (row.lastReadAt === null || lastCompleted > row.lastReadAt);
+    return {
+      sessionId: row.id,
+      updatedAt: row.updatedAt.toISOString(),
+      title: titles.get(row.id) ?? row.title ?? "New chat",
+      projectId: row.projectId,
+      unread,
+    };
+  });
 
   const last = page[page.length - 1];
   const nextCursor =
     hasMore && last ? encodeCursor(last.updatedAt, last.id) : null;
 
   return { items, nextCursor };
+}
+
+export async function markChatSessionRead(input: {
+  userId: string;
+  sessionId: string;
+}): Promise<void> {
+  await prisma.chatSession.updateMany({
+    where: { id: input.sessionId, userId: input.userId },
+    data: { lastReadAt: new Date() },
+  });
 }

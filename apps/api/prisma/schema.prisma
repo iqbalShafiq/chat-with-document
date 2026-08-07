@@ -150,6 +150,8 @@ model ChatSession {
   title     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  /// When the user last opened/read this session (clears the sidebar unread marker).
+  lastReadAt DateTime?
 
   @@index([userId, projectId, updatedAt])
   @@index([userId, updatedAt])
@@ -290,4 +292,77 @@ model AgentUsageEvent {
   @@index([sessionId, createdAt])
   @@index([userId, sessionId, createdAt])
   @@index([runId])
+}
+
+// ─── Model registry (master data, seeded) ───────────────────────────────────
+
+model ModelProvider {
+  id        String      @id @default(cuid())
+  slug      String      @unique
+  name      String
+  sortOrder Int         @default(0)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  models    ChatModel[]
+
+  @@map("model_provider")
+}
+
+model ChatModel {
+  id                         String                @id @default(cuid())
+  modelId                    String                @unique
+  providerId                 String
+  provider                   ModelProvider         @relation(fields: [providerId], references: [id])
+  label                      String
+  /// Full display name, e.g. "GPT 5.6 Luna" (falls back to label).
+  name                       String                @default("")
+  hint                       String?
+  description                String?
+  /// Raw SVG (sanitized client-side before render). Empty = default icon.
+  iconSvg                    String                @default("")
+  contextWindowTokens        Int
+  maxInputTokens             Int?
+  maxOutputTokens            Int?
+  inputPricePerMTokens       Decimal?              @db.Decimal(10, 4)
+  cachedInputPricePerMTokens Decimal?              @db.Decimal(10, 4)
+  outputPricePerMTokens      Decimal?              @db.Decimal(10, 4)
+  cacheWriteMultiplier       Decimal?              @db.Decimal(5, 3)
+  longPromptThresholdTokens  Int?
+  longPromptInputMultiplier  Decimal?              @db.Decimal(5, 3)
+  longPromptOutputMultiplier Decimal?              @db.Decimal(5, 3)
+  supportsReasoning          Boolean               @default(true)
+  isActive                   Boolean               @default(true)
+  sortOrder                  Int                   @default(0)
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  reasoningEfforts           ModelReasoningEffort[]
+
+  @@index([providerId])
+  @@map("chat_model")
+}
+
+model ReasoningEffort {
+  id          String                @id @default(cuid())
+  key         String                @unique
+  label       String
+  description String?
+  sortOrder   Int                   @default(0)
+  isActive    Boolean               @default(true)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  models      ModelReasoningEffort[]
+
+  @@map("reasoning_effort")
+}
+
+model ModelReasoningEffort {
+  id       String           @id @default(cuid())
+  modelId  String
+  model    ChatModel        @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  effortId String
+  effort   ReasoningEffort  @relation(fields: [effortId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, effortId])
+  @@map("model_reasoning_effort")
 }

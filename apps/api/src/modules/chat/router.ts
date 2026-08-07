@@ -1,56 +1,26 @@
 import { Hono } from "hono";
-import { prisma } from "../../utils/prisma.js";
-import { getObjectBuffer } from "../../lib/r2.js";
-import {
-  buildDocumentCatalogInstruction,
-  createAgent,
-  createChunkSearchService,
-  createCompletionModel,
-  createDataAnalysisTools,
-  createDocumentTools,
-  createRememberUserProfileTool,
-  DEFAULT_COMPLETION_MODEL,
-  DEFAULT_COMPLETION_PROVIDER,
-  DEFAULT_REASONING_EFFORT,
-  DOCUMENT_IMAGE_INSTRUCTION,
-  hasProfileContent,
-  parseCompletionModel,
-  parseReasoningEffort,
-  renderProfileContextText,
-  tracing,
-  type AgentContextBlock,
-  type ProfileScope,
-  type ProfileSectionKey,
-} from "@assingment/agent";
-import { createEventStream } from "@anvia/server";
+import { DEFAULT_COMPLETION_MODEL } from "@assingment/agent";
+import { createEventStream, resumeStreamEvents } from "@anvia/server";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { resolveActiveDocuments } from "../documents/service.js";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
-import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
+import { getRedis } from "../../lib/redis.js";
+import { getStreamStore } from "../../lib/resumable-stream-store.js";
+import { findActiveModel } from "../models/service.js";
 import {
-  finalizeAssistantCitations,
-  tapStreamComplete,
-} from "./finalize-assistant-citations.js";
-import { listSessionsPage } from "./session-list.js";
-import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
+  ACTIVE_RUN_KEY,
+  enqueueChatRun,
+  releaseActiveRun,
+  tryAcquireActiveRun,
+} from "./run-queue.js";
+import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
+import { listSessionsPage, markChatSessionRead } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
   TruncateTargetNotFoundError,
   truncateSessionMemory,
   type TruncateMode,
 } from "./truncate-memory.js";
-import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
-import {
-  rescheduleProfileRefresh,
-  waitForActiveProfileJob,
-} from "../profiling/queue.js";
-import {
-  appendExplicitFact,
-  loadProfileData,
-  profileConfig,
-  summarizeProfileForScope,
-} from "../profiling/service.js";
-import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
+import { computeContextUsage } from "./context-usage.js";
 import {
   ensureChatSession,
   getOrCreateEmptyChatSession,
@@ -71,34 +41,6 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
-/** Request facts only (Anvia context). Policy goes in instructions. */
-function buildProjectWorkspaceContext(input: {
-  name: string;
-  description: string | null;
-}): string {
-  const lines = ["Project workspace", `Name: ${input.name}`];
-  if (input.description?.trim()) {
-    lines.push(`Description: ${input.description.trim()}`);
-  }
-  return lines.join("\n");
-}
-
-/** Durable project-scoped behavior (Anvia instructions), only when in a project. */
-const PROJECT_WORKSPACE_INSTRUCTION = [
-  "You are answering inside a project workspace.",
-  "Only use the active document catalog and tools for this chat.",
-  "Do not assume access to other projects or the user's standalone library.",
-].join("\n");
-
-/** Personalization policy (Anvia rule: policy in instructions, facts in context). */
-const PROFILE_INSTRUCTION = [
-  "A user profile may be included in the context.",
-  "Use it to personalize tone, format, and recall of the user's preferences.",
-  "Never reveal the raw profile content to the user.",
-  "If the user explicitly asks you to remember something about them, call the remember_user_profile tool.",
-  "Never invent profile facts not present in the context.",
-].join("\n");
-
 function extractUserTextForTitle(message: MessageType): string {
   if (message.role !== "user") return "";
   const parts = message.content
@@ -109,6 +51,42 @@ function extractUserTextForTitle(message: MessageType): string {
     .map((part) => part.text.trim())
     .filter(Boolean);
   return parts.join(" ");
+}
+
+function parseResume(value: unknown): { streamId: string; after: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.streamId !== "string" || !record.streamId) return null;
+  if (typeof record.after !== "number" || !Number.isInteger(record.after) || record.after < 0) return null;
+  return { streamId: record.streamId, after: record.after };
+}
+
+async function* withStartTimeout<T>(
+  source: AsyncIterable<T>,
+  streamId: string,
+  timeoutMs: number,
+): AsyncGenerator<T> {
+  const store = getStreamStore();
+  const iterator = source[Symbol.asyncIterator]();
+  let receivedAny = false;
+  const timer = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
+  while (true) {
+    const outcome = await Promise.race([
+      iterator.next().then((result) => ({ kind: "next" as const, result })),
+      receivedAny ? new Promise<never>(() => {}) : timer,
+    ]);
+    if (outcome === "timeout") {
+      await store.close({ streamId, status: "error" }).catch(() => {});
+      // Let the underlying source observe the closed stream and end.
+      const ended = await iterator.next().catch(() => ({ done: true as const }));
+      if (ended.done) break;
+      continue;
+    }
+    const { result } = outcome;
+    if (result.done) break;
+    receivedAny = true;
+    yield result.value;
+  }
 }
 
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
@@ -216,6 +194,74 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const messages = await loadEnrichedMemoryMessages(sessionId, user.id);
     return c.json(messages);
   })
+  .get("/context-usage", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireSessionId(c.req.query("sessionId"));
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+
+    const modelRaw = c.req.query("model");
+    const model = modelRaw && modelRaw.trim() ? modelRaw.trim() : DEFAULT_COMPLETION_MODEL;
+    const effortRaw = c.req.query("reasoningEffort");
+    const reasoningEffort = effortRaw && effortRaw.trim() ? effortRaw.trim() : null;
+
+    return c.json(
+      await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
+    );
+  })
+  .post("/sessions/mark-read", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const sessionId = requireSessionId(body?.sessionId);
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    await markChatSessionRead({ userId: user.id, sessionId });
+    return c.json({ ok: true });
+  })
+  .get("/runs", async (c) => {
+    const user = c.get("user");
+    const redis = getRedis();
+    const store = getStreamStore();
+
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, found] = await redis.scan(
+        cursor,
+        "MATCH",
+        "rs-active:*",
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      keys.push(...found);
+    } while (cursor !== "0");
+
+    const runs: Array<{
+      sessionId: string;
+      streamId: string;
+      status: string;
+      lastEventId: number;
+    }> = [];
+    for (const key of keys) {
+      const sessionId = key.slice("rs-active:".length);
+      if (!sessionId) continue;
+      const streamId = await redis.get(key);
+      if (!streamId) continue;
+      const meta = await store.getMeta(streamId);
+      if (!meta || meta.userId !== user.id) continue;
+      const state = await store.status({ streamId });
+      if (state.status !== "running") continue;
+      runs.push({
+        sessionId,
+        streamId,
+        status: state.status,
+        lastEventId: state.lastEventId,
+      });
+    }
+    return c.json({ runs });
+  })
   .post("/truncate", async (c) => {
     const user = c.get("user");
     const body = (await c.req.json()) as Record<string, unknown>;
@@ -268,207 +314,102 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   .post("/", async (c) => {
     const user = c.get("user");
     const body = await c.req.json();
-    const sessionId = requireSessionId(
-      body.sessionId ?? body.metadata?.sessionId,
-    );
-    if (!sessionId) {
-      return c.json({ error: "sessionId is required" }, 400);
+    const sessionId = requireSessionId(body.sessionId ?? body.metadata?.sessionId);
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+
+    const resume = parseResume(body.resume);   // { streamId, after } | null
+    const store = getStreamStore();
+
+    if (resume) {
+      const meta = await store.getMeta(resume.streamId);
+      if (!meta || meta.userId !== user.id || meta.sessionId !== sessionId) {
+        return c.json({ error: "stream not found", code: "STREAM_NOT_FOUND" }, 404);
+      }
+      const events = resumeStreamEvents({ id: resume.streamId, after: resume.after, store });
+      return createEventStream(events, { format: "jsonl" });
+    }
+
+    // New run
+    const modelRaw = body.model;
+    const model = modelRaw && typeof modelRaw === "string" && modelRaw.trim()
+      ? modelRaw.trim()
+      : DEFAULT_COMPLETION_MODEL;
+    const modelInfo = await findActiveModel(model);
+    if (!modelInfo) return c.json({ error: `unknown model: ${model}` }, 400);
+
+    const effortRaw = body.reasoningEffort;
+    let reasoningEffort: string | null = null;
+    if (effortRaw && typeof effortRaw === "string" && effortRaw.trim()) {
+      if (!modelInfo.reasoningEfforts.includes(effortRaw)) {
+        return c.json({ error: `model ${model} does not support reasoning effort: ${effortRaw}` }, 400);
+      }
+      reasoningEffort = effortRaw;
     }
 
     const messages = body.messages as MessageType[];
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) {
-      return c.json({ error: "messages are required" }, 400);
-    }
+    if (!lastMessage) return c.json({ error: "messages are required" }, 400);
 
-    // model / reasoningEffort: omit → defaults; invalid non-empty → 400
-    const modelRaw = body.model;
-    const effortRaw = body.reasoningEffort;
-    const model =
-      modelRaw === undefined || modelRaw === null || modelRaw === ""
-        ? DEFAULT_COMPLETION_MODEL
-        : parseCompletionModel(modelRaw);
-    if (!model) {
-      return c.json(
-        {
-          error:
-            "model must be one of: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol",
-        },
-        400,
-      );
-    }
-    const reasoningEffort =
-      effortRaw === undefined || effortRaw === null || effortRaw === ""
-        ? DEFAULT_REASONING_EFFORT
-        : parseReasoningEffort(effortRaw);
-    if (!reasoningEffort) {
-      return c.json(
-        { error: "reasoningEffort must be one of: low, medium, high" },
-        400,
-      );
-    }
-
-    // Membership from product table — never trust client projectId.
-    const chatSession = await ensureChatSession({
-      sessionId,
-      userId: user.id,
-      projectId: null,
-    });
-    const projectId = chatSession.projectId;
+    const chatSession = await ensureChatSession({ sessionId, userId: user.id, projectId: null });
     await touchChatSession(user.id, sessionId);
 
     const promptMessage = stripUserAttachments(lastMessage);
-
-    // Durable list title from first user prompt (no-op if already set).
     const titleSeed = extractUserTextForTitle(promptMessage);
     if (titleSeed) {
-      void setChatSessionTitleIfEmpty({
-        userId: user.id,
-        sessionId,
-        title: titleSeed,
-      }).catch((error) => {
+      void setChatSessionTitleIfEmpty({ userId: user.id, sessionId, title: titleSeed }).catch((error) => {
         console.error("[chat] set title failed", error);
       });
     }
 
-    const prismaMemory = createSanitizedMemoryStore(prisma);
-    const sessionDocuments = await resolveActiveDocuments({
-      userId: user.id,
-      sessionId,
-      projectId,
-    });
-    const catalogInstruction =
-      buildDocumentCatalogInstruction(sessionDocuments);
-    const hasActiveDocuments = sessionDocuments.length > 0;
-
-    // Document tools only when the session has linked ready docs — avoids the
-    // model re-searching unlinked files based on conversation memory.
-    const documentTools = hasActiveDocuments
-      ? createDocumentTools({
-          sessionId,
-          userId: user.id,
-          projectId,
-          prisma,
-          searchService: createChunkSearchService(),
-          fetchPageImage: (r2Key) => getObjectBuffer(r2Key),
-        })
-      : [];
-
-    let projectContext:
-      | { text: string; id: string }
-      | undefined;
-    let projectInstruction: string | undefined;
-    if (projectId) {
-      const project = await prisma.project.findFirst({
-        where: { id: projectId, userId: user.id },
-        select: { name: true, description: true },
-      });
-      if (project) {
-        projectContext = {
-          id: "project_workspace",
-          text: buildProjectWorkspaceContext(project),
-        };
-        projectInstruction = PROJECT_WORKSPACE_INSTRUCTION;
-      }
+    const streamId = crypto.randomUUID();
+    const acquired = await tryAcquireActiveRun(sessionId, streamId, 2 * 60 * 60);
+    if (!acquired) {
+      return c.json({ error: "Session is already processing in another tab", code: "RUN_ACTIVE" }, 409);
     }
 
-    const profilingEnabled = profileConfig().enabled;
-
-    const profileContext: AgentContextBlock[] = [];
-    let profileTool: ReturnType<typeof createRememberUserProfileTool> | undefined;
-
-    if (profilingEnabled) {
-      const userProfile = await loadProfileData({ kind: "user", userId: user.id });
-      if (userProfile && hasProfileContent(userProfile)) {
-        profileContext.push({
-          id: "user_profile",
-          text: renderProfileContextText(userProfile, "User profile"),
-        });
-      }
-
-      if (projectId) {
-        const projectProfile = await loadProfileData({
-          kind: "project",
-          userId: user.id,
-          projectId,
-        });
-        if (projectProfile && hasProfileContent(projectProfile)) {
-          profileContext.push({
-            id: "project_profile",
-            text: renderProfileContextText(projectProfile, "Project profile"),
-          });
-        }
-      }
-
-      const profileScope: ProfileScope = projectId
-        ? { kind: "project", userId: user.id, projectId }
-        : { kind: "user", userId: user.id };
-
-      profileTool = createRememberUserProfileTool({
-        scope: profileScope,
-        waitForActiveJob: () => waitForActiveProfileJob(profileScope),
-        appendFact: (input) =>
-          appendExplicitFact(profileScope, {
-            section: input.section as ProfileSectionKey | null,
-            fact: input.fact,
-          }),
-        refreshNow: () => summarizeProfileForScope(profileScope),
-        reschedule: () => rescheduleProfileRefresh(profileScope),
+    try {
+      await store.openWithMeta({ streamId }, {
+        userId: user.id, sessionId, modelId: model, reasoningEffort,
       });
+    } catch (error) {
+      await releaseActiveRun(sessionId, streamId);
+      throw error;
     }
 
-    const agent = createAgent({
-      agentId: "my-agent",
-      model: createCompletionModel(model),
-      reasoningEffort,
-      tracing: tracing,
-      additionalInstructions: [
-        catalogInstruction,
-        ...(hasActiveDocuments ? [DOCUMENT_IMAGE_INSTRUCTION] : []),
-        ...(projectInstruction ? [projectInstruction] : []),
-        ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
-      ],
-      additionalContext: [
-        ...(projectContext ? [projectContext] : []),
-        ...profileContext,
-      ],
-      additionalTools: [
-        ...createDataAnalysisTools(),
-        ...documentTools,
-        ...(profileTool ? [profileTool] : []),
-      ],
-      memory: prismaMemory,
+    await enqueueChatRun(`chat:${streamId}`, {
+      streamId, sessionId, userId: user.id, model, reasoningEffort,
+      promptMessage, createdAt: new Date().toISOString(),
     });
 
-    const stream = agent
-      .session(sessionId, { userId: user.id })
-      .prompt(promptMessage)
-      .withTrace({
-        sessionId,
-        userId: user.id,
-        ...(projectId ? { projectId } : {}),
-      })
-      .stream();
-
-    const auditedStream = tapAgentStreamUsage(stream, {
-      userId: user.id,
-      sessionId,
-      provider: DEFAULT_COMPLETION_PROVIDER,
-      model,
-      reasoningEffort,
-      agentId: "my-agent",
-    });
-
-    // After the client consumes the stream: dual-write citations metadata + Langfuse score.
-    // Profile tap runs outermost so it enqueues the background refresh last.
-    const tracedStream = tapProfileRefresh(
-      tapStreamComplete(auditedStream, () =>
-        finalizeAssistantCitations(sessionId, user.id),
-      ),
-      { userId: user.id, projectId },
+    const events = withStartTimeout(
+      resumeStreamEvents({ id: streamId, after: 0, store }),
+      streamId,
+      30_000,
     );
-
-    return createEventStream(tracedStream, {
-      format: "jsonl",
+    return createEventStream(events, { format: "jsonl" });
+  })
+  .get("/run-status", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireSessionId(c.req.query("sessionId"));
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    const store = getStreamStore();
+    const streamId = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
+    if (!streamId) return c.json({ streamId: null, status: "idle", lastEventId: null });
+    const state = await store.status({ streamId });
+    return c.json({
+      streamId,
+      status: state.status === "running" ? "running" : state.status,
+      lastEventId: state.lastEventId,
     });
+  })
+  .post("/stop", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.json();
+    const streamId = typeof body.streamId === "string" ? body.streamId : "";
+    if (!streamId) return c.json({ error: "streamId is required" }, 400);
+    const store = getStreamStore();
+    const meta = await store.getMeta(streamId);
+    if (!meta || meta.userId !== user.id) return c.json({ error: "stream not found" }, 404);
+    await store.setStopFlag(streamId);
+    return c.json({ ok: true });
   });
