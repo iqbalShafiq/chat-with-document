@@ -5,7 +5,7 @@
 
 import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
 
-export const DEFAULT_COMPLETION_MODEL = "gpt-5.6-luna";
+export const DEFAULT_COMPLETION_MODEL = "openai/gpt-5.6-luna";
 export type ReasoningEffort = string;
 
 export function isKnownModel(models: ModelInfo[], modelId: string): boolean {

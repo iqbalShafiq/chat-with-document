@@ -4,7 +4,7 @@ import { OpenAIClient } from "@anvia/openai";
 /** Model ids are registered in the DB registry; any non-empty id is structurally valid. */
 export type CompletionModelId = string;
 
-export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "gpt-5.6-luna";
+export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "openai/gpt-5.6-luna";
 export const DEFAULT_COMPLETION_PROVIDER = "openai";
 
 export const REASONING_EFFORTS = ["low", "medium", "high"] as const;

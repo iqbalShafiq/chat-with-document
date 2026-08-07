@@ -239,7 +239,7 @@ function renderMessageForSummary(
  */
 async function lunaModel(): Promise<CompletionModel> {
   const { createCompletionModel } = await import("@assingment/agent");
-  return createCompletionModel("gpt-5.6-luna");
+  return createCompletionModel("openai/gpt-5.6-luna");
 }
 
 async function summarizeMessages(input: {
