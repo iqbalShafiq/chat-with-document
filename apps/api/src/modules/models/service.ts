@@ -87,7 +87,7 @@ function toModelInfo(row: {
   };
 }
 
-const MODEL_SELECT = {
+export const MODEL_SELECT = {
   modelId: true,
   label: true,
   name: true,
@@ -104,6 +104,10 @@ const MODEL_SELECT = {
   longPromptThresholdTokens: true,
   longPromptInputMultiplier: true,
   longPromptOutputMultiplier: true,
+  outputType: true,
+  inputModalities: true,
+  outputModalities: true,
+  imageCapabilities: true,
   sortOrder: true,
   provider: { select: { slug: true, name: true } },
   reasoningEfforts: {
