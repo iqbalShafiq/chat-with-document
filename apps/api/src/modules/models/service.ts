@@ -25,6 +25,10 @@ export type ModelInfo = {
     longPromptOutputMultiplier: number | null;
   };
   reasoningEfforts: string[];
+  /** "text" | "image" — chat model or image generator. */
+  outputType: "text" | "image";
+  /** Image-gen capability descriptors (from OpenRouter discovery). */
+  imageCapabilities: Prisma.JsonValue | null;
   sortOrder: number;
 };
 
@@ -59,6 +63,8 @@ function toModelInfo(row: {
   sortOrder: number;
   provider: { slug: string; name: string };
   reasoningEfforts: { effort: { key: string } }[];
+  outputType: string;
+  imageCapabilities: Prisma.JsonValue | null;
 }): ModelInfo {
   return {
     modelId: row.modelId,
@@ -83,6 +89,8 @@ function toModelInfo(row: {
     reasoningEfforts: row.reasoningEfforts
       .map((entry) => entry.effort.key)
       .sort(),
+    outputType: row.outputType === "image" ? "image" : "text",
+    imageCapabilities: row.imageCapabilities,
     sortOrder: row.sortOrder,
   };
 }
@@ -116,13 +124,19 @@ export const MODEL_SELECT = {
   },
 } as const;
 
-export async function listModels(): Promise<{
+export async function listModels(input?: {
+  outputType?: "text" | "image";
+}): Promise<{
   models: ModelInfo[];
   reasoningEfforts: ReasoningEffortInfo[];
 }> {
   const [models, reasoningEfforts] = await Promise.all([
     prisma.chatModel.findMany({
-      where: { isActive: true, provider: { isActive: true } },
+      where: {
+        isActive: true,
+        provider: { isActive: true },
+        ...(input?.outputType ? { outputType: input.outputType } : {}),
+      },
       select: MODEL_SELECT,
       orderBy: [{ sortOrder: "asc" }, { modelId: "asc" }],
     }),

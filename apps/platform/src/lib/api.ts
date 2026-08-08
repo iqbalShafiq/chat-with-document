@@ -819,6 +819,10 @@ export type ModelInfo = {
     longPromptOutputMultiplier: number | null;
   };
   reasoningEfforts: string[];
+  /** "text" | "image" — chat model or image generator. */
+  outputType: "text" | "image";
+  /** Image-gen capability descriptors (from OpenRouter discovery). */
+  imageCapabilities: ImageModelCapabilities | null;
   sortOrder: number;
 };
 
@@ -1138,8 +1142,8 @@ async function fetchImageModelsRemote(): Promise<ImageModelCatalogItem[]> {
   if (!response.ok) throw new Error("Failed to load image models");
 
   const data: unknown = await response.json();
-  // Defensive: the backend filter (Task 13) may not be live yet — accept any
-  // model catalog page and keep the image-capable items we can identify.
+  // The backend filters by outputType=image; the shape guard stays as cheap
+  // defense against a misbehaving server.
   if (!isRecord(data) || !Array.isArray(data.models)) {
     throw new Error("Unexpected image models response shape");
   }
