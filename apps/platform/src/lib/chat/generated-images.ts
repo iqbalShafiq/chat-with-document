@@ -61,9 +61,8 @@ export function collectGeneratedImages(
     if (!part.toolName || !isImageToolName(part.toolName)) continue;
     if (part.state !== "output-available") continue;
 
-    const output = isRecord(parseToolOutput(part.output))
-      ? (parseToolOutput(part.output) as Record<string, unknown>)
-      : {};
+    const parsed = parseToolOutput(part.output);
+    const output = isRecord(parsed) ? parsed : {};
     const images = Array.isArray(output.images) ? output.images : [];
 
     for (const image of images) {

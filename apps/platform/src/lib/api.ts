@@ -1165,10 +1165,15 @@ function isGeneratedImageMeta(value: unknown): value is GeneratedImageMeta {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    typeof value.sessionId === "string" &&
+    (value.projectId === null || typeof value.projectId === "string") &&
     typeof value.mediaType === "string" &&
     typeof value.width === "number" &&
     typeof value.height === "number" &&
-    typeof value.modelId === "string"
+    typeof value.modelId === "string" &&
+    typeof value.prompt === "string" &&
+    (value.nOfTotal === null || typeof value.nOfTotal === "string") &&
+    typeof value.createdAt === "string"
   );
 }
 

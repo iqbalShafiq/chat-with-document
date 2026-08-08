@@ -147,6 +147,28 @@ describe("collectGeneratedImages", () => {
 
     expect(collectGeneratedImages(parts)).toEqual([imageMeta({ imageId: "img-6" })]);
   });
+
+  it("returns [] for output without an images array", () => {
+    const parts = [
+      toolPart("generate_image", { prompt: "no images key" }),
+      toolPart("edit_image", { images: null }),
+      toolPart("generate_image", undefined),
+    ];
+
+    expect(collectGeneratedImages(parts)).toEqual([]);
+  });
+
+  it("returns [] for malformed JSON string output", () => {
+    const parts = [toolPart("generate_image", "{not valid json")];
+
+    expect(collectGeneratedImages(parts)).toEqual([]);
+  });
+
+  it("returns [] for bare-array output (array shape is not supported)", () => {
+    const parts = [toolPart("generate_image", [imageMeta({ imageId: "img-7" })])];
+
+    expect(collectGeneratedImages(parts)).toEqual([]);
+  });
 });
 
 describe("collectGeneratedImagesFromMessages", () => {
