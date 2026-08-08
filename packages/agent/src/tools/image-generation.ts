@@ -17,7 +17,10 @@ import { mapOpenRouterImageError } from "../providers/image-generation.js";
  */
 
 const MAX_PROMPT_LENGTH = 4000;
-const MAX_IMAGES = 10;
+/** Hard cap on images per call when the model capability is unknown. */
+const MAX_IMAGES = 4;
+/** Upper bound the model may request directly (the execution cap is capability-aware). */
+const MAX_MODEL_IMAGES = 10;
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 
 const PROMPT_DESCRIPTION =
@@ -57,12 +60,15 @@ const generateImageInput = z.object({
       "Background for the image (e.g. transparent). Leave unset for a model-chosen background.",
     ),
   n: z
+    .coerce
     .number()
     .int()
     .min(1)
-    .max(MAX_IMAGES)
+    .max(MAX_MODEL_IMAGES)
     .optional()
-    .describe(`How many images to generate (default 1, max ${MAX_IMAGES})`),
+    .describe(
+      `How many images to generate (default 1, max ${MAX_MODEL_IMAGES})`,
+    ),
 });
 
 const editImageInput = z.object({
@@ -103,6 +109,17 @@ const editImageInput = z.object({
     .describe(
       "Background for the edited image (e.g. transparent). Leave unset for a model-chosen background.",
     ),
+});
+
+/**
+ * Re-validation schema for args AFTER the override merge. Overrides are
+ * user-supplied and bypass the framework's validation of the model's args, so
+ * the merged object is re-parsed here. `n` is unbounded above because the
+ * effective cap (capability nMax, else MAX_IMAGES) is enforced at execution;
+ * an upper bound here would reject hostile values instead of capping them.
+ */
+const generateImageMergedInput = generateImageInput.extend({
+  n: z.coerce.number().int().min(1).optional(),
 });
 
 export type ImageGenSettings = {
@@ -214,11 +231,11 @@ const OVERRIDE_KEYS = [
 
 type GenerationArgs = {
   prompt: string;
-  modelId?: string;
-  aspectRatio?: string;
-  quality?: string;
-  background?: string;
-  n?: number;
+  modelId?: string | undefined;
+  aspectRatio?: string | undefined;
+  quality?: string | undefined;
+  background?: string | undefined;
+  n?: number | undefined;
 };
 
 type InputReference = {
@@ -229,9 +246,9 @@ type InputReference = {
 function applyOverride(
   args: GenerationArgs,
   override: Record<string, unknown> | null,
-): GenerationArgs {
+): Record<string, unknown> {
   if (!override || typeof override !== "object" || Array.isArray(override)) {
-    return args;
+    return { ...args };
   }
   const merged: Record<string, unknown> = { ...args };
   for (const key of OVERRIDE_KEYS) {
@@ -239,7 +256,7 @@ function applyOverride(
       merged[key] = override[key];
     }
   }
-  return merged as unknown as GenerationArgs;
+  return merged;
 }
 
 /** Keep a value only when the capability set allows it; unknown set = allow. */
@@ -267,14 +284,20 @@ async function runGeneration(
   extraParams: Record<string, unknown> = {},
 ): Promise<GenerateImageResult> {
   const toolName = isEdit ? "edit_image" : "generate_image";
-  const merged = applyOverride(args, scope.takeToolOverride(toolName));
+  const mergedInput = applyOverride(args, scope.takeToolOverride(toolName));
+  // Overrides bypass the framework's validation of the model's args, so the
+  // merged args are re-validated against the tool schema. When an override is
+  // invalid (e.g. a prompt beyond the bound), it is dropped in favor of the
+  // pre-override args, which were already validated — never forwarded raw.
+  const schema = isEdit ? editImageInput : generateImageMergedInput;
+  const parsed = schema.safeParse(mergedInput);
+  const merged: GenerationArgs = parsed.success
+    ? (parsed.data as GenerationArgs)
+    : args;
 
-  const modelId =
-    merged.modelId ??
-    scope.defaultSettings?.modelId ??
-    scope.model.defaultModel ??
-    "auto";
-  const capability = scope.capabilities(modelId);
+  const resolvedModelId: string | undefined =
+    merged.modelId ?? scope.defaultSettings?.modelId ?? scope.model.defaultModel;
+  const capability = resolvedModelId ? scope.capabilities(resolvedModelId) : null;
   const hasCapability = capability !== null;
 
   const quality = allowedValue(
@@ -290,7 +313,7 @@ async function runGeneration(
   const requestedN = merged.n ?? scope.defaultSettings?.n;
   const n =
     requestedN !== undefined
-      ? Math.max(1, Math.min(requestedN, capability?.nMax ?? requestedN))
+      ? Math.max(1, Math.min(requestedN, capability?.nMax ?? MAX_IMAGES))
       : undefined;
 
   const { width, height } = aspectRatioToSize(
@@ -298,7 +321,9 @@ async function runGeneration(
   );
 
   const additionalParams = {
-    model: modelId,
+    // Only send a model id we actually resolved; otherwise the provider uses
+    // its own default model.
+    ...(resolvedModelId ? { model: resolvedModelId } : {}),
     ...(quality ? { quality } : {}),
     ...(background ? { background, output_format: "png" } : {}),
     ...(n !== undefined ? { n } : {}),
@@ -330,7 +355,7 @@ async function runGeneration(
         projectId: scope.projectId,
         buffer: image.data,
         mediaType: image.mediaType,
-        modelId,
+        modelId: resolvedModelId ?? "",
         prompt: merged.prompt,
         width,
         height,
@@ -364,6 +389,10 @@ export function createImageGenerationTools(
 ): AnyTool[] {
   const approval = (toolName: "generate_image" | "edit_image") => ({
     when: () => !scope.enabled && !scope.hasGrant(toolName),
+    // The reason shows the model's pre-execution intent. An override replacing
+    // the prompt comes from the user's own approval card, so it is not shown
+    // here; override prompts are still bounded by schema re-validation in
+    // runGeneration, so the mismatch cannot grow unbounded.
     reason: (ctx: { args: { prompt: string } }) =>
       `The agent wants to generate an image: "${ctx.args.prompt.slice(0, 200)}"`,
     rejectMessage: "Image generation was declined by the user.",
@@ -394,30 +423,19 @@ export function createImageGenerationTools(
         "not image data.",
       input: editImageInput,
       approval: approval("edit_image"),
-      execute: async ({
-        prompt,
-        referenceImageId,
-        ...rest
-      }: {
-        prompt: string;
-        referenceImageId: string;
-        modelId?: string;
-        aspectRatio?: string;
-        quality?: string;
-        background?: string;
-      }) => {
-        const reference = await scope.resolveReference(referenceImageId);
+      execute: async (args) => {
+        const reference = await scope.resolveReference(args.referenceImageId);
         if (!reference) {
           return { images: [], error: "Reference image not found" };
         }
         if (reference.buffer.byteLength > (scope.maxBytes ?? MAX_REFERENCE_BYTES)) {
           return { images: [], error: "Reference image too large" };
         }
-        const dataUrl = `data:${reference.mediaType};base64,${Buffer.from(reference.buffer).toString("base64")}`;
+        const dataUrl = `data:${reference.mediaType ?? "application/octet-stream"};base64,${Buffer.from(reference.buffer).toString("base64")}`;
         const inputReferences: InputReference[] = [
           { type: "image_url", image_url: { url: dataUrl } },
         ];
-        return runGeneration(scope, { prompt, ...rest }, true, {
+        return runGeneration(scope, args, true, {
           input_references: inputReferences,
         });
       },

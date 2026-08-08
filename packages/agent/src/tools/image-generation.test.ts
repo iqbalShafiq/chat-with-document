@@ -57,11 +57,14 @@ function makeScope(
 } {
   const imageGeneration = vi.fn();
   const saveGeneratedImage = vi.fn();
-  const scope: ImageGenerationToolScope = {
-    model: {
+  const model =
+    overrides.model ??
+    ({
       imageGeneration,
       defaultModel: DEFAULT_MODEL,
-    } as unknown as ImageGenerationModel<unknown, string>,
+    } as unknown as ImageGenerationModel<unknown, string>);
+  const scope: ImageGenerationToolScope = {
+    model,
     store: { saveGeneratedImage },
     enabled: true,
     hasGrant: () => false,
@@ -73,7 +76,10 @@ function makeScope(
     capabilities: () => null,
     ...overrides,
   };
-  return { scope, imageGeneration, saveGeneratedImage };
+  const usedImageGeneration = (
+    model as { imageGeneration: ReturnType<typeof vi.fn> }
+  ).imageGeneration;
+  return { scope, imageGeneration: usedImageGeneration, saveGeneratedImage };
 }
 
 describe("createImageGenerationTools", () => {
@@ -149,6 +155,95 @@ describe("createImageGenerationTools", () => {
       );
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override prompt" }),
+      );
+    });
+
+    it("caps an oversized override n to MAX_IMAGES when capabilities are unknown", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ n: 100 }),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      expect(imageGeneration.mock.calls[0]![0].additionalParams.n).toBe(4);
+    });
+
+    it("caps an oversized override n to the capability nMax", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ n: 100 }),
+        capabilities: () => ({ nMax: 1 }),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      expect(imageGeneration.mock.calls[0]![0].additionalParams.n).toBe(1);
+    });
+
+    it("coerces a string override n safely", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ n: "5" }),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams.n).toBe(4);
+      expect(Number.isInteger(request.additionalParams.n)).toBe(true);
+    });
+
+    it("drops unknown override keys before they reach the wire", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ provider: { type: "openrouter" }, n: 2 }),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
+        n: 2,
+      });
+    });
+
+    it("rejects an oversized override prompt in favor of the validated args", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ prompt: "x".repeat(4001) }),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      expect(imageGeneration).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: "a red fox" }),
+      );
+    });
+
+    it("omits the model param when no model id resolves", async () => {
+      const { scope, imageGeneration, saveGeneratedImage } = makeScope({
+        model: {
+          imageGeneration: vi.fn(),
+          defaultModel: undefined,
+        } as unknown as ImageGenerationModel<unknown, string>,
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      saveGeneratedImage.mockResolvedValue(record("rec-1"));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams).toEqual({});
+      expect(saveGeneratedImage).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: "" }),
       );
     });
 
@@ -448,6 +543,26 @@ describe("createImageGenerationTools", () => {
       expect(imageGeneration).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override edit" }),
       );
+    });
+
+    it("does not apply an n override since the edit schema has no n", async () => {
+      const { scope, imageGeneration } = makeScope({
+        takeToolOverride: () => ({ n: 3 }),
+        resolveReference: async () => ({
+          mediaType: "image/png",
+          buffer: new Uint8Array([1]),
+        }),
+      });
+      imageGeneration.mockResolvedValue(response(image(9)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[1]!.call({
+        prompt: "make it red",
+        referenceImageId: "img-1",
+      });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams).not.toHaveProperty("n");
     });
   });
 });
