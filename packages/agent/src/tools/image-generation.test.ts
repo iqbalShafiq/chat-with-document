@@ -152,6 +152,28 @@ describe("createImageGenerationTools", () => {
       );
     });
 
+    it("sends the provider default model when nothing overrides it", async () => {
+      const { scope, imageGeneration } = makeScope();
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
+    });
+
+    it("sends an explicit modelId arg to the wire request", async () => {
+      const { scope, imageGeneration } = makeScope();
+      imageGeneration.mockResolvedValue(response(image(1)));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox", modelId: "explicit-model" });
+
+      const request = imageGeneration.mock.calls[0]![0];
+      expect(request.additionalParams).toEqual({ model: "explicit-model" });
+    });
+
     it("caps n to the capability nMax", async () => {
       const { scope, imageGeneration } = makeScope({
         capabilities: () => ({ nMax: 1 }),
@@ -162,7 +184,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", n: 5 });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ n: 1 });
+      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL, n: 1 });
     });
 
     it("drops a background not supported by the capability", async () => {
@@ -175,7 +197,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", background: "transparent" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({});
+      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
     });
 
     it("drops a quality not in the capability list", async () => {
@@ -188,7 +210,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", quality: "high" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({});
+      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
     });
 
     it("keeps a background listed in the capability and forces png output", async () => {
@@ -202,6 +224,7 @@ describe("createImageGenerationTools", () => {
 
       const request = imageGeneration.mock.calls[0]![0];
       expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
         background: "transparent",
         output_format: "png",
       });
@@ -316,6 +339,7 @@ describe("createImageGenerationTools", () => {
       const request = imageGeneration.mock.calls[0]![0];
       expect(request.width).toBe(1344);
       expect(request.height).toBe(768);
+      expect(request.additionalParams).toEqual({ model: "default-model" });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ modelId: "default-model" }),
       );
@@ -356,6 +380,7 @@ describe("createImageGenerationTools", () => {
 
       const request = imageGeneration.mock.calls[0]![0];
       expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
         input_references: [
           {
             type: "image_url",

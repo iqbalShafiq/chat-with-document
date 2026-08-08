@@ -298,6 +298,7 @@ async function runGeneration(
   );
 
   const additionalParams = {
+    model: modelId,
     ...(quality ? { quality } : {}),
     ...(background ? { background, output_format: "png" } : {}),
     ...(n !== undefined ? { n } : {}),
