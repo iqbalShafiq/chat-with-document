@@ -118,6 +118,11 @@ function createFakeRedis() {
     }),
     expire: vi.fn(async (_key: string, _seconds: number) => 1),
     get: vi.fn(async (key: string) => store.get(key) ?? null),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
+    }),
     set: vi.fn(async (key: string, value: string) => {
       store.set(key, value);
       return "OK" as const;
@@ -548,6 +553,9 @@ describe("createApprovalRegistry", () => {
       await expect(
         registry.takeToolOverride(SESSION_ID, "web_search"),
       ).resolves.toBeNull();
+      expect(fake.getdel).toHaveBeenCalledWith(
+        OVERRIDE_KEY(SESSION_ID, "web_search"),
+      );
     });
 
     it("takeToolOverride returns null for missing and corrupt values", async () => {
@@ -561,7 +569,7 @@ describe("createApprovalRegistry", () => {
       await expect(
         registry.takeToolOverride(SESSION_ID, "web_search"),
       ).resolves.toBeNull();
-      expect(fake.del).toHaveBeenCalledWith(
+      expect(fake.getdel).toHaveBeenCalledWith(
         OVERRIDE_KEY(SESSION_ID, "web_search"),
       );
     });

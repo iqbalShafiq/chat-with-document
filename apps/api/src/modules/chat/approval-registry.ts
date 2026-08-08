@@ -102,7 +102,7 @@ type ClarificationDecision = {
 /** Narrow surface used by the registry so tests can inject a fake. */
 export type ApprovalRedis = Pick<
   Redis,
-  "hset" | "hgetall" | "expire" | "get" | "set" | "del"
+  "hset" | "hgetall" | "expire" | "get" | "getdel" | "set" | "del"
 >;
 
 function sleep(ms: number): Promise<void> {
@@ -321,15 +321,14 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
       );
     },
 
-    /** Fetch a staged override once, consuming it. */
+    /** Fetch a staged override once, consuming it atomically. */
     async takeToolOverride(
       sessionId: string,
       toolName: string,
     ): Promise<Record<string, unknown> | null> {
       const key = OVERRIDE_KEY(sessionId, toolName);
-      const raw = await redis.get(key);
+      const raw = await redis.getdel(key);
       if (raw === null) return null;
-      await redis.del(key);
       try {
         const parsed: unknown = JSON.parse(raw);
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -443,7 +442,7 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
 
     async getClarification(
       id: string,
-    ): Promise<{ userId: string; status: string } | null> {
+    ): Promise<{ userId: string; status: ApprovalStatus } | null> {
       const raw = await redis.get(CLARIFICATION_KEY(id));
       if (raw === null) return null;
       try {
@@ -454,7 +453,14 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
         ) {
           return null;
         }
-        return { userId: parsed.userId, status: parsed.status };
+        const status: ApprovalStatus =
+          parsed.status === "pending" ||
+          parsed.status === "approved" ||
+          parsed.status === "rejected" ||
+          parsed.status === "timed_out"
+            ? parsed.status
+            : "pending";
+        return { userId: parsed.userId, status };
       } catch {
         return null;
       }
