@@ -16,7 +16,7 @@ import {
   createWebSearchTools,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
-  IMAGE_GENERATION_INSTRUCTION,
+  buildImageGenerationInstruction,
   normalizePageImages,
   OpenRouterImageGenerationModel,
   renderProfileContextText,
@@ -362,7 +362,11 @@ export async function buildChatRunInput(input: {
         defaultSettings: imageGenSettings ?? undefined,
       }),
     );
-    instructions.push(IMAGE_GENERATION_INSTRUCTION);
+    // The instruction's web_search-first guidance only makes sense when web
+    // tools are actually registered this run.
+    instructions.push(
+      buildImageGenerationInstruction({ webSearchAvailable }),
+    );
   }
 
   // Clarification: the generic request_clarification tool suspends the run

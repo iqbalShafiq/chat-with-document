@@ -5,6 +5,7 @@ import type {
 } from "@anvia/core/image-generation";
 import {
   aspectRatioToSize,
+  buildImageGenerationInstruction,
   createImageGenerationTools,
   IMAGE_GENERATION_INSTRUCTION,
   type GeneratedImageRecord,
@@ -129,6 +130,26 @@ describe("createImageGenerationTools", () => {
       ).toBe(true);
     });
 
+    it("fails safe to approval when hasGrant rejects", async () => {
+      const { scope } = makeScope({
+        enabled: false,
+        hasGrant: () => Promise.reject(new Error("redis down")),
+      });
+      const tools = createImageGenerationTools(scope);
+      const approval = tools[0]!.approval as ApprovalPolicy;
+      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(true);
+    });
+
+    it("does not require approval when hasGrant resolves true", async () => {
+      const { scope } = makeScope({
+        enabled: false,
+        hasGrant: async (name) => name === "generate_image",
+      });
+      const tools = createImageGenerationTools(scope);
+      const approval = tools[0]!.approval as ApprovalPolicy;
+      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+    });
+
     it("justifies approval with the prompt", () => {
       const { scope } = makeScope({ enabled: false });
       const tools = createImageGenerationTools(scope);
@@ -155,6 +176,24 @@ describe("createImageGenerationTools", () => {
       );
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override prompt" }),
+      );
+    });
+
+    it("uses the original args when takeToolOverride rejects", async () => {
+      const { scope, imageGeneration, saveGeneratedImage } = makeScope({
+        takeToolOverride: () => Promise.reject(new Error("redis down")),
+      });
+      imageGeneration.mockResolvedValue(response(image(1)));
+      saveGeneratedImage.mockResolvedValue(record("rec-1"));
+      const tools = createImageGenerationTools(scope);
+
+      await tools[0]!.call({ prompt: "a red fox" });
+
+      expect(imageGeneration).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: "a red fox" }),
+      );
+      expect(saveGeneratedImage).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: "a red fox" }),
       );
     });
 
@@ -588,5 +627,29 @@ describe("IMAGE_GENERATION_INSTRUCTION", () => {
     expect(IMAGE_GENERATION_INSTRUCTION).toContain("request_clarification");
     expect(IMAGE_GENERATION_INSTRUCTION).toContain("image ids");
     expect(IMAGE_GENERATION_INSTRUCTION).toContain("approval");
+  });
+});
+
+describe("buildImageGenerationInstruction", () => {
+  it("keeps the web_search-first sentence when web search is available", () => {
+    const instruction = buildImageGenerationInstruction({
+      webSearchAvailable: true,
+    });
+    expect(instruction).toContain("web_search first");
+    expect(instruction).toContain("session defaults");
+    expect(instruction).toContain("request_clarification");
+    expect(instruction).toContain("image ids");
+    expect(instruction).toContain("approval");
+  });
+
+  it("omits the web_search-first sentence when web search is unavailable", () => {
+    const instruction = buildImageGenerationInstruction({
+      webSearchAvailable: false,
+    });
+    expect(instruction).not.toContain("web_search");
+    expect(instruction).toContain("session defaults");
+    expect(instruction).toContain("request_clarification");
+    expect(instruction).toContain("image ids");
+    expect(instruction).toContain("approval");
   });
 });

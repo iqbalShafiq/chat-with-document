@@ -279,6 +279,44 @@ function boundedImageError(error: unknown): string {
   return mapOpenRouterImageError(error);
 }
 
+/**
+ * Fail-safe grant read: a registry blip must not fail the run — it only
+ * makes approval required for this call (the safe default).
+ */
+async function safeHasGrant(
+  scope: ImageGenerationToolScope,
+  toolName: string,
+): Promise<boolean> {
+  try {
+    return await scope.hasGrant(toolName);
+  } catch (error) {
+    console.error("[image-tools] hasGrant failed, requiring approval", {
+      toolName,
+      error,
+    });
+    return false;
+  }
+}
+
+/**
+ * Fail-safe override read: a registry blip must not fail the run — the call
+ * proceeds with the model-supplied args.
+ */
+async function safeTakeToolOverride(
+  scope: ImageGenerationToolScope,
+  toolName: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await scope.takeToolOverride(toolName);
+  } catch (error) {
+    console.error("[image-tools] takeToolOverride failed, ignoring override", {
+      toolName,
+      error,
+    });
+    return null;
+  }
+}
+
 async function runGeneration(
   scope: ImageGenerationToolScope,
   args: GenerationArgs,
@@ -286,7 +324,10 @@ async function runGeneration(
   extraParams: Record<string, unknown> = {},
 ): Promise<GenerateImageResult> {
   const toolName = isEdit ? "edit_image" : "generate_image";
-  const mergedInput = applyOverride(args, await scope.takeToolOverride(toolName));
+  const mergedInput = applyOverride(
+    args,
+    await safeTakeToolOverride(scope, toolName),
+  );
   // Overrides bypass the framework's validation of the model's args, so the
   // merged args are re-validated against the tool schema. When an override is
   // invalid (e.g. a prompt beyond the bound), it is dropped in favor of the
@@ -390,7 +431,7 @@ export function createImageGenerationTools(
   scope: ImageGenerationToolScope,
 ): AnyTool[] {
   const approval = (toolName: "generate_image" | "edit_image") => ({
-    when: async () => !scope.enabled && !(await scope.hasGrant(toolName)),
+    when: async () => !scope.enabled && !(await safeHasGrant(scope, toolName)),
     // The reason shows the model's pre-execution intent. An override replacing
     // the prompt comes from the user's own approval card, so it is not shown
     // here; override prompts are still bounded by schema re-validation in
@@ -445,12 +486,29 @@ export function createImageGenerationTools(
   ];
 }
 
-/** Agent guidance on when to use image tools (added to instructions). */
-export const IMAGE_GENERATION_INSTRUCTION = [
-  "You can generate and edit images with the generate_image and edit_image tools.",
-  "When the prompt needs visual detail the model cannot reliably imagine — a real place, product, person, or layout — run web_search first to gather accurate visual references.",
-  "Use the session defaults for model, aspect ratio, quality, and background unless the user explicitly asks for different values.",
-  "When the request is ambiguous about style, aspect ratio, or subject matter, call request_clarification instead of guessing.",
-  "When a generation succeeds, report the returned image ids to the user.",
-  "Image generation may require user approval; proceed only after the tool returns its result, and respect a decline.",
-].join("\n");
+/**
+ * Agent guidance on when to use image tools. The web_search-first sentence
+ * is only included when web tools are actually registered — the model must
+ * not be told to run a tool that does not exist.
+ */
+export function buildImageGenerationInstruction(input: {
+  webSearchAvailable: boolean;
+}): string {
+  return [
+    "You can generate and edit images with the generate_image and edit_image tools.",
+    ...(input.webSearchAvailable
+      ? [
+          "When the prompt needs visual detail the model cannot reliably imagine — a real place, product, person, or layout — run web_search first to gather accurate visual references.",
+        ]
+      : []),
+    "Use the session defaults for model, aspect ratio, quality, and background unless the user explicitly asks for different values.",
+    "When the request is ambiguous about style, aspect ratio, or subject matter, call request_clarification instead of guessing.",
+    "When a generation succeeds, report the returned image ids to the user.",
+    "Image generation may require user approval; proceed only after the tool returns its result, and respect a decline.",
+  ].join("\n");
+}
+
+/** Default image-generation instruction (web search available). */
+export const IMAGE_GENERATION_INSTRUCTION = buildImageGenerationInstruction({
+  webSearchAvailable: true,
+});

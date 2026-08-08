@@ -57,4 +57,79 @@ describe("parseClarificationResponseBody", () => {
       parseClarificationResponseBody({ answers: {}, skipped: [1] }),
     ).toBeNull();
   });
+
+  it("rejects an answer string longer than 2000 characters", () => {
+    expect(
+      parseClarificationResponseBody({ answers: { style: "x".repeat(2001) } }),
+    ).toBeNull();
+  });
+
+  it("accepts an answer string of exactly 2000 characters", () => {
+    const parsed = parseClarificationResponseBody({
+      answers: { style: "x".repeat(2000) },
+    });
+    expect(parsed?.answers.style).toBe("x".repeat(2000));
+  });
+
+  it("rejects an array answer with more than 8 items", () => {
+    expect(
+      parseClarificationResponseBody({
+        answers: { colors: Array.from({ length: 9 }, () => "red") },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts an array answer with exactly 8 items", () => {
+    const parsed = parseClarificationResponseBody({
+      answers: { colors: Array.from({ length: 8 }, () => "red") },
+    });
+    expect(parsed?.answers.colors).toHaveLength(8);
+  });
+
+  it("rejects an array answer whose item exceeds 2000 characters", () => {
+    expect(
+      parseClarificationResponseBody({
+        answers: { colors: ["red", "x".repeat(2001)] },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects more than 10 answer keys", () => {
+    const answers: Record<string, string> = {};
+    for (let i = 0; i < 11; i++) answers[`q${i}`] = "a";
+    expect(parseClarificationResponseBody({ answers })).toBeNull();
+  });
+
+  it("accepts exactly 10 answer keys", () => {
+    const answers: Record<string, string> = {};
+    for (let i = 0; i < 10; i++) answers[`q${i}`] = "a";
+    const parsed = parseClarificationResponseBody({ answers });
+    expect(Object.keys(parsed!.answers)).toHaveLength(10);
+  });
+
+  it("rejects more than 10 skipped items", () => {
+    expect(
+      parseClarificationResponseBody({
+        answers: {},
+        skipped: Array.from({ length: 11 }, () => "q"),
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a skipped item longer than 100 characters", () => {
+    expect(
+      parseClarificationResponseBody({
+        answers: {},
+        skipped: ["x".repeat(101)],
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts skipped items of exactly 100 characters", () => {
+    const parsed = parseClarificationResponseBody({
+      answers: {},
+      skipped: ["x".repeat(100)],
+    });
+    expect(parsed?.skipped).toEqual(["x".repeat(100)]);
+  });
 });
