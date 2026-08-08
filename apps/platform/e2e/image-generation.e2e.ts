@@ -1,3 +1,15 @@
+/**
+ * Browser E2E for image generation against a local LLM/image stub.
+ *
+ * Node requirement: the stub runs via native type stripping (`node
+ * e2e/stub-openrouter.ts`), so Node >= 22.18 (or 23.6+) is required.
+ *
+ * Test "web search tool call precedes the image generation" drives a REAL
+ * web_search tool execution: TAVILY_API_KEY=dummy makes the worker call the
+ * real Tavily API, which returns 401 (bounded error) — the run must continue
+ * and still generate the image. The assertion checks tool-call ORDERING in
+ * the stub's recorded requests, never search success.
+ */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const STUB_ORIGIN = "http://127.0.0.1:18765";
@@ -81,8 +93,8 @@ function imagesRequests(requests: unknown[]): Record<string, unknown>[] {
   );
 }
 
-function toolNamesSeen(requests: unknown[]): string[] {
-  const seen = new Set<string>();
+function toolCallOrder(requests: unknown[]): string[] {
+  const order: string[] = [];
   for (const entry of requests) {
     if (!entry || typeof entry !== "object") continue;
     if ((entry as { kind?: unknown }).kind !== "responses") continue;
@@ -94,10 +106,10 @@ function toolNamesSeen(requests: unknown[]): string[] {
       if (!item || typeof item !== "object") continue;
       const record = item as Record<string, unknown>;
       if (record.type !== "function_call") continue;
-      if (typeof record.name === "string") seen.add(record.name);
+      if (typeof record.name === "string") order.push(record.name);
     }
   }
-  return [...seen];
+  return order;
 }
 
 test.beforeEach(async ({ request }) => {
@@ -147,6 +159,30 @@ test("approval card appears for a generation while the toggle is off, allow once
   });
   await waitForRailImage(page, "buatkan gambar kucing di taman");
   await waitForRunDone(page);
+
+  // "Allow once" is per-call: the next generation in the same session must
+  // ask for approval again.
+  await sendMessage(page, "buatkan gambar kucing sekali lagi");
+  await expect(approvalRegion(page)).toBeVisible({ timeout: 30_000 });
+  await approvalRegion(page)
+    .getByRole("button", { name: "Allow once" })
+    .click();
+  await waitForRailImage(page, "buatkan gambar kucing sekali lagi");
+  await waitForRunDone(page);
+});
+
+test("rejecting an image approval skips generation", async ({ page, request }) => {
+  await openFreshChat(page);
+  await sendMessage(page, "buatkan gambar kucing yang ditolak");
+
+  const card = approvalRegion(page);
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await card.getByRole("button", { name: "Reject" }).click();
+  await card.getByRole("button", { name: "Reject" }).click();
+
+  await waitForRunDone(page);
+  await expect(rail(page).getByText("Generated images")).toHaveCount(0);
+  expect(imagesRequests(await stubRequests(request))).toHaveLength(0);
 });
 
 test("session grant persists across messages", async ({ page }) => {
@@ -221,9 +257,11 @@ test("web search tool call precedes the image generation", async ({ page, reques
   await waitForRailImage(page, "cari referensi lalu buatkan gambar kucing");
   await waitForRunDone(page);
 
-  const seen = toolNamesSeen(await stubRequests(request));
-  expect(seen).toContain("web_search");
-  expect(seen).toContain("generate_image");
+  const order = toolCallOrder(await stubRequests(request));
+  const webSearchIndex = order.indexOf("web_search");
+  const generateImageIndex = order.indexOf("generate_image");
+  expect(webSearchIndex).toBeGreaterThanOrEqual(0);
+  expect(generateImageIndex).toBeGreaterThan(webSearchIndex);
 });
 
 test("background removed sends transparent png params and the gallery lists the image", async ({

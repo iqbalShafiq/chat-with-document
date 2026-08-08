@@ -21,6 +21,17 @@ type StubState = {
 
 const state: StubState = { requests: [], turns: new Map() };
 
+/**
+ * Conversation key = hash of the LAST user message text (the current prompt).
+ * The agent replays the full session memory on every request, so input[0] is
+ * the first-ever message and identical across runs in one session — keying on
+ * it would share one turn counter across unrelated runs. The last user text is
+ * the only per-run-stable part of the request body.
+ *
+ * Caveat: sending the exact same text twice in one session makes the second
+ * run look like a later turn of the first (turn counters continue). The spec
+ * never repeats a prompt verbatim, and /__reset clears counters between tests.
+ */
 function hashConversation(body: { input?: unknown }): string {
   const anchor = lastUserText(body).slice(0, 600);
   return createHash("sha1").update(anchor).digest("hex").slice(0, 12);
@@ -424,7 +435,13 @@ export async function fetchStubState(
 const isStandalone = process.argv[1]?.endsWith("stub-openrouter.ts");
 if (isStandalone) {
   startStubServer().catch((error) => {
-    console.error("[stub] failed to start", error);
+    if (error && typeof error === "object" && (error as { code?: unknown }).code === "EADDRINUSE") {
+      console.error(
+        `[stub] FATAL: port ${STUB_PORT} already in use — kill the stale stub first: lsof -i :${STUB_PORT}`,
+      );
+    } else {
+      console.error("[stub] failed to start", error);
+    }
     process.exit(1);
   });
 }

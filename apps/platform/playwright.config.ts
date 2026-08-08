@@ -7,6 +7,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
+  retries: 1,
   reporter: "line",
   use: {
     baseURL: "http://localhost:3000",
@@ -16,8 +17,8 @@ export default defineConfig({
   webServer: {
     command:
       "node e2e/stub-openrouter.ts & OPENAI_BASE_URL=http://127.0.0.1:18765/api/v1 OPENAI_API_KEY=e2e-key TAVILY_API_KEY=dummy pnpm --dir ../.. dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: true,
+    url: "http://localhost:3001/api/auth/get-session",
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
