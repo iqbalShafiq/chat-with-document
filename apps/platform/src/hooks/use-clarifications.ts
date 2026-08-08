@@ -70,6 +70,7 @@ function parseRequestEvent(event: unknown): ClarificationRecord | null {
     typeof clarification.id !== "string" ||
     typeof clarification.sessionId !== "string" ||
     !Array.isArray(clarification.questions) ||
+    clarification.questions.length === 0 ||
     !clarification.questions.every(isClarificationQuestion)
   ) {
     return null;

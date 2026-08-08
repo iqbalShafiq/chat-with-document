@@ -229,7 +229,7 @@ export function ClarificationPanel() {
           </button>
 
           <div className="flex items-center gap-1.5">
-            {current.optional === true && !isLastStep ? (
+            {current.optional === true ? (
               <button
                 type="button"
                 disabled={submitting}

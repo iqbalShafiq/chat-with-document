@@ -109,6 +109,34 @@ describe("wizardReducer", () => {
     expect(skipped.answers).toEqual({ palette: "dark" });
   });
 
+  it("skip works on the last step so an optional question can be skipped there", () => {
+    const styleAnswered = wizardReducer(initial, {
+      type: "answer",
+      questionId: "style",
+      value: "minimal",
+    });
+    const sizeAnswered = wizardReducer(styleAnswered, {
+      type: "answer",
+      questionId: "size",
+      value: "m",
+    });
+    const once = wizardReducer(sizeAnswered, {
+      type: "next",
+      questionsLength: 3,
+    });
+    const atLast = wizardReducer(once, {
+      type: "next",
+      questionsLength: 3,
+    });
+    expect(atLast.step).toBe(2);
+    const skipped = wizardReducer(atLast, {
+      type: "skip",
+      questionId: "palette",
+    });
+    expect(skipped.skipped).toEqual(["palette"]);
+    expect(canSubmit(skipped, QUESTIONS)).toBe(true);
+  });
+
   it("reset clears step, answers and skipped", () => {
     const filled: WizardState = {
       step: 2,
