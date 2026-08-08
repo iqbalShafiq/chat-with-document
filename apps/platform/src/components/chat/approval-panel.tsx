@@ -138,7 +138,8 @@ function ApprovalCard({
     }
   };
 
-  const query = safeParseArgs(approval.args)?.query ?? null;
+  const decodedArgs = safeParseArgs(approval.args);
+  const query = decodedArgs?.query ?? decodedArgs?.url ?? null;
   const prompt = isImageTool ? parsedImage?.prompt ?? null : null;
   const label = toolActivityLabelForName(approval.toolName);
 
