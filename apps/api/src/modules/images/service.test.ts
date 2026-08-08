@@ -50,12 +50,14 @@ function setup() {
     async (_key: string, _body: Uint8Array, _contentType: string) => {},
   );
   const getObjectBuffer = vi.fn(async () => new Uint8Array([9, 8, 7]));
+  const deleteObject = vi.fn(async (_key: string) => {});
   const store = createImageStore({
     prisma: fakePrisma as unknown as ImageStorePrisma,
     putObject,
     getObjectBuffer,
+    deleteObject,
   });
-  return { fakePrisma, putObject, getObjectBuffer, store };
+  return { fakePrisma, putObject, getObjectBuffer, deleteObject, store };
 }
 
 describe("createImageStore", () => {
@@ -150,7 +152,7 @@ describe("createImageStore", () => {
     });
 
     it("passes a custom mediaType through to R2 and the row", async () => {
-      const { fakePrisma, putObject, store } = setup();
+      const { fakePrisma, putObject, deleteObject, store } = setup();
       fakePrisma.generatedImage.create.mockResolvedValue(makeRecord());
 
       await store.saveGeneratedImage({
@@ -173,6 +175,49 @@ describe("createImageStore", () => {
       expect(fakePrisma.generatedImage.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ mediaType: "image/jpeg" }),
       });
+      expect(deleteObject).not.toHaveBeenCalled();
+    });
+
+    it("deletes the R2 object when the DB row creation fails", async () => {
+      const { fakePrisma, putObject, deleteObject, store } = setup();
+      fakePrisma.generatedImage.create.mockRejectedValue(new Error("db down"));
+
+      await expect(
+        store.saveGeneratedImage({
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          projectId: null,
+          buffer: new Uint8Array([7]),
+          modelId: "model-1",
+          prompt: "p",
+          width: 512,
+          height: 512,
+        }),
+      ).rejects.toThrow("db down");
+
+      const key = putObject.mock.calls[0]?.[0] as string;
+      expect(key).toMatch(
+        new RegExp(`^images/${USER_ID}/${UUID_V4_SOURCE}$`),
+      );
+      expect(deleteObject).toHaveBeenCalledWith(key);
+    });
+
+    it("does not call deleteObject when the row is persisted", async () => {
+      const { fakePrisma, deleteObject, store } = setup();
+      fakePrisma.generatedImage.create.mockResolvedValue(makeRecord());
+
+      await store.saveGeneratedImage({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        projectId: null,
+        buffer: new Uint8Array([8]),
+        modelId: "model-1",
+        prompt: "p",
+        width: 512,
+        height: 512,
+      });
+
+      expect(deleteObject).not.toHaveBeenCalled();
     });
   });
 
@@ -219,6 +264,7 @@ describe("createImageStore", () => {
       });
       expect(fakePrisma.generatedImage.findMany).toHaveBeenCalledWith({
         where: { projectId: PROJECT_ID },
+        orderBy: { createdAt: "desc" },
       });
     });
 
@@ -239,6 +285,7 @@ describe("createImageStore", () => {
       await expect(store.listUserImages(USER_ID)).resolves.toEqual([]);
       expect(fakePrisma.generatedImage.findMany).toHaveBeenCalledWith({
         where: { userId: USER_ID, projectId: null },
+        orderBy: { createdAt: "desc" },
       });
     });
   });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "../../generated/prisma/client.js";
-import { getObjectBuffer, putObject } from "../../lib/r2.js";
+import { deleteObject, getObjectBuffer, putObject } from "../../lib/r2.js";
 import { prisma } from "../../utils/prisma.js";
 
 export type GeneratedImageRecord = {
@@ -32,6 +32,7 @@ export type ImageStoreDeps = {
     contentType: string,
   ) => Promise<void>;
   getObjectBuffer: (key: string) => Promise<Uint8Array>;
+  deleteObject: (key: string) => Promise<void>;
 };
 
 export function createImageStore(deps: ImageStoreDeps) {
@@ -52,24 +53,31 @@ export function createImageStore(deps: ImageStoreDeps) {
       const mediaType = input.mediaType ?? "image/png";
       const r2Key = `images/${input.userId}/${randomUUID()}`;
 
-      await deps.putObject(r2Key, Buffer.from(input.buffer), mediaType);
+      try {
+        await deps.putObject(r2Key, Buffer.from(input.buffer), mediaType);
 
-      return deps.prisma.generatedImage.create({
-        data: {
-          userId: input.userId,
-          sessionId: input.sessionId,
-          projectId: input.projectId,
-          r2Key,
-          mediaType,
-          width: input.width,
-          height: input.height,
-          modelId: input.modelId,
-          prompt: input.prompt,
-          ...(input.nOfTotal !== undefined
-            ? { nOfTotal: input.nOfTotal }
-            : {}),
-        },
-      });
+        return await deps.prisma.generatedImage.create({
+          data: {
+            userId: input.userId,
+            sessionId: input.sessionId,
+            projectId: input.projectId,
+            r2Key,
+            mediaType,
+            width: input.width,
+            height: input.height,
+            modelId: input.modelId,
+            prompt: input.prompt,
+            ...(input.nOfTotal !== undefined
+              ? { nOfTotal: input.nOfTotal }
+              : {}),
+          },
+        });
+      } catch (error) {
+        // Avoid orphaned R2 objects when the row fails to persist. The
+        // delete is best-effort (the upload may itself have failed).
+        await deps.deleteObject(r2Key).catch(() => {});
+        throw error;
+      }
     },
 
     /**
@@ -107,12 +115,14 @@ export function createImageStore(deps: ImageStoreDeps) {
 
       return deps.prisma.generatedImage.findMany({
         where: { projectId: input.projectId },
+        orderBy: { createdAt: "desc" },
       });
     },
 
     listUserImages(userId: string): Promise<GeneratedImageRecord[]> {
       return deps.prisma.generatedImage.findMany({
         where: { userId, projectId: null },
+        orderBy: { createdAt: "desc" },
       });
     },
 
@@ -151,7 +161,12 @@ let imageStore: ImageStore | null = null;
 /** Process-lifetime image store backed by the shared prisma + R2 clients. */
 export function getImageStore(): ImageStore {
   if (!imageStore) {
-    imageStore = createImageStore({ prisma, putObject, getObjectBuffer });
+    imageStore = createImageStore({
+      prisma,
+      putObject,
+      getObjectBuffer,
+      deleteObject,
+    });
   }
   return imageStore;
 }
