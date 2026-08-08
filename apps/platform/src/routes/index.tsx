@@ -24,7 +24,7 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
-  apiFetch,
+  decideApproval,
   fetchContextUsage,
   fetchRunStatus,
   fetchChatCapabilities,
@@ -43,6 +43,7 @@ import {
   uploadDocument,
   waitForDocumentReady,
   type ContextUsageInfo,
+  type ImageGenSettings,
   type ModelInfo,
   type ProjectListItem,
   type ReasoningEffortInfo,
@@ -75,8 +76,12 @@ import {
   type SessionSummary,
 } from "#/lib/session-history";
 import {
+  persistImageGenSettings,
+  persistImageGenerationEnabled,
   persistSelectedModel,
   persistSelectedReasoningEffort,
+  readImageGenSettings,
+  readImageGenerationEnabled,
   readSelectedModel,
   readSelectedReasoningEffort,
 } from "#/lib/chat-preferences";
@@ -892,6 +897,12 @@ function ChatSession({
     readSelectedModel(models),
   );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() =>
+    readImageGenerationEnabled(),
+  );
+  const [imageGenSettings, setImageGenSettings] = useState<ImageGenSettings>(() =>
+    readImageGenSettings(),
+  );
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
@@ -907,9 +918,13 @@ function ChatSession({
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
+  const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
+  const imageGenSettingsRef = useRef(imageGenSettings);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
+  imageGenerationEnabledRef.current = imageGenerationEnabled;
+  imageGenSettingsRef.current = imageGenSettings;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
   const messagesRef = useRef<UIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
@@ -1095,31 +1110,18 @@ function ChatSession({
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
         webSearchEnabled: webSearchEnabledRef.current,
+        imageGenerationEnabled: imageGenerationEnabledRef.current,
+        imageGenSettings: imageGenSettingsRef.current,
         ...(resume ? { resume } : {}),
       };
     },
     humanInput: {
       // Custom decideApproval: defaultDecideApproval fetches without
       // credentials, which 401s cross-origin (platform :3000 → API :3001).
-      // apiFetch sends credentials: "include" and maps 401 → ApiAuthError.
-      decideApproval: async ({ approvalId, approved, reason }) => {
-        const response = await apiFetch(
-          `${API_BASE}/api/chat/approvals/${encodeURIComponent(approvalId)}/decision`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              approved,
-              ...(reason !== undefined ? { reason } : {}),
-            }),
-          },
-        );
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          throw new Error(body?.error ?? "Failed to send approval decision");
-        }
+      // The api.ts helper sends credentials: "include", maps 401 →
+      // ApiAuthError, and carries optional grantScope/overrideArgs.
+      decideApproval: async (decision) => {
+        await decideApproval(decision);
         // Server replies { ok: true } — not a ToolApproval. The stream event
         // carries the resolved approval state, so nothing to return here.
         return undefined;
@@ -1189,6 +1191,19 @@ function ChatSession({
     setSelectedReasoningEffort(effort);
     persistSelectedReasoningEffort(effort);
   }, []);
+
+  const handleImageGenerationToggle = useCallback((enabled: boolean) => {
+    setImageGenerationEnabled(enabled);
+    persistImageGenerationEnabled(enabled);
+  }, []);
+
+  const handleImageGenSettingsChange = useCallback(
+    (settings: ImageGenSettings) => {
+      setImageGenSettings(settings);
+      persistImageGenSettings(settings);
+    },
+    [],
+  );
 
   const focusComposer = useCallback(() => {
     let attempts = 0;
@@ -1788,6 +1803,13 @@ function ChatSession({
                     webSearchEnabled={webSearchEnabled}
                     webSearchAvailable={capabilities?.webSearchAvailable ?? false}
                     onWebSearchToggle={setWebSearchEnabled}
+                    imageGenerationEnabled={imageGenerationEnabled}
+                    imageGenerationAvailable={
+                      capabilities?.imageGenerationAvailable ?? false
+                    }
+                    onImageGenerationToggle={handleImageGenerationToggle}
+                    imageGenSettings={imageGenSettings}
+                    onImageGenSettingsChange={handleImageGenSettingsChange}
                   />
                 </div>
               </div>

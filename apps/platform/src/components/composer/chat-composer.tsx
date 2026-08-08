@@ -4,10 +4,11 @@ import { FileX, ArrowUp, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
+import { FeaturesPopover } from "#/components/composer/features-popover";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
-import { WebSearchToggle } from "#/components/composer/web-search-toggle";
 import type {
   ContextUsageInfo,
+  ImageGenSettings,
   ModelInfo,
   ReasoningEffortInfo,
   SessionDocument,
@@ -49,6 +50,11 @@ export function ChatComposer({
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
+  imageGenerationEnabled = false,
+  imageGenerationAvailable = true,
+  onImageGenerationToggle = () => {},
+  imageGenSettings = {},
+  onImageGenSettingsChange = () => {},
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -82,6 +88,14 @@ export function ChatComposer({
   /** Server has web tools configured (TAVILY_API_KEY). */
   webSearchAvailable?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  /** Per-session image generation toggle state (default off). */
+  imageGenerationEnabled?: boolean;
+  /** Server has an image model configured. */
+  imageGenerationAvailable?: boolean;
+  onImageGenerationToggle?: (enabled: boolean) => void;
+  /** Capability-driven image generation settings. */
+  imageGenSettings?: ImageGenSettings;
+  onImageGenSettingsChange?: (settings: ImageGenSettings) => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
@@ -149,11 +163,15 @@ export function ChatComposer({
 
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            <WebSearchToggle
-              enabled={webSearchEnabled}
-              available={webSearchAvailable}
-              disabled={busy || modelsUnavailable}
-              onToggle={onWebSearchToggle}
+            <FeaturesPopover
+              webSearchEnabled={webSearchEnabled}
+              onWebSearchToggle={onWebSearchToggle}
+              webSearchAvailable={webSearchAvailable}
+              imageGenerationEnabled={imageGenerationEnabled}
+              onImageGenerationToggle={onImageGenerationToggle}
+              imageGenerationAvailable={imageGenerationAvailable}
+              settings={imageGenSettings}
+              onSettingsChange={onImageGenSettingsChange}
             />
             <ModelReasoningSwitcher
               models={models}

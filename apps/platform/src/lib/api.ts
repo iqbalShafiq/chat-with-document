@@ -958,6 +958,7 @@ export async function stopChatRun(streamId: string): Promise<void> {
 
 export type WebCapabilities = {
   webSearchAvailable: boolean;
+  imageGenerationAvailable: boolean;
   context7Available: boolean;
 };
 
@@ -983,9 +984,256 @@ async function fetchChatCapabilitiesRemote(): Promise<WebCapabilities> {
     !data ||
     typeof data !== "object" ||
     typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
+    typeof (data as WebCapabilities).imageGenerationAvailable !== "boolean" ||
     typeof (data as WebCapabilities).context7Available !== "boolean"
   ) {
     throw new Error("Unexpected capabilities response shape");
   }
   return data as WebCapabilities;
+}
+
+// ─── Approval decisions ──────────────────────────────────────────────────────
+
+export type DecideApprovalInput = {
+  approvalId: string;
+  approved: boolean;
+  reason?: string;
+  /** "session" persists a tool grant for the rest of the run; "once" (default) approves only the current call. */
+  grantScope?: "once" | "session";
+  /** UI-edited tool args staged for the tool's next call (e.g. image params). */
+  overrideArgs?: Record<string, unknown>;
+};
+
+export async function decideApproval(
+  input: DecideApprovalInput,
+): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/approvals/${encodeURIComponent(input.approvalId)}/decision`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        approved: input.approved,
+        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        ...(input.grantScope !== undefined
+          ? { grantScope: input.grantScope }
+          : {}),
+        ...(input.overrideArgs && Object.keys(input.overrideArgs).length > 0
+          ? { overrideArgs: input.overrideArgs }
+          : {}),
+      }),
+    },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to send approval decision");
+  }
+}
+
+// ─── Image generation ────────────────────────────────────────────────────────
+
+export type ImageGenSettings = {
+  modelId?: string;
+  aspectRatio?: string;
+  quality?: string;
+  background?: string;
+  n?: number;
+};
+
+export type GeneratedImageMeta = {
+  id: string;
+  sessionId: string;
+  projectId: string | null;
+  mediaType: string;
+  width: number;
+  height: number;
+  modelId: string;
+  prompt: string;
+  nOfTotal: string | null;
+  createdAt: string;
+};
+
+export type ClarificationResponseBody = {
+  answers: Record<string, string | string[]>;
+  skipped: string[];
+};
+
+export type ImageModelCapabilities = {
+  quality?: string[];
+  background?: string[];
+  n?: { min: number; max: number };
+  aspectRatios?: string[];
+  resolutions?: string[];
+};
+
+export type ImageModelCatalogItem = {
+  modelId: string;
+  name: string;
+  label: string;
+  hint: string;
+  imageCapabilities: ImageModelCapabilities | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter(
+    (item): item is string => typeof item === "string",
+  );
+  return strings.length > 0 ? strings : undefined;
+}
+
+function parseImageModelCapabilities(value: unknown): ImageModelCapabilities | null {
+  if (!isRecord(value)) return null;
+  const n =
+    isRecord(value.n) &&
+    typeof value.n.min === "number" &&
+    typeof value.n.max === "number"
+      ? { min: value.n.min, max: value.n.max }
+      : undefined;
+  const quality = stringArray(value.quality);
+  const background = stringArray(value.background);
+  const aspectRatios = stringArray(value.aspectRatios);
+  const resolutions = stringArray(value.resolutions);
+  if (
+    !n &&
+    !quality &&
+    !background &&
+    !aspectRatios &&
+    !resolutions
+  ) {
+    return null;
+  }
+  return {
+    ...(n ? { n } : {}),
+    ...(quality ? { quality } : {}),
+    ...(background ? { background } : {}),
+    ...(aspectRatios ? { aspectRatios } : {}),
+    ...(resolutions ? { resolutions } : {}),
+  };
+}
+
+let imageModelsPromise: Promise<ImageModelCatalogItem[]> | null = null;
+
+export async function fetchImageModels(): Promise<ImageModelCatalogItem[]> {
+  if (imageModelsPromise === null) {
+    imageModelsPromise = fetchImageModelsRemote();
+    imageModelsPromise.catch(() => {
+      // Drop the cache on failure so a transient error retries next call.
+      imageModelsPromise = null;
+    });
+  }
+  return imageModelsPromise;
+}
+
+async function fetchImageModelsRemote(): Promise<ImageModelCatalogItem[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/models?outputType=image`,
+  );
+  if (!response.ok) throw new Error("Failed to load image models");
+
+  const data: unknown = await response.json();
+  // Defensive: the backend filter (Task 13) may not be live yet — accept any
+  // model catalog page and keep the image-capable items we can identify.
+  if (!isRecord(data) || !Array.isArray(data.models)) {
+    throw new Error("Unexpected image models response shape");
+  }
+
+  return (data.models as unknown[])
+    .filter(
+      (item): item is Record<string, unknown> =>
+        isRecord(item) &&
+        typeof item.modelId === "string" &&
+        typeof item.name === "string" &&
+        typeof item.label === "string",
+    )
+    .map((item) => ({
+      modelId: item.modelId as string,
+      name: item.name as string,
+      label: item.label as string,
+      hint: typeof item.hint === "string" ? item.hint : "",
+      imageCapabilities: parseImageModelCapabilities(item.imageCapabilities),
+    }));
+}
+
+function isGeneratedImageMeta(value: unknown): value is GeneratedImageMeta {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.mediaType === "string" &&
+    typeof value.width === "number" &&
+    typeof value.height === "number" &&
+    typeof value.modelId === "string"
+  );
+}
+
+function parseGeneratedImages(data: unknown): GeneratedImageMeta[] {
+  if (!isRecord(data) || !Array.isArray(data.images)) {
+    throw new Error("Unexpected images response shape");
+  }
+  return (data.images as unknown[]).filter(isGeneratedImageMeta);
+}
+
+export async function fetchSessionImages(
+  sessionId: string,
+): Promise<GeneratedImageMeta[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/images?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load session images");
+  return parseGeneratedImages(await response.json());
+}
+
+export async function fetchProjectImages(
+  projectId: string,
+): Promise<GeneratedImageMeta[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/images?projectId=${encodeURIComponent(projectId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load project images");
+  return parseGeneratedImages(await response.json());
+}
+
+export async function fetchUserImages(): Promise<GeneratedImageMeta[]> {
+  const response = await apiFetch(`${API_BASE}/api/images?scope=user`);
+  if (!response.ok) throw new Error("Failed to load user images");
+  return parseGeneratedImages(await response.json());
+}
+
+export async function fetchImageBytes(
+  id: string,
+): Promise<{ blob: Blob; mediaType: string }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/images/${encodeURIComponent(id)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load image");
+  return {
+    blob: await response.blob(),
+    mediaType: response.headers.get("content-type") ?? "image/png",
+  };
+}
+
+export async function submitClarification(input: {
+  clarificationId: string;
+  body: ClarificationResponseBody;
+}): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/clarifications/${encodeURIComponent(input.clarificationId)}/response`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input.body),
+    },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to send clarification response");
+  }
 }
