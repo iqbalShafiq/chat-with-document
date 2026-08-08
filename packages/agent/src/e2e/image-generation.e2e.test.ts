@@ -1,91 +1,31 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import type { TavilyClient } from "@tavily/core";
-import { OpenRouterImageGenerationModel } from "../providers/image-generation.js";
 import {
   createImageGenerationTools,
-  type GeneratedImageRecord,
   type GenerateImageResult,
   type ImageGenerationToolScope,
 } from "../tools/image-generation.js";
 import { createWebSearchTools } from "../tools/web-search.js";
-
-const DEFAULT_MODEL = "openai/gpt-5-image-mini";
-
-/** 1x1 transparent PNG — decodes cleanly through the model's base64 path. */
-const TRANSPARENT_1X1_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-
-type StubImageRequest = {
-  model: string;
-  prompt: string;
-  size: string;
-  n?: number;
-  background?: string;
-  output_format?: string;
-  quality?: string;
-  input_references?: Array<{
-    type: "image_url";
-    image_url: { url: string };
-  }>;
-};
-
-/**
- * Stub OpenRouter images endpoint: records every request body and answers
- * with `n` (default 1) copies of a 1x1 transparent PNG, mirroring the
- * `{ data: [{ b64_json, media_type }] }` contract the real API returns.
- */
-function startStubServer(): Promise<{
-  server: Server;
-  port: number;
-  requests: StubImageRequest[];
-}> {
-  const requests: StubImageRequest[] = [];
-  const server = createServer((request, response) => {
-    if (request.method !== "POST" || request.url !== "/api/v1/images") {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-    let raw = "";
-    request.on("data", (chunk) => (raw += chunk));
-    request.on("end", () => {
-      const body = JSON.parse(raw) as Record<string, unknown>;
-      requests.push(body as unknown as StubImageRequest);
-      const count = typeof body.n === "number" ? body.n : 1;
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(
-        JSON.stringify({
-          data: Array.from({ length: count }, () => ({
-            b64_json: TRANSPARENT_1X1_PNG_BASE64,
-            media_type: "image/png",
-          })),
-        }),
-      );
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address() as AddressInfo;
-      resolve({ server, port: address.port, requests });
-    });
-  });
-}
+import {
+  TRANSPARENT_1X1_PNG_BASE64,
+  approvalContext,
+  createSaveGeneratedImageMock,
+  createStubOpenRouterModel,
+  startStubServer,
+  type ApprovalPolicy,
+  type StubImageRequest,
+} from "./image-e2e-helpers.js";
 
 let server: Server;
 let stubRequests: StubImageRequest[];
-let model: OpenRouterImageGenerationModel;
+let model: ReturnType<typeof createStubOpenRouterModel>;
 
 beforeAll(async () => {
   const stub = await startStubServer();
   server = stub.server;
   stubRequests = stub.requests;
-  model = new OpenRouterImageGenerationModel({
-    apiKey: "test-key",
-    baseUrl: `http://127.0.0.1:${stub.port}/api/v1`,
-    fetchFn: fetch,
-  });
+  model = createStubOpenRouterModel(stub.port);
 });
 
 afterAll(async () => {
@@ -98,45 +38,13 @@ beforeEach(() => {
   stubRequests.length = 0;
 });
 
-type ApprovalPolicy = {
-  when(context: unknown): boolean | Promise<boolean>;
-  reason(context: { args: { prompt: string } }): string;
-};
-
-function approvalContext(args: Record<string, unknown>) {
-  return {
-    toolName: "generate_image",
-    args,
-    rawArgs: JSON.stringify(args),
-    internalCallId: "internal-call-1",
-    run: { runId: "run-1", agentId: "agent-1", sessionId: "session-1" },
-  };
-}
-
 function makeScope(
   overrides: Partial<ImageGenerationToolScope> = {},
 ): {
   scope: ImageGenerationToolScope;
-  saveGeneratedImage: ReturnType<typeof vi.fn>;
+  saveGeneratedImage: ReturnType<typeof createSaveGeneratedImageMock>;
 } {
-  const saveGeneratedImage = vi.fn();
-  let recordCount = 0;
-  saveGeneratedImage.mockImplementation(
-    async (input: {
-      mediaType: string | undefined;
-      width: number;
-      height: number;
-      modelId: string;
-      prompt: string;
-    }): Promise<GeneratedImageRecord> => ({
-      id: `rec-${++recordCount}`,
-      mediaType: input.mediaType ?? "image/png",
-      width: input.width,
-      height: input.height,
-      modelId: input.modelId,
-      prompt: input.prompt,
-    }),
-  );
+  const saveGeneratedImage = createSaveGeneratedImageMock();
   const scope: ImageGenerationToolScope = {
     model,
     store: { saveGeneratedImage },
@@ -164,7 +72,7 @@ describe("generate_image happy path (toggle ON)", () => {
 
     expect(stubRequests).toHaveLength(1);
     expect(stubRequests[0]).toEqual({
-      model: DEFAULT_MODEL,
+      model: "openai/gpt-5-image-mini",
       prompt: "a red panda",
       size: "1024x1024",
     });
@@ -176,7 +84,7 @@ describe("generate_image happy path (toggle ON)", () => {
       sessionId: "session-1",
       projectId: null,
       mediaType: "image/png",
-      modelId: DEFAULT_MODEL,
+      modelId: "openai/gpt-5-image-mini",
       prompt: "a red panda",
       width: 1024,
       height: 1024,
@@ -189,7 +97,7 @@ describe("generate_image happy path (toggle ON)", () => {
       mediaType: "image/png",
       width: 1024,
       height: 1024,
-      modelId: DEFAULT_MODEL,
+      modelId: "openai/gpt-5-image-mini",
       prompt: "a red panda",
       index: 0,
       total: 1,
@@ -266,7 +174,7 @@ describe("background removal", () => {
 
     expect(stubRequests).toHaveLength(1);
     expect(stubRequests[0]).toEqual({
-      model: DEFAULT_MODEL,
+      model: "openai/gpt-5-image-mini",
       prompt: "a red panda",
       size: "1024x1024",
       background: "transparent",
@@ -340,7 +248,7 @@ describe("edit_image with a reference image", () => {
 
     expect(stubRequests).toHaveLength(1);
     expect(stubRequests[0]).toEqual({
-      model: DEFAULT_MODEL,
+      model: "openai/gpt-5-image-mini",
       prompt: "make it watercolor",
       size: "1024x1024",
       input_references: [

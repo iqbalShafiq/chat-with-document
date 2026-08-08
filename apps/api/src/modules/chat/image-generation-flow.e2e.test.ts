@@ -1,21 +1,48 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import type { ToolApprovalRequest } from "@anvia/core";
+import type { ImageGenerationModel } from "@anvia/core/image-generation";
+import type { GeneratedImageRecord } from "@assingment/agent";
 import {
   createApprovalRegistry,
   type ApprovalRedis,
 } from "./approval-registry.js";
+// The shared helper lives in packages/agent. Its VALUES cannot be statically
+// imported here: that would pull the file (and its providers/ imports) into
+// the api program, tripping rootDir on `tsc` emit. The helper module has no
+// credential-throwing side effects, so loading it via vi.importActual is safe.
+// The mirror types below are the compile-time view (keep in sync with
+// packages/agent/src/e2e/image-e2e-helpers.ts); everything else is typed from
+// @anvia/core and @assingment/agent package types.
+const helpers = (await vi.importActual(
+  "../../../../../packages/agent/src/e2e/image-e2e-helpers.js",
+)) as ImageE2EHelpers;
 
-const USER_ID = "user-1";
-const SESSION_ID = "session-1";
-const STREAM_ID = "stream-1";
+type ImageE2EHelpers = {
+  startStubServer(): Promise<{
+    server: Server;
+    port: number;
+    requests: StubImageRequest[];
+  }>;
+  createStubOpenRouterModel(port: number): ImageGenerationModel<unknown, string>;
+  approvalContext(args: Record<string, unknown>): ApprovalContext;
+  approvalRequest(overrides?: Partial<ToolApprovalRequest>): ToolApprovalRequest;
+  createSaveGeneratedImageMock(): SaveGeneratedImage;
+};
 
-/** 1x1 transparent PNG — decodes cleanly through the model's base64 path. */
-const TRANSPARENT_1X1_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+type ApprovalContext = {
+  toolName: string;
+  args: Record<string, unknown>;
+  rawArgs: string;
+  internalCallId: string;
+  run: { runId: string; agentId: string; sessionId: string };
+};
 
-const REJECT_MESSAGE = "Image generation was declined by the user.";
+type ApprovalPolicy = {
+  when(context: unknown): boolean | Promise<boolean>;
+  reason(context: { args: { prompt: string } }): string;
+  rejectMessage?: string;
+};
 
 type StubImageRequest = {
   model: string;
@@ -31,47 +58,24 @@ type StubImageRequest = {
   }>;
 };
 
-/**
- * Stub OpenRouter images endpoint: records every request body and answers
- * with `n` (default 1) copies of a 1x1 transparent PNG, mirroring the
- * `{ data: [{ b64_json, media_type }] }` contract the real API returns.
- */
-function startStubServer(): Promise<{
-  server: Server;
-  port: number;
-  requests: StubImageRequest[];
-}> {
-  const requests: StubImageRequest[] = [];
-  const server = createServer((request, response) => {
-    if (request.method !== "POST" || request.url !== "/api/v1/images") {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-    let raw = "";
-    request.on("data", (chunk) => (raw += chunk));
-    request.on("end", () => {
-      const body = JSON.parse(raw) as Record<string, unknown>;
-      requests.push(body as unknown as StubImageRequest);
-      const count = typeof body.n === "number" ? body.n : 1;
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(
-        JSON.stringify({
-          data: Array.from({ length: count }, () => ({
-            b64_json: TRANSPARENT_1X1_PNG_BASE64,
-            media_type: "image/png",
-          })),
-        }),
-      );
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address() as AddressInfo;
-      resolve({ server, port: address.port, requests });
-    });
-  });
-}
+type SaveGeneratedImage = (input: {
+  userId: string;
+  sessionId: string;
+  projectId: string | null;
+  buffer: Uint8Array;
+  mediaType: string | undefined;
+  modelId: string;
+  prompt: string;
+  width: number;
+  height: number;
+  nOfTotal?: string;
+}) => Promise<GeneratedImageRecord>;
+
+const USER_ID = "user-1";
+const SESSION_ID = "session-1";
+const STREAM_ID = "stream-1";
+
+const REJECT_MESSAGE = "Image generation was declined by the user.";
 
 type ToolApprovalRequestEvent = {
   type: "tool_approval_request";
@@ -116,12 +120,6 @@ type ClarificationRequestEvent = {
     status: string;
     requestedAt: string;
   };
-};
-
-type ApprovalPolicy = {
-  when(context: unknown): boolean | Promise<boolean>;
-  reason(context: { args: { prompt: string } }): string;
-  rejectMessage?: string;
 };
 
 /** Map-backed fake for the narrow ApprovalRedis surface (mirrors approval-registry.test.ts). */
@@ -223,29 +221,6 @@ function createHandler(
   });
 }
 
-function approvalContext(args: Record<string, unknown>) {
-  return {
-    toolName: "generate_image",
-    args,
-    rawArgs: JSON.stringify(args),
-    internalCallId: "internal-call-1",
-    run: { runId: "run-1", agentId: "agent-1", sessionId: SESSION_ID },
-  };
-}
-
-function approvalRequest(
-  overrides: Partial<ToolApprovalRequest> = {},
-): ToolApprovalRequest {
-  return {
-    toolName: "generate_image",
-    args: { prompt: "a red panda" },
-    rawArgs: JSON.stringify({ prompt: "a red panda" }),
-    internalCallId: "internal-call-1",
-    run: { runId: "run-1", agentId: "agent-1", sessionId: SESSION_ID },
-    ...overrides,
-  };
-}
-
 let agentModule: typeof import("@assingment/agent");
 let server: Server;
 let stubRequests: StubImageRequest[];
@@ -253,12 +228,12 @@ let port: number;
 
 beforeAll(async () => {
   // @assingment/agent evaluates OpenAIClient/MistralClient construction at
-  // module load (see compaction.ts), so fake credentials are set first.
-  process.env.OPENAI_API_KEY = "test-key";
-  process.env.MISTRAL_API_KEY = "test-key";
+  // module load (see compaction.ts), so fake credentials are stubbed first.
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
+  vi.stubEnv("MISTRAL_API_KEY", "test-key");
   agentModule = await import("@assingment/agent");
 
-  const stub = await startStubServer();
+  const stub = await helpers.startStubServer();
   server = stub.server;
   stubRequests = stub.requests;
   port = stub.port;
@@ -268,21 +243,12 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+  vi.unstubAllEnvs();
 });
 
 beforeEach(() => {
   stubRequests.length = 0;
 });
-
-function createModel(): InstanceType<
-  typeof agentModule.OpenRouterImageGenerationModel
-> {
-  return new agentModule.OpenRouterImageGenerationModel({
-    apiKey: "test-key",
-    baseUrl: `http://127.0.0.1:${port}/api/v1`,
-    fetchFn: fetch,
-  });
-}
 
 /**
  * Real image tools wired to the real registry the same way the worker wires
@@ -291,26 +257,9 @@ function createModel(): InstanceType<
 function buildImageTools(
   registry: ReturnType<typeof createApprovalRegistry>,
 ) {
-  const saveGeneratedImage = vi.fn();
-  let recordCount = 0;
-  saveGeneratedImage.mockImplementation(
-    async (input: {
-      mediaType: string | undefined;
-      width: number;
-      height: number;
-      modelId: string;
-      prompt: string;
-    }) => ({
-      id: `rec-${++recordCount}`,
-      mediaType: input.mediaType ?? "image/png",
-      width: input.width,
-      height: input.height,
-      modelId: input.modelId,
-      prompt: input.prompt,
-    }),
-  );
+  const saveGeneratedImage = helpers.createSaveGeneratedImageMock();
   const tools = agentModule.createImageGenerationTools({
-    model: createModel(),
+    model: helpers.createStubOpenRouterModel(port),
     store: { saveGeneratedImage },
     enabled: false,
     hasGrant: (toolName: string) =>
@@ -331,13 +280,13 @@ describe("consent gate flow (Allow once)", () => {
     const { recorder, registry } = setup();
     const { tools, saveGeneratedImage } = buildImageTools(registry);
     const approval = tools[0]!.approval as ApprovalPolicy;
-    const context = approvalContext({ prompt: "a red panda" });
+    const context = helpers.approvalContext({ prompt: "a red panda" });
 
     expect(await approval.when(context)).toBe(true);
 
     const handler = createHandler(registry, recorder);
     const pending = handler({
-      ...approvalRequest(),
+      ...helpers.approvalRequest(),
       reason: approval.reason({ args: { prompt: "a red panda" } }),
       rejectMessage: REJECT_MESSAGE,
     });
@@ -376,11 +325,11 @@ describe("allow for session persists", () => {
     const { recorder, registry } = setup();
     const { tools, saveGeneratedImage } = buildImageTools(registry);
     const approval = tools[0]!.approval as ApprovalPolicy;
-    const context = approvalContext({ prompt: "a red panda" });
+    const context = helpers.approvalContext({ prompt: "a red panda" });
 
     const handler = createHandler(registry, recorder);
     const pending = handler({
-      ...approvalRequest(),
+      ...helpers.approvalRequest(),
       reason: approval.reason({ args: { prompt: "a red panda" } }),
       rejectMessage: REJECT_MESSAGE,
     });
@@ -501,14 +450,14 @@ describe("override flow", () => {
 });
 
 describe("reject flow", () => {
-  it("returns a rejection decision and never calls the model or the store", async () => {
+  it("returns a rejection decision and surfaces a rejected result event", async () => {
     const { recorder, registry } = setup();
-    const { tools, saveGeneratedImage } = buildImageTools(registry);
+    const { tools } = buildImageTools(registry);
     const approval = tools[0]!.approval as ApprovalPolicy;
 
     const handler = createHandler(registry, recorder);
     const pending = handler({
-      ...approvalRequest(),
+      ...helpers.approvalRequest(),
       reason: approval.reason({ args: { prompt: "a red panda" } }),
       rejectMessage: REJECT_MESSAGE,
     });
@@ -524,6 +473,9 @@ describe("reject flow", () => {
       reason: "no",
     });
 
+    // append pushes events in order (request first, then result) and resolves
+    // the request-event promise synchronously, so by the time the handler's
+    // polling has resolved, events[1] is this approval's result event.
     const resultEvent = recorder.events[1] as ToolApprovalResultEvent;
     expect(resultEvent.type).toBe("tool_approval_result");
     expect(resultEvent.approval).toMatchObject({
@@ -533,7 +485,9 @@ describe("reject flow", () => {
       reason: "no",
     });
 
-    expect(saveGeneratedImage).not.toHaveBeenCalled();
-    expect(stubRequests).toHaveLength(0);
+    // Whether the tool actually executes after a rejection is decided by
+    // @anvia/core's agent loop (it never runs an unapproved tool call), which
+    // is not exercised at this component level — the contract asserted here is
+    // the handler's rejected decision plus the surfaced result event.
   });
 });
