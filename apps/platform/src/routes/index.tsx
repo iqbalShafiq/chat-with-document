@@ -11,6 +11,7 @@ import { X } from "lucide-react";
 import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
+import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import {
@@ -1774,6 +1775,8 @@ function ChatSession({
                   ) : null}
 
                   <ApprovalPanel />
+
+                  <ClarificationPanel />
 
                   <ChatComposer
                     sessionId={sessionId}
