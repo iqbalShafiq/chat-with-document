@@ -42,6 +42,9 @@ function setup() {
     chatSession: {
       findFirst: vi.fn(),
     },
+    project: {
+      findFirst: vi.fn(),
+    },
   };
   const putObject = vi.fn(
     async (_key: string, _body: Uint8Array, _contentType: string) => {},
@@ -174,28 +177,59 @@ describe("createImageStore", () => {
   });
 
   describe("list functions", () => {
-    it("listSessionImages filters by sessionId, newest first", async () => {
+    it("listSessionImages filters by sessionId, newest first, when the user owns the session", async () => {
       const { fakePrisma, store } = setup();
       const records = [makeRecord({ id: "img-2" }), makeRecord({ id: "img-1" })];
+      fakePrisma.chatSession.findFirst.mockResolvedValue({ id: SESSION_ID });
       fakePrisma.generatedImage.findMany.mockResolvedValue(records);
 
-      await expect(store.listSessionImages(SESSION_ID)).resolves.toEqual(
-        records,
-      );
+      await expect(
+        store.listSessionImages({ sessionId: SESSION_ID, userId: USER_ID }),
+      ).resolves.toEqual(records);
+      expect(fakePrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: SESSION_ID, userId: USER_ID },
+        select: { id: true },
+      });
       expect(fakePrisma.generatedImage.findMany).toHaveBeenCalledWith({
         where: { sessionId: SESSION_ID },
         orderBy: { createdAt: "desc" },
       });
     });
 
-    it("listProjectImages filters by projectId", async () => {
+    it("listSessionImages returns [] for a session the user does not own", async () => {
       const { fakePrisma, store } = setup();
+      fakePrisma.chatSession.findFirst.mockResolvedValue(null);
+
+      await expect(
+        store.listSessionImages({ sessionId: SESSION_ID, userId: USER_ID }),
+      ).resolves.toEqual([]);
+      expect(fakePrisma.generatedImage.findMany).not.toHaveBeenCalled();
+    });
+
+    it("listProjectImages filters by projectId when the user owns the project", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.project.findFirst.mockResolvedValue({ id: PROJECT_ID });
       fakePrisma.generatedImage.findMany.mockResolvedValue([]);
 
-      await expect(store.listProjectImages(PROJECT_ID)).resolves.toEqual([]);
+      await expect(
+        store.listProjectImages({ projectId: PROJECT_ID, userId: USER_ID }),
+      ).resolves.toEqual([]);
+      expect(fakePrisma.project.findFirst).toHaveBeenCalledWith({
+        where: { id: PROJECT_ID, userId: USER_ID },
+      });
       expect(fakePrisma.generatedImage.findMany).toHaveBeenCalledWith({
         where: { projectId: PROJECT_ID },
       });
+    });
+
+    it("listProjectImages returns [] for a project the user does not own", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.project.findFirst.mockResolvedValue(null);
+
+      await expect(
+        store.listProjectImages({ projectId: PROJECT_ID, userId: USER_ID }),
+      ).resolves.toEqual([]);
+      expect(fakePrisma.generatedImage.findMany).not.toHaveBeenCalled();
     });
 
     it("listUserImages filters by userId with projectId null (standalone)", async () => {

@@ -24,12 +24,18 @@ export const imagesRouter = new Hono<{ Variables: AuthVariables }>()
     const store = getImageStore();
 
     if (sessionId) {
-      const images = await store.listSessionImages(sessionId);
+      const images = await store.listSessionImages({
+        sessionId,
+        userId: user.id,
+      });
       return c.json({ images: images.map(toImageMetadata) });
     }
 
     if (projectId) {
-      const images = await store.listProjectImages(projectId);
+      const images = await store.listProjectImages({
+        projectId,
+        userId: user.id,
+      });
       return c.json({ images: images.map(toImageMetadata) });
     }
 

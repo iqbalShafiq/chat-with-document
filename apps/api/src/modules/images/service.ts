@@ -21,7 +21,7 @@ export type GeneratedImageRecord = {
 /** Narrow prisma surface so tests can inject a fake (mirrors ApprovalRedis). */
 export type ImageStorePrisma = Pick<
   PrismaClient,
-  "generatedImage" | "chatSession"
+  "generatedImage" | "chatSession" | "project"
 >;
 
 export type ImageStoreDeps = {
@@ -72,15 +72,42 @@ export function createImageStore(deps: ImageStoreDeps) {
       });
     },
 
-    listSessionImages(sessionId: string): Promise<GeneratedImageRecord[]> {
+    /**
+     * Session gallery, gated on session ownership: a foreign session id
+     * yields [] (no existence oracle).
+     */
+    async listSessionImages(input: {
+      sessionId: string;
+      userId: string;
+    }): Promise<GeneratedImageRecord[]> {
+      const session = await deps.prisma.chatSession.findFirst({
+        where: { id: input.sessionId, userId: input.userId },
+        select: { id: true },
+      });
+      if (!session) return [];
+
       return deps.prisma.generatedImage.findMany({
-        where: { sessionId },
+        where: { sessionId: input.sessionId },
         orderBy: { createdAt: "desc" },
       });
     },
 
-    listProjectImages(projectId: string): Promise<GeneratedImageRecord[]> {
-      return deps.prisma.generatedImage.findMany({ where: { projectId } });
+    /**
+     * Project gallery, gated on project ownership: a foreign project id
+     * yields [] (no existence oracle).
+     */
+    async listProjectImages(input: {
+      projectId: string;
+      userId: string;
+    }): Promise<GeneratedImageRecord[]> {
+      const project = await deps.prisma.project.findFirst({
+        where: { id: input.projectId, userId: input.userId },
+      });
+      if (!project) return [];
+
+      return deps.prisma.generatedImage.findMany({
+        where: { projectId: input.projectId },
+      });
     },
 
     listUserImages(userId: string): Promise<GeneratedImageRecord[]> {
