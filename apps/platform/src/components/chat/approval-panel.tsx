@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ImageGenParamsEditor } from "#/components/composer/image-gen-params-editor";
 import { toolActivityLabelForName } from "#/components/tool-activity-panel";
+import { isImageToolName } from "#/lib/chat/generated-images";
 import {
   decideApproval,
   fetchImageModels,
@@ -11,8 +12,6 @@ import {
   type ImageGenSettings,
   type ImageModelCatalogItem,
 } from "#/lib/api";
-
-const IMAGE_TOOLS = new Set(["generate_image", "edit_image"]);
 
 const SETTINGS_KEYS = [
   "modelId",
@@ -38,6 +37,11 @@ type ImageModelsState =
  * humanInput config, so grantScope / overrideArgs would never reach the
  * backend. Local deciding state replaces chat.decidingApprovals (read-only,
  * only populated by chat.approveTool).
+ *
+ * "Allow for session" (grantScope: "session") is offered only for image
+ * tools — web_search/web_fetch approvals are not read by the backend's
+ * session-grant check, so a session grant there would be written but never
+ * consumed.
  */
 export function ApprovalPanel() {
   const { approvals } = useHumanInput();
@@ -48,7 +52,7 @@ export function ApprovalPanel() {
   });
 
   const hasImageApproval = pending.some((approval) =>
-    IMAGE_TOOLS.has(approval.toolName),
+    isImageToolName(approval.toolName),
   );
 
   const loadImageModels = () => {
@@ -96,7 +100,7 @@ function ApprovalCard({
   modelsError: boolean;
   onRetryModels: () => void;
 }) {
-  const isImageTool = IMAGE_TOOLS.has(approval.toolName);
+  const isImageTool = isImageToolName(approval.toolName);
   const parsedImage = useMemo(
     () => parseImageArgs(approval.args),
     [approval.args],
@@ -244,16 +248,18 @@ function ApprovalCard({
           >
             Allow once
           </button>
-          <button
-            type="button"
-            disabled={deciding}
-            onClick={() =>
-              void sendDecision({ approved: true, grantScope: "session" })
-            }
-            className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Allow for session
-          </button>
+          {isImageTool ? (
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() =>
+                void sendDecision({ approved: true, grantScope: "session" })
+              }
+              className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Allow for session
+            </button>
+          ) : null}
         </div>
       )}
 
