@@ -170,6 +170,16 @@ describe("createClarificationTool", () => {
         }),
       ).rejects.toThrow();
     });
+
+    it("rejects question text longer than 2000 characters", async () => {
+      await expect(
+        tool.call({
+          questions: [
+            { id: "q", question: "x".repeat(2001), type: "free_text" },
+          ],
+        }),
+      ).rejects.toThrow();
+    });
   });
 });
 

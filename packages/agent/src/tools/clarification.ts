@@ -3,26 +3,6 @@ import z from "zod";
 
 export const MAX_CLARIFICATION_QUESTIONS = 5;
 
-export type ClarificationOption = {
-  id: string;
-  label: string;
-  recommended?: boolean;
-};
-
-export type ClarificationQuestion = {
-  id: string;
-  question: string;
-  type: "single_choice" | "multiple_choice" | "free_text";
-  options?: ClarificationOption[];
-  optional?: boolean;
-  placeholder?: string;
-};
-
-export type ClarificationRequest = {
-  title?: string;
-  questions: ClarificationQuestion[];
-};
-
 export type ClarificationResponse = {
   answers: Record<string, string | string[]>;
   skipped: string[];
@@ -38,7 +18,7 @@ const optionSchema = z.object({
 const questionSchema = z
   .object({
     id: z.string().min(1),
-    question: z.string().min(1),
+    question: z.string().min(1).max(2000),
     type: z.enum(["single_choice", "multiple_choice", "free_text"]),
     options: z.array(optionSchema).min(2).max(8).optional(),
     optional: z.boolean().optional(),
@@ -66,6 +46,10 @@ const clarificationInput = z.object({
   questions: z.array(questionSchema).min(1).max(MAX_CLARIFICATION_QUESTIONS),
 });
 
+export type ClarificationOption = z.output<typeof optionSchema>;
+export type ClarificationQuestion = z.output<typeof questionSchema>;
+export type ClarificationRequest = z.output<typeof clarificationInput>;
+
 export type ClarificationToolScope = {
   requester: (request: ClarificationRequest) => Promise<ClarificationResponse>;
 };
@@ -77,7 +61,7 @@ export function createClarificationTool(scope: ClarificationToolScope) {
       "Ask the user to clarify an uncertain request before acting. Use when the user's request is ambiguous (style, dimensions, subject, scope) or when choosing between valid options would materially change the result. You may ask up to 5 questions at once; mark recommended choices and mark optional questions you can answer yourself via the recommended choice.",
     input: clarificationInput,
     execute: async (args) => {
-      const response = await scope.requester(args as ClarificationRequest);
+      const response = await scope.requester(args);
       return {
         status: response.timedOut ? "timed_out" : "answered",
         answers: response.answers,
