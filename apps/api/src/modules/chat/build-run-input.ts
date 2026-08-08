@@ -2,21 +2,31 @@ import { prisma } from "../../utils/prisma.js";
 import { getObjectBuffer } from "../../lib/r2.js";
 import {
   buildDocumentCatalogInstruction,
+  CLARIFICATION_INSTRUCTION,
   CONTEXT7_INSTRUCTION,
   createAgent,
   createChunkSearchService,
+  createClarificationTool,
   createCompletionModel,
   createDataAnalysisTools,
   createDocumentTools,
+  createImageGenerationTools,
   createRememberUserProfileTool,
   createTavilyClient,
   createWebSearchTools,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
+  IMAGE_GENERATION_INSTRUCTION,
+  normalizePageImages,
+  OpenRouterImageGenerationModel,
   renderProfileContextText,
   tracing,
   WEB_SEARCH_INSTRUCTION,
   type AgentContextBlock,
+  type ClarificationRequest,
+  type ClarificationResponse,
+  type ImageCapabilitySet,
+  type ImageGenSettings,
   type ProfileScope,
   type ProfileSectionKey,
   type ReasoningEffort,
@@ -24,6 +34,12 @@ import {
 import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
+import { getImageStore } from "../images/service.js";
+import { parseImageCapabilities } from "./image-capabilities.js";
+import {
+  resolveImageReference,
+  type ImageResolveDeps,
+} from "./image-resolve.js";
 import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
 import {
   rescheduleProfileRefresh,
@@ -69,6 +85,69 @@ export function webSearchConfig() {
   return apiKey ? { apiKey } : null;
 }
 
+/** Image generation is available when the image provider env pair is set. */
+export function imageGenerationConfig() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const baseUrl = process.env.OPENAI_BASE_URL?.trim();
+  return apiKey && baseUrl ? { apiKey, baseUrl } : null;
+}
+
+export type ToolGrantHelpers = {
+  hasGrant(toolName: string): Promise<boolean> | boolean;
+  takeToolOverride(
+    toolName: string,
+  ): Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+};
+
+/** Capability map for active image models; unknown model ids → null (tool defaults). */
+async function loadImageCapabilities(): Promise<Map<string, ImageCapabilitySet>> {
+  const models = await prisma.chatModel.findMany({
+    where: { outputType: "image", isActive: true },
+    select: { modelId: true, imageCapabilities: true },
+  });
+  const capabilities = new Map<string, ImageCapabilitySet>();
+  for (const model of models) {
+    capabilities.set(model.modelId, parseImageCapabilities(model.imageCapabilities));
+  }
+  return capabilities;
+}
+
+/**
+ * Document-page image lookup for edit_image references: a document image id
+ * only exists inside its page's images JSON, so scan the ready documents
+ * linked to this session (the same corpus the model saw image ids from).
+ */
+async function findSessionDocumentImage(
+  imageId: string,
+  userId: string,
+  sessionId: string,
+): Promise<{ mediaType: string; buffer: Uint8Array } | null> {
+  const pages = await prisma.documentPage.findMany({
+    where: {
+      document: {
+        userId,
+        status: "ready",
+        sessionLinks: { some: { sessionId, userId } },
+      },
+    },
+    select: { images: true },
+  });
+  for (const page of pages) {
+    const match = normalizePageImages(page.images).find(
+      (entry) => entry.id === imageId,
+    );
+    if (!match) continue;
+    try {
+      const buffer = await getObjectBuffer(match.r2Key);
+      return { mediaType: match.mediaType, buffer };
+    } catch (error) {
+      console.error("[chat] document image fetch failed", { imageId, error });
+      return null;
+    }
+  }
+  return null;
+}
+
 export type ChatRunInput = {
   agent: ReturnType<typeof createAgent>;
   sessionId: string;
@@ -83,6 +162,8 @@ export type ChatRunInput = {
   hasActiveDocuments: boolean;
   /** Web tools registered (TAVILY_API_KEY set). */
   webSearchAvailable: boolean;
+  /** Image generation tools registered (OPENAI_API_KEY + OPENAI_BASE_URL set). */
+  imageGenerationAvailable: boolean;
   /** Context7 MCP tools available (configured + connected). */
   context7Available: boolean;
 };
@@ -95,6 +176,16 @@ export async function buildChatRunInput(input: {
   agentId?: string;
   /** Per-session web-search toggle (default false). */
   webSearchEnabled?: boolean;
+  /** Per-session image generation toggle (default false). */
+  imageGenerationEnabled?: boolean;
+  /** Session image defaults: model, aspect ratio, quality, background, count. */
+  imageGenSettings?: ImageGenSettings | null;
+  /** Grant/override lookups for approval-gated tools (per-session, live reads). */
+  grantHelpers?: ToolGrantHelpers;
+  /** Suspends runs awaiting user answers to agent clarification questions. */
+  clarificationRequester?: (
+    request: ClarificationRequest,
+  ) => Promise<ClarificationResponse>;
   /** Approval handler suspending web tools for user confirmation. */
   approvals?: ToolApprovalsOptions;
   /** Connected context7 MCP server (nullable when unavailable). */
@@ -107,6 +198,10 @@ export async function buildChatRunInput(input: {
     reasoningEffort,
     agentId,
     webSearchEnabled = false,
+    imageGenerationEnabled = false,
+    imageGenSettings = null,
+    grantHelpers,
+    clarificationRequester,
     approvals,
     context7Server,
   } = input;
@@ -233,6 +328,50 @@ export async function buildChatRunInput(input: {
     instructions.push(WEB_SEARCH_INSTRUCTION);
   }
 
+  // Image generation tools: registered only when the image provider env pair
+  // is set. Grants/overrides come from the approval registry (live per-call
+  // reads); references resolve to generated or document images.
+  const imgConfig = imageGenerationConfig();
+  const imageGenerationAvailable = imgConfig !== null;
+  if (imageGenerationAvailable) {
+    const capabilities = await loadImageCapabilities();
+    const resolveDeps: ImageResolveDeps = {
+      getGeneratedImage: (id) => getImageStore().getImage(id),
+      getObjectBuffer,
+      findDocumentImage: findSessionDocumentImage,
+    };
+    tools.push(
+      ...createImageGenerationTools({
+        model: new OpenRouterImageGenerationModel({
+          apiKey: imgConfig.apiKey,
+          baseUrl: imgConfig.baseUrl,
+        }),
+        store: {
+          saveGeneratedImage: (input) => getImageStore().saveGeneratedImage(input),
+        },
+        enabled: imageGenerationEnabled,
+        hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+        takeToolOverride: (name) =>
+          grantHelpers?.takeToolOverride(name) ?? Promise.resolve(null),
+        userId,
+        sessionId,
+        projectId,
+        resolveReference: (imageId) =>
+          resolveImageReference({ imageId, userId, sessionId }, resolveDeps),
+        capabilities: (modelId) => capabilities.get(modelId) ?? null,
+        defaultSettings: imageGenSettings ?? undefined,
+      }),
+    );
+    instructions.push(IMAGE_GENERATION_INSTRUCTION);
+  }
+
+  // Clarification: the generic request_clarification tool suspends the run
+  // until the user answers (surfaced via the stream by the requester).
+  if (clarificationRequester) {
+    tools.push(createClarificationTool({ requester: clarificationRequester }));
+    instructions.push(CLARIFICATION_INSTRUCTION);
+  }
+
   const context7Available = context7Server !== null && context7Server !== undefined;
   if (context7Available) {
     instructions.push(CONTEXT7_INSTRUCTION);
@@ -248,7 +387,9 @@ export async function buildChatRunInput(input: {
     additionalInstructions: instructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
-    ...(webSearchAvailable && approvals ? { approvals } : {}),
+    ...((webSearchAvailable || imageGenerationAvailable) && approvals
+      ? { approvals }
+      : {}),
     ...(context7Available ? { mcpServers: [context7Server] } : {}),
     memory,
   });
@@ -266,6 +407,7 @@ export async function buildChatRunInput(input: {
     memory,
     hasActiveDocuments,
     webSearchAvailable,
+    imageGenerationAvailable,
     context7Available,
   };
 }

@@ -93,31 +93,31 @@ describe("createImageGenerationTools", () => {
   });
 
   describe("approval policy", () => {
-    it("requires approval when generation is disabled and no grant exists", () => {
+    it("requires approval when generation is disabled and no grant exists", async () => {
       const { scope } = makeScope({ enabled: false });
       const tools = createImageGenerationTools(scope);
       const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.when({ args: { prompt: "a red fox" } })).toBe(true);
+      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(true);
     });
 
-    it("does not require approval when generation is enabled", () => {
+    it("does not require approval when generation is enabled", async () => {
       const { scope } = makeScope({ enabled: true });
       const tools = createImageGenerationTools(scope);
       const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
     });
 
-    it("does not require approval when a grant exists for the tool", () => {
+    it("does not require approval when a grant exists for the tool", async () => {
       const { scope } = makeScope({
         enabled: false,
         hasGrant: (name) => name === "generate_image",
       });
       const tools = createImageGenerationTools(scope);
       const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
     });
 
-    it("requires approval for edit_image even when only generate_image is granted", () => {
+    it("requires approval for edit_image even when only generate_image is granted", async () => {
       const { scope } = makeScope({
         enabled: false,
         hasGrant: (name) => name === "generate_image",
@@ -125,7 +125,7 @@ describe("createImageGenerationTools", () => {
       const tools = createImageGenerationTools(scope);
       const approval = tools[1]!.approval as ApprovalPolicy;
       expect(
-        approval.when({ args: { prompt: "a red fox", referenceImageId: "img-1" } }),
+        await approval.when({ args: { prompt: "a red fox", referenceImageId: "img-1" } }),
       ).toBe(true);
     });
 

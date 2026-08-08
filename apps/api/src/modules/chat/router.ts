@@ -19,7 +19,12 @@ import {
   getApprovalRegistry,
 } from "./approval-registry.js";
 import { getContext7McpServer, isContext7Configured } from "../../lib/context7-server.js";
-import { webSearchConfig } from "./build-run-input.js";
+import {
+  imageGenerationConfig,
+  webSearchConfig,
+} from "./build-run-input.js";
+import { parseImageGenSettings } from "./image-gen-settings.js";
+import { parseClarificationResponseBody } from "./clarification-body.js";
 import {
   TruncateTargetNotFoundError,
   truncateSessionMemory,
@@ -347,6 +352,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     if (!modelInfo) return c.json({ error: `unknown model: ${model}` }, 400);
 
     const webSearchEnabled = parseBoolean(body.webSearchEnabled);
+    const imageGenerationEnabled = parseBoolean(body.imageGenerationEnabled);
+    const imageGenSettings = parseImageGenSettings(body.imageGenSettings);
 
     const effortRaw = body.reasoningEffort;
     let reasoningEffort: string | null = null;
@@ -389,7 +396,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
 
     await enqueueChatRun(`chat:${streamId}`, {
       streamId, sessionId, userId: user.id, model, reasoningEffort,
-      webSearchEnabled, promptMessage, createdAt: new Date().toISOString(),
+      webSearchEnabled, imageGenerationEnabled, imageGenSettings,
+      promptMessage, createdAt: new Date().toISOString(),
     });
 
     const events = withStartTimeout(
@@ -428,6 +436,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const context7Server = await getContext7McpServer();
     return c.json({
       webSearchAvailable: webSearchConfig() !== null,
+      imageGenerationAvailable: imageGenerationConfig() !== null,
       context7Available: isContext7Configured() && context7Server !== null,
     });
   })
@@ -439,6 +448,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const body = (await c.req.json().catch(() => null)) as {
       approved?: unknown;
       reason?: unknown;
+      grantScope?: unknown;
+      overrideArgs?: unknown;
     } | null;
     if (body === null || typeof body.approved !== "boolean") {
       return c.json({ error: "approved (boolean) is required" }, 400);
@@ -459,11 +470,70 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ ok: true, alreadyResolved: true });
     }
 
+    if (body.approved) {
+      // "Allow for session" makes the tool skip its approval gate for the
+      // rest of the session; the gate reads the grant on every call.
+      if (body.grantScope === "session") {
+        await registry.grantTool({
+          sessionId: approval.sessionId,
+          toolName: approval.toolName,
+        });
+      }
+      // UI-edited tool args (e.g. image params) are staged once; the tool
+      // consumes them atomically on its next call.
+      if (
+        body.overrideArgs &&
+        typeof body.overrideArgs === "object" &&
+        !Array.isArray(body.overrideArgs) &&
+        Object.keys(body.overrideArgs).length > 0
+      ) {
+        await registry.setToolOverride({
+          sessionId: approval.sessionId,
+          toolName: approval.toolName,
+          args: body.overrideArgs as Record<string, unknown>,
+        });
+      }
+    }
+
     await registry.publishDecision(approvalId, {
       approved: body.approved,
       ...(typeof body.reason === "string" && body.reason.trim()
         ? { reason: body.reason.trim() }
         : {}),
     });
+    return c.json({ ok: true });
+  })
+  .post("/clarifications/:id/response", async (c) => {
+    const user = c.get("user");
+    const id = c.req.param("id");
+    if (!id) return c.json({ error: "id is required" }, 400);
+
+    const registry = getApprovalRegistry();
+    const record = await registry.getClarification(id);
+    if (!record) {
+      // Idempotent: the clarification was already answered, timed out, or
+      // TTL'd — a late response is a no-op success.
+      return c.json({ ok: true, alreadyResolved: true });
+    }
+    if (record.userId !== user.id) {
+      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
+    }
+    if (record.status !== "pending") {
+      return c.json({ ok: true, alreadyResolved: true });
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = parseClarificationResponseBody(body);
+    if (!parsed) {
+      return c.json(
+        {
+          error:
+            "answers (object of string | string[]) and optional skipped (string[]) are required",
+        },
+        400,
+      );
+    }
+
+    await registry.publishClarificationResponse(id, parsed);
     return c.json({ ok: true });
   });

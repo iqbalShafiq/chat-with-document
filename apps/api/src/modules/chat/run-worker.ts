@@ -145,6 +145,8 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     model,
     reasoningEffort,
     webSearchEnabled,
+    imageGenerationEnabled,
+    imageGenSettings,
     promptMessage,
   } = job.data;
   const store = getStreamStore();
@@ -171,12 +173,37 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
         store.append({ streamId, event }).then(() => undefined),
     });
 
+    // Grant/override lookups are live per-call reads (grants can be issued
+    // mid-run via the decision route), so they wrap the registry directly.
+    const grantHelpers = {
+      hasGrant: (toolName: string) =>
+        getApprovalRegistry().hasToolGrant(sessionId, toolName),
+      takeToolOverride: (toolName: string) =>
+        getApprovalRegistry().takeToolOverride(sessionId, toolName),
+    };
+
+    // Clarification requests suspend the run until the user answers via the
+    // API route, surfacing each request as a stream event.
+    const clarificationRequester = getApprovalRegistry().createClarificationRequester(
+      {
+        userId,
+        sessionId,
+        streamId,
+        append: (event) =>
+          store.append({ streamId, event }).then(() => undefined),
+      },
+    );
+
     const runInput = await buildChatRunInput({
       sessionId,
       userId,
       model,
       reasoningEffort,
       webSearchEnabled,
+      imageGenerationEnabled,
+      imageGenSettings,
+      grantHelpers,
+      clarificationRequester,
       approvals: { handler: approvalHandler },
       context7Server: await getContext7McpServer(),
     });

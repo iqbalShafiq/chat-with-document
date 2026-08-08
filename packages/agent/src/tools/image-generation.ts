@@ -165,9 +165,11 @@ export type ImageGenerationToolScope = {
   /** Per-session toggle: false → the model must ask the user before generating. */
   enabled: boolean;
   /** True when the user granted the tool for this session without asking again. */
-  hasGrant(toolName: string): boolean;
+  hasGrant(toolName: string): boolean | Promise<boolean>;
   /** Consume a one-shot override of tool args (UI-edited params), if any. */
-  takeToolOverride(toolName: string): Record<string, unknown> | null;
+  takeToolOverride(
+    toolName: string,
+  ): Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
   userId: string;
   sessionId: string;
   projectId: string | null;
@@ -284,7 +286,7 @@ async function runGeneration(
   extraParams: Record<string, unknown> = {},
 ): Promise<GenerateImageResult> {
   const toolName = isEdit ? "edit_image" : "generate_image";
-  const mergedInput = applyOverride(args, scope.takeToolOverride(toolName));
+  const mergedInput = applyOverride(args, await scope.takeToolOverride(toolName));
   // Overrides bypass the framework's validation of the model's args, so the
   // merged args are re-validated against the tool schema. When an override is
   // invalid (e.g. a prompt beyond the bound), it is dropped in favor of the
@@ -388,7 +390,7 @@ export function createImageGenerationTools(
   scope: ImageGenerationToolScope,
 ): AnyTool[] {
   const approval = (toolName: "generate_image" | "edit_image") => ({
-    when: () => !scope.enabled && !scope.hasGrant(toolName),
+    when: async () => !scope.enabled && !(await scope.hasGrant(toolName)),
     // The reason shows the model's pre-execution intent. An override replacing
     // the prompt comes from the user's own approval card, so it is not shown
     // here; override prompts are still bounded by schema re-validation in

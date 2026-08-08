@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import type { Message } from "@anvia/core/completion";
+import type { ImageGenSettings } from "@assingment/agent";
 import { getBullmqConnectionOptions, getRedis } from "../../lib/redis.js";
 
 export const CHAT_RUN_QUEUE = "chat-run";
@@ -12,6 +13,10 @@ export type ChatRunJobData = {
   reasoningEffort: string | null;
   /** Per-session web-search toggle state (default false). */
   webSearchEnabled: boolean;
+  /** Per-session image generation toggle state (default false). */
+  imageGenerationEnabled: boolean;
+  /** Session image defaults: model, aspect ratio, quality, background, count. */
+  imageGenSettings: ImageGenSettings | null;
   promptMessage: Message;
   createdAt: string;
 };
