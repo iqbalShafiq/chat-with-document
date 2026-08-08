@@ -113,13 +113,15 @@ export class OpenRouterImageGenerationModel
         },
       ];
     });
+    if (images.length === 0) {
+      throw new Error("Image generation returned no usable images");
+    }
 
+    const first = images[0]!;
     return {
-      image: images[0]?.data ?? new Uint8Array(),
+      image: first.data,
       images,
-      ...(images[0]?.mediaType
-        ? { mediaType: images[0].mediaType }
-        : {}),
+      ...(first.mediaType ? { mediaType: first.mediaType } : {}),
       rawResponse: raw,
     };
   }

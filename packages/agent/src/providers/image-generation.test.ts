@@ -39,7 +39,7 @@ afterEach(() => {
 
 describe("OpenRouterImageGenerationModel", () => {
   it("posts to the images endpoint with merged params and auth header", async () => {
-    const fetchMock = mockFetch({ data: [] });
+    const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = makeModel();
 
     await model.imageGeneration({
@@ -113,7 +113,7 @@ describe("OpenRouterImageGenerationModel", () => {
     expect(result.image).toBe(result.images[0]!.data);
   });
 
-  it("skips entries without a b64 payload", async () => {
+  it("throws when all entries lack a b64 payload", async () => {
     mockFetch({
       data: [
         { b64_json: null, media_type: "image/png" },
@@ -122,29 +122,18 @@ describe("OpenRouterImageGenerationModel", () => {
     });
     const model = makeModel();
 
-    const result = await model.imageGeneration({
-      prompt: "a red fox in the snow",
-      width: 256,
-      height: 256,
-    });
-
-    expect(result.images).toEqual([]);
-    expect(result.image).toEqual(new Uint8Array());
-    expect(result.mediaType).toBeUndefined();
+    await expect(
+      model.imageGeneration({ prompt: "a red fox in the snow", width: 256, height: 256 }),
+    ).rejects.toThrow("Image generation returned no usable images");
   });
 
-  it("returns empty results when data is missing", async () => {
+  it("throws when data is missing", async () => {
     mockFetch({});
     const model = makeModel();
 
-    const result = await model.imageGeneration({
-      prompt: "a red fox in the snow",
-      width: 256,
-      height: 256,
-    });
-
-    expect(result.images).toEqual([]);
-    expect(result.image).toEqual(new Uint8Array());
+    await expect(
+      model.imageGeneration({ prompt: "a red fox in the snow", width: 256, height: 256 }),
+    ).rejects.toThrow("Image generation returned no usable images");
   });
 
   it.each([
@@ -175,7 +164,7 @@ describe("OpenRouterImageGenerationModel", () => {
   });
 
   it("strips a trailing slash from baseUrl", async () => {
-    const fetchMock = mockFetch({ data: [] });
+    const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = new OpenRouterImageGenerationModel({
       apiKey: API_KEY,
       baseUrl: `${BASE_URL}/`,
@@ -187,7 +176,7 @@ describe("OpenRouterImageGenerationModel", () => {
   });
 
   it("falls back to the default model when none is provided", async () => {
-    const fetchMock = mockFetch({ data: [] });
+    const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = new OpenRouterImageGenerationModel({
       apiKey: API_KEY,
       baseUrl: BASE_URL,
@@ -202,7 +191,7 @@ describe("OpenRouterImageGenerationModel", () => {
   });
 
   it("uses the configured default model", async () => {
-    const fetchMock = mockFetch({ data: [] });
+    const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = makeModel({ defaultModel: "google/gemini-2.5-flash-image" });
 
     await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
