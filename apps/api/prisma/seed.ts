@@ -331,7 +331,7 @@ async function main() {
     if (!providerId) throw new Error(`unknown provider slug for model: ${modelId}`);
     return prisma.chatModel.upsert({
       where: { modelId },
-      update: { ...data },
+      update: { ...data, providerId },
       create: { ...data, modelId, providerId },
     });
   };
