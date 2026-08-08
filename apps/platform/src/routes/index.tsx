@@ -893,6 +893,7 @@ function ChatSession({
     [],
   );
   const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
+  const [sessionImagesError, setSessionImagesError] = useState(false);
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
     null,
   );
@@ -968,12 +969,26 @@ function ChatSession({
     }
   }, [sessionId]);
 
+  /**
+   * Session image history. Refetched on mount, after regenerate/truncate, and
+   * retried when the last fetch failed. Version guard drops stale responses
+   * (e.g. a fetch kicked off by an action in a previous run).
+   */
+  const sessionImagesVersionRef = useRef(0);
   const refreshSessionImages = useCallback(async () => {
+    const version = ++sessionImagesVersionRef.current;
     try {
       const images = await fetchSessionImages(sessionId);
+      if (version !== sessionImagesVersionRef.current) return;
       setSessionImages(images);
+      setSessionImagesError(false);
     } catch {
-      // Keep the previous list if refresh fails.
+      if (version === sessionImagesVersionRef.current) {
+        // Keep the previous list, but flag it so the next relevant event
+        // (docs refresh / regenerate / truncate) retries instead of silently
+        // serving stale data.
+        setSessionImagesError(true);
+      }
     }
   }, [sessionId]);
 
@@ -1306,6 +1321,7 @@ function ChatSession({
   useEffect(() => {
     setSessionDocuments([]);
     setSessionImages([]);
+    setSessionImagesError(false);
     setIngestionItems([]);
     setComposerError(null);
     setAttachmentErrors([]);
@@ -1490,6 +1506,10 @@ function ChatSession({
         clientMessageId: meta.clientMessageId,
       });
 
+      // The dropped run's tool parts leave chat.messages, so live image
+      // collection shrinks — resync history to server truth (fire-and-forget).
+      void refreshSessionImages();
+
       currentChat.setMessages(currentChat.messages.slice(0, index));
       setEditingMessageId(null);
 
@@ -1503,7 +1523,7 @@ function ChatSession({
         }),
       });
     },
-    [sessionId],
+    [sessionId, refreshSessionImages],
   );
 
   const handleRevert = useCallback(
@@ -1597,6 +1617,8 @@ function ChatSession({
               }).catch(() => {});
             }
             chatController.setMessages(messages.slice(0, -2));
+            // The failed tail is gone from live parts — resync image history.
+            void refreshSessionImages();
           }
 
           const documentIds: string[] = [];
@@ -1643,6 +1665,9 @@ function ChatSession({
               }
 
               await refreshSessionDocuments();
+              // Retry a failed image-history fetch alongside the docs refresh
+              // so the rail doesn't silently serve stale data.
+              if (sessionImagesError) void refreshSessionImages();
             } catch (error) {
               const message =
                 error instanceof Error
