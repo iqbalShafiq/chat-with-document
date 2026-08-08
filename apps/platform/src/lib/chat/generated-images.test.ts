@@ -3,8 +3,12 @@ import type { UIMessage, UIMessagePart } from "@anvia/react";
 import {
   collectGeneratedImages,
   collectGeneratedImagesFromMessages,
+  countRunningImageToolPartsFromMessages,
   isImageToolName,
+  mergeGeneratedImages,
+  toGeneratedImageItem,
 } from "./generated-images";
+import type { GeneratedImageMeta } from "#/lib/api";
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
 
@@ -183,5 +187,113 @@ describe("collectGeneratedImagesFromMessages", () => {
       imageMeta({ imageId: "a" }),
       imageMeta({ imageId: "b" }),
     ]);
+  });
+});
+
+function storedMeta(overrides: Record<string, unknown> = {}): GeneratedImageMeta {
+  return {
+    id: "stored-0",
+    sessionId: "s1",
+    projectId: null,
+    mediaType: "image/png",
+    width: 1024,
+    height: 1024,
+    modelId: "openai/gpt-5-image-mini",
+    prompt: "stored prompt",
+    nOfTotal: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("mergeGeneratedImages", () => {
+  it("combines live images before history, deduping by id", () => {
+    const live = [
+      imageMeta({ imageId: "live-1", prompt: "live prompt", total: 2, index: 1 }),
+      imageMeta({ imageId: "both", prompt: "live wins" }),
+    ];
+    const history = [
+      storedMeta({ id: "both", prompt: "history loses" }),
+      storedMeta({ id: "stored-2", nOfTotal: "1 of 4" }),
+    ];
+
+    expect(mergeGeneratedImages(live, history)).toEqual([
+      {
+        id: "live-1",
+        modelId: "openai/gpt-5-image-mini",
+        prompt: "live prompt",
+        width: 1024,
+        height: 1024,
+        mediaType: "image/png",
+        nOfTotal: "2 of 2",
+      },
+      {
+        id: "both",
+        modelId: "openai/gpt-5-image-mini",
+        prompt: "live wins",
+        width: 1024,
+        height: 1024,
+        mediaType: "image/png",
+        nOfTotal: null,
+      },
+      {
+        id: "stored-2",
+        modelId: "openai/gpt-5-image-mini",
+        prompt: "stored prompt",
+        width: 1024,
+        height: 1024,
+        mediaType: "image/png",
+        nOfTotal: "1 of 4",
+      },
+    ]);
+  });
+
+  it("returns [] when both lists are empty", () => {
+    expect(mergeGeneratedImages([], [])).toEqual([]);
+  });
+});
+
+describe("toGeneratedImageItem", () => {
+  it("normalizes a stored meta keeping the server nOfTotal string", () => {
+    expect(toGeneratedImageItem(storedMeta({ nOfTotal: "3 of 4" }))).toEqual({
+      id: "stored-0",
+      modelId: "openai/gpt-5-image-mini",
+      prompt: "stored prompt",
+      width: 1024,
+      height: 1024,
+      mediaType: "image/png",
+      nOfTotal: "3 of 4",
+    });
+  });
+});
+
+describe("countRunningImageToolPartsFromMessages", () => {
+  it("counts distinct image tool parts still streaming input", () => {
+    const messages = [
+      message([
+        toolPart("generate_image", undefined, "input-streaming"),
+        toolPart("edit_image", undefined, "input-available"),
+        toolPart("generate_image", { images: [] }, "output-available"),
+        toolPart("generate_image", undefined, "error"),
+        toolPart("web_search", undefined, "input-streaming"),
+      ]),
+      message([
+        toolPart("generate_image", undefined, "input-streaming"),
+      ]),
+    ];
+
+    expect(countRunningImageToolPartsFromMessages(messages)).toBe(3);
+  });
+
+  it("returns 0 when no image tool is in flight", () => {
+    const messages = [
+      message([
+        toolPart("generate_image", { images: [] }, "output-available"),
+        toolPart("edit_image", undefined, "error"),
+        toolPart("web_search", undefined, "input-streaming"),
+      ]),
+    ];
+
+    expect(countRunningImageToolPartsFromMessages(messages)).toBe(0);
   });
 });

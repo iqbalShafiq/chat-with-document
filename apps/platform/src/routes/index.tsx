@@ -43,7 +43,9 @@ import {
   unlinkDocumentFromSession,
   uploadDocument,
   waitForDocumentReady,
+  fetchSessionImages,
   type ContextUsageInfo,
+  type GeneratedImageMeta,
   type ImageGenSettings,
   type ModelInfo,
   type ProjectListItem,
@@ -57,6 +59,11 @@ import { ImagePreviewProvider } from "#/components/images/image-preview";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
+import {
+  collectGeneratedImagesFromMessages,
+  countRunningImageToolPartsFromMessages,
+  mergeGeneratedImages,
+} from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
@@ -885,6 +892,7 @@ function ChatSession({
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
   );
+  const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
     null,
   );
@@ -955,6 +963,15 @@ function ChatSession({
     try {
       const documents = await listSessionDocuments(sessionId);
       setSessionDocuments(documents);
+    } catch {
+      // Keep the previous list if refresh fails.
+    }
+  }, [sessionId]);
+
+  const refreshSessionImages = useCallback(async () => {
+    try {
+      const images = await fetchSessionImages(sessionId);
+      setSessionImages(images);
     } catch {
       // Keep the previous list if refresh fails.
     }
@@ -1288,6 +1305,7 @@ function ChatSession({
 
   useEffect(() => {
     setSessionDocuments([]);
+    setSessionImages([]);
     setIngestionItems([]);
     setComposerError(null);
     setAttachmentErrors([]);
@@ -1297,7 +1315,8 @@ function ChatSession({
     setCompaction({ phase: "idle" });
     setPreviousRunError(false);
     void refreshSessionDocuments();
-  }, [refreshSessionDocuments]);
+    void refreshSessionImages();
+  }, [refreshSessionDocuments, refreshSessionImages]);
 
   // Capabilities are global (not per-session) — best-effort fetch; the
   // module-wide promise cache in lib/api makes this cheap on remounts.
@@ -1522,6 +1541,21 @@ function ChatSession({
   const webSources = useMemo(
     () => collectWebSources(chat.messages),
     [chat.messages],
+  );
+
+  const liveGeneratedImages = useMemo(
+    () => collectGeneratedImagesFromMessages(chat.messages),
+    [chat.messages],
+  );
+
+  const runningImageParts = useMemo(
+    () => countRunningImageToolPartsFromMessages(chat.messages),
+    [chat.messages],
+  );
+
+  const generatedImages = useMemo(
+    () => mergeGeneratedImages(liveGeneratedImages, sessionImages),
+    [liveGeneratedImages, sessionImages],
   );
 
   return (
@@ -1824,6 +1858,8 @@ function ChatSession({
             sessionDocuments={sessionDocuments}
             citedDocuments={citedDocuments}
             webSources={webSources}
+            generatedImages={generatedImages}
+            runningImageCount={runningImageParts}
             ingestionItems={ingestionItems}
             onRemoveActiveDocument={handleRemoveActiveDocument}
             removingDocumentId={removingDocumentId}

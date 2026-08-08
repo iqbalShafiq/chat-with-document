@@ -5,11 +5,13 @@ import { useCitationSessionOptional } from "#/components/chat/citation-session-c
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { ComposerAttachmentChip } from "#/components/composer-attachment";
 import { DocumentRow } from "#/components/documents/document-row";
+import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { IngestionStatusPill } from "#/components/ingestion-status-pill";
 import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
 import type { WebSourceSummary } from "#/lib/chat/web-sources";
+import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
-import { Globe, Quote, X } from "lucide-react";
+import { Globe, Image, Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
@@ -25,11 +27,15 @@ export function useHasSessionDocuments({
   citedDocuments,
   ingestionItems,
   webSources = [],
+  generatedImages = [],
+  runningImageCount = 0,
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
   webSources?: WebSourceSummary[];
+  generatedImages?: GeneratedImageItem[];
+  runningImageCount?: number;
 }) {
   const composer = useComposer();
   return (
@@ -37,6 +43,8 @@ export function useHasSessionDocuments({
     citedDocuments.length > 0 ||
     ingestionItems.length > 0 ||
     webSources.length > 0 ||
+    generatedImages.length > 0 ||
+    runningImageCount > 0 ||
     composer.attachments.length > 0
   );
 }
@@ -50,6 +58,8 @@ export function SessionDocumentsPanel({
   citedDocuments,
   ingestionItems,
   webSources = [],
+  generatedImages = [],
+  runningImageCount = 0,
   onRemoveActiveDocument,
   removingDocumentId = null,
 }: {
@@ -57,6 +67,8 @@ export function SessionDocumentsPanel({
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
   webSources?: WebSourceSummary[];
+  generatedImages?: GeneratedImageItem[];
+  runningImageCount?: number;
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
@@ -69,6 +81,7 @@ export function SessionDocumentsPanel({
   const hasActive = sessionDocuments.length > 0;
   const hasCited = citedDocuments.length > 0;
   const hasWebSources = webSources.length > 0;
+  const hasGeneratedImages = generatedImages.length > 0;
   const hasIngestion = ingestionItems.length > 0;
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
@@ -155,6 +168,9 @@ export function SessionDocumentsPanel({
             hasActive ? `${sessionDocuments.length} active` : null,
             hasCited ? `${citedDocuments.length} cited` : null,
             hasWebSources ? `${webSources.length} web` : null,
+            hasGeneratedImages
+              ? `${generatedImages.length} image${generatedImages.length === 1 ? "" : "s"}`
+              : null,
             hasPending ? `${pendingCount} pending` : null,
           ]
             .filter(Boolean)
@@ -304,6 +320,34 @@ export function SessionDocumentsPanel({
             </CollapsibleDocumentSection>
           ) : null}
 
+          {hasGeneratedImages || runningImageCount > 0 ? (
+            <CollapsibleDocumentSection
+              title="Generated images"
+              icon={
+                <Image
+                  className="size-3.5 shrink-0 text-accent"
+                  strokeWidth={1.75}
+                />
+              }
+            >
+              <ul className="grid w-full list-none grid-cols-2 gap-1.5 p-0">
+                {generatedImages.map((image) => (
+                  <li key={image.id} className="min-w-0">
+                    <GeneratedImageThumbnail image={image} />
+                  </li>
+                ))}
+                {Array.from({ length: runningImageCount }).map((_, i) => (
+                  <li key={`running-${i}`} aria-hidden className="min-w-0">
+                    <div
+                      className="skeleton-shimmer aspect-square w-full rounded-lg"
+                      title="Generating…"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleDocumentSection>
+          ) : null}
+
           {hasPending ? (
             <CollapsibleDocumentSection
               title={hasIngestion ? "Uploading documents" : "Attachments"}
@@ -338,7 +382,12 @@ export function SessionDocumentsPanel({
             </CollapsibleDocumentSection>
           ) : null}
 
-          {!hasActive && !hasCited && !hasWebSources && !hasPending ? (
+          {!hasActive &&
+          !hasCited &&
+          !hasWebSources &&
+          !hasGeneratedImages &&
+          runningImageCount === 0 &&
+          !hasPending ? (
             <p className="px-1 py-6 text-center text-[11px] text-text-faint">
               Attach a file or pick from your library to ground this chat.
             </p>
@@ -367,6 +416,8 @@ export function SessionDocumentsRail({
   citedDocuments,
   ingestionItems,
   webSources = [],
+  generatedImages = [],
+  runningImageCount = 0,
   onRemoveActiveDocument,
   removingDocumentId,
 }: {
@@ -374,6 +425,8 @@ export function SessionDocumentsRail({
   citedDocuments: CitedDocumentSummary[];
   ingestionItems: IngestionItem[];
   webSources?: WebSourceSummary[];
+  generatedImages?: GeneratedImageItem[];
+  runningImageCount?: number;
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
 }) {
@@ -382,6 +435,8 @@ export function SessionDocumentsRail({
     citedDocuments,
     ingestionItems,
     webSources,
+    generatedImages,
+    runningImageCount,
   });
 
   return (
@@ -403,6 +458,8 @@ export function SessionDocumentsRail({
             citedDocuments={citedDocuments}
             ingestionItems={ingestionItems}
             webSources={webSources}
+            generatedImages={generatedImages}
+            runningImageCount={runningImageCount}
             onRemoveActiveDocument={onRemoveActiveDocument}
             removingDocumentId={removingDocumentId}
           />

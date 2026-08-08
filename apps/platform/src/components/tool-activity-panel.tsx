@@ -21,6 +21,7 @@ const TOOL_LABELS: Record<string, string> = {
   web_fetch: "Fetching web page",
   generate_image: "Generating image",
   edit_image: "Editing image",
+  request_clarification: "Asking for clarification",
   "resolve-library-id": "Looking up library",
   "query-docs": "Reading library docs",
 };

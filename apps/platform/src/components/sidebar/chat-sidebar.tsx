@@ -1,12 +1,15 @@
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { ImageGalleryModal } from "#/components/images/image-gallery-modal";
 import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
-import type { ProjectListItem } from "#/lib/api";
+import { fetchProjectImages, fetchUserImages, type ProjectListItem } from "#/lib/api";
+import { useCallback, useEffect, useState } from "react";
 import {
   FileText,
   FolderKanban,
+  Images,
   MessagesSquare,
   PanelLeftClose,
   SquarePen,
@@ -74,6 +77,26 @@ export function ChatSidebar({
   onOpenRecentProject: (project: ProjectListItem) => void;
 }) {
   const visibleProjects = recentProjects.slice(0, RECENT_PROJECTS_MAX);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [imageCount, setImageCount] = useState<number | null>(null);
+
+  // Lightweight badge: images in the current scope (project or user).
+  const refreshImageCount = useCallback(async () => {
+    try {
+      const inProject = viewMode === "project-workspace" && activeProjectId;
+      const items = inProject
+        ? await fetchProjectImages(activeProjectId!)
+        : await fetchUserImages();
+      setImageCount(items.length);
+    } catch {
+      setImageCount(null);
+    }
+  }, [activeProjectId, viewMode]);
+
+  useEffect(() => {
+    setImageCount(null);
+    void refreshImageCount();
+  }, [refreshImageCount]);
 
   return (
     <aside className="glass-sidebar flex h-full w-full min-h-0 flex-col">
@@ -195,6 +218,24 @@ export function ChatSidebar({
               Documents
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setGalleryOpen(true);
+              onCloseMobile?.();
+            }}
+            aria-haspopup="dialog"
+            className="mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] text-text-muted hover:bg-white/[0.05] hover:text-text"
+          >
+            <Images className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">Images</span>
+            {imageCount && imageCount > 0 ? (
+              <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-text-muted">
+                {imageCount}
+              </span>
+            ) : null}
+          </button>
         </div>
 
         {/* Recent projects sit above date groups (TODAY / …), history-list style */}
@@ -265,6 +306,16 @@ export function ChatSidebar({
       <div className="shrink-0">
         <AccountMenu user={user} />
       </div>
+
+      <ImageGalleryModal
+        open={galleryOpen}
+        onClose={() => {
+          setGalleryOpen(false);
+          // Keep the badge in sync with the latest list the modal loaded.
+          void refreshImageCount();
+        }}
+        activeProjectId={activeProjectId}
+      />
     </aside>
   );
 }
