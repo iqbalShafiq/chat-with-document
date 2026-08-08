@@ -55,3 +55,8 @@ docker-data/
 # Prisma local DB (if ever used)
 *.db
 *.db-journal
+
+# Playwright
+apps/platform/test-results/
+apps/platform/playwright-report/
+apps/platform/e2e/.auth/
