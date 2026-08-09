@@ -9,14 +9,14 @@ import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { useImagePreview } from "#/components/images/image-preview";
-import { MathMarkdown } from "#/components/math-markdown";
-import { ReasoningPanel } from "#/components/reasoning-panel";
+import { MathMarkdown } from "#/components/math-markdown";import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
   imageItemsFromToolPart,
   isImageToolName,
+  type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import {
   formatMessageBubbleTimestamp,
@@ -71,6 +71,12 @@ function messageStartsWithActivity(message: UIMessage): boolean {
  * by reference, so a model switch — which re-renders the parent thread —
  * no longer re-parses markdown/formatting for every message.
  */
+/**
+ * Minimum width for the edit bubble so the Cancel / Save & resubmit row fits
+ * on one line even when the message text is very short.
+ */
+const EDIT_BUBBLE_MIN_WIDTH = 264;
+
 export const ChatMessageRow = memo(function ChatMessageRow({
   message: messageProp,
   chatStatus,
@@ -81,6 +87,10 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onSubmitEdit,
   onRevert,
   generationInfo,
+  editContextImages,
+  editAvailableImages,
+  onEditContextAdd,
+  onEditContextRemove,
 }: {
   message: UIMessage;
   chatStatus: UseChatStatus;
@@ -92,6 +102,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onRevert: (message: UIMessage) => Promise<void>;
   /** Generation footer info — only the final assistant message shows it. */
   generationInfo?: { isGenerationEnd: boolean; generationText: string };
+  /** Context images managed inside the edit bubble (view / add / remove). */
+  editContextImages?: GeneratedImageItem[];
+  editAvailableImages?: GeneratedImageItem[];
+  onEditContextAdd?: (image: GeneratedImageItem) => void;
+  onEditContextRemove?: (image: GeneratedImageItem) => void;
 }) {
   const message = messageProp;
   const messageKind = readChatMessageMeta(message.metadata).kind;
@@ -174,7 +189,13 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           className="glass-bubble min-w-0 max-w-full text-sm leading-relaxed group-data-[role=user]:max-w-[min(100%,42rem)] group-data-[role=user]:rounded-2xl group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-text group-data-[role=assistant]:w-full group-data-[role=assistant]:max-w-full group-data-[role=assistant]:text-text"
           style={
             isEditing && editWidthPx
-              ? { width: editWidthPx, maxWidth: editWidthPx }
+              ? {
+                  // Keep the bubble at the message's width, but never below
+                  // the minimum that fits the Cancel / Save & resubmit row.
+                  width: editWidthPx,
+                  minWidth: EDIT_BUBBLE_MIN_WIDTH,
+                  maxWidth: editWidthPx,
+                }
               : undefined
           }
         >
@@ -184,6 +205,10 @@ export const ChatMessageRow = memo(function ChatMessageRow({
               busy={chatStatus === "streaming"}
               onCancel={onCancelEdit}
               onSubmit={(text) => onSubmitEdit(message, text)}
+              contextImages={editContextImages}
+              availableImages={editAvailableImages}
+              onAddContextImage={onEditContextAdd}
+              onRemoveContextImage={onEditContextRemove}
             />
           ) : (
             <>

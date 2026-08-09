@@ -1,6 +1,6 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer } from "@anvia/react-ui";
-import { FileX, ArrowUp, Pin, Square, X } from "lucide-react";
+import { FileX, ArrowUp, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -159,29 +159,20 @@ export function ChatComposer({
       ) : null}
 
       {activeContextImages.length > 0 ? (
-        <div className="flex items-center gap-2">
-          <Pin
-            className="size-3.5 shrink-0 text-accent"
-            strokeWidth={2.25}
-          />
-          <span className="shrink-0 text-[10px] font-medium text-text-faint">
-            Image context
-          </span>
-          <div
-            className="chat-scroll-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5"
-            role="list"
-            aria-label="Active image context"
-          >
-            {activeContextImages.map((image) => (
-              <div key={image.id} className="w-11 shrink-0" role="listitem">
-                <GeneratedImageThumbnail
-                  image={image}
-                  pinned
-                  onTogglePin={() => onToggleImageContext(image)}
-                />
-              </div>
-            ))}
-          </div>
+        <div
+          className="chat-scroll-x flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"
+          role="list"
+          aria-label="Active image context"
+        >
+          {activeContextImages.map((image) => (
+            <div key={image.id} className="w-24 shrink-0" role="listitem">
+              <GeneratedImageThumbnail
+                image={image}
+                pinned
+                onTogglePin={() => onToggleImageContext(image)}
+              />
+            </div>
+          ))}
         </div>
       ) : null}
 

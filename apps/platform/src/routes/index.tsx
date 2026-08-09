@@ -4,7 +4,7 @@ import {
   initialMessagesFromMemory,
   useChat,
 } from "@anvia/react";
-import type { UIAttachment, UIMessage } from "@anvia/react";
+import type { UIAttachment, UIMessage, UIMessagePart } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
@@ -1623,6 +1623,10 @@ function ChatSession({
    * useChat result object is recreated every render) — memoized message rows
    * depend on the stability of onSubmitEdit/onRevert.
    */
+  const [editContextImages, setEditContextImages] = useState<GeneratedImageItem[]>(
+    [],
+  );
+
   const resubmitFromUserMessage = useCallback(
     async (message: UIMessage, text: string) => {
       const currentChat = chatRef.current;
@@ -1664,6 +1668,33 @@ function ChatSession({
       currentChat.setMessages(currentChat.messages.slice(0, index));
       setEditingMessageId(null);
 
+      // Attach the context images managed in the edit bubble (view/add/remove)
+      // to the resubmitted message, like the normal send flow does.
+      const editAttachments: Array<{
+        id: string;
+        type: "image";
+        name: string;
+        mediaType: string;
+        data?: string;
+        text?: string;
+      }> = [];
+      for (const image of editContextImages) {
+        try {
+          const { blob, mediaType } = await fetchImageBytes(image.id);
+          editAttachments.push({
+            id: `ctx-${image.id}`,
+            type: "image",
+            name: image.prompt || "Image context",
+            mediaType,
+            data: await blobToDataUrl(blob),
+            text: image.prompt || "Image context",
+          });
+        } catch {
+          // skip images that fail to load
+        }
+      }
+      setEditContextImages([]);
+
       await currentChat.sendMessage({
         text: trimmed,
         metadata: withChatMessageMeta(undefined, {
@@ -1672,9 +1703,10 @@ function ChatSession({
           createdAt: new Date().toISOString(),
           clientMessageId: createClientMessageId(),
         }),
+        attachments: editAttachments,
       });
     },
-    [sessionId, refreshSessionImages],
+    [sessionId, refreshSessionImages, editContextImages],
   );
 
   const handleRevert = useCallback(
@@ -1697,17 +1729,6 @@ function ChatSession({
     () => computeGenerationActionInfo(chat.messages),
     [chat.messages],
   );
-  const handleStartEdit = useCallback(
-    (message: UIMessage) => {
-      if (chat.status === "streaming") return;
-      setEditingMessageId(message.id);
-    },
-    [chat.status],
-  );
-  const handleCancelEdit = useCallback(() => {
-    setEditingMessageId(null);
-  }, []);
-
   const citedDocuments = useMemo(
     () => collectCitedDocuments(chat.messages),
     [chat.messages],
@@ -1732,6 +1753,96 @@ function ChatSession({
     () => mergeGeneratedImages(liveGeneratedImages, sessionImages),
     [liveGeneratedImages, sessionImages],
   );
+
+  /**
+   * Resolve the context images attached to a user message so the edit bubble
+   * can show / manage them. Live messages carry the id as `ctx-<imageId>`;
+   * rebuilt-from-memory messages lose it, so fall back to matching the raw
+   * base64 payload against the session's generated images.
+   */
+  const resolveEditContextImages = useCallback(
+    async (message: UIMessage): Promise<GeneratedImageItem[]> => {
+      const parts = message.parts.filter(
+        (part): part is Extract<UIMessagePart, { type: "attachment" }> =>
+          part.type === "attachment" && part.attachment?.type === "image",
+      );
+      if (parts.length === 0) return [];
+      const byId = new Map(generatedImages.map((image) => [image.id, image]));
+      const found: GeneratedImageItem[] = [];
+      const dataParts: Array<
+        Extract<UIMessagePart, { type: "attachment" }>
+      > = [];
+      for (const part of parts) {
+        const idMatch = part.attachment.id?.match(/^ctx-(.+)$/);
+        const item = idMatch ? (byId.get(idMatch[1]) ?? null) : null;
+        if (item) {
+          if (!found.some((existing) => existing.id === item.id)) found.push(item);
+        } else {
+          dataParts.push(part);
+        }
+      }
+      if (dataParts.length > 0) {
+        const candidates = generatedImages.filter(
+          (image) => !found.some((existing) => existing.id === image.id),
+        );
+        for (const part of dataParts) {
+          const target = part.attachment.data ?? "";
+          if (!target) continue;
+          for (const candidate of candidates) {
+            try {
+              const { blob } = await fetchImageBytes(candidate.id);
+              const dataUrl = await blobToDataUrl(blob);
+              if (dataUrl.slice(dataUrl.indexOf(",") + 1) === target) {
+                found.push(candidate);
+                break;
+              }
+            } catch {
+              // skip images that fail to load
+            }
+          }
+        }
+      }
+      return found;
+    },
+    [generatedImages],
+  );
+
+
+  const handleStartEdit = useCallback(
+    (message: UIMessage) => {
+      if (chat.status === "streaming") return;
+      setEditingMessageId(message.id);
+      setEditContextImages([]);
+      void resolveEditContextImages(message).then(setEditContextImages);
+    },
+    [chat.status, resolveEditContextImages],
+  );
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditContextImages([]);
+  }, []);
+
+  const editAvailableImages = useMemo(
+    () =>
+      generatedImages.filter(
+        (image) =>
+          !editContextImages.some((item) => item.id === image.id),
+      ),
+    [generatedImages, editContextImages],
+  );
+  const handleEditContextAdd = useCallback((image: GeneratedImageItem) => {
+    setEditContextImages((current) =>
+      current.some((item) => item.id === image.id)
+        ? current
+        : [...current, image],
+    );
+  }, []);
+  const handleEditContextRemove = useCallback((image: GeneratedImageItem) => {
+    setEditContextImages((current) =>
+      current.filter((item) => item.id !== image.id),
+    );
+  }, []);
+
 
   return (
     <ChatProvider controller={chat}>
@@ -1980,6 +2091,10 @@ function ChatSession({
                         onSubmitEdit={handleSubmitEdit}
                         onRevert={handleRevert}
                         generationInfo={generationInfoMap.get(message.id)}
+                        editContextImages={editContextImages}
+                        editAvailableImages={editAvailableImages}
+                        onEditContextAdd={handleEditContextAdd}
+                        onEditContextRemove={handleEditContextRemove}
                       />
                     )}
                   </Thread.Messages>
