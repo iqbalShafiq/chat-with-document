@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { DIALOG_PRIMARY_BUTTON_CLASS, DIALOG_SECONDARY_BUTTON_CLASS } from "#/components/ui/dialog-actions";
 import { Select } from "#/components/ui/select";
 import type { SelectOption } from "#/components/ui/select-list";
+import { ModelIcon } from "#/components/composer/model-reasoning-switcher";
 import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
 
 /**
@@ -67,6 +68,9 @@ export function ImageContextModelDialog({
     value: model.modelId,
     label: model.name,
     hint: model.hint ?? undefined,
+    icon: (
+      <ModelIcon svg={model.iconSvg} className="size-3.5 shrink-0 opacity-70" />
+    ),
   }));
 
   const effortOptions: SelectOption[] = supportedEfforts.map((effort) => ({
@@ -84,7 +88,7 @@ export function ImageContextModelDialog({
       ref={dialogRef}
       aria-labelledby="image-context-dialog-title"
       aria-describedby="image-context-dialog-desc"
-      className="m-auto rounded-2xl border border-hairline bg-canvas-elevated p-5 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col open:gap-3 animate-scale-in"
+      className="chat-scroll m-auto max-h-[85dvh] overflow-y-auto rounded-2xl border border-hairline bg-canvas-elevated p-5 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col open:gap-3 animate-scale-in"
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onCancel();
@@ -117,6 +121,8 @@ export function ImageContextModelDialog({
           options={modelOptions}
           ariaLabel="Vision model"
           disabled={busy}
+          portal
+          hoverSide="right"
         />
       </label>
 

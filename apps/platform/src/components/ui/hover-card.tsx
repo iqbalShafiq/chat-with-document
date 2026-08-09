@@ -26,19 +26,25 @@ export function HoverCard({
   content,
   variant = "tooltip",
   disabled = false,
+  side = "top",
   children,
 }: {
   content: ReactNode;
   variant?: "tooltip" | "panel";
   disabled?: boolean;
+  /** "top": above the anchor; "right": to the right of the anchor's container. */
+  side?: "top" | "right";
   children: ReactNode;
 }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; bottom: number; right: number } | null>(
-    null,
-  );
+  const [pos, setPos] = useState<{
+    top: number;
+    bottom: number;
+    right: number;
+    left: number;
+  } | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const isPanelHoveredRef = useRef(false);
@@ -63,7 +69,16 @@ export function HoverCard({
     openTimerRef.current = window.setTimeout(() => {
       const rect = anchorRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setPos({ top: rect.top, bottom: rect.bottom, right: rect.right });
+      // "right" anchors the panel to the right edge of the trigger's
+      // container (the dropdown popover), with a small gap.
+      const container = anchorRef.current?.parentElement;
+      const containerRect = container?.getBoundingClientRect();
+      setPos({
+        top: rect.top,
+        bottom: rect.bottom,
+        right: containerRect?.right ?? rect.right,
+        left: containerRect?.left ?? rect.left,
+      });
       setOpen(true);
     }, DEFAULT_OPEN_DELAY_MS);
   };
@@ -117,17 +132,30 @@ export function HoverCard({
 
     const applyPosition = () => {
       const height = panel.offsetHeight;
+      const width = panel.offsetWidth;
       const gap = 8;
+      if (side === "right") {
+        // Right of the trigger's container (the dropdown popover).
+        const left = pos.right + gap;
+        const overflowRight = left + width - window.innerWidth;
+        panel.style.left = `${overflowRight > 0 ? pos.left - gap - width : left}px`;
+        // Vertically align with the hovered row, flipping up when near bottom.
+        const openUp = pos.bottom + height > window.innerHeight - 8;
+        panel.style.top = `${openUp ? pos.top - height : pos.bottom}px`;
+        panel.style.right = "auto";
+        return;
+      }
       const openUp = pos.top - height - gap >= 0;
       panel.style.top = `${openUp ? pos.top - height - gap : pos.bottom + gap}px`;
       panel.style.right = `${window.innerWidth - pos.right}px`;
+      panel.style.left = "auto";
     };
 
     applyPosition();
     const observer = new ResizeObserver(applyPosition);
     observer.observe(panel);
     return () => observer.disconnect();
-  }, [open, pos]);
+  }, [open, pos, side]);
 
   useEffect(() => {
     if (disabled) {

@@ -26,6 +26,8 @@ export type SelectOptionListProps = {
   style?: CSSProperties;
   className?: string;
   onKeyDown?: KeyboardEventHandler;
+  /** Where the option detail hover card appears relative to the popover. */
+  hoverSide?: "top" | "right";
 };
 
 /**
@@ -42,6 +44,7 @@ export function SelectOptionList({
   style,
   className = "",
   onKeyDown,
+  hoverSide = "top",
 }: SelectOptionListProps) {
   return (
     <ul
@@ -51,7 +54,7 @@ export function SelectOptionList({
       aria-label={ariaLabel}
       style={style}
       onKeyDown={onKeyDown}
-      className={`overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${className}`}
+      className={`chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${className}`}
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;
@@ -90,6 +93,7 @@ export function SelectOptionList({
             {opt.detail ? (
               <HoverCard
                 variant="tooltip"
+                side={hoverSide}
                 disabled={opt.disabled}
                 content={opt.detail}
               >

@@ -221,6 +221,7 @@ export function ModelReasoningSwitcher({
               zIndex: 80,
             }}
             options={openMenu === "model" ? modelOptions : reasoningOptions}
+            hoverSide={openMenu === "model" ? "right" : "top"}
             onSelect={(selectedValue) => {
               if (openMenu === "model") {
                 onModelChange(selectedValue);

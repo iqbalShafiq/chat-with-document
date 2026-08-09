@@ -2,11 +2,13 @@ import { ChevronDown } from "lucide-react";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   SelectOptionList,
   type SelectOption,
@@ -20,6 +22,14 @@ export type SelectProps = {
   ariaLabel: string;
   className?: string;
   disabled?: boolean;
+  /**
+   * Render the listbox through a portal anchored to the trigger. Needed when
+   * the Select lives inside a transformed container (e.g. animated dialogs)
+   * that would otherwise clip or stack the dropdown behind itself.
+   */
+  portal?: boolean;
+  /** Hover detail placement for option cards (model logos etc). */
+  hoverSide?: "top" | "right";
 };
 
 export function Select({
@@ -30,6 +40,8 @@ export function Select({
   ariaLabel,
   className = "",
   disabled = false,
+  portal = false,
+  hoverSide = "top",
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -75,6 +87,17 @@ export function Select({
       triggerRef.current?.focus();
     }
   }, [open]);
+
+  const [listPos, setListPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !portal) {
+      setListPos(null);
+      return;
+    }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setListPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+  }, [open, portal]);
 
   useEffect(() => {
     if (!open) return;
@@ -177,21 +200,51 @@ export function Select({
         strokeWidth={1.75}
       />
       {open ? (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1.5">
-          <SelectOptionList
-            ref={listRef}
-            id={listId}
-            ariaLabel={ariaLabel}
-            value={value}
-            options={options}
-            onSelect={(optionValue) => {
-              onChange(optionValue);
-              setOpen(false);
-            }}
-            onKeyDown={handleListKeyDown}
-            className="max-h-[16rem] overflow-y-auto"
-          />
-        </div>
+        portal && listPos ? (
+          createPortal(
+            <div
+              className="fixed z-[90]"
+              style={{
+                top: listPos.top,
+                left: listPos.left,
+                width: Math.max(listPos.width, 200),
+              }}
+            >
+              <SelectOptionList
+                ref={listRef}
+                id={listId}
+                ariaLabel={ariaLabel}
+                value={value}
+                options={options}
+                onSelect={(optionValue) => {
+                  onChange(optionValue);
+                  setOpen(false);
+                }}
+                onKeyDown={handleListKeyDown}
+                hoverSide={hoverSide}
+                className="max-h-[16rem] overflow-y-auto"
+              />
+            </div>,
+            document.body,
+          )
+        ) : (
+          <div className="absolute left-0 right-0 top-full z-30 mt-1.5">
+            <SelectOptionList
+              ref={listRef}
+              id={listId}
+              ariaLabel={ariaLabel}
+              value={value}
+              options={options}
+              onSelect={(optionValue) => {
+                onChange(optionValue);
+                setOpen(false);
+              }}
+              onKeyDown={handleListKeyDown}
+              hoverSide={hoverSide}
+              className="max-h-[16rem] overflow-y-auto"
+            />
+          </div>
+        )
       ) : null}
     </div>
   );
