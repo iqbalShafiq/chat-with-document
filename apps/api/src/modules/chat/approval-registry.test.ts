@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ToolApprovalRequest } from "@anvia/core";
 import {
   createApprovalRegistry,
+  STREAM_STOP_KEY,
   type ApprovalRedis,
   type ClarificationRequest,
 } from "./approval-registry.js";
@@ -134,6 +135,15 @@ function createFakeRedis() {
       }
       return removed;
     }),
+    keys: vi.fn(async (pattern: string) => {
+      // Minimal glob: only supports suffix "*" (used by listPending*).
+      const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
+      return [...store.keys()].filter((key) =>
+        pattern.endsWith("*") ? key.startsWith(prefix) : key === pattern,
+      );
+    }),
+    /** Test helper — not part of ApprovalRedis. */
+    __store: store,
   };
 }
 
@@ -306,6 +316,48 @@ describe("createApprovalRegistry", () => {
       status: "approved",
       resolvedAt: expect.any(String),
     });
+  });
+
+  it("rejects pending approval when the stream stop flag is set", async () => {
+    const { fake, recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 5_000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    await fake.set(STREAM_STOP_KEY(STREAM_ID), "1");
+    await expect(pending).resolves.toEqual({
+      approved: false,
+      reason: "Stopped by the user.",
+    });
+
+    const resultEvent = recorder.events[1] as ToolApprovalResultEvent;
+    expect(resultEvent.type).toBe("tool_approval_result");
+    expect(resultEvent.approval).toMatchObject({
+      id: approvalId,
+      toolName: "web_search",
+      status: "rejected",
+      reason: "Stopped by the user.",
+    });
+  });
+
+  it("cancelPendingForStream publishes reject decisions for pending approvals", async () => {
+    const { recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 5_000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    const result = await registry.cancelPendingForStream(STREAM_ID);
+    expect(result.approvals).toBe(1);
+
+    await expect(pending).resolves.toEqual({
+      approved: false,
+      reason: "Stopped by the user.",
+    });
+    expect(approvalId).toBeTruthy();
   });
 
   it("resolves rejected when a negative decision is published", async () => {
@@ -732,6 +784,29 @@ describe("createApprovalRegistry", () => {
         resolvedAt: expect.any(String),
       });
       await expect(registry.getClarification(id)).resolves.toBeNull();
+    });
+
+    it("exits as timed out when the stream stop flag is set", async () => {
+      const { fake, registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 5_000)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await fake.set(STREAM_STOP_KEY(STREAM_ID), "1");
+      await expect(pending).resolves.toEqual({
+        answers: {},
+        skipped: [],
+        timedOut: true,
+      });
+
+      const resultEvent = recorder.events[1] as ClarificationResponseEvent;
+      expect(resultEvent.clarification).toMatchObject({
+        id,
+        status: "timed_out",
+      });
     });
 
     it("ignores late publishes after resolution", async () => {

@@ -1239,16 +1239,23 @@ function ChatSession({
   resumeChatRef.current = chat.resume;
 
   /**
-   * Stop button: abort the local fetch (Composer.Stop → chat.stop()) AND ask
-   * the worker to end the run early, so a second tab never keeps it running
-   * to completion. Fire-and-forget; the local abort always proceeds.
+   * Stop button: ask the worker to end the run (including any pending
+   * approval / clarification waiters), then reset the local chat controller
+   * so status returns to idle and human-input panels close. `chat.stop()`
+   * alone aborts the fetch but leaves pending approvals/clarifications open;
+   * `reset(messages)` keeps the transcript and matches mid-stream stop.
+   * Composer.Stop still calls `chat.stop()` after this — harmless double abort.
    */
   const handleStopRun = useCallback(() => {
-    const streamId = chatRef.current?.streamId;
-    if (!streamId) return;
-    void stopChatRun(streamId).catch(() => {
-      // best-effort: the local abort still stops the client stream
-    });
+    const current = chatRef.current;
+    if (!current) return;
+    const streamId = current.streamId;
+    if (streamId) {
+      void stopChatRun(streamId).catch(() => {
+        // best-effort: local reset still stops the client stream
+      });
+    }
+    current.reset(current.messages);
   }, []);
 
   const handleModelChange = useCallback((model: string) => {

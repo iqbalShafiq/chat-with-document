@@ -498,8 +498,13 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const store = getStreamStore();
     const meta = await store.getMeta(streamId);
     if (!meta || meta.userId !== user.id) return c.json({ error: "stream not found" }, 404);
+    // Stop flag ends the event stream; also unblock any human-input waiters
+    // (approval / clarification) so the worker does not hang until timeout.
     await store.setStopFlag(streamId);
-    return c.json({ ok: true });
+    const cancelled = await getApprovalRegistry()
+      .cancelPendingForStream(streamId)
+      .catch(() => ({ approvals: 0, clarifications: 0 }));
+    return c.json({ ok: true, cancelled });
   })
   .get("/capabilities", async (c) => {
     const context7Server = await getContext7McpServer();

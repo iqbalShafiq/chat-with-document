@@ -37,6 +37,15 @@ const CLARIFICATION_KEY = (id: string) => `chat-clarification:${id}`;
 const CLARIFICATION_DECISION_KEY = (id: string) =>
   `chat-clarification:${id}:decision`;
 
+/**
+ * Same Redis key the stream store / run-worker use when the client hits Stop.
+ * Approval and clarification waiters poll this so a stop during human-input
+ * unblocks the worker instead of hanging until timeout.
+ */
+export const STREAM_STOP_KEY = (streamId: string) => `rs-stop:${streamId}`;
+
+const STOPPED_BY_USER_REASON = "Stopped by the user.";
+
 export type ApprovalStatus =
   | "pending"
   | "approved"
@@ -113,7 +122,8 @@ async function waitForDecision<T>(
   redis: ApprovalRedis,
   decisionKey: string,
   timeoutMs: number,
-): Promise<T | "timeout"> {
+  stopKey?: string,
+): Promise<T | "timeout" | "stopped"> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const raw = await redis.get(decisionKey);
@@ -124,6 +134,11 @@ async function waitForDecision<T>(
         // Corrupt value — not a decision yet; drop it and keep polling.
         await redis.del(decisionKey);
       }
+    }
+    // Client Stop sets rs-stop:<streamId>; exit promptly so the worker can
+    // end the run instead of sitting in human-input until the timeout.
+    if (stopKey && (await redis.get(stopKey))) {
+      return "stopped";
     }
     if (Date.now() >= deadline) return "timeout";
     await sleep(POLL_INTERVAL_MS);
@@ -191,12 +206,15 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
           redis,
           DECISION_KEY(approvalId),
           timeoutMs,
+          STREAM_STOP_KEY(streamId),
         );
 
         const resolvedAt = new Date().toISOString();
-        if (decision === "timeout") {
+        if (decision === "timeout" || decision === "stopped") {
+          const status: ApprovalStatus =
+            decision === "stopped" ? "rejected" : "timed_out";
           await redis.hset(APPROVAL_KEY(approvalId), {
-            status: "timed_out",
+            status,
             resolvedAt,
           });
           await append({
@@ -204,15 +222,20 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
             approval: {
               id: approvalId,
               toolName: request.toolName,
-              status: "timed_out",
+              status,
               resolvedAt,
+              ...(decision === "stopped"
+                ? { reason: STOPPED_BY_USER_REASON }
+                : {}),
             },
           });
           await removeApproval(approvalId);
           return {
             approved: false,
             reason:
-              "Web access request timed out; answer from available knowledge.",
+              decision === "stopped"
+                ? STOPPED_BY_USER_REASON
+                : "Web access request timed out; answer from available knowledge.",
           };
         }
 
@@ -393,10 +416,11 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
           redis,
           CLARIFICATION_DECISION_KEY(id),
           timeoutMs,
+          STREAM_STOP_KEY(streamId),
         );
 
         const resolvedAt = new Date().toISOString();
-        if (decision === "timeout") {
+        if (decision === "timeout" || decision === "stopped") {
           await append({
             type: "clarification_response",
             clarification: { id, status: "timed_out", resolvedAt },
@@ -538,6 +562,32 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
         }
       }
       return records;
+    },
+
+    /**
+     * Unblock human-input waiters for a stream (used by POST /chat/stop).
+     * Publishes reject decisions for pending approvals so waiters wake on the
+     * next poll even before they re-check the stop flag. Clarification waiters
+     * exit via the stream stop key (no answer payload to invent).
+     */
+    async cancelPendingForStream(
+      streamId: string,
+      reason: string = STOPPED_BY_USER_REASON,
+    ): Promise<{ approvals: number; clarifications: number }> {
+      const approvals = await this.listPendingApprovals(streamId);
+      for (const approval of approvals) {
+        await this.publishDecision(approval.approvalId, {
+          approved: false,
+          reason,
+        });
+      }
+      // Clarifications: set stop key is enough (waitForDecision checks it).
+      // Count them for observability; no answer is published.
+      const clarifications = await this.listPendingClarifications(streamId);
+      return {
+        approvals: approvals.length,
+        clarifications: clarifications.length,
+      };
     },
   };
 }
