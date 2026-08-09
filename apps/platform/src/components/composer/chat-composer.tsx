@@ -115,6 +115,13 @@ export function ChatComposer({
     (attachment) => isImageAttachmentLike(attachment),
   );
 
+  const placeholderText =
+    chatStatus === "streaming"
+      ? "The agent is generating…"
+      : isIngesting
+        ? "Processing document…"
+        : "Ask about your documents…";
+
   // Optimistic clear: when a stream starts, empty the composer (text +
   // image attachments) right away. Only input + attachments are touched —
   // the full SDK clear() (entities, triggers) runs post-stream where the
@@ -126,37 +133,45 @@ export function ChatComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per stream start
   }, [chatStatus]);
 
-  // @anvia/react-ui's useEditor never re-applies the placeholder extension
-  // when the prop changes, and Tiptap recreates the <p> on content updates —
-  // keep the attribute in sync via a MutationObserver (Tiptap renders it via
-  // CSS `content: attr(data-placeholder)`).
+  // @anvia/react-ui's useEditor does not re-apply the Placeholder extension
+  // when the prop changes, and Tiptap may recreate the empty <p> on clears.
+  // Patch data-placeholder only when status changes — never via MutationObserver
+  // on that attribute (setAttribute ↔ Tiptap decoration ping-pongs and freezes
+  // the main thread).
   useEffect(() => {
-    const editorEl = document.querySelector<HTMLElement>(
-      "[data-anvia-composer-editor]",
-    );
-    if (!editorEl) return;
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 20;
+
     const apply = () => {
-      const p = editorEl.querySelector("p[data-placeholder]");
-      if (!p) return;
-      p.setAttribute(
-        "data-placeholder",
-        chatStatus === "streaming"
-          ? "The agent is generating…"
-          : isIngesting
-            ? "Processing document…"
-            : "Ask about your documents…",
+      if (cancelled) return true;
+      const editorEl = document.querySelector<HTMLElement>(
+        "[data-anvia-composer-editor]",
       );
+      const p = editorEl?.querySelector("p[data-placeholder]");
+      if (!p) return false;
+      if (p.getAttribute("data-placeholder") !== placeholderText) {
+        p.setAttribute("data-placeholder", placeholderText);
+      }
+      return true;
     };
-    apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(editorEl, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-placeholder"],
-    });
-    return () => observer.disconnect();
-  }, [chatStatus, isIngesting]);
+
+    if (apply()) return;
+
+    // Editor can mount a frame later (Composer.Input). Retry briefly; do not
+    // observe mutations — that re-introduced a CPU spin with Tiptap.
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (apply() || attempts >= maxAttempts) {
+        window.clearInterval(timer);
+      }
+    }, 50);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [placeholderText]);
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
@@ -269,13 +284,7 @@ export function ChatComposer({
           className="composer-input min-h-[1.5rem] w-full min-w-0 flex-1 bg-transparent px-1 text-sm leading-relaxed text-text"
           minRows={1}
           maxRows={8}
-          placeholder={
-            chatStatus === "streaming"
-              ? "The agent is generating…"
-              : isIngesting
-                ? "Processing document…"
-                : "Ask about your documents…"
-          }
+          placeholder={placeholderText}
           disabled={isIngesting || modelsUnavailable}
         />
 

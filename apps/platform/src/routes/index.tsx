@@ -8,6 +8,7 @@ import type { UIAttachment, UIMessage, UIMessagePart } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
+import { AnimatedStatusText } from "#/components/chat/animated-status-text";
 import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
@@ -2218,9 +2219,13 @@ function ChatSession({
                   </Thread.Messages>
 
                   <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
-                    {chat.status === "streaming"
-                      ? "Thinking and writing…"
-                      : "Writing…"}
+                    <AnimatedStatusText
+                      label={
+                        chat.status === "streaming"
+                          ? "Thinking and writing"
+                          : "Writing"
+                      }
+                    />
                   </Thread.Loading>
 
                   <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
