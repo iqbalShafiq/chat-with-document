@@ -1,18 +1,31 @@
+import { useEffect } from "react";
 import { useImagePreview } from "#/components/images/image-preview";
 import { useGeneratedImage } from "#/components/images/use-generated-image";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 
 /**
  * Square thumbnail tile for a stored generated image — shared by the session
- * rail and the gallery modal. Hover shows the prompt; nOfTotal renders a badge.
+ * rail, the gallery modal, and inline message strips. Hover shows the prompt;
+ * nOfTotal renders a badge.
+ *
+ * `onSrcReady` reports the loaded blob URL (used by strips to build a viewer
+ * batch) and `onOpen` overrides the default single-image preview.
  */
 export function GeneratedImageThumbnail({
   image,
+  onSrcReady,
+  onOpen,
 }: {
   image: GeneratedImageItem;
+  onSrcReady?: (src: string) => void;
+  onOpen?: () => void;
 }) {
   const { open } = useImagePreview();
   const { displaySrc, state, retry } = useGeneratedImage(image.id);
+
+  useEffect(() => {
+    if (state === "ready" && displaySrc) onSrcReady?.(displaySrc);
+  }, [state, displaySrc, onSrcReady]);
 
   if (state === "loading" || !displaySrc) {
     return <div className="skeleton-shimmer aspect-square w-full rounded-lg" />;
@@ -34,9 +47,13 @@ export function GeneratedImageThumbnail({
   return (
     <button
       type="button"
-      onClick={() =>
-        open({ src: displaySrc, alt: image.prompt || "Generated image" })
-      }
+      onClick={() => {
+        if (onOpen) {
+          onOpen();
+        } else {
+          open({ src: displaySrc, alt: image.prompt || "Generated image" });
+        }
+      }}
       title={image.prompt || "View generated image"}
       className="group/thumb relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-white/[0.06] transition hover:border-white/[0.14] active:scale-[0.98]"
     >

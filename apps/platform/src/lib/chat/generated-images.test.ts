@@ -4,6 +4,7 @@ import {
   collectGeneratedImages,
   collectGeneratedImagesFromMessages,
   countRunningImageToolPartsFromMessages,
+  groupImageToolRuns,
   imageItemsFromToolPart,
   isImageToolName,
   mergeGeneratedImages,
@@ -296,6 +297,38 @@ describe("countRunningImageToolPartsFromMessages", () => {
     ];
 
     expect(countRunningImageToolPartsFromMessages(messages)).toBe(0);
+  });
+});
+
+describe("groupImageToolRuns", () => {
+  it("groups consecutive image tool parts into one run", () => {
+    const parts = [
+      toolPart("generate_image", undefined, "output-available"),
+      toolPart("generate_image", undefined, "output-available"),
+    ];
+    const runs = groupImageToolRuns(parts);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toHaveLength(2);
+  });
+
+  it("splits runs separated by non-image parts", () => {
+    const parts = [
+      toolPart("generate_image", undefined, "output-available"),
+      toolPart("web_search", undefined, "output-available"),
+      toolPart("generate_image", undefined, "output-available"),
+      toolPart("edit_image", undefined, "output-available"),
+    ];
+    const runs = groupImageToolRuns(parts);
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toHaveLength(1);
+    expect(runs[1]).toHaveLength(2);
+  });
+
+  it("returns no runs when there are no image tools", () => {
+    const runs = groupImageToolRuns([
+      toolPart("web_search", undefined, "output-available"),
+    ]);
+    expect(runs).toHaveLength(0);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { UIMessage, UseChatStatus } from "@anvia/react";
+import type { UIMessage, UIMessagePart, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
@@ -6,13 +6,17 @@ import { MessageCitationProvider } from "#/components/chat/message-citation-cont
 import { ConversationSummaryDivider } from "#/components/chat/conversation-summary-divider";
 import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
+import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
-import { imageItemsFromToolPart } from "#/lib/chat/generated-images";
+import {
+  imageItemsFromToolPart,
+  isImageToolName,
+} from "#/lib/chat/generated-images";
 import {
   formatMessageBubbleTimestamp,
   formatMessageDateTime,
@@ -246,6 +250,36 @@ function ChatMessageParts({
 }) {
   const { message } = useMessage();
 
+  // Group consecutive image tool parts into runs — a multi-image generation
+  // (n > 1) or repeated generate/edit calls with no text between them render
+  // as one horizontal scrollable strip instead of separate grids.
+  const imageRuns = useMemo(() => {
+    type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
+    const runs: ToolPart[][] = [];
+    let current: ToolPart[] = [];
+    for (const part of message.parts) {
+      if (part.type === "tool" && isImageToolName(part.toolName)) {
+        current.push(part);
+      } else if (current.length > 0) {
+        runs.push(current);
+        current = [];
+      }
+    }
+    if (current.length > 0) runs.push(current);
+    return runs;
+  }, [message.parts]);
+
+  const stripForPart = useMemo(() => {
+    const byFirst = new Map<
+      Extract<UIMessagePart, { type: "tool" }>,
+      Array<Extract<UIMessagePart, { type: "tool" }>>
+    >();
+    for (const run of imageRuns) {
+      if (run.length > 0) byFirst.set(run[0]!, run);
+    }
+    return byFirst;
+  }, [imageRuns]);
+
   return (
     <Message.Parts
       filter={(part) => isRenderablePart(part, message.role)}
@@ -281,16 +315,25 @@ function ChatMessageParts({
         }
 
         if (part.type === "tool") {
-          const imageItems = imageItemsFromToolPart(part);
+          const run = stripForPart.get(part);
+          const isRunStart = run !== undefined;
+          const runImages = isRunStart
+            ? run.flatMap((runPart) => imageItemsFromToolPart(runPart))
+            : [];
+          const uniqueRunImages = [
+            ...new Map(runImages.map((image) => [image.id, image])).values(),
+          ];
           return (
             <Message.Part className="min-w-0 max-w-full">
               <ToolActivityPanel part={part} />
-              {imageItems.length > 0 ? (
-                <div className="mt-2 grid max-w-md grid-cols-2 gap-2">
-                  {imageItems.map((image) => (
-                    <GeneratedImageThumbnail key={image.id} image={image} />
-                  ))}
-                </div>
+              {isRunStart && uniqueRunImages.length > 0 ? (
+                uniqueRunImages.length > 1 ? (
+                  <GeneratedImageStrip images={uniqueRunImages} />
+                ) : (
+                  <div className="mt-2 max-w-md">
+                    <GeneratedImageThumbnail image={uniqueRunImages[0]!} />
+                  </div>
+                )
               ) : null}
             </Message.Part>
           );

@@ -504,6 +504,39 @@ body {
 }
 
 /*
+  Horizontal variant of chat-scroll — for inline image strips and other
+  horizontally scrollable rows. Thin 4px track that fades in on hover.
+*/
+.chat-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.chat-scroll-x:hover {
+  scrollbar-color: rgb(255 255 255 / 0.1) transparent;
+}
+
+.chat-scroll-x::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chat-scroll-x::-webkit-scrollbar-track {
+  margin-inline: 8px;
+  background: transparent;
+}
+
+.chat-scroll-x::-webkit-scrollbar-thumb {
+  border: 0 solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: transparent;
+}
+
+.chat-scroll-x:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.08);
+}
+
+/*
   Full-bleed chat viewport: content scrolls under top bar + textfield.
   Native scrollbar is hidden; InsetScrollbar draws an inset thumb instead.
 */

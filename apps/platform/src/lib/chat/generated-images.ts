@@ -160,6 +160,28 @@ export function imageItemsFromToolPart(
 }
 
 /**
+ * Group consecutive image tool parts into runs. A multi-image generation
+ * (n > 1) or repeated generate/edit calls with no text between them render
+ * as one horizontal strip instead of separate grids.
+ */
+export function groupImageToolRuns<T extends { type?: string; toolName?: string }>(
+  parts: T[],
+): T[][] {
+  const runs: T[][] = [];
+  let current: T[] = [];
+  for (const part of parts) {
+    if (part.type === "tool" && isImageToolName(part.toolName ?? "")) {
+      current.push(part);
+    } else if (current.length > 0) {
+      runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) runs.push(current);
+  return runs;
+}
+
+/**
  * Merge live stream images (first) with persisted history, deduped by id.
  * Live items keep their slot; history fills in anything the stream lost.
  */

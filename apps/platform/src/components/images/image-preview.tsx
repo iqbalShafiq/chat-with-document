@@ -11,11 +11,24 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Minus, Plus, RotateCcw, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Minus,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { useDocumentImage } from "#/components/images/use-document-image";
 
-type ImagePreviewInput = { src: string; alt?: string };
-type ImagePreviewContextValue = { open: (input: ImagePreviewInput) => void };
+export type ImagePreviewInput = { src: string; alt?: string };
+type ImagePreviewCollection = {
+  images: ImagePreviewInput[];
+  /** Index of the image to show first (default 0). */
+  index?: number;
+};
+type ImagePreviewOpenInput = ImagePreviewInput | ImagePreviewCollection;
+type ImagePreviewContextValue = { open: (input: ImagePreviewOpenInput) => void };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
 
@@ -43,7 +56,8 @@ const ZOOM_STEP = 1.5;
  *   disabled states; motion respects `prefers-reduced-motion` (CSS).
  */
 export function ImagePreviewProvider({ children }: { children: ReactNode }) {
-  const [current, setCurrent] = useState<ImagePreviewInput | null>(null);
+  const [collection, setCollection] = useState<ImagePreviewInput[] | null>(null);
+  const [index, setIndex] = useState(0);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -56,6 +70,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     originY: number;
   } | null>(null);
   const titleId = useId();
+  const current = collection?.[index] ?? null;
   // Internal document URLs need an authenticated fetch (plain <img> cannot
   // send the session cookie cross-origin) — same path as inline DocumentImage.
   const { internal, displaySrc, state, retry } = useDocumentImage(
@@ -68,8 +83,14 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const open = useCallback(
-    (input: ImagePreviewInput) => {
-      setCurrent(input);
+    (input: ImagePreviewOpenInput) => {
+      if ("images" in input) {
+        setCollection(input.images);
+        setIndex(Math.min(Math.max(input.index ?? 0, 0), input.images.length - 1));
+      } else {
+        setCollection([input]);
+        setIndex(0);
+      }
       resetView();
     },
     [resetView],
@@ -77,9 +98,23 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     dialogRef.current?.close();
-    setCurrent(null);
+    setCollection(null);
+    setIndex(0);
     resetView();
   }, [resetView]);
+
+  const goTo = useCallback(
+    (nextIndex: number) => {
+      setIndex((currentIndex) => {
+        const length = collection?.length ?? 1;
+        const clamped = Math.min(Math.max(nextIndex, 0), length - 1);
+        if (clamped === currentIndex) return currentIndex;
+        resetView();
+        return clamped;
+      });
+    },
+    [collection, resetView],
+  );
 
   const zoomBy = useCallback((factor: number) => {
     setScale((currentScale) =>
@@ -168,11 +203,17 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
         zoomBy(1 / ZOOM_STEP);
       } else if (event.key === "0") {
         resetView();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goTo(index + 1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goTo(index - 1);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [current, zoomBy, resetView]);
+  }, [current, index, zoomBy, resetView, goTo]);
 
   if (typeof window === "undefined") return null;
 
@@ -280,7 +321,39 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 >
                   <Plus className="size-4" strokeWidth={1.75} />
                 </button>
+                {collection && collection.length > 1 ? (
+                  <span className="pointer-events-auto ml-1.5 rounded-lg px-1 text-[11px] font-medium tabular-nums text-text-faint">
+                    {index + 1} / {collection.length}
+                  </span>
+                ) : null}
               </div>
+
+              {collection && collection.length > 1 ? (
+                <>
+                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      aria-label="Previous image"
+                      onClick={() => goTo(index - 1)}
+                      className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                      disabled={index <= 0}
+                    >
+                      <ChevronLeft className="size-4" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                  <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      aria-label="Next image"
+                      onClick={() => goTo(index + 1)}
+                      className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                      disabled={index >= collection.length - 1}
+                    >
+                      <ChevronRight className="size-4" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                </>
+              ) : null}
 
               <div className="pointer-events-none absolute right-4 top-4">
                 <button
