@@ -145,7 +145,7 @@ export function FeaturesPopover({
   return (
     <div className="relative inline-flex">
       <div
-        className={`glass inline-flex h-9 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`glass inline-flex h-8 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
           anyEnabled ? "" : ""
         }`}
       >
@@ -162,7 +162,7 @@ export function FeaturesPopover({
           aria-expanded={open}
           disabled={!anyAvailable}
           onClick={toggle}
-          className={`inline-flex size-9 shrink-0 cursor-pointer items-center justify-center transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
+          className={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
             anyEnabled ? "rounded-l-xl text-accent" : "rounded-xl text-text-muted"
           }`}
         >
