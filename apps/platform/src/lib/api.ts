@@ -1250,6 +1250,88 @@ export async function fetchUserImages(): Promise<GeneratedImageMeta[]> {
   return parseGeneratedImages(await response.json());
 }
 
+export type UploadSessionImageInput = {
+  sessionId: string;
+  file: File;
+  width: number;
+  height: number;
+  projectId?: string | null;
+};
+
+export async function uploadSessionImage(
+  input: UploadSessionImageInput,
+): Promise<GeneratedImageMeta> {
+  const form = new FormData();
+  form.append("sessionId", input.sessionId);
+  form.append("file", input.file);
+  form.append("width", String(input.width));
+  form.append("height", String(input.height));
+  if (input.projectId) {
+    form.append("projectId", input.projectId);
+  }
+
+  const response = await apiFetch(`${API_BASE}/api/images`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to upload image");
+  }
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !data ||
+    typeof (data as { image?: unknown }).image !== "object"
+  ) {
+    throw new Error("Unexpected image upload response shape");
+  }
+  return (data as { image: GeneratedImageMeta }).image;
+}
+
+/** Image file extensions treated as photos even when the MIME type is odd. */
+const IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "avif",
+  "bmp",
+  "svg",
+  "heic",
+  "heif",
+]);
+
+/** True when an attachment (or file) is a photo the user wants to attach. */
+export function isImageAttachmentLike(input: {
+  mediaType?: string | null;
+  name?: string | null;
+}): boolean {
+  if (input.mediaType?.startsWith("image/")) return true;
+  const name = input.name ?? "";
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return false;
+  return IMAGE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+/** Decode image dimensions from a file (falls back to 0×0). */
+export async function imageDimensionsFromFile(
+  file: Blob,
+): Promise<{ width: number; height: number }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const dims = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dims;
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
 export async function fetchImageBytes(
   id: string,
 ): Promise<{ blob: Blob; mediaType: string }> {

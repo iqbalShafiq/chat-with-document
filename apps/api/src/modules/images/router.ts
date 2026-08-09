@@ -61,6 +61,64 @@ export const imagesRouter = new Hono<{ Variables: AuthVariables }>()
     });
     return c.json({ images: images.map(toImageMetadata) });
   })
+  .post("/", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.parseBody();
+    const sessionId = requireQueryId(body.sessionId);
+    const file = body.file;
+
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    if (!(file instanceof File)) {
+      return c.json({ error: "file is required" }, 400);
+    }
+    if (file.size === 0) {
+      return c.json({ error: "File is empty" }, 400);
+    }
+
+    const mediaType = file.type || "image/png";
+    if (!mediaType.startsWith("image/")) {
+      return c.json({ error: "Only image files can be uploaded here" }, 400);
+    }
+
+    const width = Number(body.width);
+    const height = Number(body.height);
+    const projectIdRaw = body.projectId;
+    const projectId =
+      typeof projectIdRaw === "string" && projectIdRaw.trim()
+        ? projectIdRaw.trim()
+        : null;
+
+    try {
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      if (buffer.byteLength === 0) {
+        return c.json({ error: "File is empty" }, 400);
+      }
+      const store = getImageStore();
+      if (!(await store.sessionOwnedByUser({ sessionId, userId: user.id }))) {
+        return c.json({ error: "Session not found" }, 404);
+      }
+      const image = await store.saveGeneratedImage({
+        userId: user.id,
+        sessionId,
+        projectId,
+        buffer,
+        mediaType,
+        modelId: "user-upload",
+        prompt: file.name || "Uploaded image",
+        width: Number.isFinite(width) && width > 0 ? width : 0,
+        height: Number.isFinite(height) && height > 0 ? height : 0,
+      });
+      return c.json({ image: toImageMetadata(image) }, 201);
+    } catch (error) {
+      console.error("[images] upload failed", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return c.json({ error: "Could not upload image" }, 500);
+    }
+  })
   .post("/context", async (c) => {
     const user = c.get("user");
     const body = (await c.req.json().catch(() => null)) as {

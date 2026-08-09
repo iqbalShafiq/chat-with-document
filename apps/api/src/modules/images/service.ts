@@ -100,6 +100,18 @@ export function createImageStore(deps: ImageStoreDeps) {
       });
     },
 
+    /** True when the chat session belongs to the user (upload gating). */
+    async sessionOwnedByUser(input: {
+      sessionId: string;
+      userId: string;
+    }): Promise<boolean> {
+      const session = await deps.prisma.chatSession.findFirst({
+        where: { id: input.sessionId, userId: input.userId },
+        select: { id: true },
+      });
+      return session !== null;
+    },
+
     /**
      * Project gallery, gated on project ownership: a foreign project id
      * yields [] (no existence oracle).

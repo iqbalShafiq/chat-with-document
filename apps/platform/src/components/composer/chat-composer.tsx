@@ -1,5 +1,5 @@
 import type { UseChatStatus } from "@anvia/react";
-import { Composer } from "@anvia/react-ui";
+import { Composer, useComposer } from "@anvia/react-ui";
 import { FileX, ArrowUp, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
@@ -14,6 +14,7 @@ import type {
   ReasoningEffortInfo,
   SessionDocument,
 } from "#/lib/api";
+import { isImageAttachmentLike } from "#/lib/api";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 
@@ -107,6 +108,12 @@ export function ChatComposer({
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
   const modelsUnavailable = modelsStatus !== "success";
+  // Local photo attachments (image/*) preview above the field; they are
+  // uploaded as session images when the message is sent.
+  const composer = useComposer();
+  const localImageAttachments = composer.attachments.filter(
+    (attachment) => isImageAttachmentLike(attachment),
+  );
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
@@ -155,6 +162,43 @@ export function ChatComposer({
       {composerError ? (
         <div className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
           {composerError}
+        </div>
+      ) : null}
+
+      {localImageAttachments.length > 0 ? (
+        <div
+          className="chat-scroll-x flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"
+          role="list"
+          aria-label="Image attachments"
+        >
+          {localImageAttachments.map((attachment) => {
+            const raw = attachment.data ?? attachment.url ?? "";
+            const src = /^(data:|blob:|https?:|file:)/i.test(raw)
+              ? raw
+              : `data:${attachment.mediaType ?? "image/png"};base64,${raw}`;
+            return (
+              <div
+                key={attachment.id}
+                className="relative w-24 shrink-0"
+                role="listitem"
+              >
+                <img
+                  src={src}
+                  alt={attachment.name ?? "Image"}
+                  className="aspect-square w-full rounded-lg border border-white/[0.08] object-cover"
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove ${attachment.name ?? "image"}`}
+                  title="Remove"
+                  onClick={() => composer.removeAttachment(attachment.id)}
+                  className="absolute right-1 top-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white/85 backdrop-blur-sm transition duration-150 hover:bg-black/75 hover:text-white active:scale-[0.92]"
+                >
+                  <X className="size-3" strokeWidth={2} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
 

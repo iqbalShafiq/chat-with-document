@@ -43,6 +43,9 @@ import {
   truncateSessionMemory,
   unlinkDocumentFromSession,
   uploadDocument,
+  uploadSessionImage,
+  isImageAttachmentLike,
+  imageDimensionsFromFile,
   waitForDocumentReady,
   fetchSessionImages,
   fetchSessionImageContexts,
@@ -1912,73 +1915,129 @@ function ChatSession({
           }
 
           const documentIds: string[] = [];
+          // Local images attach to the message like pinned context (uploaded
+          // to the session image store + auto-pinned so the model sees them).
+          const uploadedImageAttachments: Array<{
+            id: string;
+            type: "image";
+            name: string;
+            mediaType: string;
+            data?: string;
+            text?: string;
+          }> = [];
+          const documentAttachments: UIAttachment[] = [];
 
           // Local "Upload from computer" queues on composer; ingest only on submit.
           if (attachments.length > 0) {
-            setIsIngesting(true);
-            setIngestionItems([]);
-
-            try {
-              for (const attachment of attachments) {
+            for (const attachment of attachments) {
+              if (isImageAttachmentLike(attachment)) {
                 const file = await resolveAttachmentFile(attachment);
                 if (file.size === 0) {
                   throw new Error(`File is empty: ${file.name}`);
                 }
-
-                const itemId = attachment.id || crypto.randomUUID();
-                setIngestionItems((current) => [
-                  ...current,
-                  { id: itemId, filename: file.name, status: "uploading" },
-                ]);
-
-                const uploaded = await uploadDocument({
-                  sessionId,
-                  file,
-                  projectId,
-                });
-
-                const ready = await waitForDocumentReady({
-                  sessionId,
-                  documentId: uploaded.id,
-                  onStatus: (status) => {
-                    setIngestionItems((current) =>
-                      current.map((item) =>
-                        item.id === itemId
-                          ? { ...item, status: status.status }
-                          : item,
-                      ),
-                    );
-                  },
-                });
-
-                documentIds.push(ready.id);
+                try {
+                  const dims = await imageDimensionsFromFile(file);
+                  const meta = await uploadSessionImage({
+                    sessionId,
+                    file,
+                    width: dims.width,
+                    height: dims.height,
+                    projectId,
+                  });
+                  // Auto-pin so the worker injects it as image input (vision)
+                  // or exposes it via view_image (text-only models).
+                  await addSessionImageContext({
+                    sessionId,
+                    imageId: meta.id,
+                  });
+                  const { blob, mediaType } = await fetchImageBytes(meta.id);
+                  uploadedImageAttachments.push({
+                    id: `ctx-${meta.id}`,
+                    type: "image",
+                    name: meta.prompt || "Uploaded image",
+                    mediaType,
+                    data: await blobToDataUrl(blob),
+                    text: meta.prompt || "Uploaded image",
+                  });
+                } catch (error) {
+                  setComposerError(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not upload image",
+                  );
+                  return;
+                }
+              } else {
+                documentAttachments.push(attachment);
               }
-
-              await refreshSessionDocuments();
-              // Retry a failed image-history fetch alongside the docs refresh
-              // so the rail doesn't silently serve stale data.
-              if (sessionImagesError) void refreshSessionImages();
-            } catch (error) {
-              const message =
-                error instanceof Error
-                  ? error.message
-                  : "Document processing failed";
-              setComposerError(message);
-              setIngestionItems((current) =>
-                current.map((item) =>
-                  item.status === "uploading" ||
-                  item.status === "queued" ||
-                  item.status === "ocr_processing" ||
-                  item.status === "embedding_processing"
-                    ? { ...item, status: "failed" }
-                    : item,
-                ),
-              );
-              setIsIngesting(false);
-              return;
             }
 
-            setIsIngesting(false);
+            if (documentAttachments.length > 0) {
+              setIsIngesting(true);
+              setIngestionItems([]);
+
+              try {
+                for (const attachment of documentAttachments) {
+                  const file = await resolveAttachmentFile(attachment);
+                  if (file.size === 0) {
+                    throw new Error(`File is empty: ${file.name}`);
+                  }
+
+                  const itemId = attachment.id || crypto.randomUUID();
+                  setIngestionItems((current) => [
+                    ...current,
+                    { id: itemId, filename: file.name, status: "uploading" },
+                  ]);
+
+                  const uploaded = await uploadDocument({
+                    sessionId,
+                    file,
+                    projectId,
+                  });
+
+                  const ready = await waitForDocumentReady({
+                    sessionId,
+                    documentId: uploaded.id,
+                    onStatus: (status) => {
+                      setIngestionItems((current) =>
+                        current.map((item) =>
+                          item.id === itemId
+                            ? { ...item, status: status.status }
+                            : item,
+                        ),
+                      );
+                    },
+                  });
+
+                  documentIds.push(ready.id);
+                }
+
+                await refreshSessionDocuments();
+                // Retry a failed image-history fetch alongside the docs refresh
+                // so the rail doesn't silently serve stale data.
+                if (sessionImagesError) void refreshSessionImages();
+              } catch (error) {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Document processing failed";
+                setComposerError(message);
+                setIngestionItems((current) =>
+                  current.map((item) =>
+                    item.status === "uploading" ||
+                    item.status === "queued" ||
+                    item.status === "ocr_processing" ||
+                    item.status === "embedding_processing"
+                      ? { ...item, status: "failed" }
+                      : item,
+                  ),
+                );
+                setIsIngesting(false);
+                return;
+              }
+
+              setIsIngesting(false);
+            }
           }
 
           const attachedDocuments = attachments.map((attachment) => {
@@ -2028,13 +2087,14 @@ function ChatSession({
               clientMessageId: createClientMessageId(),
             }),
             attachments: [
-              ...attachments.map((attachment) => ({
+              ...documentAttachments.map((attachment) => ({
                 id: attachment.id,
                 type: attachment.type,
                 name: attachment.name,
                 mediaType: attachment.mediaType,
                 text: attachment.name ?? "Document",
               })),
+              ...uploadedImageAttachments,
               ...contextAttachments,
             ],
           });
@@ -2044,6 +2104,12 @@ function ChatSession({
           // run reads them).
           if (activeContextImages.length > 0) {
             setActiveContextImages([]);
+          }
+          // Locally uploaded images now live in the session image store —
+          // refresh the rail so they appear alongside generated images.
+          if (uploadedImageAttachments.length > 0) {
+            void refreshSessionImages();
+            void refreshActiveContext();
           }
 
           clear();
