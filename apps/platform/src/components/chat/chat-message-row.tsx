@@ -238,8 +238,8 @@ function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
   if (part.type === "text") return part.text.trim().length > 0;
   if (part.type === "reasoning" || part.type === "tool") return true;
   if (part.type === "attachment") {
-    void role;
-    return false;
+    // Image attachments (active image context) render in the user bubble.
+    return role === "user" && part.attachment?.type === "image";
   }
   return false;
 }
@@ -349,6 +349,26 @@ function ChatMessageParts({
                     <GeneratedImageThumbnail image={uniqueRunImages[0]!} />
                   </div>
                 )
+              ) : null}
+            </Message.Part>
+          );
+        }
+
+        if (part.type === "attachment" && part.attachment?.type === "image") {
+          const src =
+            part.attachment.data ??
+            part.attachment.url ??
+            "";
+          return (
+            <Message.Part className="min-w-0 max-w-full">
+              {src ? (
+                <div className="mt-1.5 flex max-w-md flex-wrap gap-1.5">
+                  <img
+                    src={src}
+                    alt={part.attachment.name ?? "Attached image"}
+                    className="size-24 rounded-lg border border-white/[0.08] object-cover"
+                  />
+                </div>
               ) : null}
             </Message.Part>
           );

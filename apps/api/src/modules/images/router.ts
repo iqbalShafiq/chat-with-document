@@ -73,4 +73,60 @@ export const imagesRouter = new Hono<{ Variables: AuthVariables }>()
       console.error("[images] R2 fetch failed", { imageId: image.id, error });
       return c.json({ error: "Image not found" }, 404);
     }
+  })
+  .get("/context", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireQueryId(c.req.query("sessionId"));
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    const images = await getImageStore().listSessionImageContexts({
+      sessionId,
+      userId: user.id,
+    });
+    return c.json({ images: images.map(toImageMetadata) });
+  })
+  .post("/context", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as {
+      sessionId?: unknown;
+      imageId?: unknown;
+    } | null;
+    const sessionId =
+      typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
+    const imageId =
+      typeof body?.imageId === "string" ? body.imageId.trim() : "";
+    if (!sessionId || !imageId) {
+      return c.json(
+        { error: "sessionId and imageId are required" },
+        400,
+      );
+    }
+
+    const added = await getImageStore().addSessionImageContext({
+      userId: user.id,
+      sessionId,
+      imageId,
+    });
+    if (!added) {
+      return c.json({ error: "Image not found in this session" }, 404);
+    }
+    return c.json({ ok: true });
+  })
+  .delete("/context/:imageId", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireQueryId(c.req.query("sessionId"));
+    const imageId = c.req.param("imageId");
+    if (!sessionId || !imageId) {
+      return c.json(
+        { error: "sessionId is required" },
+        400,
+      );
+    }
+    await getImageStore().removeSessionImageContext({
+      userId: user.id,
+      sessionId,
+      imageId,
+    });
+    return c.json({ ok: true });
   });

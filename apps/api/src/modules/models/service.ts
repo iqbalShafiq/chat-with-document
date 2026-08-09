@@ -29,6 +29,8 @@ export type ModelInfo = {
   outputType: "text" | "image";
   /** Image-gen capability descriptors (from OpenRouter discovery). */
   imageCapabilities: Prisma.JsonValue | null;
+  /** Input modalities the model accepts, e.g. ["text","image","file"]. */
+  inputModalities: string[];
   sortOrder: number;
 };
 
@@ -65,7 +67,13 @@ function toModelInfo(row: {
   reasoningEfforts: { effort: { key: string } }[];
   outputType: string;
   imageCapabilities: Prisma.JsonValue | null;
+  inputModalities: Prisma.JsonValue | null;
 }): ModelInfo {
+  const inputModalities = Array.isArray(row.inputModalities)
+    ? row.inputModalities.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
   return {
     modelId: row.modelId,
     label: row.label,
@@ -91,6 +99,7 @@ function toModelInfo(row: {
       .sort(),
     outputType: row.outputType === "image" ? "image" : "text",
     imageCapabilities: row.imageCapabilities,
+    inputModalities,
     sortOrder: row.sortOrder,
   };
 }

@@ -44,6 +44,10 @@ import {
   uploadDocument,
   waitForDocumentReady,
   fetchSessionImages,
+  fetchSessionImageContexts,
+  addSessionImageContext,
+  removeSessionImageContext,
+  fetchImageBytes,
   type ContextUsageInfo,
   type GeneratedImageMeta,
   type ImageGenSettings,
@@ -56,6 +60,7 @@ import {
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
 import { ImagePreviewProvider } from "#/components/images/image-preview";
+import { ImageContextModelDialog } from "#/components/images/image-context-model-dialog";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
@@ -63,6 +68,7 @@ import {
   collectGeneratedImagesFromMessages,
   countRunningImageToolPartsFromMessages,
   mergeGeneratedImages,
+  type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
@@ -164,6 +170,15 @@ function failedUserMessageText(messages: UIMessage[]): string | null {
 
 function createClientMessageId() {
   return crypto.randomUUID();
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function resolveAttachmentFile(attachment: UIAttachment) {
@@ -897,6 +912,9 @@ function ChatSession({
   );
   const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
   const [sessionImagesError, setSessionImagesError] = useState(false);
+  const [activeContextImages, setActiveContextImages] = useState<
+    GeneratedImageMeta[]
+  >([]);
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
     null,
   );
@@ -1228,6 +1246,109 @@ function ChatSession({
     persistSelectedReasoningEffort(effort);
   }, []);
 
+  /**
+   * Active image context — images pinned by the user as chat context for this
+   * session. Refetched on mount/session change; toggled via the pin button on
+   * thumbnails (a confirmation modal gates non-vision models).
+   */
+  const activeContextVersionRef = useRef(0);
+  const refreshActiveContext = useCallback(async () => {
+    const version = ++activeContextVersionRef.current;
+    try {
+      const images = await fetchSessionImageContexts(sessionId);
+      if (version !== activeContextVersionRef.current) return;
+      setActiveContextImages(images);
+    } catch {
+      // keep previous list on failure
+    }
+  }, [sessionId]);
+
+  const [contextSwitchPending, setContextSwitchPending] = useState<{
+    image: GeneratedImageItem;
+  } | null>(null);
+  const [contextSwitchBusy, setContextSwitchBusy] = useState(false);
+  const [contextSwitchError, setContextSwitchError] = useState<string | null>(
+    null,
+  );
+
+  const handleToggleImageContext = useCallback(
+    async (image: GeneratedImageItem) => {
+      const isPinned = activeContextImages.some((item) => item.id === image.id);
+      if (isPinned) {
+        try {
+          await removeSessionImageContext({ sessionId, imageId: image.id });
+          void refreshActiveContext();
+        } catch (error) {
+          setComposerError(
+            error instanceof Error
+              ? error.message
+              : "Could not update image context",
+          );
+        }
+        return;
+      }
+
+      // Pinning requires a model that accepts image input. If the current
+      // model cannot, gate on the ImageContextModelDialog (switch model).
+      const activeModel = modelById(models, selectedModelRef.current);
+      const supportsImage =
+        activeModel !== null &&
+        activeModel.inputModalities.includes("image");
+      if (supportsImage) {
+        try {
+          await addSessionImageContext({ sessionId, imageId: image.id });
+          void refreshActiveContext();
+        } catch (error) {
+          setComposerError(
+            error instanceof Error
+              ? error.message
+              : "Could not add image context",
+          );
+        }
+        return;
+      }
+
+      setContextSwitchPending({ image });
+      setContextSwitchBusy(false);
+      setContextSwitchError(null);
+    },
+    [activeContextImages, sessionId, refreshActiveContext, models],
+  );
+
+  const handleContextSwitchConfirm = useCallback(
+    async (input: { modelId: string; reasoningEffort: string | null }) => {
+      const pending = contextSwitchPending;
+      if (!pending) return;
+      setContextSwitchBusy(true);
+      setContextSwitchError(null);
+      try {
+        handleModelChange(input.modelId);
+        handleReasoningChange(input.reasoningEffort);
+        await addSessionImageContext({
+          sessionId,
+          imageId: pending.image.id,
+        });
+        setContextSwitchPending(null);
+        void refreshActiveContext();
+      } catch (error) {
+        setContextSwitchError(
+          error instanceof Error
+            ? error.message
+            : "Could not add image context",
+        );
+      } finally {
+        setContextSwitchBusy(false);
+      }
+    },
+    [
+      contextSwitchPending,
+      sessionId,
+      refreshActiveContext,
+      handleModelChange,
+      handleReasoningChange,
+    ],
+  );
+
   const handleImageGenerationToggle = useCallback((enabled: boolean) => {
     setImageGenerationEnabled(enabled);
     persistImageGenerationEnabled(enabled);
@@ -1325,6 +1446,7 @@ function ChatSession({
     setSessionDocuments([]);
     setSessionImages([]);
     setSessionImagesError(false);
+    setActiveContextImages([]);
     setIngestionItems([]);
     setComposerError(null);
     setAttachmentErrors([]);
@@ -1335,7 +1457,12 @@ function ChatSession({
     setPreviousRunError(false);
     void refreshSessionDocuments();
     void refreshSessionImages();
-  }, [refreshSessionDocuments, refreshSessionImages]);
+    void refreshActiveContext();
+  }, [
+    refreshSessionDocuments,
+    refreshSessionImages,
+    refreshActiveContext,
+  ]);
 
   // Capabilities are global (not per-session) — best-effort fetch; the
   // module-wide promise cache in lib/api makes this cheap on remounts.
@@ -1705,6 +1832,36 @@ function ChatSession({
               : { name };
           });
 
+          // Active image context: attach pinned images to the user bubble so
+          // they are visible in the sent message (the worker injects them as
+          // image input to the model).
+          const contextAttachments: Array<{
+            id: string;
+            type: "image";
+            name: string;
+            mediaType: string;
+            url?: string;
+            data?: string;
+            text?: string;
+          }> = [];
+          if (activeContextImages.length > 0) {
+            for (const image of activeContextImages) {
+              try {
+                const { blob, mediaType } = await fetchImageBytes(image.id);
+                contextAttachments.push({
+                  id: `ctx-${image.id}`,
+                  type: "image",
+                  name: image.prompt || "Image context",
+                  mediaType,
+                  data: await blobToDataUrl(blob),
+                  text: image.prompt || "Image context",
+                });
+              } catch {
+                // skip images that fail to load — the context still works
+              }
+            }
+          }
+
           await chatController.sendMessage({
             text: trimmed,
             metadata: withChatMessageMeta(undefined, {
@@ -1714,13 +1871,16 @@ function ChatSession({
               createdAt: new Date().toISOString(),
               clientMessageId: createClientMessageId(),
             }),
-            attachments: attachments.map((attachment) => ({
-              id: attachment.id,
-              type: attachment.type,
-              name: attachment.name,
-              mediaType: attachment.mediaType,
-              text: attachment.name ?? "Document",
-            })),
+            attachments: [
+              ...attachments.map((attachment) => ({
+                id: attachment.id,
+                type: attachment.type,
+                name: attachment.name,
+                mediaType: attachment.mediaType,
+                text: attachment.name ?? "Document",
+              })),
+              ...contextAttachments,
+            ],
           });
 
           clear();
@@ -1845,6 +2005,22 @@ function ChatSession({
 
                   <ClarificationPanel />
 
+                  <ImageContextModelDialog
+                    open={contextSwitchPending !== null}
+                    models={models}
+                    reasoningEfforts={reasoningEfforts}
+                    busy={contextSwitchBusy}
+                    error={contextSwitchError}
+                    onConfirm={(input) => {
+                      void handleContextSwitchConfirm(input);
+                    }}
+                    onCancel={() => {
+                      if (contextSwitchBusy) return;
+                      setContextSwitchPending(null);
+                      setContextSwitchError(null);
+                    }}
+                  />
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -1893,9 +2069,13 @@ function ChatSession({
             webSources={webSources}
             generatedImages={generatedImages}
             runningImageCount={runningImageParts}
+            activeContextImages={activeContextImages}
             ingestionItems={ingestionItems}
             onRemoveActiveDocument={handleRemoveActiveDocument}
             removingDocumentId={removingDocumentId}
+            onToggleImageContext={(image) => {
+              void handleToggleImageContext(image);
+            }}
           />
         </div>
       </Composer.Root>

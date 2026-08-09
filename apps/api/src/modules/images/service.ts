@@ -21,7 +21,7 @@ export type GeneratedImageRecord = {
 /** Narrow prisma surface so tests can inject a fake (mirrors ApprovalRedis). */
 export type ImageStorePrisma = Pick<
   PrismaClient,
-  "generatedImage" | "chatSession" | "project"
+  "generatedImage" | "chatSession" | "project" | "sessionImageContext"
 >;
 
 export type ImageStoreDeps = {
@@ -150,6 +150,72 @@ export function createImageStore(deps: ImageStoreDeps) {
         select: { id: true },
       });
       return membership !== null;
+    },
+
+    /**
+     * Active image context: images the user pinned as chat context for a
+     * session. They are injected as image input into the agent prompt when
+     * the selected model supports image input (see build-run-input).
+     */
+    async addSessionImageContext(input: {
+      userId: string;
+      sessionId: string;
+      imageId: string;
+    }): Promise<boolean> {
+      const image = await deps.prisma.generatedImage.findFirst({
+        where: { id: input.imageId },
+        select: { id: true, userId: true, sessionId: true },
+      });
+      if (!image || image.userId !== input.userId) return false;
+      if (image.sessionId !== input.sessionId) return false;
+
+      await deps.prisma.sessionImageContext.upsert({
+        where: {
+          sessionId_imageId: {
+            sessionId: input.sessionId,
+            imageId: input.imageId,
+          },
+        },
+        create: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+          imageId: input.imageId,
+        },
+        update: {},
+      });
+      return true;
+    },
+
+    async removeSessionImageContext(input: {
+      userId: string;
+      sessionId: string;
+      imageId: string;
+    }): Promise<void> {
+      await deps.prisma.sessionImageContext.deleteMany({
+        where: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+          imageId: input.imageId,
+        },
+      });
+    },
+
+    async listSessionImageContexts(input: {
+      userId: string;
+      sessionId: string;
+    }): Promise<GeneratedImageRecord[]> {
+      const session = await deps.prisma.chatSession.findFirst({
+        where: { id: input.sessionId, userId: input.userId },
+        select: { id: true },
+      });
+      if (!session) return [];
+
+      const rows = await deps.prisma.sessionImageContext.findMany({
+        where: { sessionId: input.sessionId },
+        orderBy: { createdAt: "asc" },
+        include: { image: true },
+      });
+      return rows.map((row) => row.image);
     },
   };
 }

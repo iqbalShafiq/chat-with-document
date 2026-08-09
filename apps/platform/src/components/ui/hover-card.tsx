@@ -146,7 +146,7 @@ export function HoverCard({
         onMouseLeave={handleLeave}
         onFocus={handleEnter}
         onBlur={handleLeave}
-        className="inline-flex"
+        className="block w-full"
       >
         {children}
       </span>

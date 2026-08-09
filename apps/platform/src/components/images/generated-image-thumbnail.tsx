@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Pin, PinOff } from "lucide-react";
 import { useImagePreview } from "#/components/images/image-preview";
 import { useGeneratedImage } from "#/components/images/use-generated-image";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
@@ -9,16 +10,22 @@ import type { GeneratedImageItem } from "#/lib/chat/generated-images";
  * nOfTotal renders a badge.
  *
  * `onSrcReady` reports the loaded blob URL (used by strips to build a viewer
- * batch) and `onOpen` overrides the default single-image preview.
+ * batch) and `onOpen` overrides the default single-image preview. When
+ * `pinned`/`onTogglePin` are provided a pin button overlays the tile so the
+ * image can be added to (or removed from) the session's active image context.
  */
 export function GeneratedImageThumbnail({
   image,
   onSrcReady,
   onOpen,
+  pinned,
+  onTogglePin,
 }: {
   image: GeneratedImageItem;
   onSrcReady?: (src: string) => void;
   onOpen?: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   const { open } = useImagePreview();
   const { displaySrc, state, retry } = useGeneratedImage(image.id);
@@ -63,6 +70,38 @@ export function GeneratedImageThumbnail({
         loading="lazy"
         className="aspect-square w-full object-cover"
       />
+      {onTogglePin ? (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={
+            pinned ? "Remove image from context" : "Add image as context"
+          }
+          title={pinned ? "Remove from context" : "Add as context"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onTogglePin();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onTogglePin();
+            }
+          }}
+          className={`absolute right-1 top-1 inline-flex size-6 cursor-pointer items-center justify-center rounded-md backdrop-blur-sm transition duration-150 active:scale-[0.92] ${
+            pinned
+              ? "bg-accent text-canvas opacity-100"
+              : "bg-black/60 text-white/85 opacity-0 group-hover/thumb:opacity-100 hover:bg-black/75 hover:text-white"
+          }`}
+        >
+          {pinned ? (
+            <Pin className="size-3" strokeWidth={2} />
+          ) : (
+            <PinOff className="size-3" strokeWidth={2} />
+          )}
+        </span>
+      ) : null}
       {image.nOfTotal ? (
         <span className="absolute right-1 top-1 rounded-md bg-black/60 px-1 py-0.5 text-[9px] font-semibold leading-none text-white/90 backdrop-blur-sm">
           {image.nOfTotal}

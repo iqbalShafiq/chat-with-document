@@ -4,6 +4,7 @@ import type {
   ReactNode,
   Ref,
 } from "react";
+import { HoverCard } from "#/components/ui/hover-card";
 
 export type SelectOption = {
   value: string;
@@ -11,6 +12,8 @@ export type SelectOption = {
   hint?: string;
   icon?: ReactNode;
   disabled?: boolean;
+  /** Extra capability/price info shown as a hover popover on the row. */
+  detail?: ReactNode;
 };
 
 export type SelectOptionListProps = {
@@ -52,36 +55,49 @@ export function SelectOptionList({
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;
+        const row = (
+          <button
+            type="button"
+            disabled={opt.disabled}
+            data-option-value={opt.value}
+            className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40 ${
+              isSelected ? "bg-white/[0.05]" : ""
+            }`}
+            onClick={() => {
+              if (opt.disabled) return;
+              onSelect(opt.value);
+            }}
+          >
+            {opt.icon ? (
+              <span className="mt-0.5 text-text-muted">{opt.icon}</span>
+            ) : null}
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span
+                className={`text-xs font-medium ${isSelected ? "text-text" : "text-text-muted"}`}
+              >
+                {opt.label}
+              </span>
+              {opt.hint ? (
+                <span className="text-[10px] text-text-faint">
+                  {opt.hint}
+                </span>
+              ) : null}
+            </span>
+          </button>
+        );
         return (
           <li key={opt.value} role="option" aria-selected={isSelected}>
-            <button
-              type="button"
-              disabled={opt.disabled}
-              data-option-value={opt.value}
-              className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40 ${
-                isSelected ? "bg-white/[0.05]" : ""
-              }`}
-              onClick={() => {
-                if (opt.disabled) return;
-                onSelect(opt.value);
-              }}
-            >
-              {opt.icon ? (
-                <span className="mt-0.5 text-text-muted">{opt.icon}</span>
-              ) : null}
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span
-                  className={`text-xs font-medium ${isSelected ? "text-text" : "text-text-muted"}`}
-                >
-                  {opt.label}
-                </span>
-                {opt.hint ? (
-                  <span className="text-[10px] text-text-faint">
-                    {opt.hint}
-                  </span>
-                ) : null}
-              </span>
-            </button>
+            {opt.detail ? (
+              <HoverCard
+                variant="tooltip"
+                disabled={opt.disabled}
+                content={opt.detail}
+              >
+                {row}
+              </HoverCard>
+            ) : (
+              row
+            )}
           </li>
         );
       })}

@@ -11,7 +11,7 @@ import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
 import type { WebSourceSummary } from "#/lib/chat/web-sources";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
-import { Globe, Image, Quote, X } from "lucide-react";
+import { Focus, Globe, Image, Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
@@ -29,6 +29,7 @@ export function useHasSessionDocuments({
   webSources = [],
   generatedImages = [],
   runningImageCount = 0,
+  activeContextImages = [],
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
@@ -36,6 +37,7 @@ export function useHasSessionDocuments({
   webSources?: WebSourceSummary[];
   generatedImages?: GeneratedImageItem[];
   runningImageCount?: number;
+  activeContextImages?: GeneratedImageItem[];
 }) {
   const composer = useComposer();
   return (
@@ -45,6 +47,7 @@ export function useHasSessionDocuments({
     webSources.length > 0 ||
     generatedImages.length > 0 ||
     runningImageCount > 0 ||
+    activeContextImages.length > 0 ||
     composer.attachments.length > 0
   );
 }
@@ -60,8 +63,10 @@ export function SessionDocumentsPanel({
   webSources = [],
   generatedImages = [],
   runningImageCount = 0,
+  activeContextImages = [],
   onRemoveActiveDocument,
   removingDocumentId = null,
+  onToggleImageContext,
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
@@ -69,8 +74,10 @@ export function SessionDocumentsPanel({
   webSources?: WebSourceSummary[];
   generatedImages?: GeneratedImageItem[];
   runningImageCount?: number;
+  activeContextImages?: GeneratedImageItem[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
+  onToggleImageContext?: (image: GeneratedImageItem) => void;
 }) {
   const composer = useComposer();
   const citationSession = useCitationSessionOptional();
@@ -85,6 +92,7 @@ export function SessionDocumentsPanel({
   const hasIngestion = ingestionItems.length > 0;
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
+  const activeContextIds = new Set(activeContextImages.map((image) => image.id));
   const pendingCount = hasIngestion
     ? ingestionItems.length
     : composer.attachments.length;
@@ -333,7 +341,15 @@ export function SessionDocumentsPanel({
               <ul className="grid w-full list-none grid-cols-2 gap-1.5 p-0">
                 {generatedImages.map((image) => (
                   <li key={image.id} className="min-w-0">
-                    <GeneratedImageThumbnail image={image} />
+                    <GeneratedImageThumbnail
+                      image={image}
+                      pinned={activeContextIds.has(image.id)}
+                      onTogglePin={
+                        onToggleImageContext
+                          ? () => onToggleImageContext(image)
+                          : undefined
+                      }
+                    />
                   </li>
                 ))}
                 {Array.from({ length: runningImageCount }).map((_, i) => (
@@ -341,6 +357,38 @@ export function SessionDocumentsPanel({
                     <div
                       className="skeleton-shimmer aspect-square w-full rounded-lg"
                       title="Generating…"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleDocumentSection>
+          ) : null}
+
+          {activeContextImages.length > 0 ? (
+            <CollapsibleDocumentSection
+              title="Active image context"
+              icon={
+                <Focus
+                  className="size-3.5 shrink-0 text-accent"
+                  strokeWidth={1.75}
+                />
+              }
+            >
+              <p className="mb-1.5 text-[11px] leading-snug text-text-faint">
+                These images are sent to the model as context — they take
+                priority over other session images.
+              </p>
+              <ul className="grid w-full list-none grid-cols-2 gap-1.5 p-0">
+                {activeContextImages.map((image) => (
+                  <li key={image.id} className="min-w-0">
+                    <GeneratedImageThumbnail
+                      image={image}
+                      pinned
+                      onTogglePin={
+                        onToggleImageContext
+                          ? () => onToggleImageContext(image)
+                          : undefined
+                      }
                     />
                   </li>
                 ))}
@@ -418,8 +466,10 @@ export function SessionDocumentsRail({
   webSources = [],
   generatedImages = [],
   runningImageCount = 0,
+  activeContextImages = [],
   onRemoveActiveDocument,
   removingDocumentId,
+  onToggleImageContext,
 }: {
   sessionDocuments: SessionDocument[];
   citedDocuments: CitedDocumentSummary[];
@@ -427,8 +477,10 @@ export function SessionDocumentsRail({
   webSources?: WebSourceSummary[];
   generatedImages?: GeneratedImageItem[];
   runningImageCount?: number;
+  activeContextImages?: GeneratedImageItem[];
   onRemoveActiveDocument?: (documentId: string) => void;
   removingDocumentId?: string | null;
+  onToggleImageContext?: (image: GeneratedImageItem) => void;
 }) {
   const open = useHasSessionDocuments({
     sessionDocuments,
@@ -437,6 +489,7 @@ export function SessionDocumentsRail({
     webSources,
     generatedImages,
     runningImageCount,
+    activeContextImages,
   });
 
   return (
@@ -460,8 +513,10 @@ export function SessionDocumentsRail({
             webSources={webSources}
             generatedImages={generatedImages}
             runningImageCount={runningImageCount}
+            activeContextImages={activeContextImages}
             onRemoveActiveDocument={onRemoveActiveDocument}
             removingDocumentId={removingDocumentId}
+            onToggleImageContext={onToggleImageContext}
           />
         </div>
       </div>

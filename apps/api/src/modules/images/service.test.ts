@@ -45,6 +45,11 @@ function setup() {
     project: {
       findFirst: vi.fn(),
     },
+    sessionImageContext: {
+      upsert: vi.fn(),
+      deleteMany: vi.fn(),
+      findMany: vi.fn(),
+    },
   };
   const putObject = vi.fn(
     async (_key: string, _body: Uint8Array, _contentType: string) => {},
@@ -364,6 +369,124 @@ describe("createImageStore", () => {
       expect(fakePrisma.chatSession.findFirst).toHaveBeenCalledWith({
         where: { projectId: PROJECT_ID, userId: "user-3" },
         select: { id: true },
+      });
+    });
+  });
+
+  describe("session image context", () => {
+    it("addSessionImageContext upserts when the image belongs to the session", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.generatedImage.findFirst.mockResolvedValue(
+        makeRecord({ id: "img-ctx", sessionId: SESSION_ID }),
+      );
+      fakePrisma.sessionImageContext.upsert.mockResolvedValue({});
+
+      const added = await store.addSessionImageContext({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        imageId: "img-ctx",
+      });
+
+      expect(added).toBe(true);
+      expect(fakePrisma.sessionImageContext.upsert).toHaveBeenCalledWith({
+        where: {
+          sessionId_imageId: {
+            sessionId: SESSION_ID,
+            imageId: "img-ctx",
+          },
+        },
+        create: {
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          imageId: "img-ctx",
+        },
+        update: {},
+      });
+    });
+
+    it("rejects adding an image owned by someone else", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.generatedImage.findFirst.mockResolvedValue(
+        makeRecord({ id: "img-other", userId: "user-other" }),
+      );
+
+      const added = await store.addSessionImageContext({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        imageId: "img-other",
+      });
+
+      expect(added).toBe(false);
+      expect(fakePrisma.sessionImageContext.upsert).not.toHaveBeenCalled();
+    });
+
+    it("rejects adding an image from a different session", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.generatedImage.findFirst.mockResolvedValue(
+        makeRecord({ id: "img-other-session", sessionId: "session-other" }),
+      );
+
+      const added = await store.addSessionImageContext({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        imageId: "img-other-session",
+      });
+
+      expect(added).toBe(false);
+    });
+
+    it("removeSessionImageContext deletes by user, session, and image", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.sessionImageContext.deleteMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await store.removeSessionImageContext({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        imageId: "img-ctx",
+      });
+
+      expect(fakePrisma.sessionImageContext.deleteMany).toHaveBeenCalledWith({
+        where: {
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          imageId: "img-ctx",
+        },
+      });
+    });
+
+    it("listSessionImageContexts returns [] for a foreign session", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.chatSession.findFirst.mockResolvedValue(null);
+
+      const images = await store.listSessionImageContexts({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+      });
+
+      expect(images).toEqual([]);
+      expect(fakePrisma.sessionImageContext.findMany).not.toHaveBeenCalled();
+    });
+
+    it("listSessionImageContexts returns the pinned images in pinned order", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.chatSession.findFirst.mockResolvedValue({ id: SESSION_ID });
+      fakePrisma.sessionImageContext.findMany.mockResolvedValue([
+        { image: makeRecord({ id: "img-1" }) },
+        { image: makeRecord({ id: "img-2" }) },
+      ]);
+
+      const images = await store.listSessionImageContexts({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+      });
+
+      expect(images.map((image) => image.id)).toEqual(["img-1", "img-2"]);
+      expect(fakePrisma.sessionImageContext.findMany).toHaveBeenCalledWith({
+        where: { sessionId: SESSION_ID },
+        orderBy: { createdAt: "asc" },
+        include: { image: true },
       });
     });
   });

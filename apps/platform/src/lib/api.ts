@@ -823,6 +823,8 @@ export type ModelInfo = {
   outputType: "text" | "image";
   /** Image-gen capability descriptors (from OpenRouter discovery). */
   imageCapabilities: ImageModelCapabilities | null;
+  /** Input modalities the model accepts, e.g. ["text","image","file"]. */
+  inputModalities: string[];
   sortOrder: number;
 };
 
@@ -858,11 +860,14 @@ export async function listModels(input?: {
   }
 
   const catalog: ModelCatalog = {
+    // Chat model picker shows text models only — image generators live in
+    // the composer's image-gen settings (fetchImageModels).
     models: (data as ModelCatalog).models.filter(
       (model): model is ModelInfo =>
         !!model &&
         typeof model.modelId === "string" &&
-        typeof model.label === "string",
+        typeof model.label === "string" &&
+        model.outputType !== "image",
     ),
     reasoningEfforts: Array.isArray(
       (data as ModelCatalog).reasoningEfforts,
@@ -1232,6 +1237,45 @@ export async function fetchImageBytes(
     blob: await response.blob(),
     mediaType: response.headers.get("content-type") ?? "image/png",
   };
+}
+
+/** Active image context — images pinned as chat context for a session. */
+export async function fetchSessionImageContexts(
+  sessionId: string,
+): Promise<GeneratedImageMeta[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/images/context?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load image contexts");
+  return parseGeneratedImages(await response.json());
+}
+
+export async function addSessionImageContext(input: {
+  sessionId: string;
+  imageId: string;
+}): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/api/images/context`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to pin image as context");
+  }
+}
+
+export async function removeSessionImageContext(input: {
+  sessionId: string;
+  imageId: string;
+}): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/images/context/${encodeURIComponent(input.imageId)}?sessionId=${encodeURIComponent(input.sessionId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error("Failed to unpin image context");
 }
 
 export async function submitClarification(input: {

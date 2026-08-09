@@ -34,7 +34,10 @@ import {
 import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
-import { getImageStore } from "../images/service.js";
+import {
+  getImageStore,
+  type GeneratedImageRecord,
+} from "../images/service.js";
 import { parseImageCapabilities } from "./image-capabilities.js";
 import {
   resolveImageReference,
@@ -166,6 +169,8 @@ export type ChatRunInput = {
   imageGenerationAvailable: boolean;
   /** Context7 MCP tools available (configured + connected). */
   context7Available: boolean;
+  /** Images pinned as active context for this session (in pin order). */
+  activeContextImages: GeneratedImageRecord[];
 };
 
 export async function buildChatRunInput(input: {
@@ -314,6 +319,29 @@ export async function buildChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
+  // Active image context: images the user pinned for this session. They are
+  // injected into the agent prompt as image input (worker) when the selected
+  // model supports image input, and described in a prioritized context block
+  // so the model treats them as the primary visual reference.
+  const activeContextImages =
+    await getImageStore().listSessionImageContexts({ userId, sessionId });
+  if (activeContextImages.length > 0) {
+    contextBlocks.push({
+      id: "active_image_context",
+      text:
+        "Active image context\n" +
+        "The user pinned the following images as context for this conversation. " +
+        "They are provided to you as image input and take priority over any " +
+        "other images mentioned in the session:\n" +
+        activeContextImages
+          .map(
+            (image, index) =>
+              `${index + 1}. ${image.prompt || image.id} (${image.mediaType})`,
+          )
+          .join("\n"),
+    });
+  }
+
   // Web tools: registered only when TAVILY_API_KEY is set; the per-session
   // toggle decides whether approval is required for each call.
   const tavilyConfig = webSearchConfig();
@@ -413,5 +441,7 @@ export async function buildChatRunInput(input: {
     webSearchAvailable,
     imageGenerationAvailable,
     context7Available,
+    /** Images pinned as active context (bytes fetched by the worker). */
+    activeContextImages,
   };
 }
