@@ -1,4 +1,3 @@
-import { AuroraBackground } from "#/components/layout/aurora-background";
 import { ChatTopBar } from "#/components/layout/chat-top-bar";
 import {
   ChatSidebar,
@@ -122,14 +121,14 @@ export function AppShell({
     onOpenRecentProject,
   };
 
+  // Aurora lives on the root route so auth → chat keeps the same ambient layer.
+  // vt-* names pair with AuthShell for a continuous view-transition morph.
   return (
     <div className="relative flex h-[100dvh] max-h-[100dvh] overflow-hidden text-text">
-      <AuroraBackground />
-
       <div className="relative z-[1] flex min-h-0 min-w-0 flex-1">
-        {/* Desktop sidebar — full-bleed */}
+        {/* Desktop sidebar — full-bleed; width track matches auth (272px) */}
         <div
-          className={`hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
+          className={`vt-sidebar hidden shrink-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:block ${
             sidebarOpen
               ? "w-[272px] translate-x-0 opacity-100"
               : "w-0 -translate-x-1 opacity-0 pointer-events-none"
@@ -171,7 +170,7 @@ export function AppShell({
             onNewChat={onNewChat}
             newChatDisabled={newChatDisabled}
           />
-          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <main className="vt-main relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {/*
               Curved L-separator — only while desktop sidebar is open;
               opacity/border animate out when collapsed.

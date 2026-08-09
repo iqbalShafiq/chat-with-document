@@ -43,9 +43,17 @@ function createBlobs(count: number): AuroraBlob[] {
   });
 }
 
+/** Module-level cache so Strict Mode remounts (and rare re-creates) keep the same scene. */
+let cachedBlobs: AuroraBlob[] | null = null;
+
+function getBlobs() {
+  if (!cachedBlobs) cachedBlobs = createBlobs(4);
+  return cachedBlobs;
+}
+
 export function AuroraBackground() {
-  // Stable random layout for this page lifetime (not every render).
-  const blobs = useMemo(() => createBlobs(4), []);
+  // Stable layout for the SPA session (root-mounted; not re-seeded on navigation).
+  const blobs = useMemo(() => getBlobs(), []);
 
   return (
     <div className="aurora-root" aria-hidden>

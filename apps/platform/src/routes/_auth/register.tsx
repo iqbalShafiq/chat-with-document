@@ -10,7 +10,7 @@ import {
   AuthPasswordField,
   AuthTextField,
 } from "#/components/auth/auth-form-fields";
-import { AuthShell } from "#/components/auth/auth-shell";
+import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
 import {
   clearStoredSessionId,
@@ -18,29 +18,26 @@ import {
   persistSessionId,
 } from "#/lib/session-storage";
 
-export const Route = createFileRoute("/login")({
-  component: LoginPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    redirect:
-      typeof search.redirect === "string" && search.redirect.startsWith("/")
-        ? search.redirect
-        : undefined,
-  }),
+export const Route = createFileRoute("/_auth/register")({
+  component: RegisterPage,
   beforeLoad: async () => {
     const session = await authClient.getSession();
     if (session.data?.user) {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/", viewTransition: true });
     }
   },
 });
 
-function LoginPage() {
+function RegisterPage() {
   const navigate = useNavigate();
-  const { redirect } = Route.useSearch();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,8 +45,16 @@ function LoginPage() {
     event.preventDefault();
     setFormError(null);
 
+    const nextName = name.trim();
     const nextEmail = email.trim();
     let valid = true;
+
+    if (nextName.length < 1) {
+      setNameError("Name is required");
+      valid = false;
+    } else {
+      setNameError(null);
+    }
     if (!nextEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
       setEmailError("Enter a valid email address");
       valid = false;
@@ -62,48 +67,68 @@ function LoginPage() {
     } else {
       setPasswordError(null);
     }
+    if (confirm !== password) {
+      setConfirmError("Passwords do not match");
+      valid = false;
+    } else {
+      setConfirmError(null);
+    }
     if (!valid) return;
 
     setBusy(true);
     try {
-      const result = await authClient.signIn.email({
+      const result = await authClient.signUp.email({
+        name: nextName,
         email: nextEmail,
         password,
       });
       if (result.error) {
         setFormError(
-          result.error.message || "Invalid email or password",
+          result.error.message || "Could not create account. Try another email.",
         );
         return;
       }
 
       clearStoredSessionId();
       persistSessionId(createSessionId());
-      await navigate({ to: redirect ?? "/" });
+      // View transition: shared sidebar/topbar morph into the chat shell.
+      await navigate({ to: "/", viewTransition: true });
     } catch {
-      setFormError("Could not sign in. Check your connection and try again.");
+      setFormError("Could not register. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <AuthShell
-      title="Sign in to your workspace"
-      subtitle="Your chats and documents stay private to your account."
+    <AuthFormPanel
+      title="Create account"
+      subtitle="Start a private workspace for your documents and chats."
       footer={
         <>
-          No account?{" "}
+          Already have an account?{" "}
           <Link
-            to="/register"
+            to="/login"
+            search={{ redirect: undefined }}
             className="font-medium text-accent transition hover:text-accent-hover"
           >
-            Create one
+            Sign in
           </Link>
         </>
       }
     >
-      <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
+      <form className="flex flex-col gap-5" onSubmit={onSubmit} noValidate>
+        <AuthTextField
+          label="Name"
+          type="text"
+          placeholder="How we should address you"
+          autoComplete="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          error={nameError}
+          disabled={busy}
+          required
+        />
         <AuthTextField
           label="Email"
           type="email"
@@ -117,11 +142,22 @@ function LoginPage() {
         />
         <AuthPasswordField
           label="Password"
-          placeholder="Enter your password"
-          autoComplete="current-password"
+          placeholder="At least 8 characters"
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={passwordError}
+          helper="Minimum 8 characters"
+          disabled={busy}
+          required
+        />
+        <AuthPasswordField
+          label="Confirm password"
+          placeholder="Re-enter password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          error={confirmError}
           disabled={busy}
           required
         />
@@ -129,16 +165,20 @@ function LoginPage() {
         {formError ? (
           <div
             role="alert"
-            className="rounded-xl bg-danger-soft px-3 py-2 text-sm text-danger animate-fade-in"
+            className="rounded-2xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger animate-fade-in"
           >
             {formError}
           </div>
         ) : null}
 
-        <button type="submit" className={AUTH_SUBMIT_CLASS} disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+        <button
+          type="submit"
+          className={`${AUTH_SUBMIT_CLASS} mt-1`}
+          disabled={busy}
+        >
+          {busy ? "Creating account…" : "Create account"}
         </button>
       </form>
-    </AuthShell>
+    </AuthFormPanel>
   );
 }

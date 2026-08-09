@@ -398,6 +398,90 @@ body {
 }
 
 /*
+  View Transitions — auth ↔ app continuity.
+  Named layers on sidebar / top bar / main so geometry morphs instead of a
+  full-page blink. Root stays a soft crossfade as fallback.
+*/
+.vt-sidebar {
+  view-transition-name: app-sidebar;
+}
+
+.vt-topbar {
+  view-transition-name: app-topbar;
+}
+
+.vt-main {
+  view-transition-name: app-main;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease-out-premium);
+}
+
+/*
+  Sidebar intentionally differs in width (auth feature panel ≈ 28rem → chat
+  272px). Group morph interpolates that width for a continuous handoff.
+*/
+::view-transition-group(app-sidebar) {
+  animation-duration: 420ms;
+  animation-timing-function: var(--ease-out-premium);
+}
+
+::view-transition-group(app-topbar) {
+  animation-duration: 360ms;
+  animation-timing-function: var(--ease-out-premium);
+}
+
+::view-transition-old(app-sidebar),
+::view-transition-new(app-sidebar),
+::view-transition-old(app-topbar),
+::view-transition-new(app-topbar) {
+  /* Height/width morph comes from the group; snapshots stay sharp. */
+  height: 100%;
+  overflow: clip;
+}
+
+::view-transition-old(app-main) {
+  animation: vt-main-out 280ms var(--ease-out-premium) both;
+}
+
+::view-transition-new(app-main) {
+  animation: vt-main-in 320ms var(--ease-out-premium) both;
+}
+
+@keyframes vt-main-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.992);
+  }
+}
+
+@keyframes vt-main-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Prefer reduced motion: skip fancy morph, keep instant swap */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-group(app-sidebar),
+  ::view-transition-group(app-topbar),
+  ::view-transition-old(app-main),
+  ::view-transition-new(app-main) {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/*
   Image viewer — no container: the image floats directly on a frosted
   backdrop. The glass comes from the dialog's ::backdrop (blur + dark tint),
   so the viewer never renders a panel behind the image.

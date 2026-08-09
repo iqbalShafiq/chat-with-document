@@ -20,7 +20,7 @@ export function ChatTopBar({
   const showNewChat = isMobile || !sidebarOpen;
 
   return (
-    <header className="glass-top-bar absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-2.5 px-3 md:px-4">
+    <header className="vt-topbar glass-top-bar absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-2.5 px-3 md:px-4">
       {showLeftControl ? (
         isMobile ? (
           <button
