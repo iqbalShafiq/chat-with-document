@@ -1077,6 +1077,7 @@ export type ImageModelCatalogItem = {
   name: string;
   label: string;
   hint: string;
+  iconSvg: string;
   imageCapabilities: ImageModelCapabilities | null;
 };
 
@@ -1161,6 +1162,7 @@ async function fetchImageModelsRemote(): Promise<ImageModelCatalogItem[]> {
       name: item.name as string,
       label: item.label as string,
       hint: typeof item.hint === "string" ? item.hint : "",
+      iconSvg: typeof item.iconSvg === "string" ? item.iconSvg : "",
       imageCapabilities: parseImageModelCapabilities(item.imageCapabilities),
     }));
 }

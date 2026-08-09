@@ -1,5 +1,6 @@
 import { Check, Minus, Plus } from "lucide-react";
 import { useMemo } from "react";
+import { ModelIcon } from "#/components/composer/model-reasoning-switcher";
 import { Select } from "#/components/ui/select";
 import type { SelectOption } from "#/components/ui/select-list";
 import type { ImageGenSettings, ImageModelCatalogItem } from "#/lib/api";
@@ -52,6 +53,7 @@ export function ImageGenParamsEditor({
     value: item.modelId,
     label: item.name,
     hint: item.hint,
+    icon: <ModelIcon svg={item.iconSvg} className="size-3.5 shrink-0 opacity-70" />,
   }));
 
   const handleModelChange = (modelId: string) => {
@@ -116,6 +118,14 @@ export function ImageGenParamsEditor({
               loading
                 ? [{ value: "", label: "Loading…", disabled: true }]
                 : modelOptions
+            }
+            leadingIcon={
+              selectedModel ? (
+                <ModelIcon
+                  svg={selectedModel.iconSvg}
+                  className="size-4 shrink-0"
+                />
+              ) : undefined
             }
             ariaLabel="Image model"
             disabled={loading}
