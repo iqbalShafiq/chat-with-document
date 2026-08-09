@@ -15,6 +15,8 @@ export type FormattedSection = {
   fields?: FormattedField[];
   items?: FormattedItem[];
   emptyText?: string;
+  /** Image tool in flight — render a skeleton tile instead of empty text. */
+  imageLoading?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -690,6 +692,95 @@ function formatWebFetchOutput(output: unknown): FormattedSection {
   };
 }
 
+/** Shared fields for generate_image / edit_image requests (never the bytes). */
+function formatImageGenInputFields(
+  record: Record<string, unknown>,
+): FormattedField[] {
+  const fields: FormattedField[] = [];
+
+  const prompt = asString(record.prompt);
+  if (prompt) fields.push({ label: "Prompt", value: truncate(prompt, 400) });
+
+  const referenceImageId = asString(record.referenceImageId);
+  if (referenceImageId) {
+    fields.push({ label: "Reference", value: shortId(referenceImageId) });
+  }
+
+  const modelId = asString(record.modelId);
+  if (modelId) fields.push({ label: "Model", value: modelId });
+
+  const aspectRatio = asString(record.aspectRatio);
+  if (aspectRatio) fields.push({ label: "Aspect ratio", value: aspectRatio });
+
+  const quality = asString(record.quality);
+  if (quality) fields.push({ label: "Quality", value: quality });
+
+  const background = asString(record.background);
+  if (background) fields.push({ label: "Background", value: background });
+
+  const n = asNumber(record.n);
+  if (n !== null) fields.push({ label: "Count", value: String(n) });
+
+  return fields;
+}
+
+/** Shared result shape for both image tools: { images: [...meta] } — no bytes. */
+function formatImageGenOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const images = asArray(record.images);
+  const fields: FormattedField[] = [];
+
+  const error = asString(record.error);
+  if (error) fields.push({ label: "Error", value: truncate(error, 320) });
+
+  const first = images.find(isRecord);
+  const modelId = first ? asString(first.modelId) : null;
+  if (modelId) fields.push({ label: "Model", value: modelId });
+
+  if (images.length > 0) {
+    return {
+      title: "Result",
+      summary: countLabel(images.length, "image"),
+      fields,
+    };
+  }
+
+  return {
+    title: "Result",
+    summary: error ? "No images generated" : "No result yet",
+    fields,
+    emptyText: error ? undefined : "No images produced.",
+  };
+}
+
+function formatGenerateImageInput(input: unknown): FormattedSection {
+  const record = isRecord(input) ? input : {};
+  const fields = formatImageGenInputFields(record);
+  return {
+    title: "Request",
+    fields,
+    emptyText: fields.length === 0 ? "Waiting for request…" : undefined,
+  };
+}
+
+function formatGenerateImageOutput(output: unknown): FormattedSection {
+  return formatImageGenOutput(output);
+}
+
+function formatEditImageInput(input: unknown): FormattedSection {
+  const record = isRecord(input) ? input : {};
+  const fields = formatImageGenInputFields(record);
+  return {
+    title: "Request",
+    fields,
+    emptyText: fields.length === 0 ? "Waiting for request…" : undefined,
+  };
+}
+
+function formatEditImageOutput(output: unknown): FormattedSection {
+  return formatImageGenOutput(output);
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -713,6 +804,10 @@ export function formatToolInput(
       return formatWebSearchInput(input);
     case "web_fetch":
       return formatWebFetchInput(input);
+    case "generate_image":
+      return formatGenerateImageInput(input);
+    case "edit_image":
+      return formatEditImageInput(input);
     default:
       return formatGenericInput(input);
   }
@@ -741,6 +836,10 @@ export function formatToolOutput(
       return formatWebSearchOutput(output);
     case "web_fetch":
       return formatWebFetchOutput(output);
+    case "generate_image":
+      return formatGenerateImageOutput(output);
+    case "edit_image":
+      return formatEditImageOutput(output);
     default:
       return formatGenericOutput(output);
   }

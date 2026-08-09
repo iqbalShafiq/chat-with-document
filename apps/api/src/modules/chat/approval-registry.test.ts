@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ToolApprovalRequest } from "@anvia/core";
 import {
   createApprovalRegistry,
+  STREAM_STOP_KEY,
   type ApprovalRedis,
+  type ClarificationRequest,
 } from "./approval-registry.js";
 
 const USER_ID = "user-1";
@@ -17,6 +19,19 @@ const DECISION_KEY = (approvalId: string) =>
 // APPROVAL_TTL_SECONDS (15 min) and DECISION_TTL_SECONDS (5 min) in the module.
 const APPROVAL_TTL_SECONDS = 15 * 60;
 const DECISION_TTL_SECONDS = 5 * 60;
+
+// Mirrors the module's grant/override/clarification key helpers.
+const GRANT_SESSION_TTL_SECONDS = 24 * 60 * 60;
+const OVERRIDE_TTL_SECONDS = 5 * 60;
+const CLARIFICATION_TTL_SECONDS = 15 * 60;
+
+const GRANT_KEY = (sessionId: string, toolName: string) =>
+  `chat-tool-grant:${sessionId}:${toolName}`;
+const OVERRIDE_KEY = (sessionId: string, toolName: string) =>
+  `chat-tool-override:${sessionId}:${toolName}`;
+const CLARIFICATION_KEY = (id: string) => `chat-clarification:${id}`;
+const CLARIFICATION_DECISION_KEY = (id: string) =>
+  `chat-clarification:${id}:decision`;
 
 type ToolApprovalRequestEvent = {
   type: "tool_approval_request";
@@ -43,6 +58,32 @@ type ToolApprovalResultEvent = {
     status: string;
     resolvedAt: string;
     reason?: string;
+  };
+};
+
+type ClarificationRequestEvent = {
+  type: "clarification_request";
+  clarification: {
+    id: string;
+    sessionId: string;
+    title?: string;
+    questions: Array<{
+      id: string;
+      question: string;
+      type: string;
+      options?: Array<{ id: string; label: string; recommended?: boolean }>;
+    }>;
+    status: string;
+    requestedAt: string;
+  };
+};
+
+type ClarificationResponseEvent = {
+  type: "clarification_response";
+  clarification: {
+    id: string;
+    status: string;
+    resolvedAt: string;
   };
 };
 
@@ -78,6 +119,11 @@ function createFakeRedis() {
     }),
     expire: vi.fn(async (_key: string, _seconds: number) => 1),
     get: vi.fn(async (key: string) => store.get(key) ?? null),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
+    }),
     set: vi.fn(async (key: string, value: string) => {
       store.set(key, value);
       return "OK" as const;
@@ -89,6 +135,15 @@ function createFakeRedis() {
       }
       return removed;
     }),
+    keys: vi.fn(async (pattern: string) => {
+      // Minimal glob: only supports suffix "*" (used by listPending*).
+      const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
+      return [...store.keys()].filter((key) =>
+        pattern.endsWith("*") ? key.startsWith(prefix) : key === pattern,
+      );
+    }),
+    /** Test helper — not part of ApprovalRedis. */
+    __store: store,
   };
 }
 
@@ -109,6 +164,27 @@ function createAppendRecorder() {
     if (
       !requestSettled &&
       (event as { type?: string }).type === "tool_approval_request"
+    ) {
+      requestSettled = true;
+      resolveRequest(event);
+    }
+  };
+  return { events, requestEvent, append };
+}
+
+/** Same recorder, resolving on `clarification_request` events. */
+function createClarificationRecorder() {
+  const events: unknown[] = [];
+  let resolveRequest!: (event: unknown) => void;
+  let requestSettled = false;
+  const requestEvent = new Promise<unknown>((resolve) => {
+    resolveRequest = resolve;
+  });
+  const append = async (event: unknown) => {
+    events.push(event);
+    if (
+      !requestSettled &&
+      (event as { type?: string }).type === "clarification_request"
     ) {
       requestSettled = true;
       resolveRequest(event);
@@ -240,6 +316,48 @@ describe("createApprovalRegistry", () => {
       status: "approved",
       resolvedAt: expect.any(String),
     });
+  });
+
+  it("rejects pending approval when the stream stop flag is set", async () => {
+    const { fake, recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 5_000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    await fake.set(STREAM_STOP_KEY(STREAM_ID), "1");
+    await expect(pending).resolves.toEqual({
+      approved: false,
+      reason: "Stopped by the user.",
+    });
+
+    const resultEvent = recorder.events[1] as ToolApprovalResultEvent;
+    expect(resultEvent.type).toBe("tool_approval_result");
+    expect(resultEvent.approval).toMatchObject({
+      id: approvalId,
+      toolName: "web_search",
+      status: "rejected",
+      reason: "Stopped by the user.",
+    });
+  });
+
+  it("cancelPendingForStream publishes reject decisions for pending approvals", async () => {
+    const { recorder, registry } = setup();
+
+    const pending = createHandler(registry, recorder, 5_000)(makeRequest());
+    const requestEvent =
+      (await recorder.requestEvent) as ToolApprovalRequestEvent;
+    const approvalId = requestEvent.approval.id;
+
+    const result = await registry.cancelPendingForStream(STREAM_ID);
+    expect(result.approvals).toBe(1);
+
+    await expect(pending).resolves.toEqual({
+      approved: false,
+      reason: "Stopped by the user.",
+    });
+    expect(approvalId).toBeTruthy();
   });
 
   it("resolves rejected when a negative decision is published", async () => {
@@ -419,5 +537,326 @@ describe("createApprovalRegistry", () => {
       APPROVAL_KEY(approvalId),
       DECISION_KEY(approvalId),
     );
+  });
+
+  describe("tool session grants", () => {
+    it("hasToolGrant is false initially, true after grantTool, false after revokeToolGrant", async () => {
+      const { registry } = setup();
+
+      await expect(
+        registry.hasToolGrant(SESSION_ID, "web_search"),
+      ).resolves.toBe(false);
+
+      await registry.grantTool({
+        sessionId: SESSION_ID,
+        toolName: "web_search",
+      });
+      await expect(
+        registry.hasToolGrant(SESSION_ID, "web_search"),
+      ).resolves.toBe(true);
+
+      await registry.revokeToolGrant(SESSION_ID, "web_search");
+      await expect(
+        registry.hasToolGrant(SESSION_ID, "web_search"),
+      ).resolves.toBe(false);
+    });
+
+    it("grantTool stores the grant with a 24h session TTL", async () => {
+      const { fake, registry } = setup();
+
+      await registry.grantTool({
+        sessionId: SESSION_ID,
+        toolName: "web_search",
+      });
+
+      expect(fake.set).toHaveBeenCalledWith(
+        GRANT_KEY(SESSION_ID, "web_search"),
+        expect.any(String),
+        "EX",
+        GRANT_SESSION_TTL_SECONDS,
+      );
+      const payload = JSON.parse(
+        fake.set.mock.calls[0]?.[1] ?? "{}",
+      ) as Record<string, unknown>;
+      expect(typeof payload.grantedAt).toBe("string");
+    });
+  });
+
+  describe("tool arg overrides", () => {
+    it("setToolOverride stores args and takeToolOverride returns and consumes them", async () => {
+      const { fake, registry } = setup();
+      const args = { query: "updated query", limit: 5 };
+
+      await registry.setToolOverride({
+        sessionId: SESSION_ID,
+        toolName: "web_search",
+        args,
+      });
+      expect(fake.set).toHaveBeenCalledWith(
+        OVERRIDE_KEY(SESSION_ID, "web_search"),
+        JSON.stringify(args),
+        "EX",
+        OVERRIDE_TTL_SECONDS,
+      );
+
+      await expect(
+        registry.takeToolOverride(SESSION_ID, "web_search"),
+      ).resolves.toEqual(args);
+      await expect(
+        registry.takeToolOverride(SESSION_ID, "web_search"),
+      ).resolves.toBeNull();
+      expect(fake.getdel).toHaveBeenCalledWith(
+        OVERRIDE_KEY(SESSION_ID, "web_search"),
+      );
+    });
+
+    it("takeToolOverride returns null for missing and corrupt values", async () => {
+      const { fake, registry } = setup();
+
+      await expect(
+        registry.takeToolOverride(SESSION_ID, "web_search"),
+      ).resolves.toBeNull();
+
+      await fake.set(OVERRIDE_KEY(SESSION_ID, "web_search"), "not json");
+      await expect(
+        registry.takeToolOverride(SESSION_ID, "web_search"),
+      ).resolves.toBeNull();
+      expect(fake.getdel).toHaveBeenCalledWith(
+        OVERRIDE_KEY(SESSION_ID, "web_search"),
+      );
+    });
+  });
+
+  describe("clarification requester", () => {
+    const question = {
+      id: "model",
+      question: "Which model should I use?",
+      type: "single_choice" as const,
+      options: [
+        { id: "gpt", label: "GPT" },
+        { id: "claude", label: "Claude", recommended: true },
+      ],
+    };
+    const request: ClarificationRequest = {
+      title: "Model selection",
+      questions: [question],
+    };
+
+    function createRequester(
+      registry: ReturnType<typeof createApprovalRegistry>,
+      recorder: ReturnType<typeof createClarificationRecorder>,
+      timeoutMs?: number,
+    ) {
+      return registry.createClarificationRequester({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        streamId: STREAM_ID,
+        append: recorder.append,
+        timeoutMs,
+      });
+    }
+
+    it("stores a pending clarification and appends a clarification_request event", async () => {
+      const { fake, registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+
+      expect(requestEvent.type).toBe("clarification_request");
+      expect(requestEvent.clarification).toMatchObject({
+        id: expect.any(String),
+        sessionId: SESSION_ID,
+        title: "Model selection",
+        questions: [question],
+        status: "pending",
+        requestedAt: expect.any(String),
+      });
+
+      const id = requestEvent.clarification.id;
+      expect(fake.set).toHaveBeenCalledWith(
+        CLARIFICATION_KEY(id),
+        expect.any(String),
+        "EX",
+        CLARIFICATION_TTL_SECONDS,
+      );
+      const stored = JSON.parse(
+        fake.set.mock.calls[0]?.[1] ?? "{}",
+      ) as Record<string, unknown>;
+      expect(stored).toMatchObject({
+        id,
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        streamId: STREAM_ID,
+        title: "Model selection",
+        questions: [question],
+        status: "pending",
+        requestedAt: expect.any(String),
+      });
+
+      await registry.publishClarificationResponse(id, {
+        answers: {},
+        skipped: [],
+      });
+      await expect(pending).resolves.toEqual({
+        answers: {},
+        skipped: [],
+        timedOut: false,
+      });
+    });
+
+    it("resolves with the published answers and appends an answered event", async () => {
+      const { fake, registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await registry.publishClarificationResponse(id, {
+        answers: { model: "claude" },
+        skipped: ["other"],
+      });
+      await expect(pending).resolves.toEqual({
+        answers: { model: "claude" },
+        skipped: ["other"],
+        timedOut: false,
+      });
+
+      expect(fake.set).toHaveBeenCalledWith(
+        CLARIFICATION_DECISION_KEY(id),
+        expect.any(String),
+        "EX",
+        DECISION_TTL_SECONDS,
+      );
+      const resultEvent = recorder.events[1] as ClarificationResponseEvent;
+      expect(resultEvent.type).toBe("clarification_response");
+      expect(resultEvent.clarification).toMatchObject({
+        id,
+        status: "answered",
+        resolvedAt: expect.any(String),
+      });
+      await expect(registry.getClarification(id)).resolves.toBeNull();
+    });
+
+    it("falls back to defaults when the decision payload is malformed", async () => {
+      const { registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await registry.publishClarificationResponse(
+        id,
+        { answers: "nope", skipped: "nope" } as never,
+      );
+      await expect(pending).resolves.toEqual({
+        answers: {},
+        skipped: [],
+        timedOut: false,
+      });
+    });
+
+    it("times out and appends a timed_out clarification_response event", async () => {
+      const { registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await expect(pending).resolves.toEqual({
+        answers: {},
+        skipped: [],
+        timedOut: true,
+      });
+
+      const resultEvent = recorder.events[1] as ClarificationResponseEvent;
+      expect(resultEvent.type).toBe("clarification_response");
+      expect(resultEvent.clarification).toMatchObject({
+        id,
+        status: "timed_out",
+        resolvedAt: expect.any(String),
+      });
+      await expect(registry.getClarification(id)).resolves.toBeNull();
+    });
+
+    it("exits as timed out when the stream stop flag is set", async () => {
+      const { fake, registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 5_000)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await fake.set(STREAM_STOP_KEY(STREAM_ID), "1");
+      await expect(pending).resolves.toEqual({
+        answers: {},
+        skipped: [],
+        timedOut: true,
+      });
+
+      const resultEvent = recorder.events[1] as ClarificationResponseEvent;
+      expect(resultEvent.clarification).toMatchObject({
+        id,
+        status: "timed_out",
+      });
+    });
+
+    it("ignores late publishes after resolution", async () => {
+      const { registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await registry.publishClarificationResponse(id, {
+        answers: { model: "gpt" },
+        skipped: [],
+      });
+      await expect(pending).resolves.toEqual({
+        answers: { model: "gpt" },
+        skipped: [],
+        timedOut: false,
+      });
+
+      await registry.publishClarificationResponse(id, {
+        answers: { model: "claude" },
+        skipped: [],
+      });
+      await expect(registry.getClarification(id)).resolves.toBeNull();
+    });
+
+    it("getClarification exposes userId and status while pending, null when corrupt", async () => {
+      const { fake, registry } = setup();
+      const recorder = createClarificationRecorder();
+
+      const pending = createRequester(registry, recorder, 50)(request);
+      const requestEvent =
+        (await recorder.requestEvent) as ClarificationRequestEvent;
+      const id = requestEvent.clarification.id;
+
+      await expect(registry.getClarification(id)).resolves.toEqual({
+        userId: USER_ID,
+        status: "pending",
+      });
+
+      await fake.set(CLARIFICATION_KEY(id), "not json");
+      await expect(registry.getClarification(id)).resolves.toBeNull();
+
+      await registry.publishClarificationResponse(id, {
+        answers: {},
+        skipped: [],
+      });
+      await pending;
+    });
   });
 });

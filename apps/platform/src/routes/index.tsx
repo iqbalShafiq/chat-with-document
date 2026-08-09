@@ -4,15 +4,18 @@ import {
   initialMessagesFromMemory,
   useChat,
 } from "@anvia/react";
-import type { UIAttachment, UIMessage } from "@anvia/react";
+import type { UIAttachment, UIMessage, UIMessagePart } from "@anvia/react";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
+import { AnimatedStatusText } from "#/components/chat/animated-status-text";
 import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
+import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { StaleSessionDialog } from "#/components/chat/stale-session-dialog";
 import {
   SessionDocumentsRail,
   type IngestionItem,
@@ -24,7 +27,7 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
-  apiFetch,
+  decideApproval,
   fetchContextUsage,
   fetchRunStatus,
   fetchChatCapabilities,
@@ -41,8 +44,19 @@ import {
   truncateSessionMemory,
   unlinkDocumentFromSession,
   uploadDocument,
+  uploadSessionImage,
+  isImageAttachmentLike,
+  imageDimensionsFromFile,
   waitForDocumentReady,
+  fetchSessionImages,
+  fetchSessionImageContexts,
+  fetchSessionState,
+  addSessionImageContext,
+  removeSessionImageContext,
+  fetchImageBytes,
   type ContextUsageInfo,
+  type GeneratedImageMeta,
+  type ImageGenSettings,
   type ModelInfo,
   type ProjectListItem,
   type ReasoningEffortInfo,
@@ -51,10 +65,16 @@ import {
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
-import { ImagePreviewProvider } from "#/components/images/image-preview";
+import { ImagePreviewProvider, type ImagePreviewContextActions } from "#/components/images/image-preview";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
+import {
+  collectGeneratedImagesFromMessages,
+  countRunningImageToolPartsFromMessages,
+  mergeGeneratedImages,
+  type GeneratedImageItem,
+} from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
 import { authClient, type SessionUser } from "#/lib/auth-client";
 import {
@@ -66,7 +86,11 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
-import { getMessageRawText } from "#/lib/chat/message-text";
+import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import {
+  computeGenerationActionInfo,
+  getMessageRawText,
+} from "#/lib/chat/message-text";
 import {
   EMPTY_CHAT_TITLE,
   findEmptyNewChat,
@@ -75,8 +99,12 @@ import {
   type SessionSummary,
 } from "#/lib/session-history";
 import {
+  persistImageGenSettings,
+  persistImageGenerationEnabled,
   persistSelectedModel,
   persistSelectedReasoningEffort,
+  readImageGenSettings,
+  readImageGenerationEnabled,
   readSelectedModel,
   readSelectedReasoningEffort,
 } from "#/lib/chat-preferences";
@@ -148,6 +176,15 @@ function failedUserMessageText(messages: UIMessage[]): string | null {
 
 function createClientMessageId() {
   return crypto.randomUUID();
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function resolveAttachmentFile(attachment: UIAttachment) {
@@ -222,6 +259,7 @@ function Home() {
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const [activeRuns, setActiveRuns] = useState<ReadonlySet<string>>(new Set());
+  const [imageContextActions, setImageContextActions] = useState<ImagePreviewContextActions | null>(null);
   const activeRunsRef = useRef<ReadonlySet<string>>(new Set());
   activeRunsRef.current = activeRuns;
 
@@ -510,7 +548,11 @@ function Home() {
       try {
         const data = await loadChatMessages(sessionId);
         if (!cancelled) {
-          setInitialMessages(initialMessagesFromMemory(data as never));
+          setInitialMessages(
+            finalizeInterruptedTools(
+              initialMessagesFromMemory(data as never),
+            ),
+          );
         }
       } catch (error) {
         if (error instanceof ApiAuthError) {
@@ -757,7 +799,7 @@ function Home() {
     (viewMode === "standalone" || viewMode === "project-workspace");
 
   return (
-    <ImagePreviewProvider>
+    <ImagePreviewProvider actions={imageContextActions}>
       <AppShell
         user={user}
         sessions={sessions}
@@ -839,6 +881,8 @@ function Home() {
                   void refreshSessionsQuiet();
                 }}
                 onAuthFailure={handleAuthFailure}
+                onImageContextActions={setImageContextActions}
+                onReloadMessages={(messages) => setInitialMessages(messages)}
               />
             </div>
           )
@@ -859,6 +903,8 @@ function ChatSession({
   modelsRetry,
   onStreamSettled,
   onAuthFailure,
+  onImageContextActions,
+  onReloadMessages,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -870,6 +916,11 @@ function ChatSession({
   modelsRetry: () => void;
   onStreamSettled: () => void;
   onAuthFailure: () => void;
+  onImageContextActions?: (
+    actions: ImagePreviewContextActions | null,
+  ) => void;
+  /** Replaces the loaded conversation (fresh history after a stale dialog). */
+  onReloadMessages?: (messages: UIMessage[]) => void;
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -879,6 +930,11 @@ function ChatSession({
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
   );
+  const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
+  const [sessionImagesError, setSessionImagesError] = useState(false);
+  const [activeContextImages, setActiveContextImages] = useState<
+    GeneratedImageMeta[]
+  >([]);
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
     null,
   );
@@ -892,6 +948,12 @@ function ChatSession({
     readSelectedModel(models),
   );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() =>
+    readImageGenerationEnabled(),
+  );
+  const [imageGenSettings, setImageGenSettings] = useState<ImageGenSettings>(() =>
+    readImageGenSettings(),
+  );
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
@@ -907,9 +969,13 @@ function ChatSession({
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
+  const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
+  const imageGenSettingsRef = useRef(imageGenSettings);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
+  imageGenerationEnabledRef.current = imageGenerationEnabled;
+  imageGenSettingsRef.current = imageGenSettings;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
   const messagesRef = useRef<UIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
@@ -941,6 +1007,29 @@ function ChatSession({
       setSessionDocuments(documents);
     } catch {
       // Keep the previous list if refresh fails.
+    }
+  }, [sessionId]);
+
+  /**
+   * Session image history. Refetched on mount, after regenerate/truncate, and
+   * retried when the last fetch failed. Version guard drops stale responses
+   * (e.g. a fetch kicked off by an action in a previous run).
+   */
+  const sessionImagesVersionRef = useRef(0);
+  const refreshSessionImages = useCallback(async () => {
+    const version = ++sessionImagesVersionRef.current;
+    try {
+      const images = await fetchSessionImages(sessionId);
+      if (version !== sessionImagesVersionRef.current) return;
+      setSessionImages(images);
+      setSessionImagesError(false);
+    } catch {
+      if (version === sessionImagesVersionRef.current) {
+        // Keep the previous list, but flag it so the next relevant event
+        // (docs refresh / regenerate / truncate) retries instead of silently
+        // serving stale data.
+        setSessionImagesError(true);
+      }
     }
   }, [sessionId]);
 
@@ -1095,31 +1184,18 @@ function ChatSession({
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
         webSearchEnabled: webSearchEnabledRef.current,
+        imageGenerationEnabled: imageGenerationEnabledRef.current,
+        imageGenSettings: imageGenSettingsRef.current,
         ...(resume ? { resume } : {}),
       };
     },
     humanInput: {
       // Custom decideApproval: defaultDecideApproval fetches without
       // credentials, which 401s cross-origin (platform :3000 → API :3001).
-      // apiFetch sends credentials: "include" and maps 401 → ApiAuthError.
-      decideApproval: async ({ approvalId, approved, reason }) => {
-        const response = await apiFetch(
-          `${API_BASE}/api/chat/approvals/${encodeURIComponent(approvalId)}/decision`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              approved,
-              ...(reason !== undefined ? { reason } : {}),
-            }),
-          },
-        );
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          throw new Error(body?.error ?? "Failed to send approval decision");
-        }
+      // The api.ts helper sends credentials: "include", maps 401 →
+      // ApiAuthError, and carries optional grantScope/overrideArgs.
+      decideApproval: async (decision) => {
+        await decideApproval(decision);
         // Server replies { ok: true } — not a ToolApproval. The stream event
         // carries the resolved approval state, so nothing to return here.
         return undefined;
@@ -1168,16 +1244,24 @@ function ChatSession({
   resumeChatRef.current = chat.resume;
 
   /**
-   * Stop button: abort the local fetch (Composer.Stop → chat.stop()) AND ask
-   * the worker to end the run early, so a second tab never keeps it running
-   * to completion. Fire-and-forget; the local abort always proceeds.
+   * Stop button: ask the worker to end the run (including any pending
+   * approval / clarification waiters), finalize in-flight tool cards so they
+   * do not stay forever-"Working", then reset the local chat controller so
+   * status returns to idle and human-input panels close. `chat.stop()` alone
+   * aborts the fetch but leaves pending approvals/clarifications open and
+   * leaves tool parts at `input-available`. Composer.Stop still calls
+   * `chat.stop()` after this — harmless double abort.
    */
   const handleStopRun = useCallback(() => {
-    const streamId = chatRef.current?.streamId;
-    if (!streamId) return;
-    void stopChatRun(streamId).catch(() => {
-      // best-effort: the local abort still stops the client stream
-    });
+    const current = chatRef.current;
+    if (!current) return;
+    const streamId = current.streamId;
+    if (streamId) {
+      void stopChatRun(streamId).catch(() => {
+        // best-effort: local reset still stops the client stream
+      });
+    }
+    current.reset(finalizeInterruptedTools(current.messages));
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -1189,6 +1273,84 @@ function ChatSession({
     setSelectedReasoningEffort(effort);
     persistSelectedReasoningEffort(effort);
   }, []);
+
+  /**
+   * Active image context — images pinned by the user as chat context for this
+   * session. Refetched on mount/session change; toggled via the pin button on
+   * thumbnails (a confirmation modal gates non-vision models).
+   */
+  const activeContextVersionRef = useRef(0);
+  const refreshActiveContext = useCallback(async () => {
+    const version = ++activeContextVersionRef.current;
+    try {
+      const images = await fetchSessionImageContexts(sessionId);
+      if (version !== activeContextVersionRef.current) return;
+      setActiveContextImages(images);
+    } catch {
+      // keep previous list on failure
+    }
+  }, [sessionId]);
+
+  // Pinning works with any model: vision models receive the images as image
+  // input, text-only models get them via the view_image helper tool.
+  const handleToggleImageContext = useCallback(
+    async (image: GeneratedImageItem) => {
+      const isPinned = activeContextImages.some((item) => item.id === image.id);
+      if (isPinned) {
+        try {
+          await removeSessionImageContext({ sessionId, imageId: image.id });
+          void refreshActiveContext();
+        } catch (error) {
+          setComposerError(
+            error instanceof Error
+              ? error.message
+              : "Could not update image context",
+          );
+        }
+        return;
+      }
+
+      try {
+        await addSessionImageContext({ sessionId, imageId: image.id });
+        void refreshActiveContext();
+      } catch (error) {
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not add image context",
+        );
+      }
+    },
+    [activeContextImages, sessionId, refreshActiveContext],
+  );
+
+  const handleImageGenerationToggle = useCallback((enabled: boolean) => {
+    setImageGenerationEnabled(enabled);
+    persistImageGenerationEnabled(enabled);
+  }, []);
+
+  // Register the context actions with the ImagePreviewProvider (rendered one
+  // level up) so the viewer's "Add to context" button can toggle pinning.
+  const previewIsPinned = useCallback(
+    (image: GeneratedImageItem) =>
+      activeContextImages.some((item) => item.id === image.id),
+    [activeContextImages],
+  );
+  useEffect(() => {
+    onImageContextActions?.({
+      toggle: handleToggleImageContext,
+      isPinned: previewIsPinned,
+    });
+    return () => onImageContextActions?.(null);
+  }, [onImageContextActions, handleToggleImageContext, previewIsPinned]);
+
+  const handleImageGenSettingsChange = useCallback(
+    (settings: ImageGenSettings) => {
+      setImageGenSettings(settings);
+      persistImageGenSettings(settings);
+    },
+    [],
+  );
 
   const focusComposer = useCallback(() => {
     let attempts = 0;
@@ -1272,6 +1434,9 @@ function ChatSession({
 
   useEffect(() => {
     setSessionDocuments([]);
+    setSessionImages([]);
+    setSessionImagesError(false);
+    setActiveContextImages([]);
     setIngestionItems([]);
     setComposerError(null);
     setAttachmentErrors([]);
@@ -1281,7 +1446,13 @@ function ChatSession({
     setCompaction({ phase: "idle" });
     setPreviousRunError(false);
     void refreshSessionDocuments();
-  }, [refreshSessionDocuments]);
+    void refreshSessionImages();
+    void refreshActiveContext();
+  }, [
+    refreshSessionDocuments,
+    refreshSessionImages,
+    refreshActiveContext,
+  ]);
 
   // Capabilities are global (not per-session) — best-effort fetch; the
   // module-wide promise cache in lib/api makes this cheap on remounts.
@@ -1412,6 +1583,60 @@ function ChatSession({
     setComposerInputText(getMessageRawText(secondLast));
   }, [initialMessages, modelsStatus, setComposerInputText]);
 
+  // ─── Stale-session guard (freshness check before send) ───────────────────
+  // The server memory is the source of truth; another window/device may have
+  // appended messages. Compare persisted counts: stale ⟺ server has MORE
+  // messages than this view knows. Fail-open when the fetch fails.
+  const [staleDialog, setStaleDialog] = useState<{
+    kind: "send" | "resubmit";
+  } | null>(null);
+  /**
+   * Latest send body, kept in a ref so handlers can re-invoke it without
+   * stale closures (same pattern as chatRef/resumeChatRef).
+   */
+  const submitComposerRef = useRef<
+    (
+      input: string,
+      attachments: UIAttachment[],
+      chat: ReturnType<typeof useChat>,
+      clear: () => void,
+    ) => Promise<void>
+  >(async () => {});
+
+  const isSessionStale = useCallback(async (): Promise<boolean> => {
+    try {
+      const state = await fetchSessionState(sessionId);
+      const localCount = messagesRef.current.filter(
+        (message) => message.role === "user" || message.role === "assistant",
+      ).length;
+      return state.messageCount > localCount;
+    } catch {
+      // Fail-open: an unreachable server must never block sending.
+      return false;
+    }
+  }, [sessionId]);
+
+  /** Reload the conversation from server truth (used by the stale dialog). */
+  const reloadChatFromServer = useCallback(async () => {
+    try {
+      const data = await loadChatMessages(sessionId);
+      const fresh = finalizeInterruptedTools(
+        initialMessagesFromMemory(data as never),
+      );
+      onReloadMessages?.(fresh);
+      chatRef.current?.setMessages(fresh);
+    } catch {
+      // keep the current view on failure
+    }
+  }, [sessionId, onReloadMessages]);
+
+  const handleStaleReload = useCallback(() => {
+    setStaleDialog(null);
+    setEditingMessageId(null);
+    setEditContextImages([]);
+    void reloadChatFromServer();
+  }, [reloadChatFromServer]);
+
   /**
    * Shared path for revert (same text) and edit (new text):
    * truncate memory to exclude the target user message, drop later UI messages,
@@ -1421,6 +1646,10 @@ function ChatSession({
    * useChat result object is recreated every render) — memoized message rows
    * depend on the stability of onSubmitEdit/onRevert.
    */
+  const [editContextImages, setEditContextImages] = useState<GeneratedImageItem[]>(
+    [],
+  );
+
   const resubmitFromUserMessage = useCallback(
     async (message: UIMessage, text: string) => {
       const currentChat = chatRef.current;
@@ -1448,6 +1677,13 @@ function ChatSession({
         throw new Error("Message cannot be empty");
       }
 
+      // Freshness guard: resubmitting from a stale view would truncate the
+      // newer messages added by another window/device — block until reload.
+      if (await isSessionStale()) {
+        setStaleDialog({ kind: "resubmit" });
+        return;
+      }
+
       await truncateSessionMemory({
         sessionId,
         mode: "exclude",
@@ -1455,8 +1691,39 @@ function ChatSession({
         clientMessageId: meta.clientMessageId,
       });
 
+      // The dropped run's tool parts leave chat.messages, so live image
+      // collection shrinks — resync history to server truth (fire-and-forget).
+      void refreshSessionImages();
+
       currentChat.setMessages(currentChat.messages.slice(0, index));
       setEditingMessageId(null);
+
+      // Attach the context images managed in the edit bubble (view/add/remove)
+      // to the resubmitted message, like the normal send flow does.
+      const editAttachments: Array<{
+        id: string;
+        type: "image";
+        name: string;
+        mediaType: string;
+        data?: string;
+        text?: string;
+      }> = [];
+      for (const image of editContextImages) {
+        try {
+          const { blob, mediaType } = await fetchImageBytes(image.id);
+          editAttachments.push({
+            id: `ctx-${image.id}`,
+            type: "image",
+            name: image.prompt || "Image context",
+            mediaType,
+            data: await blobToDataUrl(blob),
+            text: image.prompt || "Image context",
+          });
+        } catch {
+          // skip images that fail to load
+        }
+      }
+      setEditContextImages([]);
 
       await currentChat.sendMessage({
         text: trimmed,
@@ -1466,9 +1733,10 @@ function ChatSession({
           createdAt: new Date().toISOString(),
           clientMessageId: createClientMessageId(),
         }),
+        attachments: editAttachments,
       });
     },
-    [sessionId],
+    [sessionId, refreshSessionImages, editContextImages, isSessionStale],
   );
 
   const handleRevert = useCallback(
@@ -1487,17 +1755,10 @@ function ChatSession({
 
   // Stable callbacks so memoized ChatMessageRow rows skip re-renders on
   // unrelated state changes (e.g. model switches).
-  const handleStartEdit = useCallback(
-    (message: UIMessage) => {
-      if (chat.status === "streaming") return;
-      setEditingMessageId(message.id);
-    },
-    [chat.status],
+  const generationInfoMap = useMemo(
+    () => computeGenerationActionInfo(chat.messages),
+    [chat.messages],
   );
-  const handleCancelEdit = useCallback(() => {
-    setEditingMessageId(null);
-  }, []);
-
   const citedDocuments = useMemo(
     () => collectCitedDocuments(chat.messages),
     [chat.messages],
@@ -1508,25 +1769,129 @@ function ChatSession({
     [chat.messages],
   );
 
-  return (
-    <ChatProvider controller={chat}>
-      <CitationSessionProvider sessionDocuments={sessionDocuments}>
-      {/*
-        Composer.Root wraps chat + right doc rail so attachments share context.
-        When docs exist, rail opens (272px = left sidebar) and pushes chat left.
-      */}
-      <Composer.Root
-        className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
-        submitMessage={async ({
-          input,
-          attachments,
-          chat: chatController,
-          clear,
-        }) => {
-          if (modelsStatus !== "success") return;
+  const liveGeneratedImages = useMemo(
+    () => collectGeneratedImagesFromMessages(chat.messages),
+    [chat.messages],
+  );
+
+  const runningImageParts = useMemo(
+    () => countRunningImageToolPartsFromMessages(chat.messages),
+    [chat.messages],
+  );
+
+  const generatedImages = useMemo(
+    () => mergeGeneratedImages(liveGeneratedImages, sessionImages),
+    [liveGeneratedImages, sessionImages],
+  );
+
+  /**
+   * Resolve the context images attached to a user message so the edit bubble
+   * can show / manage them. Live messages carry the id as `ctx-<imageId>`;
+   * rebuilt-from-memory messages lose it, so fall back to matching the raw
+   * base64 payload against the session's generated images.
+   */
+  const resolveEditContextImages = useCallback(
+    async (message: UIMessage): Promise<GeneratedImageItem[]> => {
+      const parts = message.parts.filter(
+        (part): part is Extract<UIMessagePart, { type: "attachment" }> =>
+          part.type === "attachment" && part.attachment?.type === "image",
+      );
+      if (parts.length === 0) return [];
+      const byId = new Map(generatedImages.map((image) => [image.id, image]));
+      const found: GeneratedImageItem[] = [];
+      const dataParts: Array<
+        Extract<UIMessagePart, { type: "attachment" }>
+      > = [];
+      for (const part of parts) {
+        const idMatch = part.attachment.id?.match(/^ctx-(.+)$/);
+        const item = idMatch ? (byId.get(idMatch[1]) ?? null) : null;
+        if (item) {
+          if (!found.some((existing) => existing.id === item.id)) found.push(item);
+        } else {
+          dataParts.push(part);
+        }
+      }
+      if (dataParts.length > 0) {
+        const candidates = generatedImages.filter(
+          (image) => !found.some((existing) => existing.id === image.id),
+        );
+        for (const part of dataParts) {
+          const target = part.attachment.data ?? "";
+          if (!target) continue;
+          for (const candidate of candidates) {
+            try {
+              const { blob } = await fetchImageBytes(candidate.id);
+              const dataUrl = await blobToDataUrl(blob);
+              if (dataUrl.slice(dataUrl.indexOf(",") + 1) === target) {
+                found.push(candidate);
+                break;
+              }
+            } catch {
+              // skip images that fail to load
+            }
+          }
+        }
+      }
+      return found;
+    },
+    [generatedImages],
+  );
+
+
+  const handleStartEdit = useCallback(
+    (message: UIMessage) => {
+      if (chat.status === "streaming") return;
+      setEditingMessageId(message.id);
+      setEditContextImages([]);
+      void resolveEditContextImages(message).then(setEditContextImages);
+    },
+    [chat.status, resolveEditContextImages],
+  );
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditContextImages([]);
+  }, []);
+
+  const editAvailableImages = useMemo(
+    () =>
+      generatedImages.filter(
+        (image) =>
+          !editContextImages.some((item) => item.id === image.id),
+      ),
+    [generatedImages, editContextImages],
+  );
+  const handleEditContextAdd = useCallback((image: GeneratedImageItem) => {
+    setEditContextImages((current) =>
+      current.some((item) => item.id === image.id)
+        ? current
+        : [...current, image],
+    );
+  }, []);
+  const handleEditContextRemove = useCallback((image: GeneratedImageItem) => {
+    setEditContextImages((current) =>
+      current.filter((item) => item.id !== image.id),
+    );
+  }, []);
+
+
+  // Keep the latest send body in a ref (avoids stale closures for the stale
+  // dialog's "Send anyway"); the submit handler wraps it with the freshness
+  // check.
+  submitComposerRef.current = async (
+    input,
+    attachments,
+    chatController,
+    clear,
+  ) => {
           setComposerError(null);
           const trimmed = input.trim();
           if (!trimmed && attachments.length === 0) return;
+
+          // Optimistic send: the user bubble appears the moment sendMessage
+          // is called below. The stale check runs in parallel and only
+          // surfaces a non-blocking notice afterwards (normal sends are
+          // non-destructive).
+          const stalePromise = isSessionStale();
 
           // Truncate-before-send: a persisted failed tail [user, assistant
           // kind:"error"] would re-enter memory — drop it first.
@@ -1547,73 +1912,134 @@ function ChatSession({
               }).catch(() => {});
             }
             chatController.setMessages(messages.slice(0, -2));
+            // The failed tail is gone from live parts — resync image history.
+            void refreshSessionImages();
           }
 
           const documentIds: string[] = [];
+          // Local images attach to the message like pinned context (uploaded
+          // to the session image store + auto-pinned so the model sees them).
+          const uploadedImageAttachments: Array<{
+            id: string;
+            type: "image";
+            name: string;
+            mediaType: string;
+            data?: string;
+            text?: string;
+          }> = [];
+          const documentAttachments: UIAttachment[] = [];
 
           // Local "Upload from computer" queues on composer; ingest only on submit.
           if (attachments.length > 0) {
-            setIsIngesting(true);
-            setIngestionItems([]);
-
-            try {
-              for (const attachment of attachments) {
+            for (const attachment of attachments) {
+              if (isImageAttachmentLike(attachment)) {
                 const file = await resolveAttachmentFile(attachment);
                 if (file.size === 0) {
                   throw new Error(`File is empty: ${file.name}`);
                 }
-
-                const itemId = attachment.id || crypto.randomUUID();
-                setIngestionItems((current) => [
-                  ...current,
-                  { id: itemId, filename: file.name, status: "uploading" },
-                ]);
-
-                const uploaded = await uploadDocument({
-                  sessionId,
-                  file,
-                  projectId,
-                });
-
-                const ready = await waitForDocumentReady({
-                  sessionId,
-                  documentId: uploaded.id,
-                  onStatus: (status) => {
-                    setIngestionItems((current) =>
-                      current.map((item) =>
-                        item.id === itemId
-                          ? { ...item, status: status.status }
-                          : item,
-                      ),
-                    );
-                  },
-                });
-
-                documentIds.push(ready.id);
+                try {
+                  const dims = await imageDimensionsFromFile(file);
+                  const meta = await uploadSessionImage({
+                    sessionId,
+                    file,
+                    width: dims.width,
+                    height: dims.height,
+                    projectId,
+                  });
+                  // Auto-pin so the worker injects it as image input (vision)
+                  // or exposes it via view_image (text-only models).
+                  await addSessionImageContext({
+                    sessionId,
+                    imageId: meta.id,
+                  });
+                  const { blob, mediaType } = await fetchImageBytes(meta.id);
+                  uploadedImageAttachments.push({
+                    id: `ctx-${meta.id}`,
+                    type: "image",
+                    name: meta.prompt || "Uploaded image",
+                    mediaType,
+                    data: await blobToDataUrl(blob),
+                    text: meta.prompt || "Uploaded image",
+                  });
+                } catch (error) {
+                  setComposerError(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not upload image",
+                  );
+                  return;
+                }
+              } else {
+                documentAttachments.push(attachment);
               }
-
-              await refreshSessionDocuments();
-            } catch (error) {
-              const message =
-                error instanceof Error
-                  ? error.message
-                  : "Document processing failed";
-              setComposerError(message);
-              setIngestionItems((current) =>
-                current.map((item) =>
-                  item.status === "uploading" ||
-                  item.status === "queued" ||
-                  item.status === "ocr_processing" ||
-                  item.status === "embedding_processing"
-                    ? { ...item, status: "failed" }
-                    : item,
-                ),
-              );
-              setIsIngesting(false);
-              return;
             }
 
-            setIsIngesting(false);
+            if (documentAttachments.length > 0) {
+              setIsIngesting(true);
+              setIngestionItems([]);
+
+              try {
+                for (const attachment of documentAttachments) {
+                  const file = await resolveAttachmentFile(attachment);
+                  if (file.size === 0) {
+                    throw new Error(`File is empty: ${file.name}`);
+                  }
+
+                  const itemId = attachment.id || crypto.randomUUID();
+                  setIngestionItems((current) => [
+                    ...current,
+                    { id: itemId, filename: file.name, status: "uploading" },
+                  ]);
+
+                  const uploaded = await uploadDocument({
+                    sessionId,
+                    file,
+                    projectId,
+                  });
+
+                  const ready = await waitForDocumentReady({
+                    sessionId,
+                    documentId: uploaded.id,
+                    onStatus: (status) => {
+                      setIngestionItems((current) =>
+                        current.map((item) =>
+                          item.id === itemId
+                            ? { ...item, status: status.status }
+                            : item,
+                        ),
+                      );
+                    },
+                  });
+
+                  documentIds.push(ready.id);
+                }
+
+                await refreshSessionDocuments();
+                // Retry a failed image-history fetch alongside the docs refresh
+                // so the rail doesn't silently serve stale data.
+                if (sessionImagesError) void refreshSessionImages();
+              } catch (error) {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Document processing failed";
+                setComposerError(message);
+                setIngestionItems((current) =>
+                  current.map((item) =>
+                    item.status === "uploading" ||
+                    item.status === "queued" ||
+                    item.status === "ocr_processing" ||
+                    item.status === "embedding_processing"
+                      ? { ...item, status: "failed" }
+                      : item,
+                  ),
+                );
+                setIsIngesting(false);
+                return;
+              }
+
+              setIsIngesting(false);
+            }
           }
 
           const attachedDocuments = attachments.map((attachment) => {
@@ -1623,7 +2049,37 @@ function ChatSession({
               : { name };
           });
 
-          await chatController.sendMessage({
+          // Active image context: attach pinned images to the user bubble so
+          // they are visible in the sent message (the worker injects them as
+          // image input to the model).
+          const contextAttachments: Array<{
+            id: string;
+            type: "image";
+            name: string;
+            mediaType: string;
+            url?: string;
+            data?: string;
+            text?: string;
+          }> = [];
+          if (activeContextImages.length > 0) {
+            for (const image of activeContextImages) {
+              try {
+                const { blob, mediaType } = await fetchImageBytes(image.id);
+                contextAttachments.push({
+                  id: `ctx-${image.id}`,
+                  type: "image",
+                  name: image.prompt || "Image context",
+                  mediaType,
+                  data: await blobToDataUrl(blob),
+                  text: image.prompt || "Image context",
+                });
+              } catch {
+                // skip images that fail to load — the context still works
+              }
+            }
+          }
+
+          const sendPromise = chatController.sendMessage({
             text: trimmed,
             metadata: withChatMessageMeta(undefined, {
               sessionId,
@@ -1632,17 +2088,76 @@ function ChatSession({
               createdAt: new Date().toISOString(),
               clientMessageId: createClientMessageId(),
             }),
-            attachments: attachments.map((attachment) => ({
-              id: attachment.id,
-              type: attachment.type,
-              name: attachment.name,
-              mediaType: attachment.mediaType,
-              text: attachment.name ?? "Document",
-            })),
+            attachments: [
+              ...documentAttachments.map((attachment) => ({
+                id: attachment.id,
+                type: attachment.type,
+                name: attachment.name,
+                mediaType: attachment.mediaType,
+                text: attachment.name ?? "Document",
+              })),
+              ...uploadedImageAttachments,
+              ...contextAttachments,
+            ],
           });
 
+          // The user message is now in the chat (optimistic). The composer
+          // (text + image attachments) is cleared by ChatComposer's streaming
+          // effect; the full SDK clear() runs here — after the stream — where
+          // it is safe (calling it mid-stream crashes @anvia/react-ui's
+          // ComposerInput editor).
+          await sendPromise;
           clear();
+
+          // Active image context is single-use: it was consumed by this
+          // message, so clear the pins (the server also clears after the
+          // run reads them).
+          if (activeContextImages.length > 0) {
+            setActiveContextImages([]);
+          }
+          // Locally uploaded images now live in the session image store —
+          // refresh the rail so they appear alongside generated images.
+          if (uploadedImageAttachments.length > 0) {
+            void refreshSessionImages();
+            void refreshActiveContext();
+          }
+
           setIngestionItems([]);
+
+          // Non-blocking freshness notice: the message was already sent
+          // (normal sends are non-destructive); offer a reload so the view
+          // catches up with the other window/device.
+          if (await stalePromise) {
+            setStaleDialog({ kind: "send" });
+          }
+  };
+
+  return (
+    <ChatProvider controller={chat}>
+      <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      {/*
+        Composer.Root wraps chat + right doc rail so attachments share context.
+        When docs exist, rail opens (272px = left sidebar) and pushes chat left.
+      */}
+      <Composer.Root
+        className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+        submitMessage={async ({
+          input,
+          attachments,
+          chat: chatController,
+          clear,
+        }) => {
+          if (modelsStatus !== "success") return;
+          // Normal sends are optimistic: the bubble appears the moment
+          // sendMessage is called. The freshness check runs in parallel and
+          // only surfaces a non-blocking notice afterwards (resubmit/revert
+          // still block — see resubmitFromUserMessage).
+          await submitComposerRef.current(
+            input,
+            attachments,
+            chatController,
+            clear,
+          );
         }}
       >
         <div
@@ -1709,14 +2224,23 @@ function ChatSession({
                         onCancelEdit={handleCancelEdit}
                         onSubmitEdit={handleSubmitEdit}
                         onRevert={handleRevert}
+                        generationInfo={generationInfoMap.get(message.id)}
+                        editContextImages={editContextImages}
+                        editAvailableImages={editAvailableImages}
+                        onEditContextAdd={handleEditContextAdd}
+                        onEditContextRemove={handleEditContextRemove}
                       />
                     )}
                   </Thread.Messages>
 
                   <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
-                    {chat.status === "streaming"
-                      ? "Thinking and writing…"
-                      : "Writing…"}
+                    <AnimatedStatusText
+                      label={
+                        chat.status === "streaming"
+                          ? "Thinking and writing"
+                          : "Writing"
+                      }
+                    />
                   </Thread.Loading>
 
                   <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
@@ -1760,6 +2284,14 @@ function ChatSession({
 
                   <ApprovalPanel />
 
+                  <ClarificationPanel />
+
+                  <StaleSessionDialog
+                    open={staleDialog !== null}
+                    kind={staleDialog?.kind ?? "send"}
+                    onReload={handleStaleReload}
+                  />
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -1788,6 +2320,17 @@ function ChatSession({
                     webSearchEnabled={webSearchEnabled}
                     webSearchAvailable={capabilities?.webSearchAvailable ?? false}
                     onWebSearchToggle={setWebSearchEnabled}
+                    imageGenerationEnabled={imageGenerationEnabled}
+                    imageGenerationAvailable={
+                      capabilities?.imageGenerationAvailable ?? false
+                    }
+                    onImageGenerationToggle={handleImageGenerationToggle}
+                    imageGenSettings={imageGenSettings}
+                    onImageGenSettingsChange={handleImageGenSettingsChange}
+                    activeContextImages={activeContextImages}
+                    onToggleImageContext={(image) => {
+                      void handleToggleImageContext(image);
+                    }}
                   />
                 </div>
               </div>
@@ -1799,9 +2342,15 @@ function ChatSession({
             sessionDocuments={sessionDocuments}
             citedDocuments={citedDocuments}
             webSources={webSources}
+            generatedImages={generatedImages}
+            runningImageCount={runningImageParts}
+            activeContextImages={activeContextImages}
             ingestionItems={ingestionItems}
             onRemoveActiveDocument={handleRemoveActiveDocument}
             removingDocumentId={removingDocumentId}
+            onToggleImageContext={(image) => {
+              void handleToggleImageContext(image);
+            }}
           />
         </div>
       </Composer.Root>

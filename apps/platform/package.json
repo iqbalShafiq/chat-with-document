@@ -10,7 +10,8 @@
     "generate-routes": "tsr generate",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@anvia/react": "^0.9.3",
@@ -33,6 +34,7 @@
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tanstack/devtools-vite": "latest",
     "@tanstack/router-cli": "^1.132.0",
     "@tanstack/router-plugin": "latest",

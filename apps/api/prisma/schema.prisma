@@ -336,6 +336,15 @@ model ChatModel {
   sortOrder                  Int                   @default(0)
   createdAt                  DateTime              @default(now())
   updatedAt                  DateTime              @updatedAt
+  /// "text" | "image" — whether this model is a chat model or an image generator.
+  outputType                 String                @default("text")
+  /// Modalities the model accepts as input, e.g. ["text","image"].
+  inputModalities            Json?
+  /// Modalities the model produces, e.g. ["text"] or ["image"].
+  outputModalities           Json?
+  /// Image-gen capability descriptors (from OpenRouter discovery):
+  /// { aspectRatios: string[], quality?: string[], n: {min,max}, background?: string[], resolutions?: string[] }
+  imageCapabilities          Json?
   reasoningEfforts           ModelReasoningEffort[]
 
   @@index([providerId])
@@ -365,4 +374,40 @@ model ModelReasoningEffort {
 
   @@unique([modelId, effortId])
   @@map("model_reasoning_effort")
+}
+
+model GeneratedImage {
+  id        String   @id @default(cuid())
+  userId    String
+  /// Null for standalone (global) chats.
+  projectId String?
+  sessionId String
+  r2Key     String   @unique
+  mediaType String
+  width     Int
+  height    Int
+  modelId   String
+  prompt    String
+  /// e.g. "2 of 3" when generated in a multi-image call.
+  nOfTotal  String?
+  createdAt DateTime @default(now())
+
+  sessionContexts SessionImageContext[]
+
+  @@index([userId, projectId])
+  @@index([sessionId])
+  @@map("generated_image")
+}
+
+model SessionImageContext {
+  id        String         @id @default(cuid())
+  userId    String
+  sessionId String
+  imageId   String
+  image     GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@unique([sessionId, imageId])
+  @@index([userId, sessionId])
+  @@map("session_image_context")
 }

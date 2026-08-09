@@ -24,12 +24,15 @@ export type MessageActionsBarProps = {
   chatStatus: UseChatStatus;
   onRevert: (message: UIMessage) => Promise<void>;
   onStartEdit: (message: UIMessage) => void;
+  /** Combined text of the whole generation (assistant footer copy). */
+  generationText?: string;
 };
 
 export function MessageActionsBar({
   chatStatus,
   onRevert,
   onStartEdit,
+  generationText,
 }: MessageActionsBarProps) {
   const { message } = useMessage();
   const messageCitations = useMessageCitations();
@@ -79,7 +82,9 @@ export function MessageActionsBar({
           {!isUser && assistantCitations.length > 0 ? (
             <CitationsInfoButton citations={assistantCitations} />
           ) : null}
-          {hasText ? <MessageCopyButton /> : null}
+          {hasText || (generationText && generationText.trim().length > 0) ? (
+            <MessageCopyButton generationText={generationText} />
+          ) : null}
 
           {isUser ? (
             <>

@@ -3,10 +3,12 @@ import { useId, useState, type ReactNode } from "react";
 
 export function CollapsibleDocumentSection({
   title,
+  icon,
   children,
   defaultOpen = true,
 }: {
   title: string;
+  icon?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
 }) {
@@ -28,6 +30,7 @@ export function CollapsibleDocumentSection({
           }`}
           strokeWidth={2}
         />
+        {icon ? <span className="shrink-0">{icon}</span> : null}
         <span>{title}</span>
       </button>
 

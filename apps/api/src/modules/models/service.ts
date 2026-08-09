@@ -25,6 +25,12 @@ export type ModelInfo = {
     longPromptOutputMultiplier: number | null;
   };
   reasoningEfforts: string[];
+  /** "text" | "image" — chat model or image generator. */
+  outputType: "text" | "image";
+  /** Image-gen capability descriptors (from OpenRouter discovery). */
+  imageCapabilities: Prisma.JsonValue | null;
+  /** Input modalities the model accepts, e.g. ["text","image","file"]. */
+  inputModalities: string[];
   sortOrder: number;
 };
 
@@ -59,7 +65,15 @@ function toModelInfo(row: {
   sortOrder: number;
   provider: { slug: string; name: string };
   reasoningEfforts: { effort: { key: string } }[];
+  outputType: string;
+  imageCapabilities: Prisma.JsonValue | null;
+  inputModalities: Prisma.JsonValue | null;
 }): ModelInfo {
+  const inputModalities = Array.isArray(row.inputModalities)
+    ? row.inputModalities.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
   return {
     modelId: row.modelId,
     label: row.label,
@@ -83,11 +97,14 @@ function toModelInfo(row: {
     reasoningEfforts: row.reasoningEfforts
       .map((entry) => entry.effort.key)
       .sort(),
+    outputType: row.outputType === "image" ? "image" : "text",
+    imageCapabilities: row.imageCapabilities,
+    inputModalities,
     sortOrder: row.sortOrder,
   };
 }
 
-const MODEL_SELECT = {
+export const MODEL_SELECT = {
   modelId: true,
   label: true,
   name: true,
@@ -104,6 +121,10 @@ const MODEL_SELECT = {
   longPromptThresholdTokens: true,
   longPromptInputMultiplier: true,
   longPromptOutputMultiplier: true,
+  outputType: true,
+  inputModalities: true,
+  outputModalities: true,
+  imageCapabilities: true,
   sortOrder: true,
   provider: { select: { slug: true, name: true } },
   reasoningEfforts: {
@@ -112,13 +133,19 @@ const MODEL_SELECT = {
   },
 } as const;
 
-export async function listModels(): Promise<{
+export async function listModels(input?: {
+  outputType?: "text" | "image";
+}): Promise<{
   models: ModelInfo[];
   reasoningEfforts: ReasoningEffortInfo[];
 }> {
   const [models, reasoningEfforts] = await Promise.all([
     prisma.chatModel.findMany({
-      where: { isActive: true, provider: { isActive: true } },
+      where: {
+        isActive: true,
+        provider: { isActive: true },
+        ...(input?.outputType ? { outputType: input.outputType } : {}),
+      },
       select: MODEL_SELECT,
       orderBy: [{ sortOrder: "asc" }, { modelId: "asc" }],
     }),

@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { chatRouter } from "./modules/chat/router.js";
 import { documentsRouter } from "./modules/documents/router.js";
+import { imagesRouter } from "./modules/images/router.js";
 import { modelsRouter } from "./modules/models/router.js";
 import { projectsRouter } from "./modules/projects/router.js";
 import { profilingRouter } from "./modules/profiling/router.js";
@@ -14,6 +15,7 @@ const app = new Hono()
   .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   .route("/api/chat", chatRouter)
   .route("/api/documents", documentsRouter)
+  .route("/api/images", imagesRouter)
   .route("/api/models", modelsRouter)
   .route("/api/projects", projectsRouter)
   .route("/api/profiling", profilingRouter)

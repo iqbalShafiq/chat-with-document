@@ -19,6 +19,9 @@ import { getRedis } from "../../lib/redis.js";
  */
 
 export const APPROVAL_DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+export const CLARIFICATION_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+export const GRANT_SESSION_TTL_SECONDS = 24 * 60 * 60;
+export const OVERRIDE_TTL_SECONDS = 5 * 60;
 const APPROVAL_TTL_SECONDS = 15 * 60;
 const DECISION_TTL_SECONDS = 5 * 60;
 const POLL_INTERVAL_MS = 500;
@@ -26,6 +29,22 @@ const POLL_INTERVAL_MS = 500;
 const APPROVAL_KEY = (approvalId: string) => `chat-approval:${approvalId}`;
 const DECISION_KEY = (approvalId: string) =>
   `chat-approval:${approvalId}:decision`;
+const GRANT_KEY = (sessionId: string, toolName: string) =>
+  `chat-tool-grant:${sessionId}:${toolName}`;
+const OVERRIDE_KEY = (sessionId: string, toolName: string) =>
+  `chat-tool-override:${sessionId}:${toolName}`;
+const CLARIFICATION_KEY = (id: string) => `chat-clarification:${id}`;
+const CLARIFICATION_DECISION_KEY = (id: string) =>
+  `chat-clarification:${id}:decision`;
+
+/**
+ * Same Redis key the stream store / run-worker use when the client hits Stop.
+ * Approval and clarification waiters poll this so a stop during human-input
+ * unblocks the worker instead of hanging until timeout.
+ */
+export const STREAM_STOP_KEY = (streamId: string) => `rs-stop:${streamId}`;
+
+const STOPPED_BY_USER_REASON = "Stopped by the user.";
 
 export type ApprovalStatus =
   | "pending"
@@ -51,31 +70,75 @@ export type ApprovalDecision = {
   decidedAt: string;
 };
 
+export type ClarificationQuestion = {
+  id: string;
+  question: string;
+  type: "single_choice" | "multiple_choice" | "free_text";
+  options?: Array<{ id: string; label: string; recommended?: boolean }>;
+  optional?: boolean;
+  placeholder?: string;
+};
+
+export type ClarificationRequest = {
+  title?: string;
+  questions: ClarificationQuestion[];
+};
+
+export type ClarificationResponse = {
+  answers: Record<string, string | string[]>;
+  skipped: string[];
+  timedOut: boolean;
+};
+
+type ClarificationStatus = "pending" | "answered" | "timed_out";
+
+type ClarificationRecord = {
+  id: string;
+  userId: string;
+  sessionId: string;
+  streamId: string;
+  title?: string;
+  questions: ClarificationQuestion[];
+  status: ClarificationStatus;
+  requestedAt: string;
+};
+
+type ClarificationDecision = {
+  answers?: unknown;
+  skipped?: unknown;
+};
+
 /** Narrow surface used by the registry so tests can inject a fake. */
 export type ApprovalRedis = Pick<
   Redis,
-  "hset" | "hgetall" | "expire" | "get" | "set" | "del"
+  "hset" | "hgetall" | "expire" | "get" | "getdel" | "set" | "del" | "keys"
 >;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForDecision(
+async function waitForDecision<T>(
   redis: ApprovalRedis,
-  approvalId: string,
+  decisionKey: string,
   timeoutMs: number,
-): Promise<ApprovalDecision | "timeout"> {
+  stopKey?: string,
+): Promise<T | "timeout" | "stopped"> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const raw = await redis.get(DECISION_KEY(approvalId));
+    const raw = await redis.get(decisionKey);
     if (raw) {
       try {
-        return JSON.parse(raw) as ApprovalDecision;
+        return JSON.parse(raw) as T;
       } catch {
         // Corrupt value — not a decision yet; drop it and keep polling.
-        await redis.del(DECISION_KEY(approvalId));
+        await redis.del(decisionKey);
       }
+    }
+    // Client Stop sets rs-stop:<streamId>; exit promptly so the worker can
+    // end the run instead of sitting in human-input until the timeout.
+    if (stopKey && (await redis.get(stopKey))) {
+      return "stopped";
     }
     if (Date.now() >= deadline) return "timeout";
     await sleep(POLL_INTERVAL_MS);
@@ -139,12 +202,19 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
           },
         });
 
-        const decision = await waitForDecision(redis, approvalId, timeoutMs);
+        const decision = await waitForDecision<ApprovalDecision>(
+          redis,
+          DECISION_KEY(approvalId),
+          timeoutMs,
+          STREAM_STOP_KEY(streamId),
+        );
 
         const resolvedAt = new Date().toISOString();
-        if (decision === "timeout") {
+        if (decision === "timeout" || decision === "stopped") {
+          const status: ApprovalStatus =
+            decision === "stopped" ? "rejected" : "timed_out";
           await redis.hset(APPROVAL_KEY(approvalId), {
-            status: "timed_out",
+            status,
             resolvedAt,
           });
           await append({
@@ -152,15 +222,20 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
             approval: {
               id: approvalId,
               toolName: request.toolName,
-              status: "timed_out",
+              status,
               resolvedAt,
+              ...(decision === "stopped"
+                ? { reason: STOPPED_BY_USER_REASON }
+                : {}),
             },
           });
           await removeApproval(approvalId);
           return {
             approved: false,
             reason:
-              "Web access request timed out; answer from available knowledge.",
+              decision === "stopped"
+                ? STOPPED_BY_USER_REASON
+                : "Web access request timed out; answer from available knowledge.",
           };
         }
 
@@ -231,8 +306,289 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
       };
     },
 
+    /** Make "Allow for session" sticky for a tool until the grant expires. */
+    async grantTool(input: {
+      sessionId: string;
+      toolName: string;
+    }): Promise<void> {
+      await redis.set(
+        GRANT_KEY(input.sessionId, input.toolName),
+        JSON.stringify({ grantedAt: new Date().toISOString() }),
+        "EX",
+        GRANT_SESSION_TTL_SECONDS,
+      );
+    },
+
+    async hasToolGrant(
+      sessionId: string,
+      toolName: string,
+    ): Promise<boolean> {
+      return (await redis.get(GRANT_KEY(sessionId, toolName))) !== null;
+    },
+
+    async revokeToolGrant(sessionId: string, toolName: string): Promise<void> {
+      await redis.del(GRANT_KEY(sessionId, toolName));
+    },
+
+    /** Stage edited tool args the UI wants applied at approval time. */
+    async setToolOverride(input: {
+      sessionId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+    }): Promise<void> {
+      await redis.set(
+        OVERRIDE_KEY(input.sessionId, input.toolName),
+        JSON.stringify(input.args),
+        "EX",
+        OVERRIDE_TTL_SECONDS,
+      );
+    },
+
+    /** Fetch a staged override once, consuming it atomically. */
+    async takeToolOverride(
+      sessionId: string,
+      toolName: string,
+    ): Promise<Record<string, unknown> | null> {
+      const key = OVERRIDE_KEY(sessionId, toolName);
+      const raw = await redis.getdel(key);
+      if (raw === null) return null;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          return null;
+        }
+        return parsed as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    },
+
+    /**
+     * Build a clarification requester bound to one stream run: stores the
+     * request, surfaces it via `append`, and suspends until the user answers
+     * (or the timeout fires). Powers the generic `request_clarification`
+     * agent tool.
+     */
+    createClarificationRequester(input: {
+      userId: string;
+      sessionId: string;
+      streamId: string;
+      append: (event: unknown) => Promise<void>;
+      timeoutMs?: number;
+    }): (request: ClarificationRequest) => Promise<ClarificationResponse> {
+      const { userId, sessionId, streamId, append } = input;
+      const timeoutMs = input.timeoutMs ?? CLARIFICATION_DEFAULT_TIMEOUT_MS;
+
+      return async (request) => {
+        const id = randomUUID();
+        const requestedAt = new Date().toISOString();
+        const record: ClarificationRecord = {
+          id,
+          userId,
+          sessionId,
+          streamId,
+          ...(request.title ? { title: request.title } : {}),
+          questions: request.questions,
+          status: "pending",
+          requestedAt,
+        };
+
+        await redis.set(
+          CLARIFICATION_KEY(id),
+          JSON.stringify(record),
+          "EX",
+          APPROVAL_TTL_SECONDS,
+        );
+
+        await append({
+          type: "clarification_request",
+          clarification: {
+            id,
+            sessionId,
+            ...(request.title ? { title: request.title } : {}),
+            questions: request.questions,
+            status: "pending",
+            requestedAt,
+          },
+        });
+
+        const decision = await waitForDecision<ClarificationDecision>(
+          redis,
+          CLARIFICATION_DECISION_KEY(id),
+          timeoutMs,
+          STREAM_STOP_KEY(streamId),
+        );
+
+        const resolvedAt = new Date().toISOString();
+        if (decision === "timeout" || decision === "stopped") {
+          await append({
+            type: "clarification_response",
+            clarification: { id, status: "timed_out", resolvedAt },
+          });
+          await redis.del(CLARIFICATION_KEY(id));
+          return { answers: {}, skipped: [], timedOut: true };
+        }
+
+        const answers =
+          typeof decision.answers === "object" &&
+          decision.answers !== null &&
+          !Array.isArray(decision.answers)
+            ? (decision.answers as Record<string, string | string[]>)
+            : {};
+        const skipped = Array.isArray(decision.skipped)
+          ? (decision.skipped as string[])
+          : [];
+
+        await append({
+          type: "clarification_response",
+          clarification: { id, status: "answered", resolvedAt },
+        });
+        await redis.del(CLARIFICATION_KEY(id));
+        return { answers, skipped, timedOut: false };
+      };
+    },
+
+    /** Resolve a pending clarification (called by the UI's answer route). */
+    async publishClarificationResponse(
+      id: string,
+      response: { answers: Record<string, string | string[]>; skipped?: string[] },
+    ): Promise<void> {
+      await redis.set(
+        CLARIFICATION_DECISION_KEY(id),
+        JSON.stringify({
+          ...response,
+          decidedAt: new Date().toISOString(),
+        }),
+        "EX",
+        DECISION_TTL_SECONDS,
+      );
+    },
+
+    async getClarification(
+      id: string,
+    ): Promise<{ userId: string; status: ApprovalStatus } | null> {
+      const raw = await redis.get(CLARIFICATION_KEY(id));
+      if (raw === null) return null;
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (
+          typeof parsed.userId !== "string" ||
+          typeof parsed.status !== "string"
+        ) {
+          return null;
+        }
+        const status: ApprovalStatus =
+          parsed.status === "pending" ||
+          parsed.status === "approved" ||
+          parsed.status === "rejected" ||
+          parsed.status === "timed_out"
+            ? parsed.status
+            : "pending";
+        return { userId: parsed.userId, status };
+      } catch {
+        return null;
+      }
+    },
+
     /** Forget a resolved/expired approval (called after a decision). */
     removeApproval,
+
+    /**
+     * Pending approvals for a running stream. Used by the chat resume route
+     * to re-emit the approval request as a NEW event: the resume cursor only
+     * replays events after the last consumed id, so the original request
+     * (already consumed by the previous page) would never reach the UI again.
+     */
+    async listPendingApprovals(
+      streamId: string,
+    ): Promise<PendingApprovalRecord[]> {
+      const keys = await redis.keys(APPROVAL_KEY("*"));
+      const records: PendingApprovalRecord[] = [];
+      for (const key of keys) {
+        const raw = await redis.hgetall(key);
+        if (!raw || Object.keys(raw).length === 0) continue;
+        if (raw.streamId !== streamId || raw.status !== "pending") continue;
+        records.push({
+          approvalId: raw.approvalId ?? key.slice(APPROVAL_KEY("").length),
+          userId: raw.userId ?? "",
+          sessionId: raw.sessionId ?? "",
+          streamId: raw.streamId ?? "",
+          toolName: raw.toolName ?? "",
+          args: raw.args ?? "",
+          ...(raw.reason ? { reason: raw.reason } : {}),
+          status: "pending",
+          requestedAt: raw.requestedAt ?? new Date(0).toISOString(),
+        });
+      }
+      return records;
+    },
+
+    /**
+     * Pending clarifications for a running stream — same re-emit rationale
+     * as listPendingApprovals.
+     */
+    async listPendingClarifications(
+      streamId: string,
+    ): Promise<ClarificationRecord[]> {
+      const keys = await redis.keys(CLARIFICATION_KEY("*"));
+      const records: ClarificationRecord[] = [];
+      for (const key of keys) {
+        const raw = await redis.get(key);
+        if (raw === null) continue;
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (parsed.streamId !== streamId || parsed.status !== "pending") {
+            continue;
+          }
+          records.push({
+            id: typeof parsed.id === "string" ? parsed.id : "",
+            userId: typeof parsed.userId === "string" ? parsed.userId : "",
+            sessionId:
+              typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+            streamId:
+              typeof parsed.streamId === "string" ? parsed.streamId : "",
+            ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+            questions: Array.isArray(parsed.questions)
+              ? (parsed.questions as ClarificationQuestion[])
+              : [],
+            status: parsed.status === "pending" ? "pending" : "answered",
+            requestedAt:
+              typeof parsed.requestedAt === "string"
+                ? parsed.requestedAt
+                : new Date(0).toISOString(),
+          });
+        } catch {
+          // skip corrupt records
+        }
+      }
+      return records;
+    },
+
+    /**
+     * Unblock human-input waiters for a stream (used by POST /chat/stop).
+     * Publishes reject decisions for pending approvals so waiters wake on the
+     * next poll even before they re-check the stop flag. Clarification waiters
+     * exit via the stream stop key (no answer payload to invent).
+     */
+    async cancelPendingForStream(
+      streamId: string,
+      reason: string = STOPPED_BY_USER_REASON,
+    ): Promise<{ approvals: number; clarifications: number }> {
+      const approvals = await this.listPendingApprovals(streamId);
+      for (const approval of approvals) {
+        await this.publishDecision(approval.approvalId, {
+          approved: false,
+          reason,
+        });
+      }
+      // Clarifications: set stop key is enough (waitForDecision checks it).
+      // Count them for observability; no answer is published.
+      const clarifications = await this.listPendingClarifications(streamId);
+      return {
+        approvals: approvals.length,
+        clarifications: clarifications.length,
+      };
+    },
   };
 }
 

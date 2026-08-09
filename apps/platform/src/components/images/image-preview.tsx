@@ -11,11 +11,40 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Minus, Plus, RotateCcw, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Minus,
+  Pin,
+  PinOff,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { useDocumentImage } from "#/components/images/use-document-image";
+import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 
-type ImagePreviewInput = { src: string; alt?: string };
-type ImagePreviewContextValue = { open: (input: ImagePreviewInput) => void };
+export type ImagePreviewInput = {
+  src: string;
+  alt?: string;
+  /** Stored generated image — enables the "Add to context" action. */
+  image?: GeneratedImageItem | null;
+};
+export type ImagePreviewCollectionInput = {
+  images: ImagePreviewInput[];
+  /** Index of the image to show first (default 0). */
+  index?: number;
+};
+/**
+ * When previewing a stored generated image, the "Add to context" action
+ * becomes available (toggles the session's active image context).
+ */
+export type ImagePreviewContextActions = {
+  toggle: (image: GeneratedImageItem) => void | Promise<void>;
+  isPinned: (image: GeneratedImageItem) => boolean;
+};
+type ImagePreviewOpenInput = ImagePreviewInput | ImagePreviewCollectionInput;
+type ImagePreviewContextValue = { open: (input: ImagePreviewOpenInput) => void };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
 
@@ -31,12 +60,34 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 1.5;
 
-export function ImagePreviewProvider({ children }: { children: ReactNode }) {
-  const [current, setCurrent] = useState<ImagePreviewInput | null>(null);
+/**
+ * Full-screen image viewer rendered as a native dialog with a frosted-glass
+ * backdrop — no container panel: the image floats directly on the glass.
+ *
+ * Behavior & accessibility:
+ * - `<dialog>.showModal()` gives focus trapping + Esc handling for free.
+ * - Zoom via wheel, double-click, toolbar buttons, or + / − / 0 keys.
+ * - Pan (when zoomed) via pointer drag; clicks on the backdrop close.
+ * - `aria-modal` + `aria-labelledby`; all controls have aria-labels and
+ *   disabled states; motion respects `prefers-reduced-motion` (CSS).
+ *
+ * When `actions` are provided, previews opened with an `image` record show an
+ * "Add to context" button (toggle) that also dismisses the viewer.
+ */
+export function ImagePreviewProvider({
+  children,
+  actions,
+}: {
+  children: ReactNode;
+  actions?: ImagePreviewContextActions | null;
+}) {
+  const [collection, setCollection] = useState<ImagePreviewInput[] | null>(null);
+  const [imageByIndex, setImageByIndex] = useState<Record<number, GeneratedImageItem | null>>({});
+  const [index, setIndex] = useState(0);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -45,6 +96,10 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     originY: number;
   } | null>(null);
   const titleId = useId();
+  const current = collection?.[index] ?? null;
+  const currentImage = current ? (imageByIndex[index] ?? null) : null;
+  const pinned =
+    currentImage !== null && actions?.isPinned(currentImage) === true;
   // Internal document URLs need an authenticated fetch (plain <img> cannot
   // send the session cookie cross-origin) — same path as inline DocumentImage.
   const { internal, displaySrc, state, retry } = useDocumentImage(
@@ -57,8 +112,27 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const open = useCallback(
-    (input: ImagePreviewInput) => {
-      setCurrent(input);
+    (input: ImagePreviewOpenInput) => {
+      if ("images" in input) {
+        const records: Record<number, GeneratedImageItem | null> = {};
+        input.images.forEach((item, i) => {
+          records[i] = item.image ?? null;
+        });
+        setImageByIndex(records);
+        setCollection(
+          input.images.map((item) => ({ src: item.src, alt: item.alt })),
+        );
+        setIndex(
+          Math.min(
+            Math.max(input.index ?? 0, 0),
+            input.images.length - 1,
+          ),
+        );
+      } else {
+        setCollection([{ src: input.src, alt: input.alt }]);
+        setImageByIndex({ 0: input.image ?? null });
+        setIndex(0);
+      }
       resetView();
     },
     [resetView],
@@ -66,9 +140,24 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     dialogRef.current?.close();
-    setCurrent(null);
+    setCollection(null);
+    setImageByIndex({});
+    setIndex(0);
     resetView();
   }, [resetView]);
+
+  const goTo = useCallback(
+    (nextIndex: number) => {
+      setIndex((currentIndex) => {
+        const length = collection?.length ?? 1;
+        const clamped = Math.min(Math.max(nextIndex, 0), length - 1);
+        if (clamped === currentIndex) return currentIndex;
+        resetView();
+        return clamped;
+      });
+    },
+    [collection, resetView],
+  );
 
   const zoomBy = useCallback((factor: number) => {
     setScale((currentScale) =>
@@ -78,10 +167,10 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
 
   const clampPan = useCallback(
     (x: number, y: number, currentScale: number) => {
-      const container = containerRef.current;
-      if (!container || currentScale <= 1) return { x: 0, y: 0 };
-      const maxX = ((currentScale - 1) * container.clientWidth) / 2;
-      const maxY = ((currentScale - 1) * container.clientHeight) / 2;
+      const stage = stageRef.current;
+      if (!stage || currentScale <= 1) return { x: 0, y: 0 };
+      const maxX = ((currentScale - 1) * stage.clientWidth) / 2;
+      const maxY = ((currentScale - 1) * stage.clientHeight) / 2;
       return {
         x: Math.min(maxX, Math.max(-maxX, x)),
         y: Math.min(maxY, Math.max(-maxY, y)),
@@ -157,11 +246,17 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
         zoomBy(1 / ZOOM_STEP);
       } else if (event.key === "0") {
         resetView();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goTo(index + 1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goTo(index - 1);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [current, zoomBy, resetView]);
+  }, [current, index, zoomBy, resetView, goTo]);
 
   if (typeof window === "undefined") return null;
 
@@ -174,7 +269,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
               ref={dialogRef}
               aria-labelledby={titleId}
               aria-modal="true"
-              className="m-auto flex h-full max-h-[92dvh] w-full max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-hairline bg-canvas-elevated/95 p-0 text-text backdrop-blur-xl shadow-[0_24px_64px_-16px_rgba(0,0,0,0.8)] animate-scale-in motion-reduce:animate-none"
+              className="image-viewer m-auto flex items-center justify-center p-0 text-text"
               onCancel={(event) => {
                 event.preventDefault();
                 close();
@@ -188,8 +283,8 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
               </h2>
 
               <div
-                ref={containerRef}
-                className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden"
+                ref={stageRef}
+                className="relative flex h-full w-full touch-none select-none items-center justify-center overflow-hidden p-8"
                 onWheel={(event) => {
                   event.preventDefault();
                   zoomBy(event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
@@ -201,6 +296,13 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 onPointerMove={moveDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
+                onClick={(event) => {
+                  // Backdrop click closes the viewer, but never while zoomed:
+                  // pointer capture on the stage (pan) retargets click to the
+                  // stage, which would dismiss the preview after a drag or a
+                  // double-click zoom. While zoomed, use X / Escape to close.
+                  if (scale <= 1 && event.target === stageRef.current) close();
+                }}
               >
                 {internal && state === "loading" ? (
                   <div className="flex flex-col items-center gap-2">
@@ -217,7 +319,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                     <button
                       type="button"
                       onClick={retry}
-                      className="inline-flex cursor-pointer items-center rounded-lg border border-hairline bg-surface px-3 py-1.5 text-[11px] font-medium text-text transition hover:bg-surface-elevated active:scale-[0.97]"
+                      className="glass inline-flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-[11px] font-medium text-text transition hover:bg-white/10 active:scale-[0.97]"
                     >
                       Retry
                     </button>
@@ -227,7 +329,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                     src={displaySrc}
                     alt={current.alt ?? "Document image"}
                     draggable={false}
-                    className="max-h-full max-w-full object-contain transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+                    className="max-h-full max-w-full object-contain drop-shadow-[0_24px_48px_rgba(0,0,0,0.55)] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
                     style={{
                       transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
                     }}
@@ -235,43 +337,113 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              <div className="flex shrink-0 items-center justify-end gap-1 border-t border-white/[0.06] px-3 py-2.5">
-                <button
-                  type="button"
-                  aria-label="Zoom out"
-                  onClick={() => zoomBy(1 / ZOOM_STEP)}
-                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                  disabled={scale <= MIN_SCALE}
-                >
-                  <Minus className="size-4" strokeWidth={1.75} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Reset zoom"
-                  onClick={resetView}
-                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                  disabled={scale <= MIN_SCALE}
-                >
-                  <RotateCcw className="size-4" strokeWidth={1.75} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Zoom in"
-                  onClick={() => zoomBy(ZOOM_STEP)}
-                  className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96] disabled:opacity-40"
-                  disabled={scale >= MAX_SCALE}
-                >
-                  <Plus className="size-4" strokeWidth={1.75} />
-                </button>
+              {/* Floating glass controls — no toolbar container, they sit on
+                  the frosted backdrop next to the image. Counter sits above
+                  the zoom row; select-none keeps double-click zoom from
+                  selecting the text. */}
+              <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 select-none flex-col items-center gap-1.5 rounded-xl p-1">
+                {collection && collection.length > 1 ? (
+                  <span className="pointer-events-auto rounded-lg bg-black/30 px-2 py-0.5 text-[11px] font-medium tabular-nums text-text-faint backdrop-blur-sm">
+                    {index + 1} / {collection.length}
+                  </span>
+                ) : null}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Zoom out"
+                    onClick={() => zoomBy(1 / ZOOM_STEP)}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale <= MIN_SCALE}
+                  >
+                    <Minus className="size-4" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Reset zoom"
+                    onClick={resetView}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale <= MIN_SCALE}
+                  >
+                    <RotateCcw className="size-4" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Zoom in"
+                    onClick={() => zoomBy(ZOOM_STEP)}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale >= MAX_SCALE}
+                  >
+                    <Plus className="size-4" strokeWidth={1.75} />
+                  </button>
+                </div>
+              </div>
+
+              {collection && collection.length > 1 ? (
+                <>
+                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      aria-label="Previous image"
+                      onClick={() => goTo(index - 1)}
+                      className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                      disabled={index <= 0}
+                    >
+                      <ChevronLeft className="size-4" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                  <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2">
+                    <button
+                      type="button"
+                      aria-label="Next image"
+                      onClick={() => goTo(index + 1)}
+                      className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                      disabled={index >= collection.length - 1}
+                    >
+                      <ChevronRight className="size-4" strokeWidth={1.75} />
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              <div className="pointer-events-none absolute right-4 top-4">
                 <button
                   type="button"
                   aria-label="Close image preview"
                   onClick={close}
-                  className="ml-1 inline-flex size-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96]"
+                  className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
                 >
                   <X className="size-4" strokeWidth={1.75} />
                 </button>
               </div>
+
+              {currentImage !== null && actions ? (
+                <div className="pointer-events-none absolute bottom-4 left-4">
+                  <button
+                    type="button"
+                    aria-label={
+                      pinned
+                        ? "Remove image from context"
+                        : "Add image as context"
+                    }
+                    onClick={() => {
+                      void actions.toggle(currentImage);
+                      close();
+                    }}
+                    className={`glass pointer-events-auto inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-[11px] font-medium transition duration-150 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
+                      pinned
+                        ? "bg-accent text-canvas hover:bg-accent/90 hover:text-canvas"
+                        : "text-text hover:bg-white/12 hover:text-text"
+                    }`}
+                  >
+                    {pinned ? (
+                      <PinOff className="size-3.5" strokeWidth={2} />
+                    ) : (
+                      <Pin className="size-3.5" strokeWidth={2} />
+                    )}
+                    {pinned ? "Remove from context" : "Add to context"}
+                  </button>
+                </div>
+              ) : null}
             </dialog>,
             window.document.body,
           )

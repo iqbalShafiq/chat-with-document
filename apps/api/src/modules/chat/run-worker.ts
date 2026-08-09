@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import type { Message } from "@anvia/core/completion";
+import { Message, UserContent, type Message as MessageType } from "@anvia/core/completion";
 import { DEFAULT_COMPLETION_PROVIDER } from "@assingment/agent";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { getRedis } from "../../lib/redis.js";
@@ -11,6 +11,7 @@ import { tapProfileRefresh } from "../profiling/tap-profile-refresh.js";
 import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import { getContext7McpServer } from "../../lib/context7-server.js";
 import { getApprovalRegistry } from "./approval-registry.js";
+import { getImageStore } from "../images/service.js";
 import { buildChatRunInput } from "./build-run-input.js";
 import { compactSessionMemory } from "./compaction.js";
 import { compactionConfig, estimateStaticContextTokens } from "./context-usage.js";
@@ -145,6 +146,8 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     model,
     reasoningEffort,
     webSearchEnabled,
+    imageGenerationEnabled,
+    imageGenSettings,
     promptMessage,
   } = job.data;
   const store = getStreamStore();
@@ -171,15 +174,52 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
         store.append({ streamId, event }).then(() => undefined),
     });
 
+    // Grant/override lookups are live per-call reads (grants can be issued
+    // mid-run via the decision route), so they wrap the registry directly.
+    const grantHelpers = {
+      hasGrant: (toolName: string) =>
+        getApprovalRegistry().hasToolGrant(sessionId, toolName),
+      takeToolOverride: (toolName: string) =>
+        getApprovalRegistry().takeToolOverride(sessionId, toolName),
+    };
+
+    // Clarification requests suspend the run until the user answers via the
+    // API route, surfacing each request as a stream event.
+    const clarificationRequester = getApprovalRegistry().createClarificationRequester(
+      {
+        userId,
+        sessionId,
+        streamId,
+        append: (event) =>
+          store.append({ streamId, event }).then(() => undefined),
+      },
+    );
+
     const runInput = await buildChatRunInput({
       sessionId,
       userId,
       model,
       reasoningEffort,
       webSearchEnabled,
+      imageGenerationEnabled,
+      imageGenSettings,
+      grantHelpers,
+      clarificationRequester,
       approvals: { handler: approvalHandler },
       context7Server: await getContext7McpServer(),
     });
+
+    // Active image context is single-use: it is consumed by this run, so
+    // clear it after loading (the r2 keys stay in runInput for this run and
+    // any transient retry). Best-effort — a leftover row is pruned the next
+    // time a run consumes context.
+    if (runInput.activeContextImages.length > 0) {
+      await getImageStore()
+        .clearSessionImageContexts({ userId, sessionId })
+        .catch(() => {
+          // non-fatal: next run re-clears
+        });
+    }
 
     const memoryMessages = await runInput.memory.load({ sessionId, userId });
     const estimated = estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);
@@ -227,13 +267,53 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       }
     }
 
+    // Active image context: prepend pinned images as image input to the user
+    // prompt (only when the selected model accepts image input). The context
+    // block from build-run-input describes them for non-image models.
+    const modelAcceptsImage =
+      modelInfo?.inputModalities?.includes("image") ?? false;
+    let effectivePrompt = promptMessage;
+    if (runInput.activeContextImages.length > 0 && modelAcceptsImage) {
+      const imageContents = [];
+      for (const image of runInput.activeContextImages) {
+        try {
+          const data = await getImageStore().getObjectBuffer(image.r2Key);
+          imageContents.push(
+            UserContent.imageBase64(
+              Buffer.from(data).toString("base64"),
+              image.mediaType,
+              { detail: "auto" },
+            ),
+          );
+        } catch (error) {
+          console.error("[chat-run] active context image fetch failed", {
+            imageId: image.id,
+            error,
+          });
+        }
+      }
+      if (imageContents.length > 0) {
+        const content = promptMessage.content;
+        const textParts = Array.isArray(content)
+          ? content.filter(
+              (item): item is Extract<typeof item, { type: "text" }> =>
+                item.type === "text",
+            )
+          : [UserContent.text(content)];
+        effectivePrompt = Message.user(
+          [...imageContents, ...textParts],
+          { metadata: promptMessage.metadata },
+        );
+      }
+    }
+
     // The transient-retry wrapper sits between the raw agent stream and the
     // audit taps, so a dropped attempt records nothing (no usage, no stream
     // events, no citations) — only the retried stream flows into the taps.
     const rawFactory = () =>
       runInput.agent
         .session(sessionId, { userId })
-        .prompt(promptMessage)
+        .prompt(effectivePrompt)
         .withTrace({
           sessionId,
           userId,

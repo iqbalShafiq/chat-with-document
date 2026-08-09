@@ -9,7 +9,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ModelInfo, ReasoningEffortInfo } from "#/lib/api";
-import { modelById, reasoningLabel } from "#/lib/chat/models";
+import {
+  formatModelContext,
+  formatModelPrice,
+  modalityLabel,
+  modelById,
+  reasoningLabel,
+} from "#/lib/chat/models";
 import {
   SelectOptionList,
   type SelectOption,
@@ -17,6 +23,55 @@ import {
 
 /** Used only to order the icon fill; the actual list comes from props. */
 const EFFORT_ORDER = ["low", "medium", "high", "max"];
+
+/**
+ * Hover detail for a model option: input modality tags (icons only), max
+ * context window, and input/output prices.
+ */
+function ModelDetail({ model }: { model: ModelInfo }) {
+  const priceIn = formatModelPrice(model.prices.input);
+  const priceOut = formatModelPrice(model.prices.output);
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        {model.inputModalities.length > 0
+          ? model.inputModalities.map((modality) => (
+              <span
+                key={modality}
+                className="rounded-md bg-white/[0.07] px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-text-muted"
+              >
+                {modalityLabel(modality)}
+              </span>
+            ))
+          : null}
+      </div>
+      <dl className="flex flex-col gap-0.5">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-[10px] text-text-faint">Context</dt>
+          <dd className="text-[10px] font-medium text-text/90">
+            {formatModelContext(model.contextWindowTokens)}
+          </dd>
+        </div>
+        {priceIn !== null ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[10px] text-text-faint">Input</dt>
+            <dd className="text-[10px] font-medium text-text/90">
+              {priceIn}
+            </dd>
+          </div>
+        ) : null}
+        {priceOut !== null ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[10px] text-text-faint">Output</dt>
+            <dd className="text-[10px] font-medium text-text/90">
+              {priceOut}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
 
 /**
  * Single glass shell with two joined dropdowns (model | reasoning).
@@ -130,6 +185,7 @@ export function ModelReasoningSwitcher({
     icon: (
       <ModelIcon svg={m.iconSvg} className="size-3.5 shrink-0 opacity-70" />
     ),
+    detail: <ModelDetail model={m} />,
   }));
 
   const reasoningOptions: SelectOption[] =
@@ -165,6 +221,7 @@ export function ModelReasoningSwitcher({
               zIndex: 80,
             }}
             options={openMenu === "model" ? modelOptions : reasoningOptions}
+            hoverSide={openMenu === "model" ? "right" : "top"}
             onSelect={(selectedValue) => {
               if (openMenu === "model") {
                 onModelChange(selectedValue);

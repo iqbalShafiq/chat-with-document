@@ -31,6 +31,42 @@ export function reasoningLabel(
   return efforts.find((effort) => effort.key === key)?.label ?? key;
 }
 
+/** "$0.20 / 1M input" style price formatting. */
+export function formatModelPrice(value: number | null): string | null {
+  if (value === null) return null;
+  if (value === 0) return "Free";
+  return `$${value.toFixed(2)} / 1M`;
+}
+
+/** "1,050,000 tokens" style context formatting. */
+export function formatModelContext(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, "")}M tokens`;
+  }
+  if (tokens >= 1_000) {
+    return `${Math.round(tokens / 1_000)}K tokens`;
+  }
+  return `${tokens} tokens`;
+}
+
+/** Short modal tag for the hover detail: TEXT / IMAGE / FILE / AUDIO / VIDEO. */
+export function modalityLabel(modality: string): string {
+  switch (modality) {
+    case "text":
+      return "TEXT";
+    case "image":
+      return "IMAGE";
+    case "file":
+      return "FILE";
+    case "audio":
+      return "AUDIO";
+    case "video":
+      return "VIDEO";
+    default:
+      return modality.toUpperCase();
+  }
+}
+
 /**
  * Fallback when switching to a model that does not support the current effort:
  * prefer the level directly below, then the one directly above, then null.
