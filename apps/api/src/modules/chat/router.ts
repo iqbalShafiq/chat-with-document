@@ -13,6 +13,8 @@ import {
   tryAcquireActiveRun,
 } from "./run-queue.js";
 import { loadEnrichedMemoryMessages } from "./enrich-memory-messages.js";
+import { createDefaultMemoryScopeKey } from "./memory-scope.js";
+import { prisma } from "../../utils/prisma.js";
 import { listSessionsPage, markChatSessionRead } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
@@ -339,6 +341,53 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       if (!meta || meta.userId !== user.id || meta.sessionId !== sessionId) {
         return c.json({ error: "stream not found", code: "STREAM_NOT_FOUND" }, 404);
       }
+      // Rejoin recovery: a resuming client only receives events AFTER the
+      // resume cursor, so a pending human-approval/clarification request
+      // (already consumed by the previous page) would never re-render. Re-emit
+      // pending requests as fresh events so the UI shows the card again and
+      // the decision key still matches the original poller.
+      const registry = getApprovalRegistry();
+      try {
+        const pendingApprovals = await registry.listPendingApprovals(resume.streamId);
+        for (const approval of pendingApprovals) {
+          await store.append({
+            streamId: resume.streamId,
+            event: {
+              type: "tool_approval_request",
+              approval: {
+                id: approval.approvalId,
+                sessionId: meta.sessionId,
+                toolName: approval.toolName,
+                args: approval.args,
+                status: "pending",
+                requestedAt: approval.requestedAt,
+                ...(approval.reason ? { reason: approval.reason } : {}),
+              },
+            },
+          });
+        }
+        const pendingClarifications = await registry.listPendingClarifications(resume.streamId);
+        for (const clarification of pendingClarifications) {
+          await store.append({
+            streamId: resume.streamId,
+            event: {
+              type: "clarification_request",
+              clarification: {
+                id: clarification.id,
+                sessionId: meta.sessionId,
+                ...(clarification.title ? { title: clarification.title } : {}),
+                questions: clarification.questions,
+                status: "pending",
+                requestedAt: clarification.requestedAt,
+              },
+            },
+          });
+        }
+      } catch (error) {
+        // Best-effort: the stream may have just ended; the normal replay
+        // below still works for message events.
+        console.error("[chat] resume re-emit failed", error);
+      }
       const events = resumeStreamEvents({ id: resume.streamId, after: resume.after, store });
       return createEventStream(events, { format: "jsonl" });
     }
@@ -420,6 +469,26 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       status: state.status === "running" ? "running" : state.status,
       lastEventId: state.lastEventId,
     });
+  })
+  .get("/session-state", async (c) => {
+    const user = c.get("user");
+    const sessionId = requireSessionId(c.req.query("sessionId"));
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    const scopeKey = createDefaultMemoryScopeKey(sessionId, user.id);
+    const memorySession = await prisma.agentMemorySession.findUnique({
+      where: { scopeKey },
+      select: { id: true },
+    });
+    if (!memorySession) {
+      return c.json({ messageCount: 0 });
+    }
+    const messageCount = await prisma.agentMemoryMessage.count({
+      where: {
+        memorySessionId: memorySession.id,
+        role: { in: ["user", "assistant"] },
+      },
+    });
+    return c.json({ messageCount });
   })
   .post("/stop", async (c) => {
     const user = c.get("user");

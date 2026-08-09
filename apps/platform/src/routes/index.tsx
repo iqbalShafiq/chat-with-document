@@ -14,6 +14,7 @@ import { CitationSessionProvider } from "#/components/chat/citation-session-cont
 import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { StaleSessionDialog } from "#/components/chat/stale-session-dialog";
 import {
   SessionDocumentsRail,
   type IngestionItem,
@@ -45,6 +46,7 @@ import {
   waitForDocumentReady,
   fetchSessionImages,
   fetchSessionImageContexts,
+  fetchSessionState,
   addSessionImageContext,
   removeSessionImageContext,
   fetchImageBytes,
@@ -872,6 +874,7 @@ function Home() {
                 }}
                 onAuthFailure={handleAuthFailure}
                 onImageContextActions={setImageContextActions}
+                onReloadMessages={(messages) => setInitialMessages(messages)}
               />
             </div>
           )
@@ -893,6 +896,7 @@ function ChatSession({
   onStreamSettled,
   onAuthFailure,
   onImageContextActions,
+  onReloadMessages,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -907,6 +911,8 @@ function ChatSession({
   onImageContextActions?: (
     actions: ImagePreviewContextActions | null,
   ) => void;
+  /** Replaces the loaded conversation (fresh history after a stale dialog). */
+  onReloadMessages?: (messages: UIMessage[]) => void;
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1614,6 +1620,78 @@ function ChatSession({
     setComposerInputText(getMessageRawText(secondLast));
   }, [initialMessages, modelsStatus, setComposerInputText]);
 
+  // ─── Stale-session guard (freshness check before send) ───────────────────
+  // The server memory is the source of truth; another window/device may have
+  // appended messages. Compare persisted counts: stale ⟺ server has MORE
+  // messages than this view knows. Fail-open when the fetch fails.
+  const [staleDialog, setStaleDialog] = useState<{
+    kind: "send" | "resubmit";
+  } | null>(null);
+  const pendingSendRef = useRef<{
+    input: string;
+    attachments: UIAttachment[];
+    chat: ReturnType<typeof useChat>;
+    clear: () => void;
+  } | null>(null);
+  /**
+   * Latest send body, kept in a ref so the stale dialog's "Send anyway" can
+   * re-invoke it without stale closures (same pattern as chatRef/resumeChatRef).
+   */
+  const submitComposerRef = useRef<
+    (
+      input: string,
+      attachments: UIAttachment[],
+      chat: ReturnType<typeof useChat>,
+      clear: () => void,
+    ) => Promise<void>
+  >(async () => {});
+
+  const isSessionStale = useCallback(async (): Promise<boolean> => {
+    try {
+      const state = await fetchSessionState(sessionId);
+      const localCount = messagesRef.current.filter(
+        (message) => message.role === "user" || message.role === "assistant",
+      ).length;
+      return state.messageCount > localCount;
+    } catch {
+      // Fail-open: an unreachable server must never block sending.
+      return false;
+    }
+  }, [sessionId]);
+
+  /** Reload the conversation from server truth (used by the stale dialog). */
+  const reloadChatFromServer = useCallback(async () => {
+    try {
+      const data = await loadChatMessages(sessionId);
+      const fresh = initialMessagesFromMemory(data as never);
+      onReloadMessages?.(fresh);
+      chatRef.current?.setMessages(fresh);
+    } catch {
+      // keep the current view on failure
+    }
+  }, [sessionId, onReloadMessages]);
+
+  const handleStaleReload = useCallback(() => {
+    setStaleDialog(null);
+    pendingSendRef.current = null;
+    setEditingMessageId(null);
+    setEditContextImages([]);
+    void reloadChatFromServer();
+  }, [reloadChatFromServer]);
+
+  const handleStaleSendAnyway = useCallback(() => {
+    const pending = pendingSendRef.current;
+    setStaleDialog(null);
+    pendingSendRef.current = null;
+    if (!pending) return;
+    void submitComposerRef.current(
+      pending.input,
+      pending.attachments,
+      pending.chat,
+      pending.clear,
+    );
+  }, []);
+
   /**
    * Shared path for revert (same text) and edit (new text):
    * truncate memory to exclude the target user message, drop later UI messages,
@@ -1652,6 +1730,13 @@ function ChatSession({
       const trimmed = text.trim();
       if (!trimmed) {
         throw new Error("Message cannot be empty");
+      }
+
+      // Freshness guard: resubmitting from a stale view would truncate the
+      // newer messages added by another window/device — block until reload.
+      if (await isSessionStale()) {
+        setStaleDialog({ kind: "resubmit" });
+        return;
       }
 
       await truncateSessionMemory({
@@ -1706,7 +1791,7 @@ function ChatSession({
         attachments: editAttachments,
       });
     },
-    [sessionId, refreshSessionImages, editContextImages],
+    [sessionId, refreshSessionImages, editContextImages, isSessionStale],
   );
 
   const handleRevert = useCallback(
@@ -1844,22 +1929,15 @@ function ChatSession({
   }, []);
 
 
-  return (
-    <ChatProvider controller={chat}>
-      <CitationSessionProvider sessionDocuments={sessionDocuments}>
-      {/*
-        Composer.Root wraps chat + right doc rail so attachments share context.
-        When docs exist, rail opens (272px = left sidebar) and pushes chat left.
-      */}
-      <Composer.Root
-        className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
-        submitMessage={async ({
-          input,
-          attachments,
-          chat: chatController,
-          clear,
-        }) => {
-          if (modelsStatus !== "success") return;
+  // Keep the latest send body in a ref (avoids stale closures for the stale
+  // dialog's "Send anyway"); the submit handler wraps it with the freshness
+  // check.
+  submitComposerRef.current = async (
+    input,
+    attachments,
+    chatController,
+    clear,
+  ) => {
           setComposerError(null);
           const trimmed = input.trim();
           if (!trimmed && attachments.length === 0) return;
@@ -2024,6 +2102,42 @@ function ChatSession({
 
           clear();
           setIngestionItems([]);
+  };
+
+  return (
+    <ChatProvider controller={chat}>
+      <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      {/*
+        Composer.Root wraps chat + right doc rail so attachments share context.
+        When docs exist, rail opens (272px = left sidebar) and pushes chat left.
+      */}
+      <Composer.Root
+        className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+        submitMessage={async ({
+          input,
+          attachments,
+          chat: chatController,
+          clear,
+        }) => {
+          if (modelsStatus !== "success") return;
+          // Freshness guard: if another window/device added messages, ask the
+          // user before proceeding (a normal send may continue anyway).
+          if (await isSessionStale()) {
+            pendingSendRef.current = {
+              input,
+              attachments,
+              chat: chatController,
+              clear,
+            };
+            setStaleDialog({ kind: "send" });
+            return;
+          }
+          await submitComposerRef.current(
+            input,
+            attachments,
+            chatController,
+            clear,
+          );
         }}
       >
         <div
@@ -2162,6 +2276,13 @@ function ChatSession({
                       setContextSwitchPending(null);
                       setContextSwitchError(null);
                     }}
+                  />
+
+                  <StaleSessionDialog
+                    open={staleDialog !== null}
+                    kind={staleDialog?.kind ?? "send"}
+                    onReload={handleStaleReload}
+                    onSendAnyway={handleStaleSendAnyway}
                   />
 
                   <ChatComposer

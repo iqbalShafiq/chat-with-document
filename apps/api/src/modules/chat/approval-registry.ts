@@ -102,7 +102,7 @@ type ClarificationDecision = {
 /** Narrow surface used by the registry so tests can inject a fake. */
 export type ApprovalRedis = Pick<
   Redis,
-  "hset" | "hgetall" | "expire" | "get" | "getdel" | "set" | "del"
+  "hset" | "hgetall" | "expire" | "get" | "getdel" | "set" | "del" | "keys"
 >;
 
 function sleep(ms: number): Promise<void> {
@@ -468,6 +468,77 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
 
     /** Forget a resolved/expired approval (called after a decision). */
     removeApproval,
+
+    /**
+     * Pending approvals for a running stream. Used by the chat resume route
+     * to re-emit the approval request as a NEW event: the resume cursor only
+     * replays events after the last consumed id, so the original request
+     * (already consumed by the previous page) would never reach the UI again.
+     */
+    async listPendingApprovals(
+      streamId: string,
+    ): Promise<PendingApprovalRecord[]> {
+      const keys = await redis.keys(APPROVAL_KEY("*"));
+      const records: PendingApprovalRecord[] = [];
+      for (const key of keys) {
+        const raw = await redis.hgetall(key);
+        if (!raw || Object.keys(raw).length === 0) continue;
+        if (raw.streamId !== streamId || raw.status !== "pending") continue;
+        records.push({
+          approvalId: raw.approvalId ?? key.slice(APPROVAL_KEY("").length),
+          userId: raw.userId ?? "",
+          sessionId: raw.sessionId ?? "",
+          streamId: raw.streamId ?? "",
+          toolName: raw.toolName ?? "",
+          args: raw.args ?? "",
+          ...(raw.reason ? { reason: raw.reason } : {}),
+          status: "pending",
+          requestedAt: raw.requestedAt ?? new Date(0).toISOString(),
+        });
+      }
+      return records;
+    },
+
+    /**
+     * Pending clarifications for a running stream — same re-emit rationale
+     * as listPendingApprovals.
+     */
+    async listPendingClarifications(
+      streamId: string,
+    ): Promise<ClarificationRecord[]> {
+      const keys = await redis.keys(CLARIFICATION_KEY("*"));
+      const records: ClarificationRecord[] = [];
+      for (const key of keys) {
+        const raw = await redis.get(key);
+        if (raw === null) continue;
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (parsed.streamId !== streamId || parsed.status !== "pending") {
+            continue;
+          }
+          records.push({
+            id: typeof parsed.id === "string" ? parsed.id : "",
+            userId: typeof parsed.userId === "string" ? parsed.userId : "",
+            sessionId:
+              typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+            streamId:
+              typeof parsed.streamId === "string" ? parsed.streamId : "",
+            ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+            questions: Array.isArray(parsed.questions)
+              ? (parsed.questions as ClarificationQuestion[])
+              : [],
+            status: parsed.status === "pending" ? "pending" : "answered",
+            requestedAt:
+              typeof parsed.requestedAt === "string"
+                ? parsed.requestedAt
+                : new Date(0).toISOString(),
+          });
+        } catch {
+          // skip corrupt records
+        }
+      }
+      return records;
+    },
   };
 }
 

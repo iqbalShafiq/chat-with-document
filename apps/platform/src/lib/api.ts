@@ -951,6 +951,30 @@ export async function fetchRunStatus(sessionId: string): Promise<RunStatusInfo> 
   return data as RunStatusInfo;
 }
 
+export type SessionStateInfo = {
+  /** Persisted user+assistant memory rows for the session (server truth). */
+  messageCount: number;
+};
+
+export async function fetchSessionState(
+  sessionId: string,
+): Promise<SessionStateInfo> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/session-state?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Failed to load session state");
+
+  const data: unknown = await response.json();
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof (data as SessionStateInfo).messageCount !== "number"
+  ) {
+    throw new Error("Unexpected session state response shape");
+  }
+  return data as SessionStateInfo;
+}
+
 export async function stopChatRun(streamId: string): Promise<void> {
   const response = await apiFetch(`${API_BASE}/api/chat/stop`, {
     method: "POST",
