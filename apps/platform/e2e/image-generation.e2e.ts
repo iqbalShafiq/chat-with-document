@@ -44,6 +44,15 @@ async function waitForRailImage(page: Page, prompt: string): Promise<void> {
   });
 }
 
+async function waitForInlineMessageImage(page: Page, prompt: string): Promise<void> {
+  // Generated images render twice with the same alt: once in the right-rail
+  // gallery and once inline in the assistant message. Waiting for 2 proves
+  // the inline rendering (single-image generation → exactly 2 imgs).
+  await expect(page.getByAltText(prompt, { exact: true })).toHaveCount(2, {
+    timeout: 30_000,
+  });
+}
+
 async function waitForRunDone(page: Page): Promise<void> {
   await expect(page.getByText(/Selesai:/).last()).toBeVisible({
     timeout: 30_000,
@@ -158,6 +167,7 @@ test("approval card appears for a generation while the toggle is off, allow once
     timeout: 20_000,
   });
   await waitForRailImage(page, "buatkan gambar kucing di taman");
+  await waitForInlineMessageImage(page, "buatkan gambar kucing di taman");
   await waitForRunDone(page);
 
   // "Allow once" is per-call: the next generation in the same session must
@@ -245,6 +255,7 @@ test("clarification wizard collects answers then generates the image", async ({
   await wizard.getByRole("button", { name: "Submit" }).click();
 
   await waitForRailImage(page, "buatkan gambar yang kurang jelas");
+  await waitForInlineMessageImage(page, "buatkan gambar yang kurang jelas");
   await waitForRunDone(page);
 });
 

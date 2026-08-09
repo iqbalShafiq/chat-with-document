@@ -4,8 +4,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 export const STUB_PORT = 18765;
 export const STUB_ORIGIN = `http://127.0.0.1:${STUB_PORT}`;
 
-const TRANSPARENT_1X1_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+/**
+ * 128×128 stub PNG (checkerboard + simple cat face). A 1×1 pixel looks like a
+ * "broken" solid square in the UI; a multi-pixel drawing makes manual QA and
+ * screenshot review obviously "an image loaded".
+ */
+const STUB_IMAGE_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAAEB0lEQVR42u2dIXbjMBCGFb2cI9g4qMA4RygwDtpDBBQXLzIO6BEWBxQFB+ckBX6bp6fGjixLM7/kf9hubVmZT/OPPJbszaH7NHPsdulnHd+0R7Y/YdbQVI0ACIAAaARAADQCIAAaARAAjQAIgEYABEAjgHXYZrdrDOv7eu0zAihBBEBbO4CvTue6H7ueANQYIHgfAsBXZ5p2r3Lppt2rY0CJgKbdSwbBx67Xoo6bhMUY4Hifs6DVA/ASgIAoe8NfPQ0wAihBgjMTxRkXIoAxd2RiIHw5ShAlCEmIAMVnsK1qfbx/weDSv58T1N9DJv5jv6va/QFQd0PC9+HF5IAkfoEiXV4SXsgA3PvGmG1x+vOLh6+5p/sxkrS5vkw5lQCIcE1coR98+PM+YK0SFBEEt8s1cFCHH7nSCIhLAMMpISeGH4kwGaUEMQfMu8+8JjlmvTlgrv643gw8cTgs4kSVyegWfJhHJ1L3xCQN1g8g3+zlKQwQEtsKBnscDJCw2MonAJBfPqFRkmlAdH+AN8uGkmNv7vQoKFW7PwAtGWr1x9L7ur2y8uufkUs0j76JrZOwde8AwF+/boW9j1+hdHsowMBS+nX7aSk+uv23HP66vbUyeaws73t9zhoE6I8k3/78c//5/fcg34IptBa0cArhOc79z0AnLm/BzQSZqkMWU0+f+i7wr6lakFFOiy87KoSKn4aCbIPGn49aNP0JH5hjRy5vQVKFsu0P6Ex9FuIrfj/AcF0QTRtAEaV/kIcEcBEQfos0duTyFihBlCD4IJg+ZnkLa4+A3P7FKcnhVkMHHy2pZS5vgTtkEvgLzeNMwgRAIwACoOUE8Hh6J7Bd63K+GamF03F78GuOgMH7AgwyTkOzrX/v65OLEF+t6PsB7sAvNwgsws7e0ncmIwLIka+mc2/uICh4XRBNGUDyKB4b7MmDQEA/MwLIpELTXs4kRPl2rVKCqpYgZ7ftVey+N1UQPPqcddO2rWY+V2hvswNIOHzCh3bCTJD7nQW2ymFVUD8lALiDKPq3zR3U0UHg9jD37aQReyb8fl66vLvtGuE4EPC+qARJPiTALP0D3QdgMlDp1ebQfUp+PwD2vcKu992kVdv3A9zQxomDMe/XKUFoDBS9r5YDPAZaGLxLy3tfsxjnTTPkGXhXVPG+8trQgcEjLQ8eEcjMIK5HKUcLhwKU91FWR5/uR3d6muPltk+5qnsfaHm6J0epSIzFE4LrEfcHnO7H26X/XTWa9bLdaRHDcT3uBo3BR2PFu+gk8T/Z9AQwr3i3sIwqVlar9iM+nmi85AHu8SK/ojTBY26xzHCDBo0AgEz0+wFsnxFACaIRAAHQCIAAaARAADQCIAACoBEAAdAIgABoKvYDFSz1RwdwU8cAAAAASUVORK5CYII=";
 
 type RecordedRequest = {
   kind: "responses" | "images" | "models" | "other";
@@ -328,7 +333,7 @@ function handleImages(res: ServerResponse, body: Record<string, unknown>) {
   const count =
     typeof body.n === "number" && body.n >= 1 ? Math.min(body.n, 10) : 1;
   const data = Array.from({ length: count }, () => ({
-    b64_json: TRANSPARENT_1X1_PNG_BASE64,
+    b64_json: STUB_IMAGE_BASE64,
     media_type: "image/png",
   }));
   respondJson(res, 200, { data });

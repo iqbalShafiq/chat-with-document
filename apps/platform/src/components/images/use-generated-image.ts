@@ -14,20 +14,36 @@ export function useGeneratedImage(imageId: string) {
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!imageId) return;
+    if (!imageId) {
+      setState("error");
+      setObjectUrl(null);
+      return;
+    }
     let cancelled = false;
     let createdUrl: string | null = null;
+    // Drop any previous object URL from state immediately so a remount /
+    // id-switch never paints a revoked blob (which shows as alt-text only).
     setState("loading");
+    setObjectUrl(null);
 
     fetchImageBytes(imageId)
-      .then(({ blob }) => {
+      .then(({ blob, mediaType }) => {
         if (cancelled) return;
-        createdUrl = URL.createObjectURL(blob);
+        // Some browsers ignore untyped blobs for <img>; prefer the API
+        // Content-Type when the Response didn't carry one.
+        const typed =
+          blob.type && blob.type !== "application/octet-stream"
+            ? blob
+            : new Blob([blob], { type: mediaType || "image/png" });
+        createdUrl = URL.createObjectURL(typed);
         setObjectUrl(createdUrl);
         setState("ready");
       })
       .catch(() => {
-        if (!cancelled) setState("error");
+        if (!cancelled) {
+          setObjectUrl(null);
+          setState("error");
+        }
       });
 
     return () => {

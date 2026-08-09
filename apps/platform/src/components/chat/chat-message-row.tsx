@@ -6,11 +6,13 @@ import { MessageCitationProvider } from "#/components/chat/message-citation-cont
 import { ConversationSummaryDivider } from "#/components/chat/conversation-summary-divider";
 import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
+import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
+import { imageItemsFromToolPart } from "#/lib/chat/generated-images";
 import {
   formatMessageBubbleTimestamp,
   formatMessageDateTime,
@@ -279,9 +281,17 @@ function ChatMessageParts({
         }
 
         if (part.type === "tool") {
+          const imageItems = imageItemsFromToolPart(part);
           return (
             <Message.Part className="min-w-0 max-w-full">
               <ToolActivityPanel part={part} />
+              {imageItems.length > 0 ? (
+                <div className="mt-2 grid max-w-md grid-cols-2 gap-2">
+                  {imageItems.map((image) => (
+                    <GeneratedImageThumbnail key={image.id} image={image} />
+                  ))}
+                </div>
+              ) : null}
             </Message.Part>
           );
         }

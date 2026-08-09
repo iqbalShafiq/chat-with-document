@@ -4,6 +4,7 @@ import {
   collectGeneratedImages,
   collectGeneratedImagesFromMessages,
   countRunningImageToolPartsFromMessages,
+  imageItemsFromToolPart,
   isImageToolName,
   mergeGeneratedImages,
   toGeneratedImageItem,
@@ -295,5 +296,65 @@ describe("countRunningImageToolPartsFromMessages", () => {
     ];
 
     expect(countRunningImageToolPartsFromMessages(messages)).toBe(0);
+  });
+});
+
+describe("imageItemsFromToolPart", () => {
+  it("flattens a completed generate_image output into gallery items", () => {
+    const part = toolPart("generate_image", {
+      images: [
+        {
+          imageId: "img-1",
+          modelId: "openai/gpt-5-image-mini",
+          prompt: "a red panda",
+          width: 1024,
+          height: 1024,
+          mediaType: "image/png",
+          index: 0,
+          total: 2,
+        },
+        {
+          imageId: "img-2",
+          modelId: "openai/gpt-5-image-mini",
+          prompt: "a red panda",
+          width: 1024,
+          height: 1024,
+          mediaType: "image/png",
+          index: 1,
+          total: 2,
+        },
+      ],
+    });
+
+    expect(imageItemsFromToolPart(part)).toEqual([
+      {
+        id: "img-1",
+        modelId: "openai/gpt-5-image-mini",
+        prompt: "a red panda",
+        width: 1024,
+        height: 1024,
+        mediaType: "image/png",
+        nOfTotal: "1 of 2",
+      },
+      {
+        id: "img-2",
+        modelId: "openai/gpt-5-image-mini",
+        prompt: "a red panda",
+        width: 1024,
+        height: 1024,
+        mediaType: "image/png",
+        nOfTotal: "2 of 2",
+      },
+    ]);
+  });
+
+  it("returns [] while the tool is still running", () => {
+    const part = toolPart("generate_image", undefined, "input-streaming");
+    expect(imageItemsFromToolPart(part)).toEqual([]);
+  });
+
+  it("returns [] for non-image tool parts", () => {
+    const part = toolPart("web_search", { results: [] });
+    expect(imageItemsFromToolPart(part)).toEqual([]);
   });
 });

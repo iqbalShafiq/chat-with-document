@@ -145,6 +145,21 @@ export function toGeneratedImageItem(
 }
 
 /**
+ * Images produced by a single tool part (generate_image / edit_image with a
+ * completed output) — used to render the result inline in the chat message.
+ */
+export function imageItemsFromToolPart(
+  part: {
+    type?: string;
+    state?: string;
+    toolName?: string;
+    output?: unknown;
+  },
+): GeneratedImageItem[] {
+  return collectGeneratedImages([part]).map(toGeneratedImageItem);
+}
+
+/**
  * Merge live stream images (first) with persisted history, deduped by id.
  * Live items keep their slot; history fills in anything the stream lost.
  */
