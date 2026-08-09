@@ -88,7 +88,7 @@ export function ImageContextModelDialog({
       ref={dialogRef}
       aria-labelledby="image-context-dialog-title"
       aria-describedby="image-context-dialog-desc"
-      className="chat-scroll m-auto max-h-[85dvh] overflow-y-auto rounded-2xl border border-hairline bg-canvas-elevated p-5 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col open:gap-3 animate-scale-in"
+      className="m-auto w-[min(100%-1.5rem,26rem)] overflow-visible rounded-2xl border border-hairline bg-canvas-elevated p-0 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex animate-scale-in"
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onCancel();
@@ -97,79 +97,89 @@ export function ImageContextModelDialog({
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
     >
-      <div className="flex flex-col gap-1">
-        <h2
-          id="image-context-dialog-title"
-          className="text-sm font-semibold tracking-tight"
-        >
-          Add image as chat context
-        </h2>
-        <p
-          id="image-context-dialog-desc"
-          className="text-xs leading-relaxed text-text-muted"
-        >
-          The current model cannot accept image input. Choose a vision-capable
-          model to send this image to the chat as context.
-        </p>
-      </div>
+      {/* Scroll wrapper: the dialog box itself must NOT clip/scroll so the
+          portaled Select dropdown can float above the modal content. */}
+      <div
+        className="chat-scroll flex max-h-[85dvh] w-full flex-col gap-3 overflow-y-auto p-5"
+        onClick={(event) => {
+          if (event.target === event.currentTarget && !busy) onCancel();
+        }}
+      >
+        <div className="flex flex-col gap-1">
+          <h2
+            id="image-context-dialog-title"
+            className="text-sm font-semibold tracking-tight"
+          >
+            Add image as chat context
+          </h2>
+          <p
+            id="image-context-dialog-desc"
+            className="text-xs leading-relaxed text-text-muted"
+          >
+            The current model cannot accept image input. Choose a vision-capable
+            model to send this image to the chat as context.
+          </p>
+        </div>
 
-      <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-medium text-text-faint">Model</span>
-        <Select
-          value={modelId}
-          onChange={setModelId}
-          options={modelOptions}
-          ariaLabel="Vision model"
-          disabled={busy}
-          portal
-          hoverSide="right"
-        />
-      </label>
-
-      {showEffort ? (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-text-faint">
-            Reasoning effort
-          </span>
+          <span className="text-[11px] font-medium text-text-faint">Model</span>
           <Select
-            value={reasoningEffort}
-            onChange={setReasoningEffort}
-            options={effortOptions}
-            ariaLabel="Reasoning effort"
+            value={modelId}
+            onChange={setModelId}
+            options={modelOptions}
+            ariaLabel="Vision model"
             disabled={busy}
+            portalTarget={dialogRef.current}
+            hoverSide="right"
           />
         </label>
-      ) : null}
 
-      {error ? (
-        <p role="alert" className="text-xs text-danger">
-          {error}
-        </p>
-      ) : null}
+        {showEffort ? (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-medium text-text-faint">
+              Reasoning effort
+            </span>
+            <Select
+              value={reasoningEffort}
+              onChange={setReasoningEffort}
+              options={effortOptions}
+              ariaLabel="Reasoning effort"
+              disabled={busy}
+              portalTarget={dialogRef.current}
+            />
+          </label>
+        ) : null}
 
-      <div className="mt-1 flex items-center justify-end gap-2">
-        <button
-          ref={cancelRef}
-          type="button"
-          disabled={busy}
-          onClick={onCancel}
-          className={DIALOG_SECONDARY_BUTTON_CLASS}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canConfirm}
-          onClick={() =>
-            onConfirm({
-              modelId,
-              reasoningEffort: reasoningEffort === "" ? null : reasoningEffort,
-            })
-          }
-          className={DIALOG_PRIMARY_BUTTON_CLASS}
-        >
-          {busy ? "Switching…" : "Switch model & add context"}
-        </button>
+        {error ? (
+          <p role="alert" className="text-xs text-danger">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="mt-1 flex items-center justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className={DIALOG_SECONDARY_BUTTON_CLASS}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy || !canConfirm}
+            onClick={() =>
+              onConfirm({
+                modelId,
+                reasoningEffort: reasoningEffort === "" ? null : reasoningEffort,
+              })
+            }
+            className={DIALOG_PRIMARY_BUTTON_CLASS}
+          >
+            {busy ? "Switching…" : "Switch model & add context"}
+          </button>
+        </div>
       </div>
     </dialog>,
     document.body,

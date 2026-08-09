@@ -23,7 +23,7 @@ export function GeneratedImageStrip({
       const batch: ImagePreviewInput[] = [];
       for (const image of images) {
         const src = srcs[image.id];
-        if (src) batch.push({ src, alt: image.prompt || "Generated image" });
+        if (src) batch.push({ src, alt: image.prompt || "Generated image", image });
       }
       if (batch.length === 0) return;
       const relative = images.slice(0, index + 1).filter((image) => srcs[image.id]).length - 1;

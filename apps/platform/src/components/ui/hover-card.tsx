@@ -139,9 +139,10 @@ export function HoverCard({
         const left = pos.right + gap;
         const overflowRight = left + width - window.innerWidth;
         panel.style.left = `${overflowRight > 0 ? pos.left - gap - width : left}px`;
-        // Vertically align with the hovered row, flipping up when near bottom.
-        const openUp = pos.bottom + height > window.innerHeight - 8;
-        panel.style.top = `${openUp ? pos.top - height : pos.bottom}px`;
+        // Align the panel's top edge with the hovered row's top edge (the
+        // model being pointed at), flipping above the row near the bottom.
+        const openUp = pos.top + height > window.innerHeight - 8;
+        panel.style.top = `${openUp ? pos.top - height : pos.top}px`;
         panel.style.right = "auto";
         return;
       }

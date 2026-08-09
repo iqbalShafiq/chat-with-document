@@ -15,19 +15,35 @@ import {
   ChevronLeft,
   ChevronRight,
   Minus,
+  Pin,
+  PinOff,
   Plus,
   RotateCcw,
   X,
 } from "lucide-react";
 import { useDocumentImage } from "#/components/images/use-document-image";
+import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 
-export type ImagePreviewInput = { src: string; alt?: string };
-type ImagePreviewCollection = {
+export type ImagePreviewInput = {
+  src: string;
+  alt?: string;
+  /** Stored generated image — enables the "Add to context" action. */
+  image?: GeneratedImageItem | null;
+};
+export type ImagePreviewCollectionInput = {
   images: ImagePreviewInput[];
   /** Index of the image to show first (default 0). */
   index?: number;
 };
-type ImagePreviewOpenInput = ImagePreviewInput | ImagePreviewCollection;
+/**
+ * When previewing a stored generated image, the "Add to context" action
+ * becomes available (toggles the session's active image context).
+ */
+export type ImagePreviewContextActions = {
+  toggle: (image: GeneratedImageItem) => void | Promise<void>;
+  isPinned: (image: GeneratedImageItem) => boolean;
+};
+type ImagePreviewOpenInput = ImagePreviewInput | ImagePreviewCollectionInput;
 type ImagePreviewContextValue = { open: (input: ImagePreviewOpenInput) => void };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
@@ -54,9 +70,19 @@ const ZOOM_STEP = 1.5;
  * - Pan (when zoomed) via pointer drag; clicks on the backdrop close.
  * - `aria-modal` + `aria-labelledby`; all controls have aria-labels and
  *   disabled states; motion respects `prefers-reduced-motion` (CSS).
+ *
+ * When `actions` are provided, previews opened with an `image` record show an
+ * "Add to context" button (toggle) that also dismisses the viewer.
  */
-export function ImagePreviewProvider({ children }: { children: ReactNode }) {
+export function ImagePreviewProvider({
+  children,
+  actions,
+}: {
+  children: ReactNode;
+  actions?: ImagePreviewContextActions | null;
+}) {
   const [collection, setCollection] = useState<ImagePreviewInput[] | null>(null);
+  const [imageByIndex, setImageByIndex] = useState<Record<number, GeneratedImageItem | null>>({});
   const [index, setIndex] = useState(0);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -71,6 +97,9 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const titleId = useId();
   const current = collection?.[index] ?? null;
+  const currentImage = current ? (imageByIndex[index] ?? null) : null;
+  const pinned =
+    currentImage !== null && actions?.isPinned(currentImage) === true;
   // Internal document URLs need an authenticated fetch (plain <img> cannot
   // send the session cookie cross-origin) — same path as inline DocumentImage.
   const { internal, displaySrc, state, retry } = useDocumentImage(
@@ -85,10 +114,23 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   const open = useCallback(
     (input: ImagePreviewOpenInput) => {
       if ("images" in input) {
-        setCollection(input.images);
-        setIndex(Math.min(Math.max(input.index ?? 0, 0), input.images.length - 1));
+        const records: Record<number, GeneratedImageItem | null> = {};
+        input.images.forEach((item, i) => {
+          records[i] = item.image ?? null;
+        });
+        setImageByIndex(records);
+        setCollection(
+          input.images.map((item) => ({ src: item.src, alt: item.alt })),
+        );
+        setIndex(
+          Math.min(
+            Math.max(input.index ?? 0, 0),
+            input.images.length - 1,
+          ),
+        );
       } else {
-        setCollection([input]);
+        setCollection([{ src: input.src, alt: input.alt }]);
+        setImageByIndex({ 0: input.image ?? null });
         setIndex(0);
       }
       resetView();
@@ -99,6 +141,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   const close = useCallback(() => {
     dialogRef.current?.close();
     setCollection(null);
+    setImageByIndex({});
     setIndex(0);
     resetView();
   }, [resetView]);
@@ -372,6 +415,35 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                   <X className="size-4" strokeWidth={1.75} />
                 </button>
               </div>
+
+              {currentImage !== null && actions ? (
+                <div className="pointer-events-none absolute bottom-4 left-4">
+                  <button
+                    type="button"
+                    aria-label={
+                      pinned
+                        ? "Remove image from context"
+                        : "Add image as context"
+                    }
+                    onClick={() => {
+                      void actions.toggle(currentImage);
+                      close();
+                    }}
+                    className={`glass pointer-events-auto inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-[11px] font-medium transition duration-150 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
+                      pinned
+                        ? "bg-accent text-canvas hover:bg-accent/90 hover:text-canvas"
+                        : "text-text hover:bg-white/12 hover:text-text"
+                    }`}
+                  >
+                    {pinned ? (
+                      <PinOff className="size-3.5" strokeWidth={2} />
+                    ) : (
+                      <Pin className="size-3.5" strokeWidth={2} />
+                    )}
+                    {pinned ? "Remove from context" : "Add to context"}
+                  </button>
+                </div>
+              ) : null}
             </dialog>,
             window.document.body,
           )

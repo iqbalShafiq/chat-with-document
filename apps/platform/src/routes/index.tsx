@@ -59,7 +59,7 @@ import {
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
-import { ImagePreviewProvider } from "#/components/images/image-preview";
+import { ImagePreviewProvider, type ImagePreviewContextActions } from "#/components/images/image-preview";
 import { ImageContextModelDialog } from "#/components/images/image-context-model-dialog";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
@@ -253,6 +253,7 @@ function Home() {
   const activeProjectIdRef = useRef(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
   const [activeRuns, setActiveRuns] = useState<ReadonlySet<string>>(new Set());
+  const [imageContextActions, setImageContextActions] = useState<ImagePreviewContextActions | null>(null);
   const activeRunsRef = useRef<ReadonlySet<string>>(new Set());
   activeRunsRef.current = activeRuns;
 
@@ -788,7 +789,7 @@ function Home() {
     (viewMode === "standalone" || viewMode === "project-workspace");
 
   return (
-    <ImagePreviewProvider>
+    <ImagePreviewProvider actions={imageContextActions}>
       <AppShell
         user={user}
         sessions={sessions}
@@ -870,6 +871,7 @@ function Home() {
                   void refreshSessionsQuiet();
                 }}
                 onAuthFailure={handleAuthFailure}
+                onImageContextActions={setImageContextActions}
               />
             </div>
           )
@@ -890,6 +892,7 @@ function ChatSession({
   modelsRetry,
   onStreamSettled,
   onAuthFailure,
+  onImageContextActions,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -901,6 +904,9 @@ function ChatSession({
   modelsRetry: () => void;
   onStreamSettled: () => void;
   onAuthFailure: () => void;
+  onImageContextActions?: (
+    actions: ImagePreviewContextActions | null,
+  ) => void;
 }) {
   const composerInputRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1353,6 +1359,21 @@ function ChatSession({
     setImageGenerationEnabled(enabled);
     persistImageGenerationEnabled(enabled);
   }, []);
+
+  // Register the context actions with the ImagePreviewProvider (rendered one
+  // level up) so the viewer's "Add to context" button can toggle pinning.
+  const previewIsPinned = useCallback(
+    (image: GeneratedImageItem) =>
+      activeContextImages.some((item) => item.id === image.id),
+    [activeContextImages],
+  );
+  useEffect(() => {
+    onImageContextActions?.({
+      toggle: handleToggleImageContext,
+      isPinned: previewIsPinned,
+    });
+    return () => onImageContextActions?.(null);
+  }, [onImageContextActions, handleToggleImageContext, previewIsPinned]);
 
   const handleImageGenSettingsChange = useCallback(
     (settings: ImageGenSettings) => {

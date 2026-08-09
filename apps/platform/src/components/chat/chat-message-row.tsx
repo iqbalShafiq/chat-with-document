@@ -8,6 +8,7 @@ import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
+import { useImagePreview } from "#/components/images/image-preview";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
@@ -233,6 +234,59 @@ export const ChatMessageRow = memo(function ChatMessageRow({
 });
 
 type MessagePart = UIMessage["parts"][number];
+type AttachmentImagePart = Extract<MessagePart, { type: "attachment" }>;
+
+/**
+ * Rebuilt-from-memory attachments carry RAW base64 in `data` (no `data:`
+ * prefix), while live composer attachments already carry a data URL. Normalize
+ * so the <img> always has a loadable src.
+ */
+function attachmentImageSrc(part: AttachmentImagePart): string {
+  const attachment = part.attachment;
+  const raw = attachment.data ?? attachment.url ?? "";
+  if (!raw) return "";
+  if (/^(data:|blob:|https?:|file:)/i.test(raw)) return raw;
+  return `data:${attachment.mediaType ?? "image/png"};base64,${raw}`;
+}
+
+function AttachmentImageTile({ part }: { part: AttachmentImagePart }) {
+  const { open } = useImagePreview();
+  const src = attachmentImageSrc(part);
+  if (!src) return null;
+  const alt = part.attachment.name ?? "Attached image";
+  return (
+    <button
+      type="button"
+      onClick={() => open({ src, alt })}
+      title="View image"
+      className="block cursor-zoom-in overflow-hidden rounded-lg border border-white/[0.08] transition hover:border-white/[0.18] active:scale-[0.98]"
+    >
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="size-24 object-cover"
+      />
+    </button>
+  );
+}
+
+/** Horizontal scrollable strip for consecutive image attachments. */
+function AttachmentImageStrip({ parts }: { parts: AttachmentImagePart[] }) {
+  return (
+    <div
+      className="chat-scroll-x mt-1.5 flex max-w-full gap-1.5 overflow-x-auto pb-1.5"
+      role="list"
+      aria-label="Attached images"
+    >
+      {parts.map((part) => (
+        <div key={part.id} className="shrink-0" role="listitem">
+          <AttachmentImageTile part={part} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
   if (part.type === "text") return part.text.trim().length > 0;
@@ -295,6 +349,31 @@ function ChatMessageParts({
     return byFirst;
   }, [imageRuns]);
 
+  // Consecutive user image attachments (pinned image context) render as one
+  // horizontal scrollable strip instead of separate blocks.
+  const attachmentImageRuns = useMemo(() => {
+    const runs: AttachmentImagePart[][] = [];
+    let current: AttachmentImagePart[] = [];
+    for (const part of message.parts) {
+      if (part.type === "attachment" && part.attachment?.type === "image") {
+        current.push(part);
+      } else if (current.length > 0) {
+        runs.push(current);
+        current = [];
+      }
+    }
+    if (current.length > 0) runs.push(current);
+    return runs;
+  }, [message.parts]);
+
+  const attachmentStripForPart = useMemo(() => {
+    const byFirst = new Map<AttachmentImagePart, AttachmentImagePart[]>();
+    for (const run of attachmentImageRuns) {
+      if (run.length > 0) byFirst.set(run[0]!, run);
+    }
+    return byFirst;
+  }, [attachmentImageRuns]);
+
   return (
     <Message.Parts
       filter={(part) => isRenderablePart(part, message.role)}
@@ -355,21 +434,17 @@ function ChatMessageParts({
         }
 
         if (part.type === "attachment" && part.attachment?.type === "image") {
-          const src =
-            part.attachment.data ??
-            part.attachment.url ??
-            "";
+          const run = attachmentStripForPart.get(part);
+          if (!run) return null; // rendered by the strip of the run's first part
           return (
             <Message.Part className="min-w-0 max-w-full">
-              {src ? (
-                <div className="mt-1.5 flex max-w-md flex-wrap gap-1.5">
-                  <img
-                    src={src}
-                    alt={part.attachment.name ?? "Attached image"}
-                    className="size-24 rounded-lg border border-white/[0.08] object-cover"
-                  />
+              {run.length > 1 ? (
+                <AttachmentImageStrip parts={run} />
+              ) : (
+                <div className="mt-1.5">
+                  <AttachmentImageTile part={run[0]!} />
                 </div>
-              ) : null}
+              )}
             </Message.Part>
           );
         }

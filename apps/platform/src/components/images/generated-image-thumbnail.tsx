@@ -58,7 +58,11 @@ export function GeneratedImageThumbnail({
         if (onOpen) {
           onOpen();
         } else {
-          open({ src: displaySrc, alt: image.prompt || "Generated image" });
+          open({
+            src: displaySrc,
+            alt: image.prompt || "Generated image",
+            image,
+          });
         }
       }}
       title={image.prompt || "View generated image"}

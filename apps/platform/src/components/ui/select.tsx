@@ -23,11 +23,13 @@ export type SelectProps = {
   className?: string;
   disabled?: boolean;
   /**
-   * Render the listbox through a portal anchored to the trigger. Needed when
-   * the Select lives inside a transformed container (e.g. animated dialogs)
-   * that would otherwise clip or stack the dropdown behind itself.
+   * Render the listbox through a portal anchored to the trigger. Native
+   * `showModal()` dialogs live in the browser top layer, so a portal to
+   * `document.body` renders *behind* them — pass the dialog element (or any
+   * non-clipping ancestor in the top layer) to draw the list above the
+   * modal content. Coordinates are computed relative to that element.
    */
-  portal?: boolean;
+  portalTarget?: HTMLElement | null;
   /** Hover detail placement for option cards (model logos etc). */
   hoverSide?: "top" | "right";
 };
@@ -40,7 +42,7 @@ export function Select({
   ariaLabel,
   className = "",
   disabled = false,
-  portal = false,
+  portalTarget = null,
   hoverSide = "top",
 }: SelectProps) {
   const [open, setOpen] = useState(false);
@@ -57,6 +59,9 @@ export function Select({
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (rootRef.current?.contains(target)) return;
+      // The portaled listbox lives outside the root — clicks on it must not
+      // close the dropdown before the option's onClick fires.
+      if (listRef.current?.contains(target)) return;
       setOpen(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -65,17 +70,26 @@ export function Select({
         setOpen(false);
       }
     };
+    // When portaled, the anchored list stays fixed relative to the target;
+    // scrolling the dialog content would detach it from the trigger.
+    const onScroll = () => setOpen(false);
     // Defer so the opening click does not immediately close.
     const timer = window.setTimeout(() => {
       document.addEventListener("mousedown", onPointerDown);
       document.addEventListener("keydown", onKeyDown);
+      if (portalTarget) {
+        document.addEventListener("scroll", onScroll, true);
+      }
     }, 0);
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      if (portalTarget) {
+        document.removeEventListener("scroll", onScroll, true);
+      }
     };
-  }, [open]);
+  }, [open, portalTarget]);
 
   useEffect(() => {
     if (open) {
@@ -90,14 +104,19 @@ export function Select({
 
   const [listPos, setListPos] = useState<{ top: number; left: number; width: number } | null>(null);
   useLayoutEffect(() => {
-    if (!open || !portal) {
+    if (!open || !portalTarget) {
       setListPos(null);
       return;
     }
     const rect = triggerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setListPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
-  }, [open, portal]);
+    const targetRect = portalTarget.getBoundingClientRect();
+    if (!rect || !targetRect) return;
+    setListPos({
+      top: rect.bottom + 6 - targetRect.top,
+      left: rect.left - targetRect.left,
+      width: rect.width,
+    });
+  }, [open, portalTarget]);
 
   useEffect(() => {
     if (!open) return;
@@ -200,7 +219,7 @@ export function Select({
         strokeWidth={1.75}
       />
       {open ? (
-        portal && listPos ? (
+        portalTarget && listPos ? (
           createPortal(
             <div
               className="fixed z-[90]"
@@ -225,7 +244,7 @@ export function Select({
                 className="max-h-[16rem] overflow-y-auto"
               />
             </div>,
-            document.body,
+            portalTarget,
           )
         ) : (
           <div className="absolute left-0 right-0 top-full z-30 mt-1.5">
