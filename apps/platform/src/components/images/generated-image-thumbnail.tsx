@@ -52,8 +52,10 @@ export function GeneratedImageThumbnail({
         </span>
       ) : null}
       {image.prompt ? (
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 line-clamp-2 bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-3 text-left text-[10px] leading-tight text-white/85 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/thumb:opacity-100">
-          {image.prompt}
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-3 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/thumb:opacity-100">
+          <span className="text-left text-[10px] leading-tight text-white/85 line-clamp-2">
+            {image.prompt}
+          </span>
         </span>
       ) : null}
     </button>
