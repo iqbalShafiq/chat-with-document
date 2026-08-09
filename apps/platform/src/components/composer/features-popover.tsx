@@ -176,7 +176,7 @@ export function FeaturesPopover({
               aria-hidden
             />
             <span
-              className="inline-flex items-center gap-1 rounded-r-xl px-1.5"
+              className="inline-flex items-center gap-1 rounded-r-xl pl-1.5 pr-2.5"
               aria-label="Active features"
             >
               {webSearchEnabled ? (
@@ -303,16 +303,14 @@ export function FeaturesPopover({
               </div>
 
               {imageGenerationEnabled ? (
-                <div className="mt-1.5 border-t border-white/[0.07] pt-1.5">
-                  <ImageGenParamsEditor
-                    settings={settings}
-                    onChange={onSettingsChange}
-                    models={models.items}
-                    loading={models.status === "loading"}
-                    error={models.status === "error"}
-                    onRetry={loadImageModels}
-                  />
-                </div>
+                <ImageGenParamsEditor
+                  settings={settings}
+                  onChange={onSettingsChange}
+                  models={models.items}
+                  loading={models.status === "loading"}
+                  error={models.status === "error"}
+                  onRetry={loadImageModels}
+                />
               ) : null}
             </div>,
             document.body,
