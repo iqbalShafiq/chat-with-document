@@ -86,6 +86,7 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
+import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
   computeGenerationActionInfo,
   getMessageRawText,
@@ -547,7 +548,11 @@ function Home() {
       try {
         const data = await loadChatMessages(sessionId);
         if (!cancelled) {
-          setInitialMessages(initialMessagesFromMemory(data as never));
+          setInitialMessages(
+            finalizeInterruptedTools(
+              initialMessagesFromMemory(data as never),
+            ),
+          );
         }
       } catch (error) {
         if (error instanceof ApiAuthError) {
@@ -1240,11 +1245,12 @@ function ChatSession({
 
   /**
    * Stop button: ask the worker to end the run (including any pending
-   * approval / clarification waiters), then reset the local chat controller
-   * so status returns to idle and human-input panels close. `chat.stop()`
-   * alone aborts the fetch but leaves pending approvals/clarifications open;
-   * `reset(messages)` keeps the transcript and matches mid-stream stop.
-   * Composer.Stop still calls `chat.stop()` after this — harmless double abort.
+   * approval / clarification waiters), finalize in-flight tool cards so they
+   * do not stay forever-"Working", then reset the local chat controller so
+   * status returns to idle and human-input panels close. `chat.stop()` alone
+   * aborts the fetch but leaves pending approvals/clarifications open and
+   * leaves tool parts at `input-available`. Composer.Stop still calls
+   * `chat.stop()` after this — harmless double abort.
    */
   const handleStopRun = useCallback(() => {
     const current = chatRef.current;
@@ -1255,7 +1261,7 @@ function ChatSession({
         // best-effort: local reset still stops the client stream
       });
     }
-    current.reset(current.messages);
+    current.reset(finalizeInterruptedTools(current.messages));
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -1614,7 +1620,9 @@ function ChatSession({
   const reloadChatFromServer = useCallback(async () => {
     try {
       const data = await loadChatMessages(sessionId);
-      const fresh = initialMessagesFromMemory(data as never);
+      const fresh = finalizeInterruptedTools(
+        initialMessagesFromMemory(data as never),
+      );
       onReloadMessages?.(fresh);
       chatRef.current?.setMessages(fresh);
     } catch {
