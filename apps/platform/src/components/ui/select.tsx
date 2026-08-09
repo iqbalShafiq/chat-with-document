@@ -145,7 +145,7 @@ export function Select({
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       {leadingIcon ? (
-        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-text-faint">
+        <span className="pointer-events-none absolute left-3 top-1/2 z-10 flex -translate-y-1/2 items-center text-text-faint">
           {leadingIcon}
         </span>
       ) : null}

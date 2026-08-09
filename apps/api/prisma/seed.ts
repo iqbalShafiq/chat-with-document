@@ -29,7 +29,7 @@ const DEEPSEEK_ICON_SVG = `<svg viewBox="0 0 62 42" fill="none" aria-hidden="tru
 const GEMINI_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill="currentColor" d="M12 1.5c.9 5.9 4.6 9.6 10.5 10.5-5.9.9-9.6 4.6-10.5 10.5C11.1 16.6 7.4 12.9 1.5 12 7.4 11.1 11.1 7.4 12 1.5z"/></svg>`;
 
 /** xAI Grok monogram mark (stylized X), theme-adaptive via currentColor. */
-const GROK_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill="currentColor" d="M12 9.4 6.2 3.5H3.5v1.5L9.9 12l-6.4 7v1.5h2.7L12 14.6l5.8 5.9h2.7V19L14.1 12l6.4-7V3.5h-2.7L12 9.4z"/></svg>`;
+const GROK_ICON_SVG = `<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path stroke="currentColor" stroke-width="9" stroke-linecap="round" d="M19 15 L45 49 M45 15 L19 49"/></svg>`;
 
 /**
  * Model ids follow the OpenRouter convention (provider/model-slug). Prices are
