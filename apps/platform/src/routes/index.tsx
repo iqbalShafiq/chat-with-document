@@ -138,7 +138,11 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     const session = await authClient.getSession();
     if (!session.data?.user) {
-      throw redirect({ to: "/login", search: { redirect: "/" } });
+      throw redirect({
+        to: "/login",
+        search: { redirect: "/" },
+        viewTransition: true,
+      });
     }
     return {
       user: {
@@ -264,7 +268,11 @@ function Home() {
   activeRunsRef.current = activeRuns;
 
   const handleAuthFailure = useCallback(() => {
-    void navigate({ to: "/login", search: { redirect: "/" } });
+    void navigate({
+      to: "/login",
+      search: { redirect: "/" },
+      viewTransition: true,
+    });
   }, [navigate]);
 
   const refreshRecentProjects = useCallback(async () => {

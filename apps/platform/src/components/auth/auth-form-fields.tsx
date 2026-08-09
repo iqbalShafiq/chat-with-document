@@ -1,8 +1,15 @@
 import { Eye, EyeOff } from "lucide-react";
-import { FIELD_CONTROL_CLASS } from "#/components/ui/form-field";
 import { useId, useState, type InputHTMLAttributes } from "react";
 
-const FIELD_CLASS = FIELD_CONTROL_CLASS;
+/**
+ * Auth field chrome — same glass-field material as workspace forms, slightly
+ * taller for focus on sign-in (composer-adjacent feel without the card box).
+ */
+const AUTH_FIELD_CLASS =
+  "glass-field w-full rounded-2xl px-3.5 py-3 text-sm text-text outline-none placeholder:text-text-faint disabled:cursor-not-allowed disabled:opacity-50";
+
+const AUTH_LABEL_CLASS =
+  "text-[11px] font-medium uppercase tracking-[0.08em] text-text-faint";
 
 export function AuthTextField({
   label,
@@ -22,20 +29,18 @@ export function AuthTextField({
   const helperId = `${id}-helper`;
 
   return (
-    <label className="flex flex-col gap-1.5" htmlFor={id}>
-      <span className="text-xs font-medium tracking-wide text-text-muted">
-        {label}
-      </span>
+    <label className="flex flex-col gap-2" htmlFor={id}>
+      <span className={AUTH_LABEL_CLASS}>{label}</span>
       <input
         id={id}
-        className={FIELD_CLASS}
+        className={AUTH_FIELD_CLASS}
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : helper ? helperId : undefined}
         {...props}
       />
       {helper && !error ? (
-        <span id={helperId} className="text-[11px] text-text-faint">
+        <span id={helperId} className="text-[11px] leading-relaxed text-text-faint">
           {helper}
         </span>
       ) : null}
@@ -67,15 +72,15 @@ export function AuthPasswordField({
   const [visible, setVisible] = useState(false);
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-xs font-medium tracking-wide text-text-muted">
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className={AUTH_LABEL_CLASS}>
         {label}
       </label>
       <div className="relative">
         <input
           id={id}
           type={visible ? "text" : "password"}
-          className={`${FIELD_CLASS} pr-11`}
+          className={`${AUTH_FIELD_CLASS} pr-12`}
           placeholder={placeholder}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : helper ? helperId : undefined}
@@ -84,7 +89,7 @@ export function AuthPasswordField({
         <button
           type="button"
           onClick={() => setVisible((v) => !v)}
-          className="absolute right-2 top-1/2 inline-flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-text-faint transition duration-160 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text-muted active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+          className="absolute right-2 top-1/2 inline-flex size-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-xl text-text-faint transition duration-160 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text-muted active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
           aria-label={visible ? "Hide password" : "Show password"}
         >
           {visible ? (
@@ -95,7 +100,7 @@ export function AuthPasswordField({
         </button>
       </div>
       {helper && !error ? (
-        <span id={helperId} className="text-[11px] text-text-faint">
+        <span id={helperId} className="text-[11px] leading-relaxed text-text-faint">
           {helper}
         </span>
       ) : null}
@@ -108,5 +113,6 @@ export function AuthPasswordField({
   );
 }
 
+/** Primary CTA — solid amber, same family as chat send / brand accent. */
 export const AUTH_SUBMIT_CLASS =
-  "inline-flex min-h-10 w-full cursor-pointer items-center justify-center rounded-xl bg-accent px-3.5 text-sm font-medium text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-2xl bg-accent px-4 text-sm font-medium text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring focus-visible:ring-offset-2 focus-visible:ring-offset-canvas";
