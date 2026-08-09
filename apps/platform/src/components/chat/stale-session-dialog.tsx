@@ -1,25 +1,22 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { DIALOG_PRIMARY_BUTTON_CLASS, DIALOG_SECONDARY_BUTTON_CLASS } from "#/components/ui/dialog-actions";
+import { DIALOG_PRIMARY_BUTTON_CLASS } from "#/components/ui/dialog-actions";
 import { RefreshCw } from "lucide-react";
 
 /**
- * Shown before sending when the server memory has MORE messages than the
- * local view knows about (the conversation changed in another window or
- * device). For a normal send the user may proceed anyway; for resubmit /
- * revert the action is destructive (it would delete the newer messages), so
- * only Reload is offered.
+ * Freshness notice for a conversation that changed in another window/device.
+ * For a normal send the message went through (non-destructive) — this is a
+ * non-blocking "reload to catch up" notice. For resubmit / revert the action
+ * would delete the newer messages, so it is blocked until reload.
  */
 export function StaleSessionDialog({
   open,
   kind,
   onReload,
-  onSendAnyway,
 }: {
   open: boolean;
   kind: "send" | "resubmit";
   onReload: () => void;
-  onSendAnyway?: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const reloadRef = useRef<HTMLButtonElement>(null);
@@ -73,9 +70,8 @@ export function StaleSessionDialog({
             </>
           ) : (
             <>
-              This conversation has newer messages from another window or
-              device. Reload to see them, or send anyway — your message will be
-              appended to the latest conversation.
+              Your message was sent, but this conversation has newer messages
+              from another window or device. Reload to see the latest state.
             </>
           )}
         </p>
@@ -91,15 +87,6 @@ export function StaleSessionDialog({
           <RefreshCw className="size-3.5" strokeWidth={2} />
           Reload conversation
         </button>
-        {!destructive && onSendAnyway ? (
-          <button
-            type="button"
-            onClick={onSendAnyway}
-            className={DIALOG_SECONDARY_BUTTON_CLASS}
-          >
-            Send anyway
-          </button>
-        ) : null}
       </div>
     </dialog>,
     document.body,

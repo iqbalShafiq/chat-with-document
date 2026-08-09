@@ -1,7 +1,7 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
 import { FileX, ArrowUp, Square, X } from "lucide-react";
-import type { RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { FeaturesPopover } from "#/components/composer/features-popover";
@@ -115,6 +115,49 @@ export function ChatComposer({
     (attachment) => isImageAttachmentLike(attachment),
   );
 
+  // Optimistic clear: when a stream starts, empty the composer (text +
+  // image attachments) right away. Only input + attachments are touched —
+  // the full SDK clear() (entities, triggers) runs post-stream where the
+  // ComposerInput editor is stable.
+  useEffect(() => {
+    if (chatStatus !== "streaming") return;
+    composer.setInput("");
+    composer.clearAttachments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per stream start
+  }, [chatStatus]);
+
+  // @anvia/react-ui's useEditor never re-applies the placeholder extension
+  // when the prop changes, and Tiptap recreates the <p> on content updates —
+  // keep the attribute in sync via a MutationObserver (Tiptap renders it via
+  // CSS `content: attr(data-placeholder)`).
+  useEffect(() => {
+    const editorEl = document.querySelector<HTMLElement>(
+      "[data-anvia-composer-editor]",
+    );
+    if (!editorEl) return;
+    const apply = () => {
+      const p = editorEl.querySelector("p[data-placeholder]");
+      if (!p) return;
+      p.setAttribute(
+        "data-placeholder",
+        chatStatus === "streaming"
+          ? "The agent is generating…"
+          : isIngesting
+            ? "Processing document…"
+            : "Ask about your documents…",
+      );
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(editorEl, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-placeholder"],
+    });
+    return () => observer.disconnect();
+  }, [chatStatus, isIngesting]);
+
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
       {modelsStatus === "error" ? (
@@ -226,7 +269,13 @@ export function ChatComposer({
           className="composer-input min-h-[1.5rem] w-full min-w-0 flex-1 bg-transparent px-1 text-sm leading-relaxed text-text"
           minRows={1}
           maxRows={8}
-          placeholder="Ask about your documents…"
+          placeholder={
+            chatStatus === "streaming"
+              ? "The agent is generating…"
+              : isIngesting
+                ? "Processing document…"
+                : "Ask about your documents…"
+          }
           disabled={isIngesting || modelsUnavailable}
         />
 

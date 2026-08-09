@@ -1576,15 +1576,9 @@ function ChatSession({
   const [staleDialog, setStaleDialog] = useState<{
     kind: "send" | "resubmit";
   } | null>(null);
-  const pendingSendRef = useRef<{
-    input: string;
-    attachments: UIAttachment[];
-    chat: ReturnType<typeof useChat>;
-    clear: () => void;
-  } | null>(null);
   /**
-   * Latest send body, kept in a ref so the stale dialog's "Send anyway" can
-   * re-invoke it without stale closures (same pattern as chatRef/resumeChatRef).
+   * Latest send body, kept in a ref so handlers can re-invoke it without
+   * stale closures (same pattern as chatRef/resumeChatRef).
    */
   const submitComposerRef = useRef<
     (
@@ -1622,24 +1616,10 @@ function ChatSession({
 
   const handleStaleReload = useCallback(() => {
     setStaleDialog(null);
-    pendingSendRef.current = null;
     setEditingMessageId(null);
     setEditContextImages([]);
     void reloadChatFromServer();
   }, [reloadChatFromServer]);
-
-  const handleStaleSendAnyway = useCallback(() => {
-    const pending = pendingSendRef.current;
-    setStaleDialog(null);
-    pendingSendRef.current = null;
-    if (!pending) return;
-    void submitComposerRef.current(
-      pending.input,
-      pending.attachments,
-      pending.chat,
-      pending.clear,
-    );
-  }, []);
 
   /**
    * Shared path for revert (same text) and edit (new text):
@@ -1891,6 +1871,12 @@ function ChatSession({
           const trimmed = input.trim();
           if (!trimmed && attachments.length === 0) return;
 
+          // Optimistic send: the user bubble appears the moment sendMessage
+          // is called below. The stale check runs in parallel and only
+          // surfaces a non-blocking notice afterwards (normal sends are
+          // non-destructive).
+          const stalePromise = isSessionStale();
+
           // Truncate-before-send: a persisted failed tail [user, assistant
           // kind:"error"] would re-enter memory — drop it first.
           const messages = chatController.messages;
@@ -2077,7 +2063,7 @@ function ChatSession({
             }
           }
 
-          await chatController.sendMessage({
+          const sendPromise = chatController.sendMessage({
             text: trimmed,
             metadata: withChatMessageMeta(undefined, {
               sessionId,
@@ -2099,6 +2085,14 @@ function ChatSession({
             ],
           });
 
+          // The user message is now in the chat (optimistic). The composer
+          // (text + image attachments) is cleared by ChatComposer's streaming
+          // effect; the full SDK clear() runs here — after the stream — where
+          // it is safe (calling it mid-stream crashes @anvia/react-ui's
+          // ComposerInput editor).
+          await sendPromise;
+          clear();
+
           // Active image context is single-use: it was consumed by this
           // message, so clear the pins (the server also clears after the
           // run reads them).
@@ -2112,8 +2106,14 @@ function ChatSession({
             void refreshActiveContext();
           }
 
-          clear();
           setIngestionItems([]);
+
+          // Non-blocking freshness notice: the message was already sent
+          // (normal sends are non-destructive); offer a reload so the view
+          // catches up with the other window/device.
+          if (await stalePromise) {
+            setStaleDialog({ kind: "send" });
+          }
   };
 
   return (
@@ -2132,18 +2132,10 @@ function ChatSession({
           clear,
         }) => {
           if (modelsStatus !== "success") return;
-          // Freshness guard: if another window/device added messages, ask the
-          // user before proceeding (a normal send may continue anyway).
-          if (await isSessionStale()) {
-            pendingSendRef.current = {
-              input,
-              attachments,
-              chat: chatController,
-              clear,
-            };
-            setStaleDialog({ kind: "send" });
-            return;
-          }
+          // Normal sends are optimistic: the bubble appears the moment
+          // sendMessage is called. The freshness check runs in parallel and
+          // only surfaces a non-blocking notice afterwards (resubmit/revert
+          // still block — see resubmitFromUserMessage).
           await submitComposerRef.current(
             input,
             attachments,
@@ -2278,7 +2270,6 @@ function ChatSession({
                     open={staleDialog !== null}
                     kind={staleDialog?.kind ?? "send"}
                     onReload={handleStaleReload}
-                    onSendAnyway={handleStaleSendAnyway}
                   />
 
                   <ChatComposer
