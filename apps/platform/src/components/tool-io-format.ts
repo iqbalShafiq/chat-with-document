@@ -15,6 +15,8 @@ export type FormattedSection = {
   fields?: FormattedField[];
   items?: FormattedItem[];
   emptyText?: string;
+  /** Image tool in flight — render a skeleton tile instead of empty text. */
+  imageLoading?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

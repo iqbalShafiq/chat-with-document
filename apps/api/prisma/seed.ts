@@ -97,7 +97,12 @@ const MODELS = [
       quality: ["auto", "low", "medium", "high"],
       background: ["auto", "transparent", "opaque"],
       n: { min: 1, max: 10 },
-      aspectRatios: ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9", "auto"],
+      // OpenAI-style: the model only accepts these exact pixel sizes plus
+      // "auto" (verified against OpenRouter endpoint discovery 2026-08-09).
+      // The tool maps the requested aspect ratio onto this list and falls
+      // back to "auto" — requests are never sent with an unsupported size.
+      sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+      aspectRatios: ["1:1", "2:3", "3:2", "auto"],
     },
     iconSvg: OPENAI_ICON_SVG,
     sortOrder: 0,
@@ -118,6 +123,8 @@ const MODELS = [
     imageCapabilities: {
       resolutions: ["1K"],
       n: { min: 1, max: 1 },
+      // Gemini-style: no `size` param — the tool sends aspect_ratio +
+      // resolution (verified against OpenRouter discovery 2026-08-09).
       aspectRatios: ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
     },
     iconSvg: GEMINI_ICON_SVG,
@@ -139,7 +146,9 @@ const MODELS = [
     imageCapabilities: {
       resolutions: ["1K", "2K"],
       n: { min: 1, max: 1 },
-      aspectRatios: ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "1:2", "2:1", "auto"],
+      // Grok-style: no `size` param — the tool sends aspect_ratio +
+      // resolution (verified against OpenRouter discovery 2026-08-09).
+      aspectRatios: ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "auto"],
     },
     iconSvg: GROK_ICON_SVG,
     sortOrder: 2,

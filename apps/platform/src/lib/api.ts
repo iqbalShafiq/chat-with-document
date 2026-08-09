@@ -1070,6 +1070,8 @@ export type ImageModelCapabilities = {
   n?: { min: number; max: number };
   aspectRatios?: string[];
   resolutions?: string[];
+  /** Exact pixel sizes the model accepts (OpenAI-style); drives the size UI. */
+  sizes?: string[];
 };
 
 export type ImageModelCatalogItem = {
@@ -1105,12 +1107,14 @@ function parseImageModelCapabilities(value: unknown): ImageModelCapabilities | n
   const background = stringArray(value.background);
   const aspectRatios = stringArray(value.aspectRatios);
   const resolutions = stringArray(value.resolutions);
+  const sizes = stringArray(value.sizes);
   if (
     !n &&
     !quality &&
     !background &&
     !aspectRatios &&
-    !resolutions
+    !resolutions &&
+    !sizes
   ) {
     return null;
   }
@@ -1120,6 +1124,7 @@ function parseImageModelCapabilities(value: unknown): ImageModelCapabilities | n
     ...(background ? { background } : {}),
     ...(aspectRatios ? { aspectRatios } : {}),
     ...(resolutions ? { resolutions } : {}),
+    ...(sizes ? { sizes } : {}),
   };
 }
 

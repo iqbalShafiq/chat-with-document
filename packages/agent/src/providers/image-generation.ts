@@ -103,7 +103,6 @@ export class OpenRouterImageGenerationModel
     const body: Record<string, unknown> = {
       model: this.defaultModel,
       prompt: request.prompt,
-      size: `${request.width}x${request.height}`,
     };
     if (
       typeof request.additionalParams === "object" &&
@@ -111,6 +110,11 @@ export class OpenRouterImageGenerationModel
       !Array.isArray(request.additionalParams)
     ) {
       Object.assign(body, request.additionalParams);
+    }
+    // Gemini/Grok-style models do not accept `size` — the tool signals this
+    // by passing `aspect_ratio` (+ `resolution`), so omit the pixel size.
+    if (typeof body.aspect_ratio !== "string") {
+      body.size = `${request.width}x${request.height}`;
     }
 
     let raw: unknown;

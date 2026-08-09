@@ -2,6 +2,7 @@ import type { UIMessagePart } from "@anvia/react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useImagePreview } from "#/components/images/image-preview";
+import { isImageToolName } from "#/lib/chat/generated-images";
 import {
   formatToolInput,
   formatToolOutput,
@@ -91,6 +92,19 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
       ) : null}
       {!section.summary && !hasFields && !hasItems && section.emptyText ? (
         <p className="text-[12px] text-text-faint">{section.emptyText}</p>
+      ) : null}
+      {section.imageLoading ? (
+        <div
+          className="flex items-center gap-2.5"
+          role="status"
+          aria-label="Generating image"
+        >
+          <div className="skeleton-shimmer aspect-square w-14 shrink-0 rounded-lg" />
+          <div className="flex flex-col gap-1.5">
+            <div className="skeleton-shimmer h-2.5 w-24 rounded-full" />
+            <div className="skeleton-shimmer h-2.5 w-16 rounded-full" />
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -201,6 +215,14 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
             value: part.error?.message ?? "Tool failed",
           },
         ],
+      } satisfies FormattedSection;
+    }
+    if (isRunning && isImageToolName(part.toolName)) {
+      // Image generation takes seconds to minutes — show a skeleton tile
+      // instead of a bare "Working…" so the user can see the pending image.
+      return {
+        title: "Result",
+        imageLoading: true,
       } satisfies FormattedSection;
     }
     if (isRunning) {

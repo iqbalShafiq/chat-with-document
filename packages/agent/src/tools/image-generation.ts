@@ -144,6 +144,13 @@ export type ImageCapabilitySet = {
   background?: string[];
   aspectRatios?: string[];
   quality?: string[];
+  resolutions?: string[];
+  /**
+   * Explicit pixel sizes the model accepts (OpenAI-style). When present the
+   * tool sends `size: "WxH"`; otherwise it sends `aspect_ratio` +
+   * `resolution` (Gemini/Grok-style).
+   */
+  sizes?: string[];
 };
 
 export type ImageGenerationToolScope = {
@@ -202,10 +209,16 @@ export type GenerateImageResult = {
   errors?: string[];
 };
 
+/**
+ * Pixel sizes per aspect ratio for OpenAI-style models. These are sent as
+ * `size` and MUST match a model's accepted list — the tool validates against
+ * the model's `sizes` capability and falls back to "auto" when a ratio is
+ * not available, so the request is never rejected with an invalid size.
+ */
 const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
   "1:1": { width: 1024, height: 1024 },
-  "3:2": { width: 1152, height: 768 },
-  "2:3": { width: 768, height: 1152 },
+  "3:2": { width: 1536, height: 1024 },
+  "2:3": { width: 1024, height: 1536 },
   "4:3": { width: 1152, height: 864 },
   "3:4": { width: 864, height: 1152 },
   "16:9": { width: 1344, height: 768 },
@@ -220,6 +233,51 @@ export function aspectRatioToSize(
   aspectRatio?: string,
 ): { width: number; height: number } {
   return ASPECT_SIZES[aspectRatio ?? "auto"] ?? ASPECT_SIZES.auto!;
+}
+
+/**
+ * Metadata dimensions for a stored image. The canonical aspect map is used
+ * as the record (the provider response carries no explicit dimensions).
+ */
+function savedWidth(_image: GeneratedImage, fallback: number): number {
+  return fallback;
+}
+
+function savedHeight(_image: GeneratedImage, fallback: number): number {
+  return fallback;
+}
+
+/**
+ * Resolve the wire parameters for the generation request:
+ * - OpenAI-style models (`sizes` capability): pick the closest accepted
+ *   `size` for the requested aspect ratio, falling back to "auto".
+ * - Gemini/Grok-style models: no `size` — send `aspect_ratio` +
+ *   `resolution` instead (verified against OpenRouter discovery 2026-08-09).
+ */
+export function resolveImageRequestParams(
+  aspectRatio: string | undefined,
+  capability: ImageCapabilitySet | null,
+): { size?: string; aspectRatio?: string; resolution?: string } {
+  const ratio = aspectRatio ?? "auto";
+
+  if (capability?.sizes && capability.sizes.length > 0) {
+    const { width, height } = aspectRatioToSize(ratio);
+    const exact = `${width}x${height}`;
+    if (capability.sizes.includes(exact)) return { size: exact };
+    if (capability.sizes.includes("auto")) return { size: "auto" };
+    return { size: capability.sizes[0]! };
+  }
+
+  if (capability?.resolutions && capability.resolutions.length > 0) {
+    return {
+      aspectRatio: ratio,
+      resolution: capability.resolutions[0]!,
+    };
+  }
+
+  // Unknown capability set — fall back to the explicit size path.
+  const { width, height } = aspectRatioToSize(ratio);
+  return { size: `${width}x${height}` };
 }
 
 const OVERRIDE_KEYS = [
@@ -359,6 +417,17 @@ async function runGeneration(
       ? Math.max(1, Math.min(requestedN, capability?.nMax ?? MAX_IMAGES))
       : undefined;
 
+  // Size semantics depend on the model family: OpenAI models take an exact
+  // `size`; Gemini/Grok take `aspect_ratio` + `resolution`. The request params
+  // are resolved per model capability so the wire payload is never rejected
+  // with an unsupported size.
+  const { size, aspectRatio: wireAspectRatio, resolution } =
+    resolveImageRequestParams(
+      merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
+      capability,
+    );
+  // Metadata dimensions: aspect-ratio models still report the requested
+  // ratio's canonical pixels (best effort for the DB row / gallery).
   const { width, height } = aspectRatioToSize(
     merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
   );
@@ -367,6 +436,9 @@ async function runGeneration(
     // Only send a model id we actually resolved; otherwise the provider uses
     // its own default model.
     ...(resolvedModelId ? { model: resolvedModelId } : {}),
+    ...(size ? { size } : {}),
+    ...(wireAspectRatio ? { aspect_ratio: wireAspectRatio } : {}),
+    ...(resolution ? { resolution } : {}),
     ...(quality ? { quality } : {}),
     ...(background ? { background, output_format: "png" } : {}),
     ...(n !== undefined ? { n } : {}),
@@ -400,8 +472,8 @@ async function runGeneration(
         mediaType: image.mediaType,
         modelId: resolvedModelId ?? "",
         prompt: merged.prompt,
-        width,
-        height,
+        width: savedWidth(image, width),
+        height: savedHeight(image, height),
         ...(total > 1 ? { nOfTotal: `${index + 1} of ${total}` } : {}),
       });
       images.push({

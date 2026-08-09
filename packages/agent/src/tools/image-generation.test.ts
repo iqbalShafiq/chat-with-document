@@ -8,6 +8,7 @@ import {
   buildImageGenerationInstruction,
   createImageGenerationTools,
   IMAGE_GENERATION_INSTRUCTION,
+  resolveImageRequestParams,
   type GeneratedImageRecord,
   type GenerateImageResult,
   type ImageGenerationToolScope,
@@ -249,6 +250,7 @@ describe("createImageGenerationTools", () => {
       expect(request.additionalParams).toEqual({
         model: DEFAULT_MODEL,
         n: 2,
+        size: "1024x1024",
       });
     });
 
@@ -280,7 +282,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({});
+      expect(request.additionalParams).toEqual({ size: "1024x1024" });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ modelId: "" }),
       );
@@ -294,7 +296,10 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
+      expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
+        size: "1024x1024",
+      });
     });
 
     it("sends an explicit modelId arg to the wire request", async () => {
@@ -305,7 +310,10 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", modelId: "explicit-model" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ model: "explicit-model" });
+      expect(request.additionalParams).toEqual({
+        model: "explicit-model",
+        size: "1024x1024",
+      });
     });
 
     it("caps n to the capability nMax", async () => {
@@ -318,7 +326,11 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", n: 5 });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL, n: 1 });
+      expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
+        n: 1,
+        size: "1024x1024",
+      });
     });
 
     it("drops a background not supported by the capability", async () => {
@@ -331,7 +343,10 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", background: "transparent" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
+      expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
+        size: "1024x1024",
+      });
     });
 
     it("drops a quality not in the capability list", async () => {
@@ -344,7 +359,10 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", quality: "high" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ model: DEFAULT_MODEL });
+      expect(request.additionalParams).toEqual({
+        model: DEFAULT_MODEL,
+        size: "1024x1024",
+      });
     });
 
     it("keeps a background listed in the capability and forces png output", async () => {
@@ -361,6 +379,7 @@ describe("createImageGenerationTools", () => {
         model: DEFAULT_MODEL,
         background: "transparent",
         output_format: "png",
+        size: "1024x1024",
       });
     });
 
@@ -473,7 +492,10 @@ describe("createImageGenerationTools", () => {
       const request = imageGeneration.mock.calls[0]![0];
       expect(request.width).toBe(1344);
       expect(request.height).toBe(768);
-      expect(request.additionalParams).toEqual({ model: "default-model" });
+      expect(request.additionalParams).toEqual({
+        model: "default-model",
+        size: "1344x768",
+      });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ modelId: "default-model" }),
       );
@@ -521,6 +543,7 @@ describe("createImageGenerationTools", () => {
             image_url: { url: "data:image/png;base64,AQID" },
           },
         ],
+        size: "1024x1024",
       });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "make it red" }),
@@ -617,6 +640,71 @@ describe("aspectRatioToSize", () => {
   it("falls back to auto dimensions for unknown or missing ratios", () => {
     expect(aspectRatioToSize("2:1")).toEqual({ width: 1024, height: 1024 });
     expect(aspectRatioToSize(undefined)).toEqual({ width: 1024, height: 1024 });
+  });
+});
+
+describe("resolveImageRequestParams", () => {
+  it("picks the exact accepted size for OpenAI-style models", () => {
+    const capability = {
+      nMax: 1,
+      sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+    };
+    expect(resolveImageRequestParams("1:1", capability)).toEqual({
+      size: "1024x1024",
+    });
+    expect(resolveImageRequestParams("3:2", capability)).toEqual({
+      size: "1536x1024",
+    });
+    expect(resolveImageRequestParams("2:3", capability)).toEqual({
+      size: "1024x1536",
+    });
+  });
+
+  it("falls back to auto when the ratio has no accepted pixel size", () => {
+    const capability = {
+      nMax: 1,
+      sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+    };
+    // 16:9 has no matching size in the OpenAI list → auto (never an
+    // unsupported pixel size that would 400 the request).
+    expect(resolveImageRequestParams("16:9", capability)).toEqual({
+      size: "auto",
+    });
+  });
+
+  it("uses aspect_ratio + resolution for Gemini/Grok-style models (no size)", () => {
+    const capability = { nMax: 1, resolutions: ["1K"] };
+    expect(resolveImageRequestParams("9:16", capability)).toEqual({
+      aspectRatio: "9:16",
+      resolution: "1K",
+    });
+  });
+
+  it("falls back to the canonical pixel size when capabilities are unknown", () => {
+    expect(resolveImageRequestParams("16:9", null)).toEqual({
+      size: "1344x768",
+    });
+    expect(resolveImageRequestParams(undefined, null)).toEqual({
+      size: "1024x1024",
+    });
+  });
+
+  it("never emits an unsupported size for any model family", () => {
+    const openai = { nMax: 1, sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"] };
+    const gemini = { nMax: 1, resolutions: ["1K"] };
+    for (const ratio of ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9", "9:19.5", "19.5:9", "auto"]) {
+      const o = resolveImageRequestParams(ratio, openai);
+      if (o.size) {
+        expect(openai.sizes).toContain(o.size);
+      } else {
+        expect(o.aspectRatio).toBe(ratio);
+        expect(o.resolution).toBe("1K");
+        expect(o.size).toBeUndefined();
+      }
+    }
+    const g = resolveImageRequestParams("1:1", gemini);
+    expect(g.size).toBeUndefined();
+    expect(g.aspectRatio).toBe("1:1");
   });
 });
 

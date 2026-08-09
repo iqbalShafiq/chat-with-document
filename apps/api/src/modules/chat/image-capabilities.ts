@@ -13,7 +13,7 @@ function stringArray(value: unknown): string[] | undefined {
 
 /**
  * Parse a ChatModel.imageCapabilities Json row into the image-tool capability
- * shape: { aspectRatios: string[], quality?: string[], n: {min,max}, background?: string[] }.
+ * shape: { aspectRatios, quality?, n: {min,max}, background?, resolutions?, sizes? }.
  * Unknown/malformed rows fall back to the tool's default (nMax 4).
  */
 export function parseImageCapabilities(raw: unknown): ImageCapabilitySet {
@@ -33,11 +33,15 @@ export function parseImageCapabilities(raw: unknown): ImageCapabilitySet {
   const background = stringArray(record.background);
   const aspectRatios = stringArray(record.aspectRatios);
   const quality = stringArray(record.quality);
+  const resolutions = stringArray(record.resolutions);
+  const sizes = stringArray(record.sizes);
 
   return {
     nMax,
     ...(background ? { background } : {}),
     ...(aspectRatios ? { aspectRatios } : {}),
     ...(quality ? { quality } : {}),
+    ...(resolutions ? { resolutions } : {}),
+    ...(sizes ? { sizes } : {}),
   };
 }
