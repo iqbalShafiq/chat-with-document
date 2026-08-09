@@ -163,6 +163,107 @@ describe("OpenRouterImageGenerationModel", () => {
     ).rejects.toThrow("Image generation temporarily unavailable");
   });
 
+  it("retries transient statuses then succeeds", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: "rate limit" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => ({ error: { message: "bad gateway" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a permanent 400", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { message: "invalid size" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await expect(
+      model.imageGeneration({ prompt: "p", width: 256, height: 256 }),
+    ).rejects.toThrow("invalid size");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces the upstream message for a transient 400 and retries", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: "provider temporarily overloaded" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after exhausting retries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: { message: "bad gateway" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await expect(
+      model.imageGeneration({ prompt: "p", width: 256, height: 256 }),
+    ).rejects.toThrow("bad gateway");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to the bounded message when upstream omits details", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({}),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await expect(
+      model.imageGeneration({ prompt: "p", width: 256, height: 256 }),
+    ).rejects.toThrow("Image generation failed before billing; try again");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("strips a trailing slash from baseUrl", async () => {
     const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = new OpenRouterImageGenerationModel({
