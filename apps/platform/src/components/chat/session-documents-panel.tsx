@@ -1,6 +1,6 @@
 import type { UIAttachment } from "@anvia/react";
-import { Composer, useComposer } from "@anvia/react-ui";
-import { useEffect, useRef, useState } from "react";
+import { useComposer } from "@anvia/react-ui";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCitationSessionOptional } from "#/components/chat/citation-session-context";
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { ComposerAttachmentChip } from "#/components/composer-attachment";
@@ -11,10 +11,68 @@ import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
 import type { WebSourceSummary } from "#/lib/chat/web-sources";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { DocumentStatus, SessionDocument } from "#/lib/api";
-import { Focus, Globe, Image, Quote, X } from "lucide-react";
+import { Focus, Globe, Quote, X } from "lucide-react";
 
 /** Matches left desktop sidebar width. */
 export const DOC_RAIL_WIDTH_PX = 272;
+
+/** Max items shown per right-rail section before "Load more". */
+const SECTION_PAGE_SIZE = 6;
+
+/**
+ * Client-side load-more for a rail section. Resets when the head of the list
+ * changes (session switch / list replace) so pagination does not leak.
+ */
+function useSectionLoadMore<T>(items: readonly T[], getId: (item: T) => string) {
+  const [visibleCount, setVisibleCount] = useState(SECTION_PAGE_SIZE);
+  const headId = items.length > 0 ? getId(items[0]!) : "";
+  const itemsRef = useRef(items);
+  const getIdRef = useRef(getId);
+  itemsRef.current = items;
+  getIdRef.current = getId;
+
+  useEffect(() => {
+    setVisibleCount(SECTION_PAGE_SIZE);
+  }, [headId]);
+
+  const visibleItems = items.slice(0, visibleCount);
+  const hasMore = visibleCount < items.length;
+  const remaining = Math.max(0, items.length - visibleCount);
+  const loadMore = useCallback(() => {
+    setVisibleCount((current) => current + SECTION_PAGE_SIZE);
+  }, []);
+  /** Expand the window far enough that `id` is mounted (e.g. citation focus). */
+  const ensureVisible = useCallback((id: string) => {
+    const index = itemsRef.current.findIndex(
+      (item) => getIdRef.current(item) === id,
+    );
+    if (index < 0) return;
+    setVisibleCount((current) => Math.max(current, index + 1));
+  }, []);
+
+  return { visibleItems, hasMore, remaining, loadMore, ensureVisible };
+}
+
+function LoadMoreButton({
+  remaining,
+  onClick,
+}: {
+  remaining: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-1.5 w-full cursor-pointer rounded-lg py-1.5 text-center text-[11px] font-medium text-text-faint transition hover:bg-white/[0.04] hover:text-text-muted active:scale-[0.99]"
+    >
+      Load more
+      {remaining > 0 ? (
+        <span className="text-text-faint/70"> · {remaining} left</span>
+      ) : null}
+    </button>
+  );
+}
 
 export type IngestionItem = {
   id: string;
@@ -93,12 +151,44 @@ export function SessionDocumentsPanel({
   const hasAttachments = composer.attachments.length > 0;
   const hasPending = hasIngestion || hasAttachments;
   const activeContextIds = new Set(activeContextImages.map((image) => image.id));
-  const pendingCount = hasIngestion
-    ? ingestionItems.length
-    : composer.attachments.length;
+  const pendingItems: Array<
+    | { kind: "ingestion"; item: IngestionItem }
+    | { kind: "attachment"; item: UIAttachment }
+  > = hasIngestion
+    ? ingestionItems.map((item) => ({ kind: "ingestion" as const, item }))
+    : composer.attachments.map((item) => ({
+        kind: "attachment" as const,
+        item,
+      }));
+  const pendingCount = pendingItems.length;
   const [removeError, setRemoveError] = useState<string | null>(null);
 
-  // Scroll + pulse the focused document when a citation is clicked.
+  const activePage = useSectionLoadMore(sessionDocuments, (doc) => doc.id);
+  const citedPage = useSectionLoadMore(
+    citedDocuments,
+    (doc) => doc.documentId,
+  );
+  const webPage = useSectionLoadMore(webSources, (source) => source.url);
+  const imagesPage = useSectionLoadMore(generatedImages, (image) => image.id);
+  const contextPage = useSectionLoadMore(
+    activeContextImages,
+    (image) => image.id,
+  );
+  const pendingPage = useSectionLoadMore(pendingItems, (entry) => entry.item.id);
+
+  // Expand pagination so a cited document past the first page is mounted.
+  useEffect(() => {
+    if (!focusTarget?.documentId) return;
+    activePage.ensureVisible(focusTarget.documentId);
+    citedPage.ensureVisible(focusTarget.documentId);
+  }, [
+    focusTarget?.documentId,
+    focusTarget?.nonce,
+    activePage.ensureVisible,
+    citedPage.ensureVisible,
+  ]);
+
+  // Scroll + pulse the focused document once it is in the DOM.
   useEffect(() => {
     if (!focusTarget?.documentId) return;
     const id = CSS.escape(focusTarget.documentId);
@@ -111,7 +201,12 @@ export function SessionDocumentsPanel({
       );
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [focusTarget?.documentId, focusTarget?.nonce]);
+  }, [
+    focusTarget?.documentId,
+    focusTarget?.nonce,
+    activePage.visibleItems.length,
+    citedPage.visibleItems.length,
+  ]);
 
   useEffect(() => {
     setRemoveError(null);
@@ -200,7 +295,7 @@ export function SessionDocumentsPanel({
                 ref={listRef}
                 className="flex w-full list-none flex-col gap-1.5 p-0"
               >
-                {sessionDocuments.map((doc) => {
+                {activePage.visibleItems.map((doc) => {
                   const removing = removingDocumentId === doc.id;
 
                   return (
@@ -246,6 +341,12 @@ export function SessionDocumentsPanel({
                   );
                 })}
               </ul>
+              {activePage.hasMore ? (
+                <LoadMoreButton
+                  remaining={activePage.remaining}
+                  onClick={activePage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 
@@ -255,7 +356,7 @@ export function SessionDocumentsPanel({
                 ref={citedListRef}
                 className="flex w-full list-none flex-col gap-1.5 p-0"
               >
-                {citedDocuments.map((doc) => {
+                {citedPage.visibleItems.map((doc) => {
                   const inActive = sessionDocuments.find(
                     (d) => d.id === doc.documentId,
                   );
@@ -296,13 +397,19 @@ export function SessionDocumentsPanel({
                   );
                 })}
               </ul>
+              {citedPage.hasMore ? (
+                <LoadMoreButton
+                  remaining={citedPage.remaining}
+                  onClick={citedPage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 
           {hasWebSources ? (
             <CollapsibleDocumentSection title="Web sources">
               <ul className="flex w-full list-none flex-col gap-1.5 p-0">
-                {webSources.map((source) => {
+                {webPage.visibleItems.map((source) => {
                   const domain = safeHostname(source.url);
                   return (
                     <li key={source.url} className="w-full min-w-0">
@@ -325,21 +432,19 @@ export function SessionDocumentsPanel({
                   );
                 })}
               </ul>
+              {webPage.hasMore ? (
+                <LoadMoreButton
+                  remaining={webPage.remaining}
+                  onClick={webPage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 
           {hasGeneratedImages || runningImageCount > 0 ? (
-            <CollapsibleDocumentSection
-              title="Generated images"
-              icon={
-                <Image
-                  className="size-3.5 shrink-0 text-accent"
-                  strokeWidth={1.75}
-                />
-              }
-            >
+            <CollapsibleDocumentSection title="Images">
               <ul className="grid w-full list-none grid-cols-2 gap-1.5 p-0">
-                {generatedImages.map((image) => (
+                {imagesPage.visibleItems.map((image) => (
                   <li key={image.id} className="min-w-0">
                     <GeneratedImageThumbnail
                       image={image}
@@ -352,6 +457,7 @@ export function SessionDocumentsPanel({
                     />
                   </li>
                 ))}
+                {/* Always surface in-flight skeletons so generation stays visible. */}
                 {Array.from({ length: runningImageCount }).map((_, i) => (
                   <li key={`running-${i}`} aria-hidden className="min-w-0">
                     <div
@@ -361,6 +467,12 @@ export function SessionDocumentsPanel({
                   </li>
                 ))}
               </ul>
+              {imagesPage.hasMore ? (
+                <LoadMoreButton
+                  remaining={imagesPage.remaining}
+                  onClick={imagesPage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 
@@ -379,7 +491,7 @@ export function SessionDocumentsPanel({
                 priority over other session images.
               </p>
               <ul className="grid w-full list-none grid-cols-2 gap-1.5 p-0">
-                {activeContextImages.map((image) => (
+                {contextPage.visibleItems.map((image) => (
                   <li key={image.id} className="min-w-0">
                     <GeneratedImageThumbnail
                       image={image}
@@ -393,6 +505,12 @@ export function SessionDocumentsPanel({
                   </li>
                 ))}
               </ul>
+              {contextPage.hasMore ? (
+                <LoadMoreButton
+                  remaining={contextPage.remaining}
+                  onClick={contextPage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 
@@ -401,32 +519,27 @@ export function SessionDocumentsPanel({
               title={hasIngestion ? "Uploading documents" : "Attachments"}
             >
               <div className="flex w-full flex-col gap-1.5">
-                {/* After submit: show server-side ingest progress. */}
-                {hasIngestion
-                  ? ingestionItems.map((item) => (
-                      <IngestionStatusPill
-                        key={item.id}
-                        filename={item.filename}
-                        status={item.status}
-                      />
-                    ))
-                  : null}
-
-                {/* Before submit: queued local files (composer.attachments). */}
-                {!hasIngestion && hasAttachments ? (
-                  <Composer.Attachments
-                    keepMounted
-                    className="flex w-full flex-col gap-1.5"
-                  >
-                    {(attachment: UIAttachment) => (
-                      <ComposerAttachmentChip
-                        key={attachment.id}
-                        attachment={attachment}
-                      />
-                    )}
-                  </Composer.Attachments>
-                ) : null}
+                {pendingPage.visibleItems.map((entry) =>
+                  entry.kind === "ingestion" ? (
+                    <IngestionStatusPill
+                      key={entry.item.id}
+                      filename={entry.item.filename}
+                      status={entry.item.status}
+                    />
+                  ) : (
+                    <ComposerAttachmentChip
+                      key={entry.item.id}
+                      attachment={entry.item}
+                    />
+                  ),
+                )}
               </div>
+              {pendingPage.hasMore ? (
+                <LoadMoreButton
+                  remaining={pendingPage.remaining}
+                  onClick={pendingPage.loadMore}
+                />
+              ) : null}
             </CollapsibleDocumentSection>
           ) : null}
 

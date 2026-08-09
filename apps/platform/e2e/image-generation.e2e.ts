@@ -198,7 +198,7 @@ test("rejecting an image approval skips generation", async ({ page, request }) =
   await card.getByRole("button", { name: "Reject" }).click();
 
   await waitForRunDone(page);
-  await expect(rail(page).getByText("Generated images")).toHaveCount(0);
+  await expect(rail(page).getByText("Images", { exact: true })).toHaveCount(0);
   expect(imagesRequests(await stubRequests(request))).toHaveLength(0);
 });
 
