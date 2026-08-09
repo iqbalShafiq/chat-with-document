@@ -2,6 +2,7 @@ import { Globe, ImagePlus, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ImageGenParamsEditor } from "#/components/composer/image-gen-params-editor";
+import { HoverCard } from "#/components/ui/hover-card";
 import {
   fetchImageModels,
   type ImageGenSettings,
@@ -116,6 +117,20 @@ export function FeaturesPopover({
     setOpen(true);
   };
 
+  const openFromIcon = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = buttonRef.current?.getBoundingClientRect();
+    setMenuPos(
+      rect
+        ? { top: rect.top, bottom: rect.bottom, right: rect.right }
+        : { top: 0, bottom: 0, right: 0 },
+    );
+    setOpen(true);
+  };
+
   // Position the panel explicitly (no transform: the scale-in animation owns
   // `transform` and would otherwise override a translate). Flip above the
   // trigger when there is room, below otherwise — keeps the panel inside the
@@ -176,22 +191,72 @@ export function FeaturesPopover({
               aria-hidden
             />
             <span
-              className="inline-flex items-center gap-1 rounded-r-xl px-2.5"
+              className="inline-flex items-center gap-1 rounded-r-xl px-1"
               aria-label="Active features"
             >
               {webSearchEnabled ? (
-                <Globe
-                  className="size-4 text-accent"
-                  strokeWidth={1.75}
-                  aria-label="Web search active"
-                />
+                <HoverCard
+                  disabled={open}
+                  variant="tooltip"
+                  content={
+                    webSearchAvailable
+                      ? "Web search on — the agent searches the web freely"
+                      : "Web search is not configured on the server"
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label="Open web search settings"
+                    title="Web search on"
+                    onClick={openFromIcon}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                  >
+                    <Globe
+                      className="size-4 text-accent"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </HoverCard>
               ) : null}
               {imageGenerationEnabled ? (
-                <ImagePlus
-                  className="size-4 text-accent"
-                  strokeWidth={1.75}
-                  aria-label="Image generator active"
-                />
+                <HoverCard
+                  disabled={open}
+                  variant="panel"
+                  content={
+                    imageGenerationAvailable ? (
+                      <>
+                        <p className="mb-1.5 px-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-text-faint">
+                          Image settings
+                        </p>
+                        <ImageGenParamsEditor
+                          settings={settings}
+                          onChange={onSettingsChange}
+                          models={models.items}
+                          loading={models.status === "loading"}
+                          error={models.status === "error"}
+                          onRetry={loadImageModels}
+                        />
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-text-faint">
+                        Image generation is not configured on the server
+                      </p>
+                    )
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label="Open image generator settings"
+                    title="Image generator on"
+                    onClick={openFromIcon}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                  >
+                    <ImagePlus
+                      className="size-4 text-accent"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </HoverCard>
               ) : null}
             </span>
           </>
