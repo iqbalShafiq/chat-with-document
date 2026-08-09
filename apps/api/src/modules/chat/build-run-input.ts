@@ -43,7 +43,16 @@ import {
   resolveImageReference,
   type ImageResolveDeps,
 } from "./image-resolve.js";
-import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
+import {
+  createNonVisionMemoryProxy,
+  createSanitizedMemoryStore,
+} from "./memory-sanitizer.js";
+import { findActiveModel, listModels } from "../models/service.js";
+import {
+  createDefaultViewImageTool,
+  resolveVisionHelperModel,
+  VISION_HELPER_INSTRUCTION,
+} from "./vision-helper.js";
 import {
   rescheduleProfileRefresh,
   waitForActiveProfileJob,
@@ -213,6 +222,18 @@ export async function buildChatRunInput(input: {
 
   const memory = createSanitizedMemoryStore(prisma);
 
+  // Model capability gate: text-only models (e.g. DeepSeek) 404 on image
+  // content replayed from memory. For those runs, wrap the memory store so
+  // loaded messages drop image parts (rows keep them — a later vision-model
+  // run still sees the images), and register the view_image helper tool so
+  // the model can still understand images via a cheap vision chat model.
+  const modelInfo = await findActiveModel(model);
+  const modelAcceptsImage =
+    modelInfo?.inputModalities?.includes("image") ?? false;
+  const runMemory = modelAcceptsImage
+    ? memory
+    : createNonVisionMemoryProxy(memory);
+
   // Session row is guaranteed to exist: the router runs ensureChatSession
   // before building the run input.
   const chatSession = await prisma.chatSession.findFirst({
@@ -331,12 +352,11 @@ export async function buildChatRunInput(input: {
       text:
         "Active image context\n" +
         "The user pinned the following images as context for this conversation. " +
-        "They are provided to you as image input and take priority over any " +
-        "other images mentioned in the session:\n" +
+        "They take priority over any other images mentioned in the session:\n" +
         activeContextImages
           .map(
             (image, index) =>
-              `${index + 1}. ${image.prompt || image.id} (${image.mediaType})`,
+              `${index + 1}. ${image.prompt || image.id} (${image.mediaType}) — imageId: ${image.id}`,
           )
           .join("\n"),
     });
@@ -409,6 +429,19 @@ export async function buildChatRunInput(input: {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
 
+  // Vision helper for text-only models: a read-only tool describing session
+  // images via the cheapest active vision chat model (VISION_HELPER_MODEL
+  // overrides the pick).
+  if (!modelAcceptsImage) {
+    const visionModel = await resolveVisionHelperModel();
+    if (visionModel) {
+      tools.push(
+        createDefaultViewImageTool({ userId, sessionId, model: visionModel }),
+      );
+      instructions.push(VISION_HELPER_INSTRUCTION);
+    }
+  }
+
   const agent = createAgent({
     agentId: agentId ?? "my-agent",
     model: createCompletionModel(model),
@@ -423,7 +456,7 @@ export async function buildChatRunInput(input: {
       ? { approvals }
       : {}),
     ...(context7Available ? { mcpServers: [context7Server] } : {}),
-    memory,
+    memory: runMemory,
   });
 
   return {
@@ -436,7 +469,7 @@ export async function buildChatRunInput(input: {
     instructions,
     contextBlocks,
     tools,
-    memory,
+    memory: runMemory,
     hasActiveDocuments,
     webSearchAvailable,
     imageGenerationAvailable,

@@ -62,7 +62,6 @@ import {
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
 import { DocumentsBrowser } from "#/components/documents/documents-browser";
 import { ImagePreviewProvider, type ImagePreviewContextActions } from "#/components/images/image-preview";
-import { ImageContextModelDialog } from "#/components/images/image-context-model-dialog";
 import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
@@ -1275,14 +1274,8 @@ function ChatSession({
     }
   }, [sessionId]);
 
-  const [contextSwitchPending, setContextSwitchPending] = useState<{
-    image: GeneratedImageItem;
-  } | null>(null);
-  const [contextSwitchBusy, setContextSwitchBusy] = useState(false);
-  const [contextSwitchError, setContextSwitchError] = useState<string | null>(
-    null,
-  );
-
+  // Pinning works with any model: vision models receive the images as image
+  // input, text-only models get them via the view_image helper tool.
   const handleToggleImageContext = useCallback(
     async (image: GeneratedImageItem) => {
       const isPinned = activeContextImages.some((item) => item.id === image.id);
@@ -1300,65 +1293,18 @@ function ChatSession({
         return;
       }
 
-      // Pinning requires a model that accepts image input. If the current
-      // model cannot, gate on the ImageContextModelDialog (switch model).
-      const activeModel = modelById(models, selectedModelRef.current);
-      const supportsImage =
-        activeModel !== null &&
-        activeModel.inputModalities.includes("image");
-      if (supportsImage) {
-        try {
-          await addSessionImageContext({ sessionId, imageId: image.id });
-          void refreshActiveContext();
-        } catch (error) {
-          setComposerError(
-            error instanceof Error
-              ? error.message
-              : "Could not add image context",
-          );
-        }
-        return;
-      }
-
-      setContextSwitchPending({ image });
-      setContextSwitchBusy(false);
-      setContextSwitchError(null);
-    },
-    [activeContextImages, sessionId, refreshActiveContext, models],
-  );
-
-  const handleContextSwitchConfirm = useCallback(
-    async (input: { modelId: string; reasoningEffort: string | null }) => {
-      const pending = contextSwitchPending;
-      if (!pending) return;
-      setContextSwitchBusy(true);
-      setContextSwitchError(null);
       try {
-        handleModelChange(input.modelId);
-        handleReasoningChange(input.reasoningEffort);
-        await addSessionImageContext({
-          sessionId,
-          imageId: pending.image.id,
-        });
-        setContextSwitchPending(null);
+        await addSessionImageContext({ sessionId, imageId: image.id });
         void refreshActiveContext();
       } catch (error) {
-        setContextSwitchError(
+        setComposerError(
           error instanceof Error
             ? error.message
             : "Could not add image context",
         );
-      } finally {
-        setContextSwitchBusy(false);
       }
     },
-    [
-      contextSwitchPending,
-      sessionId,
-      refreshActiveContext,
-      handleModelChange,
-      handleReasoningChange,
-    ],
+    [activeContextImages, sessionId, refreshActiveContext],
   );
 
   const handleImageGenerationToggle = useCallback((enabled: boolean) => {
@@ -2261,22 +2207,6 @@ function ChatSession({
                   <ApprovalPanel />
 
                   <ClarificationPanel />
-
-                  <ImageContextModelDialog
-                    open={contextSwitchPending !== null}
-                    models={models}
-                    reasoningEfforts={reasoningEfforts}
-                    busy={contextSwitchBusy}
-                    error={contextSwitchError}
-                    onConfirm={(input) => {
-                      void handleContextSwitchConfirm(input);
-                    }}
-                    onCancel={() => {
-                      if (contextSwitchBusy) return;
-                      setContextSwitchPending(null);
-                      setContextSwitchError(null);
-                    }}
-                  />
 
                   <StaleSessionDialog
                     open={staleDialog !== null}

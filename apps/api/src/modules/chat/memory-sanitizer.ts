@@ -82,6 +82,39 @@ function stripReasoningParts(message: Message): Message {
   return { ...message, content };
 }
 
+/**
+ * Drop message-level image content parts from the loaded view (e.g. a user
+ * message with pinned context images stored when a vision model ran). The
+ * persisted rows are untouched — a later vision-model run still gets them.
+ * A message whose content becomes empty gets an empty text part (the valid
+ * no-op variant per memory-prisma's isToolContent).
+ */
+function stripImageParts(message: Message): Message {
+  if (!Array.isArray(message.content)) return message;
+  const content: unknown[] = message.content.filter(
+    (part) => !(isRecord(part) && part.type === "image"),
+  );
+  if (content.length === message.content.length) return message;
+  if (content.length === 0) content.push({ type: "text", text: "" });
+  return { ...message, content } as unknown as Message;
+}
+
+/**
+ * Wrap a memory store so `load` returns messages without image content —
+ * used when the run's model cannot accept image input (a text-only model
+ * would 404 on image parts replayed from memory). Non-destructive: rows in
+ * the DB keep their images for future vision-model runs.
+ */
+export function createNonVisionMemoryProxy(inner: MemoryStore): MemoryStore {
+  return {
+    ...inner,
+    load: async (context) => {
+      const messages = await inner.load(context);
+      return messages.map(stripImageParts);
+    },
+  } as MemoryStore;
+}
+
 /** The agent must never see error artifacts (kind:"error" rows). */
 export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
   const inner = createPrismaMemoryStore(prisma);
