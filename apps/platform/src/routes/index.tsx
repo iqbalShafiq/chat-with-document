@@ -1904,6 +1904,13 @@ function ChatSession({
             ],
           });
 
+          // Active image context is single-use: it was consumed by this
+          // message, so clear the pins (the server also clears after the
+          // run reads them).
+          if (activeContextImages.length > 0) {
+            setActiveContextImages([]);
+          }
+
           clear();
           setIngestionItems([]);
         }}
@@ -2077,6 +2084,10 @@ function ChatSession({
                     onImageGenerationToggle={handleImageGenerationToggle}
                     imageGenSettings={imageGenSettings}
                     onImageGenSettingsChange={handleImageGenSettingsChange}
+                    activeContextImages={activeContextImages}
+                    onToggleImageContext={(image) => {
+                      void handleToggleImageContext(image);
+                    }}
                   />
                 </div>
               </div>

@@ -23,14 +23,8 @@ export type SelectProps = {
   className?: string;
   disabled?: boolean;
   /**
-   * Render the listbox through a portal anchored to the trigger. Native
-   * `showModal()` dialogs live in the browser top layer, so a portal to
-   * `document.body` renders *behind* them — pass the dialog element (or any
-   * non-clipping ancestor in the top layer) to draw the list above the
-   * modal content. Coordinates are computed relative to that element.
+   * Hover detail placement for option cards (model logos etc).
    */
-  portalTarget?: HTMLElement | null;
-  /** Hover detail placement for option cards (model logos etc). */
   hoverSide?: "top" | "right";
 };
 
@@ -42,7 +36,6 @@ export function Select({
   ariaLabel,
   className = "",
   disabled = false,
-  portalTarget = null,
   hoverSide = "top",
 }: SelectProps) {
   const [open, setOpen] = useState(false);
@@ -51,6 +44,18 @@ export function Select({
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
   const wasOpenRef = useRef(false);
+  /**
+   * Native `showModal()` dialogs live in the browser top layer, so a listbox
+   * portaled to `document.body` renders *behind* the modal. Detect a dialog
+   * ancestor after commit (a ref passed from the parent is still null during
+   * the first render) and portal the list INTO the dialog instead.
+   */
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setPortalTarget(
+      rootRef.current?.closest("dialog") ?? null,
+    );
+  }, []);
 
   const selected = options.find((opt) => opt.value === value);
 

@@ -209,6 +209,18 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       context7Server: await getContext7McpServer(),
     });
 
+    // Active image context is single-use: it is consumed by this run, so
+    // clear it after loading (the r2 keys stay in runInput for this run and
+    // any transient retry). Best-effort — a leftover row is pruned the next
+    // time a run consumes context.
+    if (runInput.activeContextImages.length > 0) {
+      await getImageStore()
+        .clearSessionImageContexts({ userId, sessionId })
+        .catch(() => {
+          // non-fatal: next run re-clears
+        });
+    }
+
     const memoryMessages = await runInput.memory.load({ sessionId, userId });
     const estimated = estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);
     const modelInfo = await findActiveModel(model);

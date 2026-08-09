@@ -1,11 +1,12 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer } from "@anvia/react-ui";
-import { FileX, ArrowUp, Square, X } from "lucide-react";
+import { FileX, ArrowUp, Pin, Square, X } from "lucide-react";
 import type { RefObject } from "react";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { FeaturesPopover } from "#/components/composer/features-popover";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
+import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import type {
   ContextUsageInfo,
   ImageGenSettings,
@@ -13,6 +14,7 @@ import type {
   ReasoningEffortInfo,
   SessionDocument,
 } from "#/lib/api";
+import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 
 /** 3 cards × 2.5rem + 2 gaps × 0.375rem — taller stacks scroll. */
@@ -55,6 +57,8 @@ export function ChatComposer({
   onImageGenerationToggle = () => {},
   imageGenSettings = {},
   onImageGenSettingsChange = () => {},
+  activeContextImages = [],
+  onToggleImageContext = () => {},
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -96,6 +100,9 @@ export function ChatComposer({
   /** Capability-driven image generation settings. */
   imageGenSettings?: ImageGenSettings;
   onImageGenSettingsChange?: (settings: ImageGenSettings) => void;
+  /** Pinned images sent with the next message — shown above the field. */
+  activeContextImages?: GeneratedImageItem[];
+  onToggleImageContext?: (image: GeneratedImageItem) => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
@@ -148,6 +155,33 @@ export function ChatComposer({
       {composerError ? (
         <div className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
           {composerError}
+        </div>
+      ) : null}
+
+      {activeContextImages.length > 0 ? (
+        <div className="flex items-center gap-2">
+          <Pin
+            className="size-3.5 shrink-0 text-accent"
+            strokeWidth={2.25}
+          />
+          <span className="shrink-0 text-[10px] font-medium text-text-faint">
+            Image context
+          </span>
+          <div
+            className="chat-scroll-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5"
+            role="list"
+            aria-label="Active image context"
+          >
+            {activeContextImages.map((image) => (
+              <div key={image.id} className="w-11 shrink-0" role="listitem">
+                <GeneratedImageThumbnail
+                  image={image}
+                  pinned
+                  onTogglePin={() => onToggleImageContext(image)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

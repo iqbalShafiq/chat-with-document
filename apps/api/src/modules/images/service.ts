@@ -200,6 +200,22 @@ export function createImageStore(deps: ImageStoreDeps) {
       });
     },
 
+    /**
+     * Active image context is single-use: the run that consumes it clears it
+     * so the next message starts clean (see run-worker).
+     */
+    async clearSessionImageContexts(input: {
+      userId: string;
+      sessionId: string;
+    }): Promise<void> {
+      await deps.prisma.sessionImageContext.deleteMany({
+        where: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+        },
+      });
+    },
+
     async listSessionImageContexts(input: {
       userId: string;
       sessionId: string;

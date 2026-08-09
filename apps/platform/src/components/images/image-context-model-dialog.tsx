@@ -129,7 +129,6 @@ export function ImageContextModelDialog({
             options={modelOptions}
             ariaLabel="Vision model"
             disabled={busy}
-            portalTarget={dialogRef.current}
             hoverSide="right"
           />
         </label>
@@ -145,7 +144,6 @@ export function ImageContextModelDialog({
               options={effortOptions}
               ariaLabel="Reasoning effort"
               disabled={busy}
-              portalTarget={dialogRef.current}
             />
           </label>
         ) : null}
