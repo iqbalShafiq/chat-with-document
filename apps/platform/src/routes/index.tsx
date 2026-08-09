@@ -75,7 +75,10 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
-import { getMessageRawText } from "#/lib/chat/message-text";
+import {
+  computeGenerationActionInfo,
+  getMessageRawText,
+} from "#/lib/chat/message-text";
 import {
   EMPTY_CHAT_TITLE,
   findEmptyNewChat,
@@ -1542,6 +1545,10 @@ function ChatSession({
 
   // Stable callbacks so memoized ChatMessageRow rows skip re-renders on
   // unrelated state changes (e.g. model switches).
+  const generationInfoMap = useMemo(
+    () => computeGenerationActionInfo(chat.messages),
+    [chat.messages],
+  );
   const handleStartEdit = useCallback(
     (message: UIMessage) => {
       if (chat.status === "streaming") return;
@@ -1784,6 +1791,7 @@ function ChatSession({
                         onCancelEdit={handleCancelEdit}
                         onSubmitEdit={handleSubmitEdit}
                         onRevert={handleRevert}
+                        generationInfo={generationInfoMap.get(message.id)}
                       />
                     )}
                   </Thread.Messages>

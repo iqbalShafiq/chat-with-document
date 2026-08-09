@@ -10,13 +10,23 @@ const ACTION_ICON_CLASS =
 
 type CopyState = "idle" | "copied" | "error";
 
-export function MessageCopyButton() {
+export function MessageCopyButton({
+  generationText,
+}: {
+  /** Whole-generation text (assistant footer); falls back to this message. */
+  generationText?: string;
+}) {
   const { message } = useMessage();
   const rawText = getMessageRawText(message);
   const text = useMemo(() => {
+    // Assistant footer: copy the ENTIRE generation (all assistant messages
+    // in this turn), not just the final message's own text.
+    if (message.role === "assistant" && generationText) {
+      return stripCitationsForCopy(generationText);
+    }
     if (message.role === "assistant") return stripCitationsForCopy(rawText);
     return rawText;
-  }, [message.role, rawText]);
+  }, [message.role, rawText, generationText]);
   const disabled = text.trim().length === 0;
   const [state, setState] = useState<CopyState>("idle");
   const resetRef = useRef<number | null>(null);

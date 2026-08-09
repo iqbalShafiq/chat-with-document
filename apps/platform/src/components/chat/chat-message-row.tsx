@@ -26,11 +26,17 @@ import {
   messageHasUserFacingText,
 } from "#/lib/chat/message-text";
 
-function shouldShowMessageActions(message: UIMessage): boolean {
+function shouldShowMessageActions(
+  message: UIMessage,
+  isGenerationEnd: boolean,
+): boolean {
   if (message.role === "user") return true;
   if (message.role === "tool") return false;
   if (message.role !== "assistant") return false;
-  return messageHasUserFacingText(message);
+  // Copy/timestamp footer only on the FINAL assistant message of a
+  // generation — an agent turn may emit several assistant messages
+  // (reply → tool → thinking → reply) and the footer belongs at the bottom.
+  return isGenerationEnd;
 }
 
 function isIntermediateStepMessage(message: UIMessage): boolean {
@@ -73,6 +79,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onCancelEdit,
   onSubmitEdit,
   onRevert,
+  generationInfo,
 }: {
   message: UIMessage;
   chatStatus: UseChatStatus;
@@ -82,6 +89,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onCancelEdit: () => void;
   onSubmitEdit: (message: UIMessage, text: string) => Promise<void>;
   onRevert: (message: UIMessage) => Promise<void>;
+  /** Generation footer info — only the final assistant message shows it. */
+  generationInfo?: { isGenerationEnd: boolean; generationText: string };
 }) {
   const message = messageProp;
   const messageKind = readChatMessageMeta(message.metadata).kind;
@@ -116,7 +125,10 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   const [editWidthPx, setEditWidthPx] = useState<number | null>(null);
   const intermediate = isIntermediateStepMessage(message);
   const startsWithActivity = messageStartsWithActivity(message);
-  const showActions = shouldShowMessageActions(message);
+  const showActions = shouldShowMessageActions(
+    message,
+    generationInfo?.isGenerationEnd ?? true,
+  );
   const isEditing =
     message.role === "user" && editingMessageId === message.id;
 
@@ -194,6 +206,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
         {showActions && !isEditing ? (
           <MessageActionsBar
             chatStatus={chatStatus}
+            generationText={generationInfo?.generationText}
             onRevert={onRevert}
             onStartEdit={(target) => {
               const width = contentRef.current?.getBoundingClientRect().width;

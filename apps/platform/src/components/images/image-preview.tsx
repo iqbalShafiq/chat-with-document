@@ -254,8 +254,11 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
                 onClick={(event) => {
-                  // Click on the glass area around the image closes the viewer.
-                  if (event.target === stageRef.current) close();
+                  // Backdrop click closes the viewer, but never while zoomed:
+                  // pointer capture on the stage (pan) retargets click to the
+                  // stage, which would dismiss the preview after a drag or a
+                  // double-click zoom. While zoomed, use X / Escape to close.
+                  if (scale <= 1 && event.target === stageRef.current) close();
                 }}
               >
                 {internal && state === "loading" ? (
@@ -292,40 +295,44 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
               </div>
 
               {/* Floating glass controls — no toolbar container, they sit on
-                  the frosted backdrop next to the image. */}
-              <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl p-1">
-                <button
-                  type="button"
-                  aria-label="Zoom out"
-                  onClick={() => zoomBy(1 / ZOOM_STEP)}
-                  className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
-                  disabled={scale <= MIN_SCALE}
-                >
-                  <Minus className="size-4" strokeWidth={1.75} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Reset zoom"
-                  onClick={resetView}
-                  className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
-                  disabled={scale <= MIN_SCALE}
-                >
-                  <RotateCcw className="size-4" strokeWidth={1.75} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Zoom in"
-                  onClick={() => zoomBy(ZOOM_STEP)}
-                  className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
-                  disabled={scale >= MAX_SCALE}
-                >
-                  <Plus className="size-4" strokeWidth={1.75} />
-                </button>
+                  the frosted backdrop next to the image. Counter sits above
+                  the zoom row; select-none keeps double-click zoom from
+                  selecting the text. */}
+              <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 select-none flex-col items-center gap-1.5 rounded-xl p-1">
                 {collection && collection.length > 1 ? (
-                  <span className="pointer-events-auto ml-1.5 rounded-lg px-1 text-[11px] font-medium tabular-nums text-text-faint">
+                  <span className="pointer-events-auto rounded-lg bg-black/30 px-2 py-0.5 text-[11px] font-medium tabular-nums text-text-faint backdrop-blur-sm">
                     {index + 1} / {collection.length}
                   </span>
                 ) : null}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Zoom out"
+                    onClick={() => zoomBy(1 / ZOOM_STEP)}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale <= MIN_SCALE}
+                  >
+                    <Minus className="size-4" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Reset zoom"
+                    onClick={resetView}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale <= MIN_SCALE}
+                  >
+                    <RotateCcw className="size-4" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Zoom in"
+                    onClick={() => zoomBy(ZOOM_STEP)}
+                    className="glass pointer-events-auto inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                    disabled={scale >= MAX_SCALE}
+                  >
+                    <Plus className="size-4" strokeWidth={1.75} />
+                  </button>
+                </div>
               </div>
 
               {collection && collection.length > 1 ? (
