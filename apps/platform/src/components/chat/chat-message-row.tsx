@@ -252,6 +252,8 @@ const PARTS_STACK_CLASS = [
   "[&>[data-part=reasoning]+[data-part=reasoning]]:mt-1",
   "[&>[data-part=reasoning]+[data-part=text]]:mt-4",
   "[&>[data-part=tool]+[data-part=text]]:mt-4",
+  "[&>[data-part=text]+[data-part=reasoning]]:mt-4",
+  "[&>[data-part=text]+[data-part=tool]]:mt-4",
 ].join(" ");
 
 function ChatMessageParts({
