@@ -83,8 +83,12 @@ export function ImageGalleryModal({
       description="Images you generated across chats"
       size="xl"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 px-3 pt-3">
+      {/*
+        One scroll surface: project filter sticks at the top with an opaque
+        elevated background so grid tiles never show through the toolbar edge.
+      */}
+      <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="sticky top-0 z-10 border-b border-white/[0.06] bg-canvas-elevated px-3 py-2.5">
           <Select
             ariaLabel="Filter images by project"
             value={selectedProjectId}
@@ -101,15 +105,14 @@ export function ImageGalleryModal({
               })),
             ]}
           />
+          {error ? (
+            <p className="mt-2 text-xs text-danger" role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
 
-        {error ? (
-          <p className="px-4 pt-2 text-xs text-danger" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="chat-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
+        <div className="p-3">
           {loading ? (
             <div className="grid grid-cols-3 gap-2">
               {Array.from({ length: 6 }).map((_, i) => (
