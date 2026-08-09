@@ -176,7 +176,7 @@ export function FeaturesPopover({
               aria-hidden
             />
             <span
-              className="inline-flex items-center gap-1 rounded-r-xl pl-1.5 pr-2.5"
+              className="inline-flex items-center gap-1 rounded-r-xl px-2.5"
               aria-label="Active features"
             >
               {webSearchEnabled ? (
