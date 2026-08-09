@@ -16,15 +16,21 @@ const STUB_ORIGIN = "http://127.0.0.1:18765";
 const API_ORIGIN = "http://localhost:3001";
 
 const rail = (page: Page) => page.locator('aside[aria-label="Session documents"]');
-const approvalRegion = (page: Page) =>
-  page.getByRole("region", { name: "Approve generating image" });
+const approvalRegion = (page: Page, toolName = "generating image") =>
+  page.getByRole("region", { name: `Approve ${toolName}` });
 
 async function openFreshChat(page: Page): Promise<void> {
   const draftResponse = await page.request.post(`${API_ORIGIN}/api/chat/sessions/draft`, {
     data: { projectId: null },
   });
   expect(draftResponse.ok()).toBe(true);
+  // Hard reload with fresh state so feature toggles (image gen, web search)
+  // and composer state never leak between tests.
   await page.goto("/");
+  await page.evaluate(() => {
+    window.localStorage.clear();
+  });
+  await page.reload();
   await expect(
     page.getByText("Ask anything about your documents"),
   ).toBeVisible({ timeout: 30_000 });
@@ -140,7 +146,8 @@ test("popover shows feature toggles and image settings", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Image model, GPT-5 Image Mini/ })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByRole("button", { name: "16:9" })).toBeVisible();
+  // Capability-driven aspect pills for gpt-5-image-mini (OpenAI sizes).
+  await expect(page.getByRole("button", { name: "3:2", exact: true })).toBeVisible();
   const transparent = page.getByRole("checkbox", { name: "Transparent background" });
   await expect(transparent).toBeVisible();
   await expect(transparent).not.toBeChecked();
@@ -220,7 +227,7 @@ test("aspect ratio edited on the approval card is applied to the image request",
 
   const card = approvalRegion(page);
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.getByRole("button", { name: "16:9" }).click();
+  await card.getByRole("button", { name: "3:2", exact: true }).click();
   await card.getByRole("button", { name: "Allow once" }).click();
 
   await waitForRailImage(page, "buatkan gambar kucing");
@@ -229,7 +236,7 @@ test("aspect ratio edited on the approval card is applied to the image request",
   const imageBodies = imagesRequests(await stubRequests(request));
   expect(imageBodies.length).toBeGreaterThan(0);
   const lastImage = imageBodies.at(-1) as Record<string, unknown>;
-  expect((lastImage.body as Record<string, unknown>).size).toBe("1344x768");
+  expect((lastImage.body as Record<string, unknown>).size).toBe("1536x1024");
 });
 
 test("clarification wizard collects answers then generates the image", async ({
@@ -273,6 +280,30 @@ test("web search tool call precedes the image generation", async ({ page, reques
   const generateImageIndex = order.indexOf("generate_image");
   expect(webSearchIndex).toBeGreaterThanOrEqual(0);
   expect(generateImageIndex).toBeGreaterThan(webSearchIndex);
+});
+
+test("web search approval appears when the toggle is off, allow once resumes the run", async ({
+  page,
+  request,
+}) => {
+  await openFreshChat(page);
+  // Web search OFF by default — the agent still calls it, approval gates it.
+  await enableImageGeneration(page);
+  await sendMessage(page, "cari referensi cuaca hari ini lalu buatkan gambar kucing");
+
+  const card = approvalRegion(page, "searching the web");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.getByText("Needs approval")).toBeVisible();
+  // The approval reason is the agent's dynamic justification.
+  await expect(card.getByText(/search|referensi/i).first()).toBeVisible();
+
+  await card.getByRole("button", { name: "Allow once" }).click();
+
+  await waitForRailImage(page, "cari referensi cuaca hari ini lalu buatkan gambar kucing");
+  await waitForRunDone(page);
+  const order = toolCallOrder(await stubRequests(request));
+  expect(order).toContain("web_search");
+  expect(order).toContain("generate_image");
 });
 
 test("background removed sends transparent png params and the gallery lists the image", async ({

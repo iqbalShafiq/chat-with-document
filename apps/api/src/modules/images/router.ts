@@ -49,31 +49,6 @@ export const imagesRouter = new Hono<{ Variables: AuthVariables }>()
       400,
     );
   })
-  .get("/:id", async (c) => {
-    const user = c.get("user");
-    const store = getImageStore();
-
-    const image = await store.getImage(c.req.param("id"));
-    if (!image) {
-      return c.json({ error: "Image not found" }, 404);
-    }
-
-    const allowed = await store.assertImageAccess({ userId: user.id, image });
-    if (!allowed) {
-      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
-    }
-
-    try {
-      const data = await store.getObjectBuffer(image.r2Key);
-      return c.body(new Uint8Array(data), 200, {
-        "Content-Type": image.mediaType,
-        "Cache-Control": "private, max-age=3600",
-      });
-    } catch (error) {
-      console.error("[images] R2 fetch failed", { imageId: image.id, error });
-      return c.json({ error: "Image not found" }, 404);
-    }
-  })
   .get("/context", async (c) => {
     const user = c.get("user");
     const sessionId = requireQueryId(c.req.query("sessionId"));
@@ -129,4 +104,29 @@ export const imagesRouter = new Hono<{ Variables: AuthVariables }>()
       imageId,
     });
     return c.json({ ok: true });
+  })
+  .get("/:id", async (c) => {
+    const user = c.get("user");
+    const store = getImageStore();
+
+    const image = await store.getImage(c.req.param("id"));
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    const allowed = await store.assertImageAccess({ userId: user.id, image });
+    if (!allowed) {
+      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
+    }
+
+    try {
+      const data = await store.getObjectBuffer(image.r2Key);
+      return c.body(new Uint8Array(data), 200, {
+        "Content-Type": image.mediaType,
+        "Cache-Control": "private, max-age=3600",
+      });
+    } catch (error) {
+      console.error("[images] R2 fetch failed", { imageId: image.id, error });
+      return c.json({ error: "Image not found" }, 404);
+    }
   });

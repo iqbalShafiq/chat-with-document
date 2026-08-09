@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DIALOG_PRIMARY_BUTTON_CLASS, DIALOG_SECONDARY_BUTTON_CLASS } from "#/components/ui/dialog-actions";
 import { Select } from "#/components/ui/select";
 import type { SelectOption } from "#/components/ui/select-list";
@@ -27,11 +28,10 @@ export function ImageContextModelDialog({
   onConfirm: (input: { modelId: string; reasoningEffort: string | null }) => void;
   onCancel: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const visionModels = useMemo(
     () =>
-      models.filter((model) =>
-        model.inputModalities.includes("image"),
-      ),
+      models.filter((model) => model.inputModalities.includes("image")),
     [models],
   );
   const [modelId, setModelId] = useState("");
@@ -39,9 +39,20 @@ export function ImageContextModelDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!open) return;
-    setModelId("");
-    setReasoningEffort("");
+    if (open) {
+      setModelId("");
+      setReasoningEffort("");
+      const dialog = dialogRef.current;
+      if (dialog && !dialog.open) {
+        try {
+          dialog.showModal();
+        } catch {
+          dialog.setAttribute("open", "");
+        }
+      }
+    } else {
+      dialogRef.current?.close();
+    }
   }, [open]);
 
   const selectedModel = visionModels.find((model) => model.modelId === modelId);
@@ -58,21 +69,19 @@ export function ImageContextModelDialog({
     hint: model.hint ?? undefined,
   }));
 
-  const effortOptions: SelectOption[] = [
-    ...(selectedModel?.reasoningEfforts.includes("")
-      ? [{ value: "", label: "None" }]
-      : []),
-    ...supportedEfforts.map((effort) => ({
-      value: effort.key,
-      label: effort.label,
-    })),
-  ];
+  const effortOptions: SelectOption[] = supportedEfforts.map((effort) => ({
+    value: effort.key,
+    label: effort.label,
+  }));
   const showEffort = supportedEfforts.length > 0;
-  const canConfirm = modelId.length > 0 && (!showEffort || reasoningEffort !== "");
+  const canConfirm =
+    modelId.length > 0 && (!showEffort || reasoningEffort !== "");
 
-  return (
+  if (!open) return null;
+
+  return createPortal(
     <dialog
-      open={open}
+      ref={dialogRef}
       aria-labelledby="image-context-dialog-title"
       aria-describedby="image-context-dialog-desc"
       className="m-auto rounded-2xl border border-hairline bg-canvas-elevated p-5 text-text shadow-[0_24px_64px_-16px_rgba(0,0,0,0.7)] backdrop:bg-black/55 open:flex open:flex-col open:gap-3 animate-scale-in"
@@ -85,10 +94,16 @@ export function ImageContextModelDialog({
       }}
     >
       <div className="flex flex-col gap-1">
-        <h2 id="image-context-dialog-title" className="text-sm font-semibold tracking-tight">
+        <h2
+          id="image-context-dialog-title"
+          className="text-sm font-semibold tracking-tight"
+        >
           Add image as chat context
         </h2>
-        <p id="image-context-dialog-desc" className="text-xs leading-relaxed text-text-muted">
+        <p
+          id="image-context-dialog-desc"
+          className="text-xs leading-relaxed text-text-muted"
+        >
           The current model cannot accept image input. Choose a vision-capable
           model to send this image to the chat as context.
         </p>
@@ -150,6 +165,7 @@ export function ImageContextModelDialog({
           {busy ? "Switching…" : "Switch model & add context"}
         </button>
       </div>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }
