@@ -429,9 +429,9 @@ export async function buildChatRunInput(input: {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
 
-  // Vision helper for text-only models: a read-only tool describing session
-  // images via the cheapest active vision chat model (VISION_HELPER_MODEL
-  // overrides the pick).
+  // Vision helper for text-only models: describe session images *or* public
+  // image URLs (e.g. logos from web_search) via the cheapest active vision
+  // chat model (VISION_HELPER_MODEL overrides the pick).
   if (!modelAcceptsImage) {
     const visionModel = await resolveVisionHelperModel();
     if (visionModel) {

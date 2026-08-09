@@ -28,6 +28,14 @@ export type SelectProps = {
   hoverSide?: "top" | "right";
 };
 
+type ListPos = {
+  top: number;
+  left: number;
+  width: number;
+  /** Open above the trigger (composer / bottom-of-viewport). */
+  openUp: boolean;
+};
+
 export function Select({
   value,
   onChange,
@@ -47,14 +55,13 @@ export function Select({
   /**
    * Native `showModal()` dialogs live in the browser top layer, so a listbox
    * portaled to `document.body` renders *behind* the modal. Detect a dialog
-   * ancestor after commit (a ref passed from the parent is still null during
-   * the first render) and portal the list INTO the dialog instead.
+   * ancestor after commit and portal the list INTO the dialog instead.
+   * Outside dialogs we always portal to `document.body` so overflow / sibling
+   * stacking (e.g. approval card above the composer) cannot clip the menu.
    */
-  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [dialogPortal, setDialogPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    setPortalTarget(
-      rootRef.current?.closest("dialog") ?? null,
-    );
+    setDialogPortal(rootRef.current?.closest("dialog") ?? null);
   }, []);
 
   const selected = options.find((opt) => opt.value === value);
@@ -75,26 +82,17 @@ export function Select({
         setOpen(false);
       }
     };
-    // When portaled, the anchored list stays fixed relative to the target;
-    // scrolling the dialog content would detach it from the trigger.
-    const onScroll = () => setOpen(false);
     // Defer so the opening click does not immediately close.
     const timer = window.setTimeout(() => {
       document.addEventListener("mousedown", onPointerDown);
       document.addEventListener("keydown", onKeyDown);
-      if (portalTarget) {
-        document.addEventListener("scroll", onScroll, true);
-      }
     }, 0);
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
-      if (portalTarget) {
-        document.removeEventListener("scroll", onScroll, true);
-      }
     };
-  }, [open, portalTarget]);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -107,21 +105,60 @@ export function Select({
     }
   }, [open]);
 
-  const [listPos, setListPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [listPos, setListPos] = useState<ListPos | null>(null);
   useLayoutEffect(() => {
-    if (!open || !portalTarget) {
+    if (!open) {
       setListPos(null);
       return;
     }
-    const rect = triggerRef.current?.getBoundingClientRect();
-    const targetRect = portalTarget.getBoundingClientRect();
-    if (!rect || !targetRect) return;
-    setListPos({
-      top: rect.bottom + 6 - targetRect.top,
-      left: rect.left - targetRect.left,
-      width: rect.width,
-    });
-  }, [open, portalTarget]);
+
+    const update = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const gap = 6;
+      // Match max-h-[16rem] on the list — used only to pick open direction.
+      const estimatedListH = Math.min(options.length * 44 + 8, 16 * 16);
+      const spaceBelow = window.innerHeight - rect.bottom - gap;
+      const spaceAbove = rect.top - gap;
+      const openUp =
+        spaceBelow < Math.min(estimatedListH, 160) && spaceAbove > spaceBelow;
+
+      const width = Math.max(rect.width, 200);
+      const maxLeft = window.innerWidth - width - 8;
+      const leftViewport = Math.max(8, Math.min(rect.left, maxLeft));
+
+      if (dialogPortal) {
+        // Coords relative to the dialog box (list is portaled into it).
+        const targetRect = dialogPortal.getBoundingClientRect();
+        setListPos({
+          top: openUp
+            ? rect.top - gap - targetRect.top
+            : rect.bottom + gap - targetRect.top,
+          left: leftViewport - targetRect.left,
+          width,
+          openUp,
+        });
+        return;
+      }
+
+      setListPos({
+        top: openUp ? rect.top - gap : rect.bottom + gap,
+        left: leftViewport,
+        width,
+        openUp,
+      });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    // Capture scroll from any ancestor (chat viewport, approval dock, etc.)
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, dialogPortal, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -189,6 +226,39 @@ export function Select({
     }
   };
 
+  const portalTarget = dialogPortal ?? (typeof document !== "undefined" ? document.body : null);
+
+  const listbox =
+    open && listPos && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[90]"
+            style={{
+              top: listPos.top,
+              left: listPos.left,
+              width: listPos.width,
+              transform: listPos.openUp ? "translateY(-100%)" : undefined,
+            }}
+          >
+            <SelectOptionList
+              ref={listRef}
+              id={listId}
+              ariaLabel={ariaLabel}
+              value={value}
+              options={options}
+              onSelect={(optionValue) => {
+                onChange(optionValue);
+                setOpen(false);
+              }}
+              onKeyDown={handleListKeyDown}
+              hoverSide={hoverSide}
+              className="max-h-[16rem] overflow-y-auto"
+            />
+          </div>,
+          portalTarget,
+        )
+      : null;
+
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       {leadingIcon ? (
@@ -223,53 +293,7 @@ export function Select({
         }`}
         strokeWidth={1.75}
       />
-      {open ? (
-        portalTarget && listPos ? (
-          createPortal(
-            <div
-              className="fixed z-[90]"
-              style={{
-                top: listPos.top,
-                left: listPos.left,
-                width: Math.max(listPos.width, 200),
-              }}
-            >
-              <SelectOptionList
-                ref={listRef}
-                id={listId}
-                ariaLabel={ariaLabel}
-                value={value}
-                options={options}
-                onSelect={(optionValue) => {
-                  onChange(optionValue);
-                  setOpen(false);
-                }}
-                onKeyDown={handleListKeyDown}
-                hoverSide={hoverSide}
-                className="max-h-[16rem] overflow-y-auto"
-              />
-            </div>,
-            portalTarget,
-          )
-        ) : (
-          <div className="absolute left-0 right-0 top-full z-30 mt-1.5">
-            <SelectOptionList
-              ref={listRef}
-              id={listId}
-              ariaLabel={ariaLabel}
-              value={value}
-              options={options}
-              onSelect={(optionValue) => {
-                onChange(optionValue);
-                setOpen(false);
-              }}
-              onKeyDown={handleListKeyDown}
-              hoverSide={hoverSide}
-              className="max-h-[16rem] overflow-y-auto"
-            />
-          </div>
-        )
-      ) : null}
+      {listbox}
     </div>
   );
 }
