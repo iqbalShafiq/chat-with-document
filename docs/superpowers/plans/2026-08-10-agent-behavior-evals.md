@@ -451,7 +451,7 @@ git commit -m "feat(agent): eval stub scopes (tavily, image model, prisma, chunk
 
 **Interfaces:**
 - Consumes: `BehaviorTrace` (Task 4), stub scopes (Task 5), `createAgent` from `../agent.js`, tool factories from `../tools/*.js`, `AgentContextBlock` from `../agent.js`
-- Produces: `runAgentAndCollect(input: { prompt: string; sessionConfig: SessionConfig; tools: AnyTool[]; instructions?: string[]; contextBlocks?: AgentContextBlock[]; approvals?: ToolApprovalsOptions }): Promise<BehaviorTrace>`
+- Produces: `runAgentAndCollect(input: { prompt: string; sessionConfig: SessionConfig; model?: CompletionModel; tools: AnyTool[]; instructions?: string[]; contextBlocks?: AgentContextBlock[]; approvals?: ToolApprovalsOptions }): Promise<BehaviorTrace>` — `model` optional: when present, `createAgent` uses it (unit tests pass a scripted model); when absent, defaults to the production default model
 
 - [ ] **Step 1: Write failing unit test**
 
@@ -469,10 +469,10 @@ describe("runAgentAndCollect", () => {
       { kind: "tool_call", name: "web_search", args: { query: "latest gpt-5", reason: "need current info" } },
       { kind: "text", text: "Here is what I found." },
     ]);
-    const agent = new AgentBuilder("eval-test", model).build();
     const trace = await runAgentAndCollect({
       prompt: "search the web for gpt-5",
       sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+      model,
       tools: [],
     });
     expect(trace.toolCalls.map((t) => t.name)).toContain("web_search");
@@ -506,6 +506,7 @@ export async function runAgentAndCollect(input: {
   const started = Date.now();
   const agent = createAgent({
     agentId: "eval-agent",
+    model: input.model,
     tracing: undefined as never, // see Step 4 for the no-tracing variant
     additionalInstructions: input.instructions ?? [],
     additionalContext: input.contextBlocks ?? [],
