@@ -260,6 +260,7 @@ export async function buildChatRunInput(input: {
         prisma,
         searchService: createChunkSearchService(),
         fetchPageImage: (r2Key) => getObjectBuffer(r2Key),
+        includeImageBytes: modelAcceptsImage,
       })
     : [];
 
@@ -429,14 +430,20 @@ export async function buildChatRunInput(input: {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
 
-  // Vision helper for text-only models: describe session images *or* public
-  // image URLs (e.g. logos from web_search) via the cheapest active vision
-  // chat model (VISION_HELPER_MODEL overrides the pick).
+  // Vision helper for text-only models: describe session images, document
+  // page images, *or* public image URLs (e.g. logos from web_search) via the
+  // cheapest active vision chat model (VISION_HELPER_MODEL overrides the pick).
   if (!modelAcceptsImage) {
     const visionModel = await resolveVisionHelperModel();
     if (visionModel) {
       tools.push(
-        createDefaultViewImageTool({ userId, sessionId, model: visionModel }),
+        createDefaultViewImageTool({
+          userId,
+          sessionId,
+          model: visionModel,
+          resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
+            findSessionDocumentImage(imageId, imageUserId, imageSessionId),
+        }),
       );
       instructions.push(VISION_HELPER_INSTRUCTION);
     }

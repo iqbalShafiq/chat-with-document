@@ -24,15 +24,20 @@ export const VISION_HELPER_INSTRUCTION =
   "an image actually looks like, call view_image — it returns an accurate " +
   "text description of the real pixels via a vision model.\n" +
   "Sources you can pass:\n" +
-  "- imageId: a session image id from the active image context or session history\n" +
+  "- imageId: a session image id from the active image context or session history, " +
+  "or an image id returned by get_document_page_images (document charts, photos, diagrams)\n" +
   "- url: a public http(s) image URL (e.g. a logo or product photo from web_search / web_fetch)\n" +
+  "get_document_page_images returns image metadata without the actual pixels " +
+  "for your model; when the answer depends on visual content, pass the returned " +
+  "image id to view_image to see it.\n" +
   "Prefer view_image over guessing visual details. External reference images " +
   "from the web are supported — do not assume view_image is limited to " +
   "conversation-only images.";
 
 const VIEW_IMAGE_DESCRIPTION =
   "Describe what an image actually shows (via a vision model). Use for " +
-  "session images (imageId from active context / history) OR public image " +
+  "session images (imageId from active context / history), document page " +
+  "images (imageId from get_document_page_images), OR public image " +
   "URLs found on the web (logo, product photo, screenshot, etc.). Required " +
   "when your model cannot receive image input and the answer depends on " +
   "visual content.";
@@ -50,7 +55,8 @@ const viewImageInput = z
       .optional()
       .describe(
         "Session generated/uploaded image id from the active image context " +
-          "or session history. Use this for conversation images.",
+          "or session history, or an image id returned by " +
+          "get_document_page_images. Use this for conversation or document images.",
       ),
     url: z
       .string()
@@ -85,6 +91,12 @@ export type ViewImageToolOptions = {
   model: CompletionModel;
   /** Injectable fetch for tests (defaults to global fetch). */
   fetchFn?: typeof fetch;
+  /** Fallback for document page image ids (OCR images live in R2, not the image store). */
+  resolveDocumentImage?: (
+    imageId: string,
+    userId: string,
+    sessionId: string,
+  ) => Promise<{ mediaType: string; buffer: Uint8Array } | null>;
 };
 
 /**
@@ -103,7 +115,13 @@ export function createViewImageTool(options: ViewImageToolOptions) {
     execute: async ({ imageId, url, question }) => {
       try {
         const loaded = imageId
-          ? await loadSessionImage({ imageId, userId, sessionId, store })
+          ? await loadSessionImage({
+              imageId,
+              userId,
+              sessionId,
+              store,
+              resolveDocumentImage: options.resolveDocumentImage,
+            })
           : await loadRemoteImage({ url: url!, fetchFn });
         if ("error" in loaded) return loaded.error;
 
@@ -140,6 +158,7 @@ async function loadSessionImage(input: {
   userId: string;
   sessionId: string;
   store: ImageStore;
+  resolveDocumentImage?: ViewImageToolOptions["resolveDocumentImage"];
 }): Promise<
   | { buffer: Buffer; mediaType: string }
   | { error: string }
@@ -150,10 +169,24 @@ async function loadSessionImage(input: {
     image.userId !== input.userId ||
     image.sessionId !== input.sessionId
   ) {
+    if (input.resolveDocumentImage) {
+      const documentImage = await input.resolveDocumentImage(
+        input.imageId,
+        input.userId,
+        input.sessionId,
+      );
+      if (documentImage) {
+        return {
+          buffer: Buffer.from(documentImage.buffer),
+          mediaType: documentImage.mediaType,
+        };
+      }
+    }
     return {
       error:
         "Image not found in this session. Use an imageId from the active " +
-        "image context or session history, or pass a public image url instead.",
+        "image context, session history, or a get_document_page_images " +
+        "result, or pass a public image url instead.",
     };
   }
   const data = await input.store.getObjectBuffer(image.r2Key);
@@ -405,6 +438,7 @@ export function createDefaultViewImageTool(options: {
   userId: string;
   sessionId: string;
   model: CompletionModel;
+  resolveDocumentImage?: ViewImageToolOptions["resolveDocumentImage"];
 }) {
   return createViewImageTool({
     ...options,

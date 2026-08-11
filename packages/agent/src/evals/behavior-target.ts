@@ -37,8 +37,12 @@ export const VISION_HELPER_INSTRUCTION =
   "an image actually looks like, call view_image — it returns an accurate " +
   "text description of the real pixels via a vision model.\n" +
   "Sources you can pass:\n" +
-  "- imageId: a session image id from the active image context or session history\n" +
+  "- imageId: a session image id from the active image context or session history, " +
+  "or an image id returned by get_document_page_images (document charts, photos, diagrams)\n" +
   "- url: a public http(s) image URL (e.g. a logo or product photo from web_search / web_fetch)\n" +
+  "get_document_page_images returns image metadata without the actual pixels " +
+  "for your model; when the answer depends on visual content, pass the returned " +
+  "image id to view_image to see it.\n" +
   "Prefer view_image over guessing visual details. External reference images " +
   "from the web are supported — do not assume view_image is limited to " +
   "conversation-only images.";
@@ -56,18 +60,13 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
       userId: "eval-user", sessionId: "eval-session", projectId: null,
       prisma: createFakePrisma(), searchService: createStubChunkSearchService(),
       // Text-only models crash on tool-result image bytes (the completion
-      // gateway rejects image input), so the stub drops the bytes for them:
+      // gateway rejects image input), so the tool drops the bytes for them:
       // get_document_page_images then returns the image id + markdown only,
       // which is exactly the "image exists but I cannot see it" state that
-      // should route the model to view_image.
-      fetchPageImage: sessionConfig.visionModelAvailable === false
-        ? async () => {
-            throw new Error(
-              "fixture: text-only model cannot receive page image bytes",
-            );
-          }
-        : async () =>
-            new Uint8Array(Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64")),
+      // should route the model to view_image. Mirrors build-run-input.
+      includeImageBytes: sessionConfig.visionModelAvailable !== false,
+      fetchPageImage: async () =>
+        new Uint8Array(Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64")),
     }));
   }
 
