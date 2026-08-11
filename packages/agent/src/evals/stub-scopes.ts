@@ -123,7 +123,7 @@ export function createFakePrisma(): FakePrisma {
           pageIndex: page.pageIndex,
           summary: page.summary,
           rawMarkdown: page.rawMarkdown,
-          images: page.images ? JSON.stringify(page.images) : null,
+          images: page.images ?? null,
         };
       },
     },
