@@ -55,14 +55,25 @@ describe("buildEvalTools", () => {
     expect(approvals).toBeUndefined();
   });
 
-  it("registers view_image and its instruction when visionModelAvailable is true", () => {
+  it("registers view_image and its instruction when visionModelAvailable is false", () => {
+    const { tools, instructions } = buildEvalTools({
+      webSearchEnabled: true,
+      imageGenEnabled: true,
+      hasDocuments: false,
+      visionModelAvailable: false,
+    });
+    expect(tools.map((tool) => tool.name)).toContain("view_image");
+    expect(instructions.join("\n")).toContain("view_image");
+  });
+
+  it("omits view_image when the model accepts image input", () => {
     const { tools, instructions } = buildEvalTools({
       webSearchEnabled: true,
       imageGenEnabled: true,
       hasDocuments: false,
       visionModelAvailable: true,
     });
-    expect(tools.map((tool) => tool.name)).toContain("view_image");
-    expect(instructions.join("\n")).toContain("view_image");
+    expect(tools.map((tool) => tool.name)).not.toContain("view_image");
+    expect(instructions.join("\n")).not.toContain("view_image");
   });
 });

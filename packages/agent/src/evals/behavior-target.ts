@@ -83,7 +83,7 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
   tools.push(createClarificationTool({ requester: createAutoClarificationResponder() }));
   instructions.push(CLARIFICATION_INSTRUCTION);
 
-  if (sessionConfig.visionModelAvailable) {
+  if (!sessionConfig.visionModelAvailable) {
     tools.push(createStubViewImageTool({ model: createStubViewImageModel() }));
     instructions.push(VISION_HELPER_INSTRUCTION);
   }
