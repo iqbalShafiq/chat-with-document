@@ -1,12 +1,17 @@
 import type { TavilyClient } from "@tavily/core";
+import { createTool } from "@anvia/core";
 import {
   AssistantContent,
   type CompletionModel,
   type CompletionResponse,
+  createCompletion,
   type JsonObject,
+  Message,
   type StreamingCompletionModel,
   Usage,
+  UserContent,
 } from "@anvia/core/completion";
+import z from "zod";
 import type { ImageGenerationModel } from "@anvia/core/image-generation";
 import type { ClarificationRequest } from "../tools/clarification.js";
 import type { ClarificationResponse } from "../tools/clarification.js";
@@ -197,6 +202,68 @@ export function createStubViewImageModel(): CompletionModel {
       };
     },
   };
+}
+
+const stubViewImageInput = z
+  .object({
+    imageId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Session generated/uploaded image id from the active image context " +
+          "or session history. Use this for conversation images.",
+      ),
+    url: z
+      .string()
+      .url()
+      .optional()
+      .describe(
+        "Public http(s) URL of an image to describe — e.g. a logo or photo " +
+          "URL from web_search results. Use when the image is not already in " +
+          "the session. Exactly one of imageId or url is required.",
+      ),
+    question: z
+      .string()
+      .optional()
+      .describe("Optional specific question to answer about the image."),
+  })
+  .superRefine((value, ctx) => {
+    const hasId = Boolean(value.imageId?.trim());
+    const hasUrl = Boolean(value.url?.trim());
+    if (hasId === hasUrl) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Provide exactly one of imageId or url",
+        path: hasId ? ["url"] : ["imageId"],
+      });
+    }
+  });
+
+export function createStubViewImageTool(options: { model: CompletionModel }) {
+  const { model } = options;
+  return createTool({
+    name: "view_image",
+    description:
+      "Describe what an image actually shows (via a vision model). Use for " +
+      "session images (imageId from active context / history) OR public image " +
+      "URLs found on the web (logo, product photo, screenshot, etc.). Required " +
+      "when your model cannot receive image input and the answer depends on " +
+      "visual content.",
+    input: stubViewImageInput,
+    execute: async ({ question }) => {
+      const result = await createCompletion(model, {
+        messages: [
+          Message.user([
+            UserContent.text(
+              question ?? "Describe this image accurately and concisely.",
+            ),
+          ]),
+        ],
+      });
+      return result.text;
+    },
+  });
 }
 
 export function createScriptedCompletionModel(
