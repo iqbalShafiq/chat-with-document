@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { StreamingCompletionModel } from "@anvia/core/completion";
 import type { LangfuseTracing } from "@anvia/langfuse";
 import { createScriptedCompletionModel } from "./stub-scopes.js";
 import { runAgentAndCollect } from "./run-agent.js";
@@ -79,5 +80,66 @@ describe("runAgentAndCollect", () => {
       traceId: "trace-2",
       observationId: "obs-2",
     });
+  });
+
+  it("rejects with a timeout error when the agent exceeds EVAL_TIMEOUT_MS", async () => {
+    const hangingModel: StreamingCompletionModel = {
+      provider: "hanging",
+      defaultModel: "hanging",
+      capabilities: {
+        streaming: true,
+        tools: true,
+        toolChoice: false,
+        imageInput: false,
+        documentInput: false,
+        outputSchema: false,
+        reasoning: false,
+      },
+      completion: () => new Promise(() => {}),
+      async *streamCompletion() {
+        await new Promise(() => {});
+      },
+    };
+    process.env.EVAL_TIMEOUT_MS = "50";
+    try {
+      await expect(
+        runAgentAndCollect({
+          prompt: "hello",
+          sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+          model: hangingModel,
+          tools: [],
+        }),
+      ).rejects.toThrow(/Eval case timed out after 50ms/);
+    } finally {
+      delete process.env.EVAL_TIMEOUT_MS;
+    }
+  });
+
+  it("marks an errored tool call with status error", async () => {
+    const model = createScriptedCompletionModel([
+      { kind: "tool_call", name: "web_search", args: { query: "x", reason: "y" } },
+      { kind: "text", text: "done" },
+    ]);
+    const trace = await runAgentAndCollect({
+      prompt: "search",
+      sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+      model,
+      tools: [
+        {
+          name: "web_search",
+          definition: () => ({
+            name: "web_search",
+            description: "search",
+            parameters: { type: "object", properties: {} },
+          }),
+          call: async () => {
+            throw new Error("fixture tool failure");
+          },
+        },
+      ],
+    });
+    const record = trace.toolCalls.find((t) => t.name === "web_search");
+    expect(record?.status).toBe("error");
+    expect(record?.error).toContain("fixture tool failure");
   });
 });

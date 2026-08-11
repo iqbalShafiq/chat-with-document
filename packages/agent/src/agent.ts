@@ -5,6 +5,7 @@ import {
   type MemoryStore,
   type ToolApprovalsOptions,
 } from "@anvia/core";
+import type { AgentObserver } from "@anvia/core/observability";
 import type { McpServer } from "@anvia/core/mcp";
 import type { LangfuseTracing } from "@anvia/langfuse";
 import {
@@ -33,6 +34,8 @@ interface CreateAgentOptions {
   approvals?: ToolApprovalsOptions;
   /** Optional MCP servers (e.g. context7) to expose to the agent. */
   mcpServers?: McpServer[];
+  /** Optional run observers (e.g. tool error tracking). */
+  observers?: AgentObserver[];
 }
 
 export function createAgent(
@@ -53,6 +56,10 @@ export function createAgent(
 
   if (opts.tracing) {
     agent.observe(opts.tracing);
+  }
+
+  for (const observer of opts.observers ?? []) {
+    agent.observe(observer);
   }
 
   for (const instruction of opts.additionalInstructions ?? []) {

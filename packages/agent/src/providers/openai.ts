@@ -49,6 +49,31 @@ export function createCompletionModel(
   return getOpenAIClient().completionModel(modelId) as CompletionModel;
 }
 
+/**
+ * Wraps a model so every request carries the given reasoning effort, the same
+ * mechanism createAgent uses (additionalParams -> provider reasoning params).
+ */
+export function withReasoningEffort(
+  model: CompletionModel,
+  effort: ReasoningEffort,
+): CompletionModel {
+  return {
+    provider: model.provider,
+    defaultModel: model.defaultModel,
+    capabilities: model.capabilities,
+    ...(model.getModelInfo ? { getModelInfo: model.getModelInfo.bind(model) } : {}),
+    ...(model.traceRequest ? { traceRequest: model.traceRequest.bind(model) } : {}),
+    completion: async (request) =>
+      model.completion({
+        ...request,
+        additionalParams: {
+          ...((request.additionalParams as Record<string, unknown> | undefined) ?? {}),
+          reasoning: { effort, summary: "auto" },
+        },
+      }),
+  };
+}
+
 let defaultModelValue: CompletionModel | null = null;
 
 export function defaultModel(): CompletionModel {

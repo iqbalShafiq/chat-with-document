@@ -10,7 +10,7 @@ import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
 const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
 
-const ANSWERS_RESPECTED_CASE = "clarification-answers-respected";
+export const ANSWERS_RESPECTED_CASE = "clarification-answers-respected";
 
 const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {

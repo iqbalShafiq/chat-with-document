@@ -17,10 +17,7 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "lightningcss"
-    ],
-    "patchedDependencies": {
-      "@anvia/core@0.16.0": "patches/@anvia__core@0.16.0.patch"
-    }
+    ]
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0"

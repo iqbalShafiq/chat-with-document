@@ -5,14 +5,18 @@ import {
   type EvalCase,
   type EvalMetric,
 } from "@anvia/core/evals";
-import { createCompletionModel } from "../../providers/openai.js";
+import {
+  createCompletionModel,
+  parseReasoningEffort,
+  withReasoningEffort,
+} from "../../providers/openai.js";
 import { createBehaviorTarget } from "../behavior-target.js";
 import { evalConfig } from "../config.js";
 import { FIXTURE_DOCUMENTS } from "../fixtures.js";
 import { expectationMetric } from "./helpers.js";
 import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
-const NO_FABRICATION_CASE = "no-fabrication-when-absent";
+export const NO_FABRICATION_CASE = "no-fabrication-when-absent";
 
 const FIXTURE_CHUNK_TEXTS = FIXTURE_DOCUMENTS.flatMap((document) =>
   document.chunks.map((chunk) => chunk.chunkText),
@@ -57,7 +61,10 @@ const noFabricationJudge = gEval<
   "no_fabricated_bonus_policy"
 >({
   name: "no_fabricated_bonus_policy",
-  model: createCompletionModel(evalConfig.judgeModel),
+  model: withReasoningEffort(
+    createCompletionModel(evalConfig.judgeModel),
+    parseReasoningEffort(evalConfig.judgeEffort) ?? "high",
+  ),
   threshold: 0.7,
   evaluationParams: ["actualOutput", "context"],
   evaluationSteps: [

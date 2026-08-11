@@ -17,7 +17,4 @@ export const evalConfig = {
   get timeoutMs() {
     return Number(process.env.EVAL_TIMEOUT_MS ?? 120_000);
   },
-  get repeat() {
-    return Number(process.env.EVAL_REPEAT ?? 1);
-  },
 };

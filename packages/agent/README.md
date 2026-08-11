@@ -34,8 +34,13 @@ hand-written metrics. Metrics that cannot be expressed as expectations
 suite-specific metrics.
 
 Exit code is the raw case failure count: `0` all pass, `1` any case failed or
-invalid, `2` bad CLI usage or unknown suite. Suites are repeatable via
-`EVAL_REPEAT` and run concurrently per `EVAL_CONCURRENCY`.
+invalid, `2` bad CLI usage or unknown suite, `3` missing `OPENAI_API_KEY`.
+Cases run concurrently per `EVAL_CONCURRENCY`; a case that exceeds
+`EVAL_TIMEOUT_MS` is marked invalid instead of hanging the CLI.
+
+The `groundedness` suite's `answers-from-docs` positive case is enforced by
+deterministic expectations (tool choice, citations, output text); the gEval
+judge only grades the no-fabrication case, which expectations cannot express.
 
 ### Per-case model override
 
@@ -61,12 +66,11 @@ case stays on the default model.
 | Var | Default | Purpose |
 | --- | --- | --- |
 | `EVAL_MODEL` | `deepseek/deepseek-v4-flash-0731` | model id used by the agent under test |
-| `EVAL_MODEL_EFFORT` | `max` | reasoning effort for the model under test (`low`/`medium`/`high`/`max`) |
+| `EVAL_MODEL_EFFORT` | `max` | reasoning effort for the model under test (`low`/`high`/`max` for the deepseek-v4-flash seed) |
 | `EVAL_JUDGE_MODEL` | `openai/gpt-5.6-luna` | model id used by judge metrics (groundedness) |
 | `EVAL_JUDGE_EFFORT` | `high` | reasoning effort for judge metrics |
 | `EVAL_CONCURRENCY` | `2` | cases per suite run in parallel |
-| `EVAL_TIMEOUT_MS` | `120000` | per-run timeout |
-| `EVAL_REPEAT` | `1` | repetitions per case (result = best score) |
+| `EVAL_TIMEOUT_MS` | `120000` | per-case timeout; a timed-out case is marked invalid |
 
 ### Langfuse
 

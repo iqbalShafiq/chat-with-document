@@ -15,7 +15,10 @@ import {
   createWebSearchTools,
   WEB_SEARCH_INSTRUCTION,
 } from "../tools/web-search.js";
-import { createCompletionModel, type ReasoningEffort } from "../providers/openai.js";
+import {
+  createCompletionModel,
+  parseReasoningEffort,
+} from "../providers/openai.js";
 import { evalConfig } from "./config.js";
 import { runAgentAndCollect } from "./run-agent.js";
 import {
@@ -119,15 +122,20 @@ export function createBehaviorTarget(
 ): EvalTarget<EvalCaseInput, BehaviorTrace> {
   return async (input: EvalCaseInput, testCase: EvalCase<EvalCaseInput>) => {
     const { tools, instructions, approvals } = buildEvalTools(input.sessionConfig);
+    const langfuseConfigured = Boolean(
+      process.env.LANGFUSE_BASE_URL &&
+        process.env.LANGFUSE_PUBLIC_KEY &&
+        process.env.LANGFUSE_SECRET_KEY,
+    );
     return runAgentAndCollect({
       prompt: input.prompt,
       sessionConfig: input.sessionConfig,
       model: createCompletionModel(input.sessionConfig.models?.[0] ?? evalConfig.model),
-      reasoningEffort: evalConfig.modelEffort as ReasoningEffort,
+      reasoningEffort: parseReasoningEffort(evalConfig.modelEffort) ?? "max",
       tools,
       instructions,
       ...(approvals ? { approvals } : {}),
-      tracing,
+      ...(langfuseConfigured ? { tracing } : {}),
       ...(suiteName ? { suiteName } : {}),
       caseId: testCase.id,
     });

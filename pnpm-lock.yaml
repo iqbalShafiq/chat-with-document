@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@anvia/core@0.16.0':
-    hash: 033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985
-    path: patches/@anvia__core@0.16.0.patch
-
 importers:
 
   .:
@@ -20,14 +15,14 @@ importers:
   apps/api:
     dependencies:
       '@anvia/core':
-        specifier: ^0.16.0
-        version: 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
+        specifier: ^0.25.1
+        version: 0.25.1
       '@anvia/memory-prisma':
         specifier: ^0.2.4
-        version: 0.2.4(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
+        version: 0.2.4(@anvia/core@0.25.1)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
       '@anvia/server':
-        specifier: ^0.5.14
-        version: 0.5.14
+        specifier: ^0.7.4
+        version: 0.7.4
       '@assingment/agent':
         specifier: workspace:*
         version: link:../../packages/agent
@@ -262,8 +257,8 @@ packages:
     peerDependencies:
       react: '>=18'
 
-  '@anvia/server@0.5.14':
-    resolution: {integrity: sha512-DWDS31uWpvoTvY6aX7Bj7H7WSiRzwILMt37tofIyU83XdnENoG1BFtG4ZteIBb231t8fNV8PxGMuCs8MnxKrGQ==}
+  '@anvia/server@0.7.4':
+    resolution: {integrity: sha512-baDwzyWOg+z68OkooxzDCq/ja/ncbYFVr++gWffBNGkYgdEV6EpjtvjJfSYR/zyQPMou4Cv4VIRf6FFRWD+KVw==}
 
   '@aws-sdk/checksums@3.1000.21':
     resolution: {integrity: sha512-AcYTunavv8dqm9u2pbq/gIlFERUo+jQDKKLZpYOgMLLytoAJ/qoyuhWj97FB7UzpMFVJNzMEUylzKK/s/05org==}
@@ -4126,7 +4121,7 @@ packages:
 
 snapshots:
 
-  '@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)':
+  '@anvia/core@0.16.0':
     dependencies:
       '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       pdfjs-dist: 6.2.108
@@ -4163,9 +4158,9 @@ snapshots:
       - '@opentelemetry/sdk-trace-base'
       - supports-color
 
-  '@anvia/memory-prisma@0.2.4(@anvia/core@0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985))(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
+  '@anvia/memory-prisma@0.2.4(@anvia/core@0.25.1)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
     dependencies:
-      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
+      '@anvia/core': 0.25.1
       '@prisma/client': 7.9.0(prisma@7.9.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
 
   '@anvia/mistral@0.3.7(@anvia/core@0.25.1)(@opentelemetry/api@1.9.1)':
@@ -4223,15 +4218,15 @@ snapshots:
 
   '@anvia/react@0.9.3(react@19.2.8)':
     dependencies:
-      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
+      '@anvia/core': 0.16.0
       react: 19.2.8
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@anvia/server@0.5.14':
+  '@anvia/server@0.7.4':
     dependencies:
-      '@anvia/core': 0.16.0(patch_hash=033d33df7eee4e9f3f1fee6f5acbe5c314170b9147b1c50e4c882f2c49985985)
+      '@anvia/core': 0.25.1
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
