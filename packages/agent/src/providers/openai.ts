@@ -31,17 +31,27 @@ export function parseReasoningEffort(value: unknown): ReasoningEffort | null {
   return isReasoningEffort(value) ? value : null;
 }
 
-const openai = new OpenAIClient({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseUrl: process.env.OPENAI_BASE_URL,
-  completionApi: "responses",
-});
+let openai: OpenAIClient | null = null;
+
+function getOpenAIClient(): OpenAIClient {
+  openai ??= new OpenAIClient({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseUrl: process.env.OPENAI_BASE_URL,
+    completionApi: "responses",
+  });
+  return openai;
+}
 
 export function createCompletionModel(
   modelId: CompletionModelId = DEFAULT_COMPLETION_MODEL,
 ): CompletionModel {
   // GPT-5.6 Luna/Terra/Sol are not all in Anvia's known-name union yet.
-  return openai.completionModel(modelId) as CompletionModel;
+  return getOpenAIClient().completionModel(modelId) as CompletionModel;
 }
 
-export const defaultModel = createCompletionModel(DEFAULT_COMPLETION_MODEL);
+let defaultModelValue: CompletionModel | null = null;
+
+export function defaultModel(): CompletionModel {
+  defaultModelValue ??= createCompletionModel(DEFAULT_COMPLETION_MODEL);
+  return defaultModelValue;
+}

@@ -2,7 +2,9 @@ import type { TavilyClient } from "@tavily/core";
 import {
   AssistantContent,
   type CompletionModel,
+  type CompletionResponse,
   type JsonObject,
+  type StreamingCompletionModel,
   Usage,
 } from "@anvia/core/completion";
 import type { ImageGenerationModel } from "@anvia/core/image-generation";
@@ -199,13 +201,33 @@ export function createStubViewImageModel(): CompletionModel {
 
 export function createScriptedCompletionModel(
   steps: ScriptedStep[],
-): CompletionModel {
+): StreamingCompletionModel {
   let index = 0;
+  const responseFor = (step: ScriptedStep, n: number): CompletionResponse => {
+    if (step.kind === "tool_call") {
+      return {
+        choice: [
+          AssistantContent.toolCall(
+            `scripted-${n}`,
+            step.name,
+            (step.args ?? {}) as JsonObject,
+          ),
+        ],
+        usage: Usage.empty(),
+        rawResponse: {},
+      };
+    }
+    return {
+      choice: [AssistantContent.text(step.text)],
+      usage: Usage.empty(),
+      rawResponse: {},
+    };
+  };
   return {
     provider: "scripted",
     defaultModel: "scripted",
     capabilities: {
-      streaming: false,
+      streaming: true,
       tools: true,
       toolChoice: false,
       imageInput: false,
@@ -216,24 +238,21 @@ export function createScriptedCompletionModel(
     async completion() {
       const step = steps[Math.min(index, steps.length - 1)]!;
       index += 1;
-      if (step.kind === "tool_call") {
-        return {
-          choice: [
-            AssistantContent.toolCall(
-              `scripted-${index}`,
-              step.name,
-              (step.args ?? {}) as JsonObject,
-            ),
-          ],
-          usage: Usage.empty(),
-          rawResponse: {},
-        };
+      return responseFor(step, index);
+    },
+    async *streamCompletion() {
+      const n = index + 1;
+      const step = steps[Math.min(index, steps.length - 1)]!;
+      index += 1;
+      const response = responseFor(step, n);
+      for (const item of response.choice) {
+        if (item.type === "text") {
+          yield { type: "text_delta", delta: item.text };
+        } else if (item.type === "tool_call") {
+          yield { type: "tool_call", toolCall: item };
+        }
       }
-      return {
-        choice: [AssistantContent.text(step.text)],
-        usage: Usage.empty(),
-        rawResponse: {},
-      };
+      yield { type: "final", response };
     },
   };
 }

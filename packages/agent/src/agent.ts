@@ -27,7 +27,7 @@ interface CreateAgentOptions {
   additionalInstructions?: string[];
   /** Small request facts (e.g. project workspace name) via Anvia AgentBuilder.context */
   additionalContext?: AgentContextBlock[];
-  tracing: LangfuseTracing;
+  tracing?: LangfuseTracing;
   memory?: MemoryStore;
   /** Optional approval handler (e.g. human approval for web tools). */
   approvals?: ToolApprovalsOptions;
@@ -40,7 +40,7 @@ export function createAgent(
 ): ReturnType<AgentBuilder["build"]> {
   const reasoningEffort = opts.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
 
-  const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel)
+  const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel())
     .instructions(BASE_INSTRUCTIONS)
     .tools([...(opts.additionalTools ?? [])])
     .additionalParams({
@@ -49,8 +49,11 @@ export function createAgent(
         summary: "auto",
       },
       include: ["reasoning.encrypted_content"],
-    })
-    .observe(opts.tracing);
+    });
+
+  if (opts.tracing) {
+    agent.observe(opts.tracing);
+  }
 
   for (const instruction of opts.additionalInstructions ?? []) {
     agent.instructions(instruction);
