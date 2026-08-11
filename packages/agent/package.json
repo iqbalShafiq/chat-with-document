@@ -6,6 +6,7 @@
   "scripts": {
     "runner:dev": "pnpm with-env tsx ./src/runner-dev.ts",
     "with-env": "dotenv -e ../../.env -- ",
+    "evals": "pnpm with-env tsx ./src/evals/run.ts",
     "test": "vitest run"
   },
   "exports": {
