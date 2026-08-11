@@ -29,4 +29,11 @@ describe("normalizeSessionTitle", () => {
     expect(chars).toHaveLength(48);
     expect(chars.every((c) => c === "😀")).toBe(true);
   });
+
+  it("never stores a lone surrogate when cutting mid-pair", () => {
+    const mixed = "a" + "😀".repeat(60); // 61 code points, 121 UTF-16 units
+    const out = normalizeSessionTitle(mixed)!;
+    expect(Array.from(out)).toHaveLength(48);
+    expect(out).not.toContain("\uFFFD");
+  });
 });

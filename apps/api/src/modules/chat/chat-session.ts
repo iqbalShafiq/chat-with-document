@@ -205,9 +205,11 @@ export async function renameChatSession(input: {
     data: { title },
   });
   if (updated.count === 0) throw new ChatSessionNotFoundError();
-  return prisma.chatSession.findFirst({
+  const row = await prisma.chatSession.findFirst({
     where: { id: input.sessionId, userId: input.userId },
-  }) as Promise<ChatSessionRow>;
+  });
+  if (!row) throw new ChatSessionNotFoundError();
+  return row;
 }
 
 export async function setChatSessionTitleIfEmpty(input: {
@@ -215,7 +217,7 @@ export async function setChatSessionTitleIfEmpty(input: {
   sessionId: string;
   title: string;
 }): Promise<void> {
-  const title = input.title.trim().slice(0, 48);
+  const title = input.title.trim().slice(0, TITLE_MAX);
   if (!title) return;
   await prisma.chatSession.updateMany({
     where: {
