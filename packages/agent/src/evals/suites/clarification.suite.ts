@@ -84,16 +84,18 @@ export const clarificationSuite = defineEvalSuite({
       name: "respects_answers",
       dataType: "BOOLEAN",
       evaluate: ({ output }) => {
-        if (output.clarifications.length === 0) return EvalOutcome.pass(true);
-        const askedTypes = new Set(
+        const askedIds = new Set(
           output.clarifications.flatMap((c) =>
-            c.questions.map((q) => q.type),
+            c.questions.map((q) => q.id),
           ),
         );
         const expectedValues = Object.entries(FIXTURE_CLARIFICATION_ANSWERS)
-          .filter(([type]) => askedTypes.has(type))
+          .filter(([id]) => askedIds.has(id))
           .map(([, value]) => value);
-        if (expectedValues.length === 0) return EvalOutcome.pass(true);
+        if (expectedValues.length === 0)
+          return EvalOutcome.invalid(
+            "No fixture-keyed clarification questions were asked",
+          );
         const missing = expectedValues.filter(
           (value) => !output.output.includes(value),
         );
