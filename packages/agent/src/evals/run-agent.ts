@@ -11,6 +11,7 @@ import type {
 import type { MemoryContext } from "@anvia/core/memory";
 import type { AgentContextBlock } from "../agent.js";
 import { createAgent } from "../agent.js";
+import { parseCitationsFromText } from "../citations/parse-citations.js";
 import type { ReasoningEffort } from "../providers/openai.js";
 import type { BehaviorTrace, ClarificationRecord, SessionConfig } from "./types.js";
 
@@ -28,7 +29,6 @@ export async function runAgentAndCollect(input: {
   const toolCalls: BehaviorTrace["toolCalls"] = [];
   const approvals: BehaviorTrace["approvals"] = [];
   const clarifications: BehaviorTrace["clarifications"] = [];
-  const citations: BehaviorTrace["citations"] = [];
   const textParts: string[] = [];
   let usage: BehaviorTrace["usage"] = {};
 
@@ -55,22 +55,21 @@ export async function runAgentAndCollect(input: {
       case "tool_call":
         recordToolCall(event.toolCall, toolCalls, clarifications);
         break;
-      case "source":
-        citations.push({ source: event.source.url });
-        break;
       case "final":
-        usage = {
-          inputTokens: event.usage.inputTokens,
-          outputTokens: event.usage.outputTokens,
-        };
+        usage = { ...event.usage };
         break;
       default:
         break;
     }
   }
 
+  const output = textParts.join("");
+  const citations: BehaviorTrace["citations"] = parseCitationsFromText(
+    output,
+  ).citations.map((citation) => ({ source: citation.filename }));
+
   return {
-    output: textParts.join(""),
+    output,
     toolCalls,
     approvals,
     clarifications,

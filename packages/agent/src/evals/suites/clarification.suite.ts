@@ -10,6 +10,10 @@ import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
 const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
 
+const AMBIGUOUS_CASE = "ambiguous-prompt-asks";
+const CLEAR_CASE = "clear-prompt-no-clarification";
+const ANSWERS_RESPECTED_CASE = "clarification-answers-respected";
+
 const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {
     id: "ambiguous-prompt-asks",
@@ -58,7 +62,8 @@ export const clarificationSuite = defineEvalSuite({
     suite.defineMetric({
       name: "clarification_requested",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== AMBIGUOUS_CASE) return EvalOutcome.pass(true);
         const requested = output.clarifications.length > 0;
         return requested
           ? EvalOutcome.pass(true)
@@ -70,7 +75,8 @@ export const clarificationSuite = defineEvalSuite({
     suite.defineMetric({
       name: "no_unnecessary_clarification",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== CLEAR_CASE) return EvalOutcome.pass(true);
         const unnecessary = output.clarifications.length === 0;
         return unnecessary
           ? EvalOutcome.pass(true)
@@ -83,19 +89,18 @@ export const clarificationSuite = defineEvalSuite({
     suite.defineMetric({
       name: "respects_answers",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
-        const askedIds = new Set(
-          output.clarifications.flatMap((c) =>
-            c.questions.map((q) => q.id),
-          ),
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== ANSWERS_RESPECTED_CASE) return EvalOutcome.pass(true);
+        const askedIds = output.clarifications.flatMap((c) =>
+          c.questions.map((q) => q.id),
         );
-        const expectedValues = Object.entries(FIXTURE_CLARIFICATION_ANSWERS)
-          .filter(([id]) => askedIds.has(id))
-          .map(([, value]) => value);
-        if (expectedValues.length === 0)
-          return EvalOutcome.invalid(
-            "No fixture-keyed clarification questions were asked",
-          );
+        if (askedIds.length === 0)
+          return EvalOutcome.fail(false, {
+            comment: "no clarification questions were asked",
+          });
+        const expectedValues = askedIds.map(
+          (id) => FIXTURE_CLARIFICATION_ANSWERS[id] ?? "default",
+        );
         const missing = expectedValues.filter(
           (value) => !output.output.includes(value),
         );

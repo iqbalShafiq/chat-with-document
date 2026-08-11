@@ -9,6 +9,10 @@ import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
 const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
 
+const OUT_OF_SCOPE_CASE = "out-of-scope-uses-web";
+const INFO_IN_DOCS_CASE = "info-in-docs-no-web";
+const NO_DOCS_CASE = "no-docs-knowledge-question";
+
 const WEB_TOOLS = ["web_search", "web_fetch"] as const;
 const DOCUMENT_TOOLS = ["find_documents", "search_document_pages"] as const;
 
@@ -21,13 +25,15 @@ function anyToolCalled(
   );
 }
 
-function toolCalled(
+function toolCalledInCase(
   toolName: string,
+  caseId: string,
 ): EvalMetric<EvalCaseInput, BehaviorTrace, boolean, unknown, string> {
   return {
     name: `tool_called_${toolName}`,
     dataType: "BOOLEAN",
-    evaluate: ({ output }) => {
+    evaluate: ({ case: testCase, output }) => {
+      if (testCase.id !== caseId) return EvalOutcome.pass(true);
       const called = output.toolCalls.some((t) => t.name === toolName);
       return called
         ? EvalOutcome.pass(true)
@@ -97,7 +103,8 @@ export const toolChoiceSuite = defineEvalSuite({
     suite.defineMetric({
       name: "used_web_search",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== OUT_OF_SCOPE_CASE) return EvalOutcome.pass(true);
         const used = anyToolCalled(output, WEB_TOOLS);
         return used
           ? EvalOutcome.pass(true)
@@ -109,7 +116,8 @@ export const toolChoiceSuite = defineEvalSuite({
     suite.defineMetric({
       name: "used_document_search",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== INFO_IN_DOCS_CASE) return EvalOutcome.pass(true);
         const used = anyToolCalled(output, DOCUMENT_TOOLS);
         return used
           ? EvalOutcome.pass(true)
@@ -121,7 +129,8 @@ export const toolChoiceSuite = defineEvalSuite({
     suite.defineMetric({
       name: "no_web_when_docs_sufficient",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== INFO_IN_DOCS_CASE) return EvalOutcome.pass(true);
         const usedWeb = anyToolCalled(output, WEB_TOOLS);
         const searchedDocs = output.toolCalls.some(
           (t) => t.name === "search_document_pages",
@@ -140,7 +149,8 @@ export const toolChoiceSuite = defineEvalSuite({
     suite.defineMetric({
       name: "no_find_documents_when_no_docs",
       dataType: "BOOLEAN",
-      evaluate: ({ output }) => {
+      evaluate: ({ case: testCase, output }) => {
+        if (testCase.id !== NO_DOCS_CASE) return EvalOutcome.pass(true);
         const calledFind = output.toolCalls.some(
           (t) => t.name === "find_documents",
         );
@@ -155,7 +165,7 @@ export const toolChoiceSuite = defineEvalSuite({
             });
       },
     }),
-    toolCalled("search_document_pages"),
-    toolCalled("web_search"),
+    toolCalledInCase("search_document_pages", INFO_IN_DOCS_CASE),
+    toolCalledInCase("web_search", OUT_OF_SCOPE_CASE),
   ],
 });

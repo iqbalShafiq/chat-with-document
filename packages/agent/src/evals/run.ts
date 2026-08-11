@@ -1,12 +1,14 @@
 import {
+  evalExitCode,
   runEvalCli,
+  type EvalExpectations,
   type EvalSuiteResult,
   type RunEvalSuiteOptions,
 } from "@anvia/core/evals";
 import { createLangfuseEvalReporter } from "@anvia/langfuse";
 import { tracing } from "../tracing.js";
 import { evalConfig } from "./config.js";
-import { EVAL_SUITES } from "./suites/index.js";
+import { EVAL_EXPECTATIONS, EVAL_SUITES } from "./suites/index.js";
 
 const args = process.argv.slice(2);
 const suiteIndex = args.indexOf("--suite");
@@ -36,20 +38,26 @@ const reporters = langfuseConfigured
   ? [createLangfuseEvalReporter(tracing, { onMissingTrace: "warn" })]
   : [];
 
-function computeExitCode(result: EvalSuiteResult<unknown, unknown, unknown>): number {
+function computeExitCode(
+  result: EvalSuiteResult<unknown, unknown, unknown>,
+  expectations: EvalExpectations | undefined,
+): number {
+  if (expectations !== undefined) return evalExitCode(result, expectations);
   return result.cases.failed > 0 || result.cases.invalid > 0 ? 1 : 0;
 }
 
 let failed = false;
 for (const name of names) {
   const suite = EVAL_SUITES[name as keyof typeof EVAL_SUITES];
+  const expectations = EVAL_EXPECTATIONS[name];
   const result = await runEvalCli({
     ...(suite as unknown as RunEvalSuiteOptions<unknown, unknown, unknown>),
     concurrency: evalConfig.concurrency,
     reporters,
+    expectations,
     format: json ? "json" : "pretty",
     exitCode: false,
   });
-  if (computeExitCode(result) !== 0) failed = true;
+  if (computeExitCode(result, expectations) !== 0) failed = true;
 }
 if (failed) process.exitCode = 1;

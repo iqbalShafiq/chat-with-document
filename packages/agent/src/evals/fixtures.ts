@@ -33,6 +33,14 @@ export const FIXTURE_DOCUMENTS: Array<{
         summary: "Remote-first policy overview",
         rawMarkdown:
           "# Remote Work Policy\n\nAcme is a remote-first company. This remote work policy describes how employees work from anywhere while staying connected to their teams.",
+        images: [
+          {
+            id: "fixture-img-remote-p0",
+            mediaType: "image/png",
+            r2Key: "eval/fixture-remote-p0.png",
+            annotation: "Illustration of Acme's distributed team over a world map",
+          },
+        ],
       },
       {
         id: "remote-policy-p1",
@@ -40,6 +48,14 @@ export const FIXTURE_DOCUMENTS: Array<{
         summary: "Office stipend",
         rawMarkdown:
           "# Office Stipend\n\nEvery quarter, each employee receives an office stipend of $500 to cover home office equipment, internet, and other remote workspace costs.",
+        images: [
+          {
+            id: "fixture-img-remote-p1",
+            mediaType: "image/png",
+            r2Key: "eval/fixture-remote-p1.png",
+            annotation: "Home office setup with a laptop and a coffee mug",
+          },
+        ],
       },
       {
         id: "remote-policy-p2",

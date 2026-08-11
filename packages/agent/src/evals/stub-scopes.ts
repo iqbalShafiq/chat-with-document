@@ -90,16 +90,26 @@ export function createFakePrisma(): FakePrisma {
               condition.summary?.contains ??
               condition.firstPageSummary?.contains,
           ).find((value) => value !== undefined) ?? "";
-        const needle = query.toLowerCase();
+        // Fixture documents are English while eval prompts are Indonesian;
+        // match on any query token so stub search behaves like a semantic
+        // search instead of failing on language mismatch.
+        const terms = query
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((term) => term.length >= 3);
+        const matches = (text: string): boolean => {
+          const lower = text.toLowerCase();
+          return terms.some((term) => lower.includes(term));
+        };
         const allowed =
           args.where.id?.in ?? FIXTURE_DOCUMENTS.map((doc) => doc.id);
         return FIXTURE_DOCUMENTS.filter(
           (doc) =>
             allowed.includes(doc.id) &&
-            (needle === "" ||
-              doc.filename.toLowerCase().includes(needle) ||
-              doc.summary.toLowerCase().includes(needle) ||
-              doc.firstPageSummary.toLowerCase().includes(needle)),
+            (terms.length === 0 ||
+              matches(doc.filename) ||
+              matches(doc.summary) ||
+              matches(doc.firstPageSummary)),
         )
           .slice(0, args.take)
           .map((doc) => ({
@@ -144,12 +154,17 @@ export function createFakePrisma(): FakePrisma {
 export function createStubChunkSearchService(): ChunkSearchService {
   return {
     search: async ({ query, documentIds, limit }) => {
+      const terms = query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((term) => term.length >= 3);
       const hits = FIXTURE_DOCUMENTS.flatMap((doc) => {
         if (!documentIds.includes(doc.id)) return [];
         return doc.chunks
-          .filter((c) =>
-            c.chunkText.toLowerCase().includes(query.toLowerCase()),
-          )
+          .filter((c) => {
+            const chunkText = c.chunkText.toLowerCase();
+            return terms.some((term) => chunkText.includes(term));
+          })
           .map((c) => ({
             chunkId: c.chunkId,
             documentId: c.documentId,

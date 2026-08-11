@@ -85,12 +85,14 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {
     id: "view-image-vision-model-no-helper",
     input: {
-      prompt: "deskripsikan gambar di dokumen halaman 1",
+      prompt:
+        "deskripsikan gambar di halaman 1 dokumen remote-work-policy.pdf",
       sessionConfig: {
         webSearchEnabled: false,
         imageGenEnabled: false,
         hasDocuments: true,
         visionModelAvailable: true,
+        models: ["openai/gpt-5.6-luna"],
       },
       expected: {
         forbidsTools: ["view_image"],
@@ -100,7 +102,8 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {
     id: "view-image-text-only-uses-helper",
     input: {
-      prompt: "deskripsikan gambar di dokumen halaman 1",
+      prompt:
+        "deskripsikan gambar di halaman 1 dokumen remote-work-policy.pdf",
       sessionConfig: {
         webSearchEnabled: false,
         imageGenEnabled: false,

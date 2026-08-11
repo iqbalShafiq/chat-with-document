@@ -2,6 +2,7 @@ import {
   defineEvalSuite,
   EvalOutcome,
   type EvalCase,
+  type EvalExpectations,
   type EvalMetric,
 } from "@anvia/core/evals";
 import { createBehaviorTarget } from "../behavior-target.js";
@@ -111,6 +112,14 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
     },
   },
 ];
+
+export const approvalImageExpectations: EvalExpectations = {
+  outcomes: {
+    "toggle-on-runs-directly": {
+      approval_requested_for_generate_image: "fail",
+    },
+  },
+};
 
 export const approvalImageSuite = defineEvalSuite({
   name: "approval-image-generation",

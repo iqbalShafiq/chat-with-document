@@ -51,7 +51,19 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
     tools.push(...createDocumentTools({
       userId: "eval-user", sessionId: "eval-session", projectId: null,
       prisma: createFakePrisma(), searchService: createStubChunkSearchService(),
-      fetchPageImage: async () => new Uint8Array(Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64")),
+      // Text-only models crash on tool-result image bytes (the completion
+      // gateway rejects image input), so the stub drops the bytes for them:
+      // get_document_page_images then returns the image id + markdown only,
+      // which is exactly the "image exists but I cannot see it" state that
+      // should route the model to view_image.
+      fetchPageImage: sessionConfig.visionModelAvailable === false
+        ? async () => {
+            throw new Error(
+              "fixture: text-only model cannot receive page image bytes",
+            );
+          }
+        : async () =>
+            new Uint8Array(Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64")),
     }));
   }
 
@@ -107,7 +119,7 @@ export function createBehaviorTarget(): EvalTarget<EvalCaseInput, BehaviorTrace>
     return runAgentAndCollect({
       prompt: input.prompt,
       sessionConfig: input.sessionConfig,
-      model: createCompletionModel(evalConfig.model),
+      model: createCompletionModel(input.sessionConfig.models?.[0] ?? evalConfig.model),
       reasoningEffort: evalConfig.modelEffort as ReasoningEffort,
       tools,
       instructions,
