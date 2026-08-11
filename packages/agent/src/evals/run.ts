@@ -9,13 +9,20 @@ import { evalConfig } from "./config.js";
 import { EVAL_SUITES } from "./suites/index.js";
 
 const args = process.argv.slice(2);
-const suiteArg = args.includes("--suite")
-  ? args[args.indexOf("--suite") + 1]
-  : undefined;
+const suiteIndex = args.indexOf("--suite");
+const suiteArg = suiteIndex !== -1 ? args[suiteIndex + 1] : undefined;
 const json = args.includes("--json");
 const names = suiteArg ? [suiteArg] : Object.keys(EVAL_SUITES);
 
-if (suiteArg !== undefined && !(suiteArg in EVAL_SUITES)) {
+if (suiteIndex !== -1 && (!suiteArg || suiteArg.startsWith("--"))) {
+  console.error(
+    "Usage: pnpm --filter agent evals [--suite <name>] [--json]\n" +
+      `Suites: ${Object.keys(EVAL_SUITES).join(", ")}`,
+  );
+  process.exit(2);
+}
+
+if (suiteArg !== undefined && !Object.keys(EVAL_SUITES).includes(suiteArg)) {
   console.error(`Unknown suite. Available: ${Object.keys(EVAL_SUITES).join(", ")}`);
   process.exit(2);
 }

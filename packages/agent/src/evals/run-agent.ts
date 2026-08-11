@@ -11,12 +11,14 @@ import type {
 import type { MemoryContext } from "@anvia/core/memory";
 import type { AgentContextBlock } from "../agent.js";
 import { createAgent } from "../agent.js";
+import type { ReasoningEffort } from "../providers/openai.js";
 import type { BehaviorTrace, ClarificationRecord, SessionConfig } from "./types.js";
 
 export async function runAgentAndCollect(input: {
   prompt: string;
   sessionConfig: SessionConfig;
   model?: CompletionModel;
+  reasoningEffort?: ReasoningEffort;
   tools: AnyTool[];
   instructions?: string[];
   contextBlocks?: AgentContextBlock[];
@@ -33,6 +35,7 @@ export async function runAgentAndCollect(input: {
   const agent = createAgent({
     agentId: "eval-agent",
     ...(input.model ? { model: input.model } : {}),
+    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
     additionalInstructions: input.instructions ?? [],
     additionalContext: input.contextBlocks ?? [],
     additionalTools: input.tools,

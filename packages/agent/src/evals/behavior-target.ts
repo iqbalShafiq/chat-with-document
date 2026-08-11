@@ -14,6 +14,8 @@ import {
   createWebSearchTools,
   WEB_SEARCH_INSTRUCTION,
 } from "../tools/web-search.js";
+import { createCompletionModel, type ReasoningEffort } from "../providers/openai.js";
+import { evalConfig } from "./config.js";
 import { runAgentAndCollect } from "./run-agent.js";
 import {
   createAutoClarificationResponder,
@@ -105,6 +107,8 @@ export function createBehaviorTarget(): EvalTarget<EvalCaseInput, BehaviorTrace>
     return runAgentAndCollect({
       prompt: input.prompt,
       sessionConfig: input.sessionConfig,
+      model: createCompletionModel(evalConfig.model),
+      reasoningEffort: evalConfig.modelEffort as ReasoningEffort,
       tools,
       instructions,
       ...(approvals ? { approvals } : {}),
