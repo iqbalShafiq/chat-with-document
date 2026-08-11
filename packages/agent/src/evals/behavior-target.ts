@@ -1,6 +1,7 @@
 import type { AnyTool, ToolApprovalsOptions } from "@anvia/core";
-import type { EvalTarget } from "@anvia/core/evals";
+import type { EvalCase, EvalTarget } from "@anvia/core/evals";
 import { TRANSPARENT_1X1_PNG_BASE64 } from "../e2e/image-e2e-helpers.js";
+import { tracing } from "../tracing.js";
 import {
   createClarificationTool,
   CLARIFICATION_INSTRUCTION,
@@ -113,8 +114,10 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
   return { tools, instructions, approvals };
 }
 
-export function createBehaviorTarget(): EvalTarget<EvalCaseInput, BehaviorTrace> {
-  return async (input: EvalCaseInput) => {
+export function createBehaviorTarget(
+  suiteName?: string,
+): EvalTarget<EvalCaseInput, BehaviorTrace> {
+  return async (input: EvalCaseInput, testCase: EvalCase<EvalCaseInput>) => {
     const { tools, instructions, approvals } = buildEvalTools(input.sessionConfig);
     return runAgentAndCollect({
       prompt: input.prompt,
@@ -124,6 +127,9 @@ export function createBehaviorTarget(): EvalTarget<EvalCaseInput, BehaviorTrace>
       tools,
       instructions,
       ...(approvals ? { approvals } : {}),
+      tracing,
+      ...(suiteName ? { suiteName } : {}),
+      caseId: testCase.id,
     });
   };
 }

@@ -60,6 +60,6 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
 export const toolChoiceSuite = defineEvalSuite({
   name: "tool-choice-initiative",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("tool-choice-initiative"),
   metrics: [expectationMetric],
 });

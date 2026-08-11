@@ -24,6 +24,7 @@ export type BehaviorTrace = {
   citations: Array<{ source: string }>;
   usage: { inputTokens?: number; outputTokens?: number };
   durationMs: number;
+  trace?: { traceId: string; observationId?: string };
 };
 
 export type ApprovalMode = "auto-approve" | "auto-reject";

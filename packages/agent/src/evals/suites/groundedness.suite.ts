@@ -86,6 +86,6 @@ const noFabricationMetric: EvalMetric<
 export const groundednessSuite = defineEvalSuite({
   name: "groundedness-and-citations",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("groundedness-and-citations"),
   metrics: [expectationMetric, noFabricationMetric],
 });

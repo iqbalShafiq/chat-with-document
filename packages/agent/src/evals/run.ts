@@ -52,4 +52,5 @@ for (const name of names) {
   });
   if (computeExitCode(result) !== 0) failed = true;
 }
+if (langfuseConfigured) await tracing.flush();
 if (failed) process.exitCode = 1;

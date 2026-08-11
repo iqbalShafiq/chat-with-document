@@ -70,6 +70,6 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
 export const documentToolsSuite = defineEvalSuite({
   name: "document-tools-and-view-image",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("document-tools-and-view-image"),
   metrics: [expectationMetric],
 });

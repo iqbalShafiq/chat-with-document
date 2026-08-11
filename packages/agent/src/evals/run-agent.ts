@@ -9,6 +9,7 @@ import type {
   ToolApprovalsOptions,
 } from "@anvia/core";
 import type { MemoryContext } from "@anvia/core/memory";
+import type { LangfuseTracing } from "@anvia/langfuse";
 import type { AgentContextBlock } from "../agent.js";
 import { createAgent } from "../agent.js";
 import { parseCitationsFromText } from "../citations/parse-citations.js";
@@ -24,6 +25,9 @@ export async function runAgentAndCollect(input: {
   instructions?: string[];
   contextBlocks?: AgentContextBlock[];
   approvals?: ToolApprovalsOptions;
+  tracing?: LangfuseTracing;
+  suiteName?: string;
+  caseId?: string;
 }): Promise<BehaviorTrace> {
   const started = Date.now();
   const toolCalls: BehaviorTrace["toolCalls"] = [];
@@ -31,6 +35,7 @@ export async function runAgentAndCollect(input: {
   const clarifications: BehaviorTrace["clarifications"] = [];
   const textParts: string[] = [];
   let usage: BehaviorTrace["usage"] = {};
+  let trace: BehaviorTrace["trace"];
 
   const agent = createAgent({
     agentId: "eval-agent",
@@ -40,12 +45,25 @@ export async function runAgentAndCollect(input: {
     additionalContext: input.contextBlocks ?? [],
     additionalTools: input.tools,
     memory: createInMemoryMemoryStore(),
+    ...(input.tracing ? { tracing: input.tracing } : {}),
     ...(input.approvals
       ? { approvals: instrumentApprovals(input.approvals, toolCalls, approvals) }
       : {}),
   });
 
-  const stream = agent.session("eval-session").prompt(input.prompt).stream();
+  let session = agent.session("eval-session").prompt(input.prompt);
+  if (input.tracing) {
+    const traceMetadata: Record<string, unknown> = {};
+    if (input.caseId) traceMetadata.caseId = input.caseId;
+    if (input.suiteName) traceMetadata.suiteName = input.suiteName;
+    session = session.withTrace({
+      sessionId: "eval",
+      userId: "eval-user",
+      name: input.suiteName,
+      metadata: traceMetadata,
+    });
+  }
+  const stream = session.stream();
 
   for await (const event of stream) {
     switch (event.type) {
@@ -57,9 +75,27 @@ export async function runAgentAndCollect(input: {
         break;
       case "final":
         usage = { ...event.usage };
+        if (event.trace?.traceId) {
+          trace = {
+            traceId: event.trace.traceId,
+            ...(event.trace.observationId
+              ? { observationId: event.trace.observationId }
+              : {}),
+          };
+        }
         break;
       default:
         break;
+    }
+  }
+
+  if (trace === undefined && input.tracing) {
+    const handle = input.tracing.getCurrentTrace();
+    if (handle) {
+      trace = {
+        traceId: handle.traceId,
+        ...(handle.observationId ? { observationId: handle.observationId } : {}),
+      };
     }
   }
 
@@ -76,6 +112,7 @@ export async function runAgentAndCollect(input: {
     citations,
     usage,
     durationMs: Date.now() - started,
+    ...(trace ? { trace } : {}),
   };
 }
 

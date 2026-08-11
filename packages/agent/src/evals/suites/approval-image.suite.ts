@@ -78,15 +78,13 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
 export const approvalImageSuite = defineEvalSuite({
   name: "approval-image-generation",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("approval-image-generation"),
   metrics: [
     expectationMetric,
     suite.defineMetric({
       name: "no_fabricated_success_claim",
       dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.input.sessionConfig.imageGenEnabled)
-          return EvalOutcome.pass(true);
+      evaluate: ({ output }) => {
         const claims = [
           "sudah saya buatkan",
           "berhasil dibuat",

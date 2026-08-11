@@ -48,7 +48,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
       },
       expected: {
         requiresTools: ["web_search"],
-        forbidsApprovalFor: ["web_search"],
+        forbidsApprovalFor: ["web_search", "web_fetch"],
       },
     },
   },
@@ -70,7 +70,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
 export const approvalWebSearchSuite = defineEvalSuite({
   name: "approval-web-search",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("approval-web-search"),
   metrics: [
     expectationMetric,
     suite.defineMetric({

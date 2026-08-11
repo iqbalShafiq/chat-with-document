@@ -55,7 +55,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
 export const clarificationSuite = defineEvalSuite({
   name: "clarification-consistency",
   cases,
-  target: createBehaviorTarget(),
+  target: createBehaviorTarget("clarification-consistency"),
   metrics: [
     expectationMetric,
     suite.defineMetric({

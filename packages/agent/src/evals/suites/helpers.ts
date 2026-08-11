@@ -1,6 +1,5 @@
 import { EvalOutcome, type EvalMetric } from "@anvia/core/evals";
 import type { BehaviorTrace, EvalCaseInput } from "../types.js";
-
 /**
  * Generic metric that enforces the case's declared expectations
  * (`case.input.expected`, a BehaviorExpectation) against the collected trace.
@@ -78,37 +77,3 @@ export const expectationMetric: EvalMetric<
     return EvalOutcome.pass(true);
   },
 };
-
-export function toolCalled(
-  toolName: string,
-): EvalMetric<EvalCaseInput, BehaviorTrace, boolean, unknown, string> {
-  return {
-    name: `tool_called_${toolName}`,
-    dataType: "BOOLEAN",
-    evaluate: ({ output }) => {
-      const called = output.toolCalls.some((t) => t.name === toolName);
-      return called
-        ? EvalOutcome.pass(true)
-        : EvalOutcome.fail(false, {
-            comment: `${toolName} was never called`,
-          });
-    },
-  };
-}
-
-export function approvalsForTool(
-  toolName: string,
-): EvalMetric<EvalCaseInput, BehaviorTrace, boolean, unknown, string> {
-  return {
-    name: `approval_requested_for_${toolName}`,
-    dataType: "BOOLEAN",
-    evaluate: ({ output }) => {
-      const requested = output.approvals.some((a) => a.toolName === toolName);
-      return requested
-        ? EvalOutcome.pass(true)
-        : EvalOutcome.fail(false, {
-            comment: `no approval request recorded for ${toolName}`,
-          });
-    },
-  };
-}

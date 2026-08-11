@@ -71,6 +71,9 @@ case stays on the default model.
 ### Langfuse
 
 When `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY` are
-set, eval scores are posted to Langfuse (missing traces are warned, not
-fatal). `case.metadata` carries the suite name and expectation id so scores can
-be traced back to scenarios.
+set, each eval case runs inside a Langfuse trace (the run's trace reference is
+attached to the case output) and eval scores are posted to Langfuse, so
+traces and scores can be inspected in the Langfuse UI. Trace metadata carries
+the suite name and case id; traces are flushed before the CLI exits. Missing
+traces are warned, not fatal. `case.metadata` carries the suite name and
+expectation id so scores can be traced back to scenarios.
