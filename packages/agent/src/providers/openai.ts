@@ -7,7 +7,7 @@ export type CompletionModelId = string;
 export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "openai/gpt-5.6-luna";
 export const DEFAULT_COMPLETION_PROVIDER = "openai";
 
-export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export const REASONING_EFFORTS = ["low", "medium", "high", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
