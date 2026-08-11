@@ -6,6 +6,7 @@
   "scripts": {
     "runner:dev": "pnpm with-env tsx ./src/runner-dev.ts",
     "with-env": "dotenv -e ../../.env -- ",
+    "evals": "pnpm with-env tsx ./src/evals/run.ts",
     "test": "vitest run"
   },
   "exports": {
@@ -23,8 +24,8 @@
   },
   "type": "module",
   "dependencies": {
-    "@anvia/core": "^0.16.0",
-    "@anvia/langfuse": "^0.3.9",
+    "@anvia/core": "^0.25.1",
+    "@anvia/langfuse": "^0.6.1",
     "@anvia/mistral": "^0.3.7",
     "@anvia/openai": "^0.4.0",
     "@anvia/qdrant": "^0.2.11",

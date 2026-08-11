@@ -5,6 +5,7 @@ import {
   type MemoryStore,
   type ToolApprovalsOptions,
 } from "@anvia/core";
+import type { AgentObserver } from "@anvia/core/observability";
 import type { McpServer } from "@anvia/core/mcp";
 import type { LangfuseTracing } from "@anvia/langfuse";
 import {
@@ -27,12 +28,14 @@ interface CreateAgentOptions {
   additionalInstructions?: string[];
   /** Small request facts (e.g. project workspace name) via Anvia AgentBuilder.context */
   additionalContext?: AgentContextBlock[];
-  tracing: LangfuseTracing;
+  tracing?: LangfuseTracing;
   memory?: MemoryStore;
   /** Optional approval handler (e.g. human approval for web tools). */
   approvals?: ToolApprovalsOptions;
   /** Optional MCP servers (e.g. context7) to expose to the agent. */
   mcpServers?: McpServer[];
+  /** Optional run observers (e.g. tool error tracking). */
+  observers?: AgentObserver[];
 }
 
 export function createAgent(
@@ -40,7 +43,7 @@ export function createAgent(
 ): ReturnType<AgentBuilder["build"]> {
   const reasoningEffort = opts.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
 
-  const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel)
+  const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel())
     .instructions(BASE_INSTRUCTIONS)
     .tools([...(opts.additionalTools ?? [])])
     .additionalParams({
@@ -49,8 +52,15 @@ export function createAgent(
         summary: "auto",
       },
       include: ["reasoning.encrypted_content"],
-    })
-    .observe(opts.tracing);
+    });
+
+  if (opts.tracing) {
+    agent.observe(opts.tracing);
+  }
+
+  for (const observer of opts.observers ?? []) {
+    agent.observe(observer);
+  }
 
   for (const instruction of opts.additionalInstructions ?? []) {
     agent.instructions(instruction);

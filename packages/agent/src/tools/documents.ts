@@ -119,6 +119,8 @@ export interface DocumentToolsDeps {
     PageImagesPrisma;
   searchService: ChunkSearchService;
   fetchPageImage: FetchPageImage;
+  /** Text-only models cannot receive image bytes; when false, get_document_page_images returns metadata only. */
+  includeImageBytes?: boolean;
 }
 
 export function createFindDocumentsTool(deps: {
@@ -397,6 +399,8 @@ export function createGetDocumentPageImagesTool(deps: {
   prisma: PageImagesPrisma & SessionDocumentIdsPrisma;
   fetchPageImage: FetchPageImage;
   maxImages?: number;
+  /** Text-only models cannot receive image bytes; when false, return metadata only. */
+  includeImageBytes?: boolean;
 }) {
   return createTool({
     name: "get_document_page_images",
@@ -462,9 +466,14 @@ export function createGetDocumentPageImagesTool(deps: {
                 ? {}
                 : { annotation: image.annotation }),
             })),
+            imageBytesIncluded: deps.includeImageBytes !== false,
           }),
         },
       ];
+
+      if (deps.includeImageBytes === false) {
+        return content;
+      }
 
       const toFetch = images.slice(0, deps.maxImages ?? 5);
       const results = await Promise.allSettled(

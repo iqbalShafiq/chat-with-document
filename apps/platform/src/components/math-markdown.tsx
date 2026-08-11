@@ -10,6 +10,7 @@ import remarkMath from "remark-math";
 import { CitationChip } from "#/components/chat/citation-chip";
 import { DocumentImage } from "#/components/images/document-image";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
+import { rehypeUnwrapImages } from "#/lib/markdown/unwrap-images";
 import {
   citationIdFromHref,
   isCitationHref,
@@ -40,7 +41,7 @@ export function normalizeMathMarkdown(text: string): string {
 }
 
 const remarkPlugins = [remarkGfm, remarkMath];
-const rehypePlugins = [rehypeKatex];
+const rehypePlugins = [rehypeKatex, rehypeUnwrapImages];
 
 /** Keep citation hash targets; otherwise use react-markdown's safe transform. */
 function citationAwareUrlTransform(url: string): string {
