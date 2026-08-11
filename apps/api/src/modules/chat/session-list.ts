@@ -1,4 +1,5 @@
 import { prisma } from "../../utils/prisma.js";
+import { TITLE_MAX } from "./chat-session.js";
 
 export type SessionListItem = {
   sessionId: string;
@@ -15,7 +16,6 @@ export type SessionListPage = {
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 50;
-const TITLE_MAX = 48;
 
 function clampLimit(raw: string | undefined): number {
   const n = raw ? Number.parseInt(raw, 10) : DEFAULT_LIMIT;
