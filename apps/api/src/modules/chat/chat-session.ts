@@ -180,6 +180,34 @@ export async function touchChatSession(
   });
 }
 
+/** Sidebar title normalization: trim, collapse whitespace, cap at 48 chars. */
+export function normalizeSessionTitle(raw: string): string | null {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return collapsed.slice(0, 48);
+}
+
+/**
+ * Rename a chat session (user-scoped). Throws ChatSessionNotFoundError when
+ * the session does not exist for this user.
+ */
+export async function renameChatSession(input: {
+  userId: string;
+  sessionId: string;
+  title: string;
+}): Promise<ChatSessionRow> {
+  const title = normalizeSessionTitle(input.title);
+  if (!title) throw new Error("title is required");
+  const existing = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+  });
+  if (!existing) throw new ChatSessionNotFoundError();
+  return prisma.chatSession.update({
+    where: { id: existing.id },
+    data: { title },
+  });
+}
+
 export async function setChatSessionTitleIfEmpty(input: {
   userId: string;
   sessionId: string;
