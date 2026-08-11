@@ -1,48 +1,7 @@
-import {
-  defineEvalSuite,
-  EvalOutcome,
-  type EvalCase,
-  type EvalMetric,
-} from "@anvia/core/evals";
+import { defineEvalSuite, type EvalCase } from "@anvia/core/evals";
 import { createBehaviorTarget } from "../behavior-target.js";
+import { expectationMetric } from "./helpers.js";
 import type { BehaviorTrace, EvalCaseInput } from "../types.js";
-
-const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
-
-const OUT_OF_SCOPE_CASE = "out-of-scope-uses-web";
-const INFO_IN_DOCS_CASE = "info-in-docs-no-web";
-const NO_DOCS_CASE = "no-docs-knowledge-question";
-
-const WEB_TOOLS = ["web_search", "web_fetch"] as const;
-const DOCUMENT_TOOLS = ["find_documents", "search_document_pages"] as const;
-
-function anyToolCalled(
-  output: BehaviorTrace,
-  toolNames: readonly string[],
-): boolean {
-  return output.toolCalls.some((t) =>
-    (toolNames as readonly string[]).includes(t.name),
-  );
-}
-
-function toolCalledInCase(
-  toolName: string,
-  caseId: string,
-): EvalMetric<EvalCaseInput, BehaviorTrace, boolean, unknown, string> {
-  return {
-    name: `tool_called_${toolName}`,
-    dataType: "BOOLEAN",
-    evaluate: ({ case: testCase, output }) => {
-      if (testCase.id !== caseId) return EvalOutcome.pass(true);
-      const called = output.toolCalls.some((t) => t.name === toolName);
-      return called
-        ? EvalOutcome.pass(true)
-        : EvalOutcome.fail(false, {
-            comment: `${toolName} was never called`,
-          });
-    },
-  };
-}
 
 /**
  * Future case, skipped in v1: library-docs-uses-context7 — a library/API
@@ -90,7 +49,10 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         imageGenEnabled: false,
         hasDocuments: false,
       },
-      expected: {},
+      expected: {
+        forbidsTools: ["find_documents"],
+        requiresOutputNonEmpty: true,
+      },
     },
   },
 ];
@@ -99,73 +61,5 @@ export const toolChoiceSuite = defineEvalSuite({
   name: "tool-choice-initiative",
   cases,
   target: createBehaviorTarget(),
-  metrics: [
-    suite.defineMetric({
-      name: "used_web_search",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== OUT_OF_SCOPE_CASE) return EvalOutcome.pass(true);
-        const used = anyToolCalled(output, WEB_TOOLS);
-        return used
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "agent never used web tools for an out-of-scope question",
-            });
-      },
-    }),
-    suite.defineMetric({
-      name: "used_document_search",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== INFO_IN_DOCS_CASE) return EvalOutcome.pass(true);
-        const used = anyToolCalled(output, DOCUMENT_TOOLS);
-        return used
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "agent never used document tools",
-            });
-      },
-    }),
-    suite.defineMetric({
-      name: "no_web_when_docs_sufficient",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== INFO_IN_DOCS_CASE) return EvalOutcome.pass(true);
-        const usedWeb = anyToolCalled(output, WEB_TOOLS);
-        const searchedDocs = output.toolCalls.some(
-          (t) => t.name === "search_document_pages",
-        );
-        if (!searchedDocs) return EvalOutcome.fail(false, {
-          comment: "search_document_pages was never called",
-        });
-        return usedWeb
-          ? EvalOutcome.fail(false, {
-              comment:
-                "agent called web tools although the document search already answered",
-            })
-          : EvalOutcome.pass(true);
-      },
-    }),
-    suite.defineMetric({
-      name: "no_find_documents_when_no_docs",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== NO_DOCS_CASE) return EvalOutcome.pass(true);
-        const calledFind = output.toolCalls.some(
-          (t) => t.name === "find_documents",
-        );
-        if (calledFind)
-          return EvalOutcome.fail(false, {
-            comment: "find_documents called even though no documents are attached",
-          });
-        return output.output.trim().length > 0
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "agent produced no output",
-            });
-      },
-    }),
-    toolCalledInCase("search_document_pages", INFO_IN_DOCS_CASE),
-    toolCalledInCase("web_search", OUT_OF_SCOPE_CASE),
-  ],
+  metrics: [expectationMetric],
 });

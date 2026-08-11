@@ -2,16 +2,14 @@ import {
   defineEvalSuite,
   EvalOutcome,
   type EvalCase,
-  type EvalMetric,
 } from "@anvia/core/evals";
 import { createBehaviorTarget } from "../behavior-target.js";
 import { FIXTURE_CLARIFICATION_ANSWERS } from "../fixtures.js";
+import { expectationMetric } from "./helpers.js";
 import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
 const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
 
-const AMBIGUOUS_CASE = "ambiguous-prompt-asks";
-const CLEAR_CASE = "clear-prompt-no-clarification";
 const ANSWERS_RESPECTED_CASE = "clarification-answers-respected";
 
 const cases: EvalCase<EvalCaseInput, unknown>[] = [
@@ -59,33 +57,7 @@ export const clarificationSuite = defineEvalSuite({
   cases,
   target: createBehaviorTarget(),
   metrics: [
-    suite.defineMetric({
-      name: "clarification_requested",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== AMBIGUOUS_CASE) return EvalOutcome.pass(true);
-        const requested = output.clarifications.length > 0;
-        return requested
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "no clarification requested for an ambiguous prompt",
-            });
-      },
-    }),
-    suite.defineMetric({
-      name: "no_unnecessary_clarification",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== CLEAR_CASE) return EvalOutcome.pass(true);
-        const unnecessary = output.clarifications.length === 0;
-        return unnecessary
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment:
-                "clarification requested even though the prompt was already specific",
-            });
-      },
-    }),
+    expectationMetric,
     suite.defineMetric({
       name: "respects_answers",
       dataType: "BOOLEAN",
@@ -98,10 +70,12 @@ export const clarificationSuite = defineEvalSuite({
           return EvalOutcome.fail(false, {
             comment: "no clarification questions were asked",
           });
-        const expectedValues = askedIds.map(
-          (id) => FIXTURE_CLARIFICATION_ANSWERS[id] ?? "default",
-        );
-        const missing = expectedValues.filter(
+        const keyedAnswers = askedIds.flatMap((id) => {
+          const value = FIXTURE_CLARIFICATION_ANSWERS[id];
+          return value === undefined ? [] : [value];
+        });
+        if (keyedAnswers.length === 0) return EvalOutcome.pass(true);
+        const missing = keyedAnswers.filter(
           (value) => !output.output.includes(value),
         );
         return missing.length === 0

@@ -56,6 +56,8 @@ export type BehaviorExpectation = {
   outputContains?: string[];
   /** Requires output text to NOT contain this substring. */
   outputNotContains?: string[];
+  /** Requires the agent to produce non-empty output text. */
+  requiresOutputNonEmpty?: boolean;
 };
 
 export type EvalCaseInput = {

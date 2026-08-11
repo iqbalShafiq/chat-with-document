@@ -22,20 +22,20 @@ pnpm --filter agent evals --suite tool-choice   # one suite
 pnpm --filter agent evals --json         # machine-readable output
 ```
 
-Exit code: `0` all pass, `1` any case failed/invalid, `2` bad CLI usage or
-unknown suite. Suites are repeatable via `EVAL_REPEAT` and run concurrently per
-`EVAL_CONCURRENCY`.
+### Case expectations
 
-### Expectations
+Every case declares `expected` (a `BehaviorExpectation`): required/forbidden
+tools, approval expectations, clarification/citation requirements, and output
+text checks. The generic `expectationMetric` (suites/helpers.ts) is part of
+every suite and enforces `case.expected` directly against the collected trace,
+so expectations are a single source of truth instead of being duplicated in
+hand-written metrics. Metrics that cannot be expressed as expectations
+(fabrication claims, judge-graded abstention, answer reflection) stay as
+suite-specific metrics.
 
-Cases are evaluated by a fixed set of metrics per suite. When a metric
-structurally cannot pass for a case (for example `approval_requested_for_*`
-cannot pass on the toggle-on case, which by construction runs without an
-approval handler), the suite declares the expected per-case outcomes in
-`EVAL_EXPECTATIONS` (suites/index.ts) and passes them to `runEvalCli`. A
-matched expectation keeps the exit code at `0` while the underlying metric
-stays a real fail in the results — expectations are never used to weaken a
-metric.
+Exit code is the raw case failure count: `0` all pass, `1` any case failed or
+invalid, `2` bad CLI usage or unknown suite. Suites are repeatable via
+`EVAL_REPEAT` and run concurrently per `EVAL_CONCURRENCY`.
 
 ### Per-case model override
 

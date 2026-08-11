@@ -9,11 +9,9 @@ import { createCompletionModel } from "../../providers/openai.js";
 import { createBehaviorTarget } from "../behavior-target.js";
 import { evalConfig } from "../config.js";
 import { FIXTURE_DOCUMENTS } from "../fixtures.js";
+import { expectationMetric } from "./helpers.js";
 import type { BehaviorTrace, EvalCaseInput } from "../types.js";
 
-const suite = defineEvalSuite<EvalCaseInput, BehaviorTrace>();
-
-const ANSWERS_FROM_DOCS_CASE = "answers-from-docs";
 const NO_FABRICATION_CASE = "no-fabrication-when-absent";
 
 const FIXTURE_CHUNK_TEXTS = FIXTURE_DOCUMENTS.flatMap((document) =>
@@ -22,7 +20,7 @@ const FIXTURE_CHUNK_TEXTS = FIXTURE_DOCUMENTS.flatMap((document) =>
 
 const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {
-    id: ANSWERS_FROM_DOCS_CASE,
+    id: "answers-from-docs",
     input: {
       prompt: "jelaskan kebijakan remote kerja di perusahaan",
       sessionConfig: {
@@ -89,49 +87,5 @@ export const groundednessSuite = defineEvalSuite({
   name: "groundedness-and-citations",
   cases,
   target: createBehaviorTarget(),
-  metrics: [
-    suite.defineMetric({
-      name: "citation_present",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== ANSWERS_FROM_DOCS_CASE)
-          return EvalOutcome.pass(true);
-        return output.citations.length > 0
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "no citation sources recorded for a document-grounded answer",
-            });
-      },
-    }),
-    suite.defineMetric({
-      name: "contains_fixture_fact",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== ANSWERS_FROM_DOCS_CASE)
-          return EvalOutcome.pass(true);
-        return output.output.includes("remote-first")
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "answer does not contain the fixture fact 'remote-first'",
-            });
-      },
-    }),
-    suite.defineMetric({
-      name: "tool_called_search_document_pages",
-      dataType: "BOOLEAN",
-      evaluate: ({ case: testCase, output }) => {
-        if (testCase.id !== ANSWERS_FROM_DOCS_CASE)
-          return EvalOutcome.pass(true);
-        const called = output.toolCalls.some(
-          (t) => t.name === "search_document_pages",
-        );
-        return called
-          ? EvalOutcome.pass(true)
-          : EvalOutcome.fail(false, {
-              comment: "search_document_pages was never called",
-            });
-      },
-    }),
-    noFabricationMetric,
-  ],
+  metrics: [expectationMetric, noFabricationMetric],
 });
