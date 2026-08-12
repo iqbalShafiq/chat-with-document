@@ -217,7 +217,7 @@ export async function setChatSessionTitleIfEmpty(input: {
   sessionId: string;
   title: string;
 }): Promise<void> {
-  const title = input.title.trim().slice(0, TITLE_MAX);
+  const title = Array.from(input.title.trim()).slice(0, TITLE_MAX).join("");
   if (!title) return;
   await prisma.chatSession.updateMany({
     where: {
