@@ -88,6 +88,7 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
   computeGenerationActionInfo,
@@ -114,6 +115,7 @@ import {
   modelById,
   resolveReasoningFallback,
 } from "#/lib/chat/models";
+import { useContextSnippet } from "#/hooks/use-context-snippet";
 import { useModels } from "#/hooks/use-models";
 import {
   clearStoredSessionId,
@@ -1400,6 +1402,16 @@ function ChatSession({
     }
   }, [sessionId]);
 
+  const contextSnippetState = useContextSnippet(sessionId);
+
+  const handleAddContext = useCallback(
+    async (text: string, sourceRole: ContextSnippetSourceRole) => {
+      return contextSnippetState.setSnippet(text, sourceRole);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snippet state is internal to the hook
+    [contextSnippetState.setSnippet],
+  );
+
   // Pinning works with any model: vision models receive the images as image
   // input, text-only models get them via the view_image helper tool.
   const handleToggleImageContext = useCallback(
@@ -2188,6 +2200,8 @@ function ChatSession({
             }
           }
 
+          const contextSnippet = contextSnippetState.snippet;
+
           const sendPromise = chatController.sendMessage({
             text: trimmed,
             metadata: withChatMessageMeta(undefined, {
@@ -2196,6 +2210,14 @@ function ChatSession({
               attachedDocuments,
               createdAt: new Date().toISOString(),
               clientMessageId: createClientMessageId(),
+              ...(contextSnippet
+                ? {
+                    contextSnippet: {
+                      text: contextSnippet.text,
+                      sourceRole: contextSnippet.sourceRole,
+                    },
+                  }
+                : {}),
             }),
             attachments: [
               ...documentAttachments.map((attachment) => ({
@@ -2224,6 +2246,9 @@ function ChatSession({
           if (activeContextImages.length > 0) {
             setActiveContextImages([]);
           }
+          // Text context is single-use: consumed by this message, cleared from
+          // the composer (the server also clears after the run reads it).
+          contextSnippetState.reset();
           // Locally uploaded images now live in the session image store —
           // refresh the rail so they appear alongside generated images.
           if (uploadedImageAttachments.length > 0) {
@@ -2338,6 +2363,7 @@ function ChatSession({
                         editAvailableImages={editAvailableImages}
                         onEditContextAdd={handleEditContextAdd}
                         onEditContextRemove={handleEditContextRemove}
+                        onAddContext={handleAddContext}
                       />
                     )}
                   </Thread.Messages>
@@ -2439,6 +2465,11 @@ function ChatSession({
                     activeContextImages={activeContextImages}
                     onToggleImageContext={(image) => {
                       void handleToggleImageContext(image);
+                    }}
+                    contextSnippet={contextSnippetState.snippet}
+                    contextSnippetError={contextSnippetState.error}
+                    onRemoveContextSnippet={() => {
+                      void contextSnippetState.remove();
                     }}
                   />
                 </div>

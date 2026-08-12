@@ -8,6 +8,7 @@ import { FeaturesPopover } from "#/components/composer/features-popover";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import type {
+  ContextSnippet,
   ContextUsageInfo,
   ImageGenSettings,
   ModelInfo,
@@ -104,6 +105,10 @@ export function ChatComposer({
   /** Pinned images sent with the next message — shown above the field. */
   activeContextImages?: GeneratedImageItem[];
   onToggleImageContext?: (image: GeneratedImageItem) => void;
+  /** Wired in Task 9 — declared now so routes/index.tsx can pass them. */
+  contextSnippet?: ContextSnippet | null;
+  contextSnippetError?: string | null;
+  onRemoveContextSnippet?: () => void;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;

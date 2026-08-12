@@ -22,6 +22,7 @@ import {
   formatMessageBubbleTimestamp,
   formatMessageDateTime,
 } from "#/lib/chat/message-time";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import {
   getMessageRawText,
   messageHasUserFacingText,
@@ -107,6 +108,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   editAvailableImages?: GeneratedImageItem[];
   onEditContextAdd?: (image: GeneratedImageItem) => void;
   onEditContextRemove?: (image: GeneratedImageItem) => void;
+  /** Wired in Task 8 — declared now so routes/index.tsx can pass it. */
+  onAddContext?: (
+    text: string,
+    sourceRole: ContextSnippetSourceRole,
+  ) => Promise<boolean>;
 }) {
   const message = messageProp;
   const messageKind = readChatMessageMeta(message.metadata).kind;
