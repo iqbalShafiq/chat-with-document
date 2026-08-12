@@ -78,4 +78,24 @@ describe("buildSessionSnapshotText", () => {
     expect(out).toContain("message 11");
     expect(out).toContain("message 0");
   });
+
+  it("clips emoji messages by UTF-16 units without breaking surrogate pairs", () => {
+    const out = buildSessionSnapshotText([
+      { createdAt: new Date(), text: "😀".repeat(10_000) },
+    ]);
+    expect(out.length).toBeLessThanOrEqual(8000);
+    for (const ch of Array.from(out)) {
+      if (ch.length === 2) expect(ch).toBe("😀");
+    }
+  });
+
+  it("keeps the newest messages when the budget runs out", () => {
+    const out = buildSessionSnapshotText([
+      { createdAt: new Date(), text: "old message" },
+      { createdAt: new Date(Date.now() + 60_000), text: "mid message" },
+      { createdAt: new Date(Date.now() + 120_000), text: "z".repeat(10_000) },
+    ]);
+    expect(out).toContain("zzz");
+    expect(out).not.toContain("old message");
+  });
 });
