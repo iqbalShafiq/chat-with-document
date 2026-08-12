@@ -39,6 +39,11 @@ import {
   getImageStore,
   type GeneratedImageRecord,
 } from "../images/service.js";
+import {
+  formatContextSnippetBlock,
+  getContextSnippetStore,
+  type ContextSnippetRecord,
+} from "./context-snippets.js";
 import { parseImageCapabilities } from "./image-capabilities.js";
 import {
   resolveImageReference,
@@ -181,6 +186,8 @@ export type ChatRunInput = {
   context7Available: boolean;
   /** Images pinned as active context for this session (in pin order). */
   activeContextImages: GeneratedImageRecord[];
+  /** The single text snippet pinned as additional context (null if none). */
+  activeContextSnippet: ContextSnippetRecord | null;
 };
 
 /**
@@ -389,6 +396,19 @@ export async function buildChatRunInput(input: {
     });
   }
 
+  // Active text context: the single snippet the user pinned for this session.
+  // Injected as a prioritized context block so the model treats it as
+  // high-priority additional context for this message.
+  const activeContextSnippet = await getContextSnippetStore()
+    .getSessionContextSnippet({ userId, sessionId })
+    .catch(() => null);
+  if (activeContextSnippet) {
+    contextBlocks.push({
+      id: "session_context_snippet",
+      text: formatContextSnippetBlock(activeContextSnippet),
+    });
+  }
+
   // Web tools: registered only when TAVILY_API_KEY is set; the per-session
   // toggle decides whether approval is required for each call.
   const tavilyConfig = webSearchConfig();
@@ -509,5 +529,7 @@ export async function buildChatRunInput(input: {
     context7Available,
     /** Images pinned as active context (bytes fetched by the worker). */
     activeContextImages,
+    /** The single text snippet pinned as additional context (null if none). */
+    activeContextSnippet,
   };
 }
