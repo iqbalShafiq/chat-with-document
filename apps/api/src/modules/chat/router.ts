@@ -34,12 +34,19 @@ import {
 } from "./truncate-memory.js";
 import { computeContextUsage } from "./context-usage.js";
 import {
+  ChatSessionNotFoundError,
   ensureChatSession,
   getOrCreateEmptyChatSession,
+  normalizeSessionTitle,
   ProjectMembershipError,
+  renameChatSession,
   setChatSessionTitleIfEmpty,
   touchChatSession,
 } from "./chat-session.js";
+import {
+  deleteChatSession,
+  SessionRunActiveError,
+} from "./session-delete.js";
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value === "string") {
@@ -193,6 +200,64 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     } catch (error) {
       if (error instanceof ProjectMembershipError) {
         return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .patch("/sessions/:id", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const title = typeof body?.title === "string" ? body.title : "";
+    const normalized = normalizeSessionTitle(title);
+    if (!normalized) {
+      return c.json({ error: "title is required" }, 400);
+    }
+
+    try {
+      const session = await renameChatSession({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+        title: normalized,
+      });
+      return c.json({
+        sessionId: session.id,
+        projectId: session.projectId,
+        title: session.title,
+        updatedAt: session.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .delete("/sessions/:id", async (c) => {
+    const user = c.get("user");
+    const confirmQuery = c.req.query("confirm");
+    const confirm = confirmQuery === "true" || confirmQuery === "1";
+    if (!confirm) {
+      return c.json(
+        {
+          error: "Cascade delete requires confirm=true",
+          code: "CONFIRM_REQUIRED",
+        },
+        400,
+      );
+    }
+
+    try {
+      const result = await deleteChatSession(user.id, c.req.param("id"));
+      return c.json(result);
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      if (error instanceof SessionRunActiveError) {
+        return c.json({ error: error.message, code: error.code }, 409);
       }
       throw error;
     }
