@@ -1,3 +1,5 @@
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
+
 export const API_BASE = "http://localhost:3001";
 
 export class ApiAuthError extends Error {
@@ -1436,6 +1438,80 @@ export async function removeSessionImageContext(input: {
     { method: "DELETE" },
   );
   if (!response.ok) throw new Error("Failed to unpin image context");
+}
+
+/** Single text snippet pinned as additional context for a session. */
+export type ContextSnippet = {
+  id: string;
+  text: string;
+  sourceRole: ContextSnippetSourceRole;
+  createdAt: string;
+};
+
+export async function fetchContextSnippet(
+  sessionId: string,
+): Promise<ContextSnippet | null> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/${encodeURIComponent(sessionId)}/context-snippet`,
+  );
+  if (!response.ok) throw new Error("Failed to load context snippet");
+  const body = (await response.json()) as { snippet?: unknown };
+  const snippet = body.snippet;
+  if (!snippet || typeof snippet !== "object") return null;
+  const record = snippet as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.text !== "string" ||
+    (record.sourceRole !== "user" && record.sourceRole !== "assistant") ||
+    typeof record.createdAt !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    text: record.text,
+    sourceRole: record.sourceRole,
+    createdAt: record.createdAt,
+  };
+}
+
+export async function upsertContextSnippet(input: {
+  sessionId: string;
+  text: string;
+  sourceRole: ContextSnippetSourceRole;
+}): Promise<ContextSnippet> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/${encodeURIComponent(input.sessionId)}/context-snippet`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: input.text,
+        sourceRole: input.sourceRole,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to add context snippet");
+  }
+  const body = (await response.json()) as { snippet?: unknown };
+  const snippet = body.snippet as ContextSnippet | undefined;
+  if (!snippet) throw new Error("Failed to add context snippet");
+  return snippet;
+}
+
+export async function removeContextSnippet(input: {
+  sessionId: string;
+  snippetId: string;
+}): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/context-snippet/${encodeURIComponent(input.snippetId)}?sessionId=${encodeURIComponent(input.sessionId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error("Failed to remove context snippet");
 }
 
 export async function submitClarification(input: {
