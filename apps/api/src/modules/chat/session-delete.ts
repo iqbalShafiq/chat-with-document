@@ -53,13 +53,23 @@ export async function stopActiveRunForSession(
     return false;
   }
 
-  // Liveness: if the chat-run job is no longer active (completed / failed /
-  // unknown), no worker can write memory — the lock is orphaned. Drop it.
+  // Liveness: only terminal job states prove no worker can write memory.
+  // Waiting/delayed/active/absent are reachable states (the router acquires
+  // the lock, opens the stream, then enqueues) — never drop the lock on them.
   const runJob = await getChatRunQueue().getJob(`chat:${streamId}`);
-  if (runJob && (await runJob.getState()) !== "active") {
-    await redis.del(ACTIVE_RUN_KEY(sessionId));
-    return false;
+  if (runJob) {
+    const jobState = await runJob.getState();
+    if (
+      jobState === "completed" ||
+      jobState === "failed" ||
+      jobState === "unknown"
+    ) {
+      // Terminal job — no worker can write memory anymore. Stale lock.
+      await redis.del(ACTIVE_RUN_KEY(sessionId));
+      return false;
+    }
   }
+  // Waiting/delayed/active/absent → the run may still execute; stop it and wait.
 
   await store.setStopFlag(streamId);
   await getApprovalRegistry()
