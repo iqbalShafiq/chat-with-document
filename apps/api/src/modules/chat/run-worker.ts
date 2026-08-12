@@ -200,6 +200,7 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       userId,
       model,
       reasoningEffort,
+      promptMessage,
       webSearchEnabled,
       imageGenerationEnabled,
       imageGenSettings,
