@@ -2,6 +2,7 @@ import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
 import { FileX, ArrowUp, Square, X } from "lucide-react";
 import { useEffect, type RefObject } from "react";
+import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { FeaturesPopover } from "#/components/composer/features-popover";
@@ -61,6 +62,9 @@ export function ChatComposer({
   onImageGenSettingsChange = () => {},
   activeContextImages = [],
   onToggleImageContext = () => {},
+  contextSnippet = null,
+  contextSnippetError = null,
+  onRemoveContextSnippet = () => {},
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -105,7 +109,7 @@ export function ChatComposer({
   /** Pinned images sent with the next message — shown above the field. */
   activeContextImages?: GeneratedImageItem[];
   onToggleImageContext?: (image: GeneratedImageItem) => void;
-  /** Wired in Task 9 — declared now so routes/index.tsx can pass them. */
+  /** Single pinned text context shown above the field (deletable). */
   contextSnippet?: ContextSnippet | null;
   contextSnippetError?: string | null;
   onRemoveContextSnippet?: () => void;
@@ -281,6 +285,20 @@ export function ChatComposer({
             </div>
           ))}
         </div>
+      ) : null}
+
+      {contextSnippetError ? (
+        <div className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
+          {contextSnippetError}
+        </div>
+      ) : null}
+
+      {contextSnippet ? (
+        <ContextSnippetChip
+          snippet={contextSnippet}
+          variant="composer"
+          onRemove={onRemoveContextSnippet}
+        />
       ) : null}
 
       <div className="relative flex min-h-[2.75rem] flex-col pb-11">
