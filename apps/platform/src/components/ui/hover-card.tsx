@@ -27,6 +27,7 @@ export function HoverCard({
   variant = "tooltip",
   disabled = false,
   side = "top",
+  panelClassName,
   children,
 }: {
   content: ReactNode;
@@ -34,6 +35,8 @@ export function HoverCard({
   disabled?: boolean;
   /** "top": above the anchor; "right": to the right of the anchor's container. */
   side?: "top" | "right";
+  /** Extra classes for the panel (width overrides etc.). */
+  panelClassName?: string;
   children: ReactNode;
 }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -187,11 +190,11 @@ export function HoverCard({
               aria-label={variant === "tooltip" ? undefined : "Feature settings"}
               onMouseEnter={handlePanelEnter}
               onMouseLeave={handlePanelLeave}
-              className={
+              className={`${
                 variant === "tooltip"
                   ? "fixed z-[80] max-w-[14rem] rounded-lg bg-black/85 px-2.5 py-1.5 text-[11px] leading-snug text-text shadow-[0_8px_24px_-8px_rgba(0,0,0,0.7)] backdrop-blur-md animate-fade-in"
                   : "glass-popover fixed z-[80] w-[17rem] rounded-2xl p-2.5 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-scale-in"
-              }
+              } ${panelClassName ?? ""}`}
             >
               {content}
             </div>,
