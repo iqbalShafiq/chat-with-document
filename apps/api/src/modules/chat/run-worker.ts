@@ -159,6 +159,18 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     return;
   }
 
+  // The session may have been deleted while this job waited. The memory store
+  // upserts its session row, so running would resurrect the deleted session.
+  const chatSessionExists = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { id: true },
+  });
+  if (!chatSessionExists) {
+    console.log(`[chat-run] skip ${streamId} (session deleted)`);
+    await releaseActiveRun(sessionId, streamId).catch(() => {});
+    return;
+  }
+
   // A stale stop flag from a crashed previous run would stop this run before
   // it starts — always clear it at job start.
   await getRedis().del(STOP_KEY(streamId)).catch(() => {});

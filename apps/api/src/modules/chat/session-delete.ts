@@ -123,13 +123,18 @@ export async function deleteChatSession(
   const chatSession = await getChatSession(userId, sessionId);
   const hadActiveRun = await stopActiveRunForSession(userId, sessionId);
 
-  const relocked = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
-  if (relocked) throw new SessionRunActiveError();
-
   const reconsiderEnabled = profileConfig().enabled;
   const snapshot = reconsiderEnabled
     ? await captureSessionSnapshot(userId, sessionId)
     : "";
+
+  // The snapshot reads (10-100ms) leave a window where a stale second tab can
+  // re-acquire the lock and start a new run, whose worker would resurrect the
+  // session via the memory store's upsert. Re-check immediately before the
+  // hard delete; the worker-side existence guard covers the final window.
+  const relocked = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
+  if (relocked) throw new SessionRunActiveError();
+
   await deleteChatSessionsHard(userId, [sessionId]);
 
   if (reconsiderEnabled && snapshot.length > 0) {
