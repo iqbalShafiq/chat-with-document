@@ -1,12 +1,13 @@
 import type { UIMessage, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
-import { Pencil, RefreshCw } from "lucide-react";
+import { Pencil, RefreshCw, Reply } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { CitationsInfoButton } from "#/components/chat/citations-info-button";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
 import { MessageCopyButton } from "#/components/chat/message-copy-button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
-import { resolveMessageCitations } from "#/lib/chat/citations";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
+import { resolveMessageCitations, stripCitationsForCopy } from "#/lib/chat/citations";
 import {
   canTargetMessageForTruncate,
   readChatMessageMeta,
@@ -26,6 +27,8 @@ export type MessageActionsBarProps = {
   onStartEdit: (message: UIMessage) => void;
   /** Combined text of the whole generation (assistant footer copy). */
   generationText?: string;
+  /** Pin the whole message as additional context. */
+  onAddContext: (text: string, sourceRole: ContextSnippetSourceRole) => Promise<boolean>;
 };
 
 export function MessageActionsBar({
@@ -33,6 +36,7 @@ export function MessageActionsBar({
   onRevert,
   onStartEdit,
   generationText,
+  onAddContext,
 }: MessageActionsBarProps) {
   const { message } = useMessage();
   const messageCitations = useMessageCitations();
@@ -84,6 +88,23 @@ export function MessageActionsBar({
           ) : null}
           {hasText || (generationText && generationText.trim().length > 0) ? (
             <MessageCopyButton generationText={generationText} />
+          ) : null}
+          {hasText ? (
+            <button
+              type="button"
+              className={ACTION_ICON_CLASS}
+              aria-label="Add message as context"
+              title="Add as context"
+              onClick={() => {
+                const text =
+                  isUser
+                    ? rawText
+                    : stripCitationsForCopy(rawText);
+                void onAddContext(text, isUser ? "user" : "assistant");
+              }}
+            >
+              <Reply className="size-4" strokeWidth={1.75} />
+            </button>
           ) : null}
 
           {isUser ? (
