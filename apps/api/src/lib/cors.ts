@@ -9,7 +9,8 @@ export function createAppCors() {
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
     // DELETE is used by document session unlink (POST /links, DELETE /links);
-    // PATCH by session rename (PATCH /sessions/:id).
-    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    // PATCH by session rename (PATCH /sessions/:id); PUT by context snippet
+    // upsert (PUT /chat/:sessionId/context-snippet).
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 }
