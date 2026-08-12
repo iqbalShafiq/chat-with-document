@@ -150,23 +150,24 @@ const reconsiderKey = (scope: ProfileScope) =>
 export async function getPendingReconsiderations(
   scope: ProfileScope,
 ): Promise<PendingReconsideration[]> {
-  const raw = await getRedis().get(reconsiderKey(scope));
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (item): item is PendingReconsideration =>
-          !!item &&
-          typeof item === "object" &&
-          typeof (item as PendingReconsideration).deletedSessionId === "string" &&
-          typeof (item as PendingReconsideration).snapshot === "string",
-      );
+  const raw = await getRedis().lrange(reconsiderKey(scope), 0, -1);
+  const result: PendingReconsideration[] = [];
+  for (const entry of raw) {
+    try {
+      const parsed: unknown = JSON.parse(entry);
+      if (
+        !!parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as PendingReconsideration).deletedSessionId === "string" &&
+        typeof (parsed as PendingReconsideration).snapshot === "string"
+      ) {
+        result.push(parsed as PendingReconsideration);
+      }
+    } catch {
+      // Malformed entry — skip; the next enqueue trims it.
     }
-  } catch {
-    // Malformed key — ignore; the next enqueue overwrites it.
   }
-  return [];
+  return result;
 }
 
 /** Append a pending reconsideration (capped list); always keeps a job scheduled. */
@@ -174,25 +175,27 @@ export async function enqueueProfileReconsideration(
   scope: ProfileScope,
   info: Omit<PendingReconsideration, "requestedAt">,
 ): Promise<void> {
-  const existing = await getPendingReconsiderations(scope);
-  const next = [
-    ...existing,
-    { ...info, requestedAt: new Date().toISOString() },
-  ].slice(-RECONSIDER_MAX_PENDING);
-  await getRedis().set(
-    reconsiderKey(scope),
-    JSON.stringify(next),
-    "EX",
-    RECONSIDER_KEY_TTL_SECONDS,
-  );
+  const redis = getRedis();
+  const entry = { ...info, requestedAt: new Date().toISOString() };
+  await redis.lpush(reconsiderKey(scope), JSON.stringify(entry));
+  await redis.ltrim(reconsiderKey(scope), 0, RECONSIDER_MAX_PENDING - 1);
+  await redis.expire(reconsiderKey(scope), RECONSIDER_KEY_TTL_SECONDS);
   await enqueueProfileRefresh(scope);
 }
 
-/** Clear pending reconsiderations after a successful profile pass. */
-export async function clearPendingReconsiderations(
+/**
+ * Remove exactly the consumed entries from the pending list. Entries that
+ * arrived after the read (newer requestedAt) survive — the worker must only
+ * call this AFTER a successful pass so a failed retry re-reads them.
+ */
+export async function removePendingReconsiderations(
   scope: ProfileScope,
+  consumed: PendingReconsideration[],
 ): Promise<void> {
-  await getRedis().del(reconsiderKey(scope));
+  const redis = getRedis();
+  for (const item of consumed) {
+    await redis.lrem(reconsiderKey(scope), 0, JSON.stringify(item));
+  }
 }
 
 /**
