@@ -182,6 +182,23 @@ describe("buildProfileSummaryText", () => {
     expect(text).toContain("- prefers dark mode (source session session-x)");
     expect(text).toContain("- name is Jane");
   });
+
+  it("renders existing bullet sources in the summary input", () => {
+    const text = buildProfileSummaryText({
+      existing: {
+        sections: {
+          facts: [{ text: "likes short answers", sources: ["session-a", "session-b"] }],
+          preferences: [],
+          interests: [],
+          expertise: [],
+          goals: [],
+        },
+        explicitFacts: [],
+      },
+      delta: [],
+    });
+    expect(text).toContain("- likes short answers (sources: session-a, session-b)");
+  });
 });
 
 describe("renderProfileContextText", () => {
