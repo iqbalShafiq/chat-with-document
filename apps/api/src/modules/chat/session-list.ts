@@ -41,7 +41,7 @@ function encodeCursor(updatedAt: Date, sessionId: string): string {
   return `${updatedAt.toISOString()}|${sessionId}`;
 }
 
-function extractTextFromMessageJson(message: unknown): string | null {
+export function extractTextFromMessageJson(message: unknown): string | null {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     return null;
   }
