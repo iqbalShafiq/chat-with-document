@@ -52,3 +52,14 @@
 | Memory saat session di-delete | Tidak dihapus; profil di-*reconsider* via LLM (non-deterministik) di worker yang sama |
 | Format sections | `{ text, sources }` dengan compat data lama |
 | Storage provenance | Di dalam JSON existing — tanpa migration |
+
+---
+
+## Implementation notes
+
+- Settle window is **12s** (`RUN_SETTLE_TIMEOUT_MS`, poll 400ms), not the 8s in §2 — gives the worker time to observe the stop flag and release the lock under load.
+- Pending reconsiderations are stored as a Redis **LIST** `profile:reconsider:<scope>` (JSON entries, capped 5, TTL 24h), not the JSON array key in §4; consumed entries are removed exactly-after-success via `lrem`.
+- Added a **liveness check** in `stopActiveRunForSession`: the lock is dropped for terminal job states (`completed`/`failed`/`unknown`) only — waiting/delayed/active/absent still have a worker that may write memory.
+- Added a **relock guard** immediately before the hard delete (a stale tab can re-acquire the lock while the snapshot is captured) and a **worker-side existence guard** (a queued job for a deleted session skips and releases the lock instead of resurrecting the memory row via upsert).
+- The snapshot is captured **before** the delete (fencing against row removal); profile reconsideration is enqueued only when the snapshot is non-empty.
+- Last-session delete recovers to an empty draft / newest remaining session / new draft — no dead-end state.
