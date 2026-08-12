@@ -6,8 +6,11 @@ import { CitationsInfoButton } from "#/components/chat/citations-info-button";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
 import { MessageCopyButton } from "#/components/chat/message-copy-button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
-import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
-import { resolveMessageCitations, stripCitationsForCopy } from "#/lib/chat/citations";
+import {
+  normalizeContextText,
+  type ContextSnippetSourceRole,
+} from "#/lib/chat/context-snippet-text";
+import { resolveMessageCitations } from "#/lib/chat/citations";
 import {
   canTargetMessageForTruncate,
   readChatMessageMeta,
@@ -96,10 +99,11 @@ export function MessageActionsBar({
               aria-label="Add message as context"
               title="Add as context"
               onClick={() => {
-                const text =
-                  isUser
-                    ? rawText
-                    : stripCitationsForCopy(rawText);
+                const text = normalizeContextText(
+                  rawText,
+                  isUser ? "user" : "assistant",
+                );
+                if (text === null) return;
                 void onAddContext(text, isUser ? "user" : "assistant");
               }}
             >

@@ -1,7 +1,7 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
 import { FileX, ArrowUp, Square, X } from "lucide-react";
-import { useEffect, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -117,6 +117,9 @@ export function ChatComposer({
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
   const modelsUnavailable = modelsStatus !== "success";
+  // Exit animation state for the context chip: the remove action is deferred
+  // ~180ms so the fade-out can play before the snippet unmounts.
+  const [removingContext, setRemovingContext] = useState(false);
   // Local photo attachments (image/*) preview above the field; they are
   // uploaded as session images when the message is sent.
   const composer = useComposer();
@@ -181,6 +184,12 @@ export function ChatComposer({
       window.clearInterval(timer);
     };
   }, [placeholderText]);
+
+  // A new snippet always starts non-removing, even if the removal timeout
+  // never ran (e.g. the snippet was cleared externally).
+  useEffect(() => {
+    if (!contextSnippet) setRemovingContext(false);
+  }, [contextSnippet]);
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
@@ -297,7 +306,15 @@ export function ChatComposer({
         <ContextSnippetChip
           snippet={contextSnippet}
           variant="composer"
-          onRemove={onRemoveContextSnippet}
+          removing={removingContext}
+          onRemove={() => {
+            if (removingContext) return;
+            setRemovingContext(true);
+            window.setTimeout(() => {
+              onRemoveContextSnippet();
+              setRemovingContext(false);
+            }, 180);
+          }}
         />
       ) : null}
 

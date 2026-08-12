@@ -350,7 +350,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const snippetId = c.req.param("snippetId");
     const sessionId = c.req.query("sessionId");
     if (!snippetId || !sessionId) {
-      return c.json({ error: "sessionId is required" }, 400);
+      return c.json({ error: "snippetId and sessionId are required" }, 400);
     }
     await getContextSnippetStore().removeContextSnippet({
       userId: user.id,

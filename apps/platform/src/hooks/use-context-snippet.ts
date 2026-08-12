@@ -11,30 +11,41 @@ export function useContextSnippet(sessionId: string) {
   const [snippet, setSnippetState] = useState<ContextSnippet | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestRef = useRef(0);
+  const snippetRef = useRef<ContextSnippet | null>(null);
+  // Single version counter guarding every mutation and refresh: a slow
+  // response only applies state when no newer mutation happened after it
+  // started (remove-during-upsert, two rapid pins, refresh-during-remove).
+  const mutationRef = useRef(0);
+
+  // Keep the ref in sync with state so stable callbacks always read the
+  // latest chip without re-creating themselves on every snippet change.
+  const syncSnippet = (next: ContextSnippet | null) => {
+    snippetRef.current = next;
+    setSnippetState(next);
+  };
 
   const refresh = useCallback(async () => {
+    const version = ++mutationRef.current;
     if (!sessionId) {
-      setSnippetState(null);
+      syncSnippet(null);
       return;
     }
-    const requestId = ++requestRef.current;
     setLoading(true);
     try {
       const current = await fetchContextSnippet(sessionId);
-      if (requestId !== requestRef.current) return;
-      setSnippetState(current);
+      if (version !== mutationRef.current) return;
+      syncSnippet(current);
       setError(null);
     } catch {
-      if (requestId !== requestRef.current) return;
+      if (version !== mutationRef.current) return;
       setError("Could not load context snippet");
     } finally {
-      if (requestId === requestRef.current) setLoading(false);
+      if (version === mutationRef.current) setLoading(false);
     }
   }, [sessionId]);
 
   useEffect(() => {
-    setSnippetState(null);
+    syncSnippet(null);
     void refresh();
   }, [refresh]);
 
@@ -44,49 +55,59 @@ export function useContextSnippet(sessionId: string) {
       sourceRole: ContextSnippetSourceRole,
     ): Promise<boolean> => {
       if (!sessionId) return false;
-      const previous = snippet;
+      const version = ++mutationRef.current;
+      const previous = snippetRef.current;
       const optimistic: ContextSnippet = {
         id: `pending-${Date.now()}`,
         text,
         sourceRole,
         createdAt: new Date().toISOString(),
       };
-      setSnippetState(optimistic);
+      syncSnippet(optimistic);
       setError(null);
       try {
         const saved = await upsertContextSnippet({ sessionId, text, sourceRole });
-        setSnippetState(saved);
+        // A newer mutation already happened — drop the stale response.
+        if (version !== mutationRef.current) return true;
+        syncSnippet(saved);
         return true;
       } catch (err) {
-        setSnippetState(previous);
+        if (version !== mutationRef.current) return false;
+        syncSnippet(previous);
         setError(
           err instanceof Error ? err.message : "Could not add context snippet",
         );
         return false;
       }
     },
-    [sessionId, snippet],
+    [sessionId],
   );
 
   const remove = useCallback(async () => {
-    const current = snippet;
+    const current = snippetRef.current;
     if (!current || !sessionId) return;
-    setSnippetState(null);
+    const version = ++mutationRef.current;
+    syncSnippet(null);
     setError(null);
     try {
       await removeContextSnippet({ sessionId, snippetId: current.id });
     } catch (err) {
-      setSnippetState(current);
+      if (version !== mutationRef.current) return;
+      syncSnippet(current);
       setError(
         err instanceof Error ? err.message : "Could not remove context snippet",
       );
     }
-  }, [sessionId, snippet]);
+  }, [sessionId]);
 
   /** Local clear after a successful send — the server clears its own row. */
   const reset = useCallback(() => {
-    setSnippetState(null);
+    mutationRef.current += 1;
+    syncSnippet(null);
     setError(null);
+    // The version bump discards any in-flight refresh, so its finally can no
+    // longer clear the spinner — clear it here to keep loading accurate.
+    setLoading(false);
   }, []);
 
   return { snippet, loading, error, refresh, setSnippet, remove, reset };

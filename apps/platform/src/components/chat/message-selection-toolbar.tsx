@@ -42,7 +42,11 @@ export function MessageSelectionToolbar({
 
   const computeSelection = useCallback(() => {
     const container = containerRef.current;
-    if (!container || disabled) return;
+    if (!container) return;
+    if (disabled) {
+      setSelection(null);
+      return;
+    }
     const native = window.getSelection();
     if (!native || native.isCollapsed) {
       setSelection(null);
@@ -106,7 +110,7 @@ export function MessageSelectionToolbar({
 
   if (!selection) return null;
 
-  const panelTop = selection.top - TOOLBAR_GAP - 30;
+  const panelTop = Math.max(selection.top - TOOLBAR_GAP - 30, 8);
   const panelLeft = Math.min(
     Math.max(selection.left - 70, 8),
     window.innerWidth - 148,

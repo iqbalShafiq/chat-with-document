@@ -62,13 +62,13 @@ export function ContextSnippetChip({
               onClick={() => setExpanded((current) => !current)}
               className="block w-full cursor-pointer text-left"
             >
-              <p
-                className={`whitespace-pre-wrap break-words text-xs leading-relaxed text-text transition-[max-height,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              <span
+                className={`block whitespace-pre-wrap break-words text-xs leading-relaxed text-text transition-[max-height,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                   expanded ? "max-h-96 overflow-y-auto opacity-100" : "line-clamp-2 max-h-10 opacity-90"
                 }`}
               >
                 {snippet.text}
-              </p>
+              </span>
             </button>
           </HoverCard>
         </div>
