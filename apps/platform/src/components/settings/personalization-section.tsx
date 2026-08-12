@@ -53,7 +53,7 @@ function ProfileBody({ profile }: { profile: ProfileDto }) {
           <ul className="flex flex-col gap-1">
             {entry.items.map((item, index) => (
               <li key={index} className="text-xs leading-relaxed text-text-muted">
-                {item}
+                {item.text}
               </li>
             ))}
           </ul>
