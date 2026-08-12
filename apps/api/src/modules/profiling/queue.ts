@@ -131,6 +131,73 @@ export async function takeNeedsProfileRefresh(scope: ProfileScope): Promise<bool
   return true;
 }
 
+// ─── Session-deletion reconsideration ──────────────────────────────────────
+// Deleting a chat must not lose profile facts, but the profile should be
+// re-examined: the summarizer (same worker, same queue, one LLM call) may
+// remove facts that were clearly learned only from the deleted conversation.
+
+export type PendingReconsideration = {
+  deletedSessionId: string;
+  snapshot: string;
+  requestedAt: string;
+};
+
+const RECONSIDER_KEY_TTL_SECONDS = 86400;
+const RECONSIDER_MAX_PENDING = 5;
+const reconsiderKey = (scope: ProfileScope) =>
+  `profile:reconsider:${profileJobId(scope)}`;
+
+export async function getPendingReconsiderations(
+  scope: ProfileScope,
+): Promise<PendingReconsideration[]> {
+  const raw = await getRedis().lrange(reconsiderKey(scope), 0, -1);
+  const result: PendingReconsideration[] = [];
+  for (const entry of raw) {
+    try {
+      const parsed: unknown = JSON.parse(entry);
+      if (
+        !!parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as PendingReconsideration).deletedSessionId === "string" &&
+        typeof (parsed as PendingReconsideration).snapshot === "string"
+      ) {
+        result.push(parsed as PendingReconsideration);
+      }
+    } catch {
+      // Malformed entry — skip; the next enqueue trims it.
+    }
+  }
+  return result;
+}
+
+/** Append a pending reconsideration (capped list); always keeps a job scheduled. */
+export async function enqueueProfileReconsideration(
+  scope: ProfileScope,
+  info: Omit<PendingReconsideration, "requestedAt">,
+): Promise<void> {
+  const redis = getRedis();
+  const entry = { ...info, requestedAt: new Date().toISOString() };
+  await redis.lpush(reconsiderKey(scope), JSON.stringify(entry));
+  await redis.ltrim(reconsiderKey(scope), 0, RECONSIDER_MAX_PENDING - 1);
+  await redis.expire(reconsiderKey(scope), RECONSIDER_KEY_TTL_SECONDS);
+  await enqueueProfileRefresh(scope);
+}
+
+/**
+ * Remove exactly the consumed entries from the pending list. Entries that
+ * arrived after the read (newer requestedAt) survive — the worker must only
+ * call this AFTER a successful pass so a failed retry re-reads them.
+ */
+export async function removePendingReconsiderations(
+  scope: ProfileScope,
+  consumed: PendingReconsideration[],
+): Promise<void> {
+  const redis = getRedis();
+  for (const item of consumed) {
+    await redis.lrem(reconsiderKey(scope), 0, JSON.stringify(item));
+  }
+}
+
 /**
  * Wait for an active job of this scope to finish (used by the remember tool so
  * two writers never race on the same profile row). Resolves on timeout.

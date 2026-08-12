@@ -123,6 +123,7 @@ function RegisterPage() {
           type="text"
           placeholder="How we should address you"
           autoComplete="name"
+          autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           error={nameError}

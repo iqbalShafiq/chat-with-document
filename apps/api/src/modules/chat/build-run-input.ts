@@ -31,6 +31,7 @@ import {
   type ProfileSectionKey,
   type ReasoningEffort,
 } from "@assingment/agent";
+import type { Message } from "@anvia/core/completion";
 import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
@@ -182,12 +183,28 @@ export type ChatRunInput = {
   activeContextImages: GeneratedImageRecord[];
 };
 
+/**
+ * Client message id of the run's prompt (used for fact provenance). Falls back
+ * to null for legacy clients that do not stamp the metadata.
+ */
+function promptClientMessageId(promptMessage: Message | undefined): string | null {
+  const metadata =
+    promptMessage && typeof promptMessage.metadata === "object"
+      ? (promptMessage.metadata as Record<string, unknown>)
+      : undefined;
+  return typeof metadata?.clientMessageId === "string"
+    ? metadata.clientMessageId
+    : null;
+}
+
 export async function buildChatRunInput(input: {
   sessionId: string;
   userId: string;
   model: string;
   reasoningEffort: string | null;
   agentId?: string;
+  /** Client message id source of the run's prompt (used for fact provenance). */
+  promptMessage?: Message;
   /** Per-session web-search toggle (default false). */
   webSearchEnabled?: boolean;
   /** Per-session image generation toggle (default false). */
@@ -211,6 +228,7 @@ export async function buildChatRunInput(input: {
     model,
     reasoningEffort,
     agentId,
+    promptMessage,
     webSearchEnabled = false,
     imageGenerationEnabled = false,
     imageGenSettings = null,
@@ -314,11 +332,19 @@ export async function buildChatRunInput(input: {
 
     profileTool = createRememberUserProfileTool({
       scope: profileScope,
+      source: {
+        sessionId,
+        messageId: promptClientMessageId(promptMessage),
+      },
       waitForActiveJob: () => waitForActiveProfileJob(profileScope),
-      appendFact: (input) =>
+      appendFact: (factInput) =>
         appendExplicitFact(profileScope, {
-          section: input.section as ProfileSectionKey | null,
-          fact: input.fact,
+          section: factInput.section as ProfileSectionKey | null,
+          fact: factInput.fact,
+          source: {
+            sessionId: factInput.source.sessionId,
+            messageId: factInput.source.messageId,
+          },
         }),
       refreshNow: () => summarizeProfileForScope(profileScope),
       reschedule: () => rescheduleProfileRefresh(profileScope),

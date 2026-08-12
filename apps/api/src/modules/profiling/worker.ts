@@ -3,7 +3,9 @@ import type { ProfileScope } from "@assingment/agent";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import {
   PROFILE_QUEUE,
+  getPendingReconsiderations,
   profileJobId,
+  removePendingReconsiderations,
   setNeedsProfileRefresh,
   takeNeedsProfileRefresh,
   type ProfileRefreshJobData,
@@ -27,8 +29,18 @@ async function processProfileJob(job: {
   const scope = scopeFromJobData(job.data);
   console.log(`[profile] summarize start ${profileJobId(scope)}`);
 
-  const result = await summarizeProfileForScope(scope);
+  const reconsiderations = await getPendingReconsiderations(scope);
+  const result = await summarizeProfileForScope(
+    scope,
+    reconsiderations.length > 0 ? { reconsiderations } : undefined,
+  );
   const processed = result.processed;
+
+  // Consume pending reconsiderations only after a successful pass, so a
+  // failed job retry still re-runs the reconsideration. Only the entries we
+  // read are removed — anything enqueued during the pass survives for the
+  // next pass (the needs-refresh follow-up re-reads the list).
+  await removePendingReconsiderations(scope, reconsiderations);
 
   // Always close the loop: a chat that finished while this job was running
   // (or a needs-refresh flag set by enqueue) must guarantee a follow-up run.

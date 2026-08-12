@@ -8,7 +8,8 @@ export function createAppCors() {
     origin,
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
-    // DELETE is used by document session unlink (POST /links, DELETE /links).
-    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+    // DELETE is used by document session unlink (POST /links, DELETE /links);
+    // PATCH by session rename (PATCH /sessions/:id).
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
 }

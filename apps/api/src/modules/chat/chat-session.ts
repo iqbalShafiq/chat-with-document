@@ -180,12 +180,44 @@ export async function touchChatSession(
   });
 }
 
+export const TITLE_MAX = 48;
+
+/** Sidebar title normalization: trim, collapse whitespace, cap at 48 chars. */
+export function normalizeSessionTitle(raw: string): string | null {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return Array.from(collapsed).slice(0, TITLE_MAX).join("");
+}
+
+/**
+ * Rename a chat session (user-scoped). Throws ChatSessionNotFoundError when
+ * the session does not exist for this user.
+ */
+export async function renameChatSession(input: {
+  userId: string;
+  sessionId: string;
+  title: string;
+}): Promise<ChatSessionRow> {
+  const title = normalizeSessionTitle(input.title);
+  if (!title) throw new Error("title is required");
+  const updated = await prisma.chatSession.updateMany({
+    where: { id: input.sessionId, userId: input.userId },
+    data: { title },
+  });
+  if (updated.count === 0) throw new ChatSessionNotFoundError();
+  const row = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+  });
+  if (!row) throw new ChatSessionNotFoundError();
+  return row;
+}
+
 export async function setChatSessionTitleIfEmpty(input: {
   userId: string;
   sessionId: string;
   title: string;
 }): Promise<void> {
-  const title = input.title.trim().slice(0, 48);
+  const title = Array.from(input.title.trim()).slice(0, TITLE_MAX).join("");
   if (!title) return;
   await prisma.chatSession.updateMany({
     where: {
@@ -210,6 +242,9 @@ export async function deleteChatSessionsHard(
 
   await prisma.$transaction(async (tx) => {
     await tx.documentSession.deleteMany({
+      where: { userId, sessionId: { in: ids } },
+    });
+    await tx.sessionImageContext.deleteMany({
       where: { userId, sessionId: { in: ids } },
     });
     await tx.agentUsageEvent.deleteMany({

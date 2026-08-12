@@ -4,10 +4,16 @@ import { PROFILE_SECTION_KEYS, type ProfileScope } from "./types.js";
 
 export type RememberUserProfileDeps = {
   scope: ProfileScope;
+  /** Provenance of this run (which conversation is asking to remember). */
+  source: { sessionId: string; messageId: string | null };
   /** Wait for a running background refresh of this scope before writing. */
   waitForActiveJob: () => Promise<void>;
   /** Persist the fact immediately; never fails the chat run. */
-  appendFact: (input: { section: string | null; fact: string }) => Promise<void>;
+  appendFact: (input: {
+    section: string | null;
+    fact: string;
+    source: { sessionId: string; messageId: string | null };
+  }) => Promise<void>;
   /** Incrementally summarize the unprocessed delta of this scope. */
   refreshNow: () => Promise<{ processed: number }>;
   /** Open a fresh debounce window for the background worker. */
@@ -30,7 +36,7 @@ export function createRememberUserProfileTool(
     execute: async ({ fact, section }) => {
       try {
         await deps.waitForActiveJob();
-        await deps.appendFact({ section: section ?? null, fact });
+        await deps.appendFact({ section: section ?? null, fact, source: deps.source });
         const { processed } = await deps.refreshNow();
         await deps.reschedule();
         return {

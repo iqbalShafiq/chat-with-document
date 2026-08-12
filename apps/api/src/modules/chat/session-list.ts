@@ -1,4 +1,5 @@
 import { prisma } from "../../utils/prisma.js";
+import { TITLE_MAX } from "./chat-session.js";
 
 export type SessionListItem = {
   sessionId: string;
@@ -15,7 +16,6 @@ export type SessionListPage = {
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 50;
-const TITLE_MAX = 48;
 
 function clampLimit(raw: string | undefined): number {
   const n = raw ? Number.parseInt(raw, 10) : DEFAULT_LIMIT;
@@ -41,7 +41,7 @@ function encodeCursor(updatedAt: Date, sessionId: string): string {
   return `${updatedAt.toISOString()}|${sessionId}`;
 }
 
-function extractTextFromMessageJson(message: unknown): string | null {
+export function extractTextFromMessageJson(message: unknown): string | null {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     return null;
   }
