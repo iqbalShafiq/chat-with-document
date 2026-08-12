@@ -116,6 +116,7 @@ import {
 } from "#/lib/chat/models";
 import { useModels } from "#/hooks/use-models";
 import {
+  clearStoredSessionId,
   clearWorkspaceProjectState,
   persistLastStandaloneSessionId,
   persistSessionId,
@@ -780,14 +781,22 @@ function Home() {
 
   const handleRenameSession = useCallback(
     async (targetSessionId: string, title: string) => {
-      const renamed = await renameSession(targetSessionId, title);
-      setSessions((current) =>
-        current.map((s) =>
-          s.sessionId === targetSessionId ? { ...s, title: renamed.title } : s,
-        ),
-      );
+      try {
+        const renamed = await renameSession(targetSessionId, title);
+        setSessions((current) =>
+          current.map((s) =>
+            s.sessionId === targetSessionId ? { ...s, title: renamed.title } : s,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
+        throw error;
+      }
     },
-    [],
+    [handleAuthFailure],
   );
 
   const handleDeleteSession = useCallback(
@@ -829,7 +838,9 @@ function Home() {
             if (!projectId) persistLastStandaloneSessionId(draft.sessionId);
           } catch (error) {
             console.error("[sessions] draft after delete failed", error);
-            // The next list load recovers a draft.
+            // Recover: the next list load will create a fresh draft.
+            setSessionId("");
+            void loadSessionsFirstPage();
           }
         }
       }
@@ -840,6 +851,17 @@ function Home() {
         next.delete(targetSessionId);
         return next;
       });
+
+      // Browser views keep no chat selection; clear a stale deleted id so it
+      // does not linger in state/storage (the next list load self-heals).
+      if (
+        sessionIdRef.current === targetSessionId &&
+        viewModeRef.current !== "standalone" &&
+        viewModeRef.current !== "project-workspace"
+      ) {
+        setSessionId("");
+        clearStoredSessionId();
+      }
     },
     [handleAuthFailure],
   );

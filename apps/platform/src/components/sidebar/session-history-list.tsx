@@ -42,6 +42,7 @@ export function SessionHistoryList({
 
   // Rows pending removal play a fade-out before the parent drops them.
   const [exitingIds, setExitingIds] = useState<ReadonlySet<string>>(new Set());
+  const exitTimerRef = useRef<number | null>(null);
 
   const handleRemoved = useCallback(
     (sessionId: string) => {
@@ -50,7 +51,7 @@ export function SessionHistoryList({
         next.add(sessionId);
         return next;
       });
-      window.setTimeout(() => {
+      exitTimerRef.current = window.setTimeout(() => {
         setExitingIds((current) => {
           const next = new Set(current);
           next.delete(sessionId);
@@ -61,6 +62,14 @@ export function SessionHistoryList({
     },
     [onRemoveSession],
   );
+
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current !== null) {
+        window.clearTimeout(exitTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const node = sentinelRef.current;
