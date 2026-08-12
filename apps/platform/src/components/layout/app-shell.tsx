@@ -40,6 +40,9 @@ export function AppShell({
   newChatDisabled = false,
   onLoadMoreSessions,
   onRetrySessions,
+  onRenameSession,
+  onDeleteSession,
+  onRemoveSession,
   viewMode,
   recentProjects,
   activeProjectId,
@@ -64,6 +67,9 @@ export function AppShell({
   newChatDisabled?: boolean;
   onLoadMoreSessions: () => void;
   onRetrySessions: () => void;
+  onRenameSession: (sessionId: string, title: string) => Promise<void>;
+  onDeleteSession: (sessionId: string) => Promise<void>;
+  onRemoveSession: (sessionId: string) => void;
   viewMode: WorkspaceViewMode;
   recentProjects: ProjectListItem[];
   activeProjectId: string | null;
@@ -112,6 +118,9 @@ export function AppShell({
     newChatDisabled,
     onLoadMore: onLoadMoreSessions,
     onRetry: onRetrySessions,
+    onRenameSession,
+    onDeleteSession,
+    onRemoveSession,
     viewMode,
     recentProjects,
     activeProjectId,

@@ -28,6 +28,7 @@ import {
   API_BASE,
   ApiAuthError,
   decideApproval,
+  deleteChatSession,
   fetchContextUsage,
   fetchRunStatus,
   fetchChatCapabilities,
@@ -40,6 +41,7 @@ import {
   markSessionRead,
   loadChatMessages,
   openProject,
+  renameSession,
   stopChatRun,
   truncateSessionMemory,
   unlinkDocumentFromSession,
@@ -266,6 +268,8 @@ function Home() {
   const [imageContextActions, setImageContextActions] = useState<ImagePreviewContextActions | null>(null);
   const activeRunsRef = useRef<ReadonlySet<string>>(new Set());
   activeRunsRef.current = activeRuns;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
 
   const handleAuthFailure = useCallback(() => {
     void navigate({
@@ -774,6 +778,78 @@ function Home() {
     [refreshRecentProjects],
   );
 
+  const handleRenameSession = useCallback(
+    async (targetSessionId: string, title: string) => {
+      const renamed = await renameSession(targetSessionId, title);
+      setSessions((current) =>
+        current.map((s) =>
+          s.sessionId === targetSessionId ? { ...s, title: renamed.title } : s,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (targetSessionId: string) => {
+      try {
+        await deleteChatSession(targetSessionId);
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
+        // Surfaced by the confirm dialog (e.g. "still processing").
+        throw error;
+      }
+
+      if (
+        sessionIdRef.current === targetSessionId &&
+        (viewModeRef.current === "standalone" ||
+          viewModeRef.current === "project-workspace")
+      ) {
+        const rest = sessionsRef.current.filter(
+          (s) => s.sessionId !== targetSessionId,
+        );
+        const empty = findEmptyNewChat(rest);
+        const replacement = empty ?? rest[0] ?? null;
+        if (replacement) {
+          setSessionId(replacement.sessionId);
+          if (viewModeRef.current === "standalone") {
+            persistLastStandaloneSessionId(replacement.sessionId);
+          }
+        } else {
+          const projectId =
+            viewModeRef.current === "project-workspace"
+              ? activeProjectIdRef.current
+              : null;
+          try {
+            const draft = await getOrCreateEmptyChatSession({ projectId });
+            setSessionId(draft.sessionId);
+            if (!projectId) persistLastStandaloneSessionId(draft.sessionId);
+          } catch (error) {
+            console.error("[sessions] draft after delete failed", error);
+            // The next list load recovers a draft.
+          }
+        }
+      }
+
+      setActiveRuns((current) => {
+        if (!current.has(targetSessionId)) return current;
+        const next = new Set(current);
+        next.delete(targetSessionId);
+        return next;
+      });
+    },
+    [handleAuthFailure],
+  );
+
+  const handleRemoveSession = useCallback((targetSessionId: string) => {
+    setSessions((current) =>
+      current.filter((s) => s.sessionId !== targetSessionId),
+    );
+  }, []);
+
   const activeSessionTitle = useMemo(() => {
     return (
       sessions.find((s) => s.sessionId === sessionId)?.title?.trim() ||
@@ -827,6 +903,9 @@ function Home() {
         onRetrySessions={() => {
           void loadSessionsFirstPage();
         }}
+        onRenameSession={handleRenameSession}
+        onDeleteSession={handleDeleteSession}
+        onRemoveSession={handleRemoveSession}
         viewMode={viewMode}
         recentProjects={recentProjects}
         activeProjectId={activeProjectId}
