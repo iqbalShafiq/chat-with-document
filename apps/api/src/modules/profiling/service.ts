@@ -3,6 +3,7 @@ import {
   createCompletionModel,
   DEFAULT_COMPLETION_MODEL,
   EMPTY_PROFILE_SECTIONS,
+  normalizeProfileSections,
   parseCompletionModel,
   summarizeProfileDelta,
   type ExplicitFact,
@@ -15,6 +16,7 @@ import {
 import type { CompletionModel } from "@anvia/core";
 import { prisma } from "../../utils/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
+import type { PendingReconsideration } from "./queue.js";
 
 export type ProfileConfig = {
   enabled: boolean;
@@ -50,29 +52,31 @@ function toProfileData(row: {
   sections: Prisma.JsonValue;
   explicitFacts: Prisma.JsonValue;
 }): ProfileData {
-  const sections = (row.sections ?? {}) as Record<string, unknown>;
+  const sections = normalizeProfileSections(row.sections ?? {});
   const facts = (row.explicitFacts ?? []) as unknown[];
   return {
-    sections: {
-      facts: Array.isArray(sections.facts) ? (sections.facts as string[]) : [],
-      preferences: Array.isArray(sections.preferences)
-        ? (sections.preferences as string[])
-        : [],
-      interests: Array.isArray(sections.interests)
-        ? (sections.interests as string[])
-        : [],
-      expertise: Array.isArray(sections.expertise)
-        ? (sections.expertise as string[])
-        : [],
-      goals: Array.isArray(sections.goals) ? (sections.goals as string[]) : [],
-    },
+    sections,
     explicitFacts: facts
       .filter((fact): fact is Record<string, unknown> => typeof fact === "object" && fact !== null)
-      .map((fact) => ({
-        section: typeof fact.section === "string" ? (fact.section as ProfileSectionKey) : null,
-        fact: typeof fact.fact === "string" ? fact.fact : "",
-        createdAt: typeof fact.createdAt === "string" ? fact.createdAt : "",
-      }))
+      .map((fact) => {
+        const source =
+          fact.source && typeof fact.source === "object" && !Array.isArray(fact.source)
+            ? (fact.source as Record<string, unknown>)
+            : undefined;
+        return {
+          section: typeof fact.section === "string" ? (fact.section as ProfileSectionKey) : null,
+          fact: typeof fact.fact === "string" ? fact.fact : "",
+          createdAt: typeof fact.createdAt === "string" ? fact.createdAt : "",
+          ...(source && typeof source.sessionId === "string"
+            ? {
+                source: {
+                  sessionId: source.sessionId,
+                  ...(typeof source.messageId === "string" ? { messageId: source.messageId } : {}),
+                },
+              }
+            : {}),
+        };
+      })
       .filter((fact) => fact.fact.length > 0),
   };
 }
@@ -112,7 +116,11 @@ export async function loadProfileDelta(
       memorySession: { sessionId: { in: chatSessions.map((session) => session.id) } },
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { createdAt: true, message: true },
+    select: {
+      createdAt: true,
+      message: true,
+      memorySession: { select: { sessionId: true } },
+    },
     take: 2000,
   });
 
@@ -120,7 +128,11 @@ export async function loadProfileDelta(
   for (const row of rows) {
     const text = extractTextFromMessageJson(row.message).trim();
     if (!text) continue;
-    delta.push({ createdAt: row.createdAt.toISOString(), text });
+    delta.push({
+      createdAt: row.createdAt.toISOString(),
+      text,
+      sessionId: row.memorySession.sessionId,
+    });
   }
   return delta;
 }
@@ -159,7 +171,11 @@ export async function saveProfileResult(
 
 export async function appendExplicitFact(
   scope: ProfileScope,
-  input: { section: ProfileSectionKey | null; fact: string },
+  input: {
+    section: ProfileSectionKey | null;
+    fact: string;
+    source?: { sessionId: string; messageId?: string | null } | null;
+  },
 ): Promise<void> {
   const existing = await loadProfileData(scope);
   const facts: ExplicitFact[] = existing?.explicitFacts ?? [];
@@ -167,6 +183,7 @@ export async function appendExplicitFact(
     section: input.section,
     fact: input.fact,
     createdAt: new Date().toISOString(),
+    ...(input.source ? { source: input.source } : {}),
   });
   const capped = facts.slice(-100);
 
@@ -248,25 +265,39 @@ export async function resetProfile(scope: ProfileScope): Promise<void> {
  * read the delta since the watermark, summarize incrementally, save, advance
  * the watermark. Returns 0 processed when there is nothing new.
  */
-export async function summarizeProfileForScope(scope: ProfileScope): Promise<{
+export async function summarizeProfileForScope(
+  scope: ProfileScope,
+  opts?: { reconsiderations?: PendingReconsideration[] },
+): Promise<{
   processed: number;
   watermark: Date | null;
 }> {
   const existing = await loadProfileData(scope);
   const since = existing?.lastProcessedAt ?? new Date(0);
   const delta = await loadProfileDelta(scope, since);
-  if (delta.length === 0) return { processed: 0, watermark: existing?.lastProcessedAt ?? null };
+  const reconsiderations = opts?.reconsiderations?.length
+    ? opts.reconsiderations
+    : undefined;
+  if (delta.length === 0 && !reconsiderations) {
+    return { processed: 0, watermark: existing?.lastProcessedAt ?? null };
+  }
 
   const { sections, usage } = await summarizeProfileDelta({
     model: profileConfig().model,
     existing: existing ?? { sections: EMPTY_PROFILE_SECTIONS, explicitFacts: [] },
     delta,
+    ...(reconsiderations ? { reconsiderations } : {}),
   });
   console.log(
     `[profile] summary usage ${scope.kind} scope: ${usage.inputTokens} in / ${usage.outputTokens} out`,
   );
 
-  const watermark = new Date(delta[delta.length - 1]!.createdAt);
+  // A pure reconsideration pass must not advance the watermark: no new
+  // messages were consumed, so the delta must be re-read on the next run.
+  const watermark =
+    delta.length > 0
+      ? new Date(delta[delta.length - 1]!.createdAt)
+      : existing?.lastProcessedAt ?? new Date();
   await saveProfileResult(scope, { sections, watermark });
   return { processed: delta.length, watermark };
 }
