@@ -128,7 +128,7 @@ export function MessageSelectionToolbar({
         type="button"
         onClick={() => void handleAdd()}
         disabled={busy}
-        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-text px-3 text-xs font-semibold text-canvas shadow-[0_8px_24px_-8px_rgba(0,0,0,0.7)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+        className="glass glass-interactive inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {busy ? (
           <Loader2 className="size-3.5 animate-spin" strokeWidth={2.25} />

@@ -107,7 +107,10 @@ export function MessageActionsBar({
                 void onAddContext(text, isUser ? "user" : "assistant");
               }}
             >
-              <Reply className="size-4" strokeWidth={1.75} />
+              {/* Optically larger box: the Reply glyph only fills ~40% of the
+                  24px viewBox height (vs ~70% for Copy/Pencil/RefreshCw), so a
+                  bare size-4 renders visibly smaller than its siblings. */}
+              <Reply className="size-[1.125rem]" strokeWidth={2} />
             </button>
           ) : null}
 
