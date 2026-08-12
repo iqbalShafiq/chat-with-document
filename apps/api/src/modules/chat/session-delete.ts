@@ -10,7 +10,7 @@ import {
   getChatSession,
 } from "./chat-session.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
-import { ACTIVE_RUN_KEY } from "./run-queue.js";
+import { ACTIVE_RUN_KEY, getChatRunQueue } from "./run-queue.js";
 import { extractTextFromMessageJson } from "./session-list.js";
 import { buildSessionSnapshotText } from "./session-snapshot.js";
 
@@ -22,7 +22,7 @@ export class SessionRunActiveError extends Error {
   }
 }
 
-const RUN_SETTLE_TIMEOUT_MS = 8000;
+const RUN_SETTLE_TIMEOUT_MS = 12000;
 const RUN_SETTLE_POLL_MS = 400;
 
 function sleep(ms: number): Promise<void> {
@@ -46,11 +46,17 @@ export async function stopActiveRunForSession(
   const streamId = await redis.get(ACTIVE_RUN_KEY(sessionId));
   if (!streamId) return false;
 
-  const state = await store
-    .status({ streamId })
-    .catch(() => ({ status: "missing" as const, lastEventId: 0 }));
+  const state = await store.status({ streamId });
   if (state.status !== "running") {
     // Stale lock from a crashed run — drop it so the delete can proceed.
+    await redis.del(ACTIVE_RUN_KEY(sessionId));
+    return false;
+  }
+
+  // Liveness: if the chat-run job is no longer active (completed / failed /
+  // unknown), no worker can write memory — the lock is orphaned. Drop it.
+  const runJob = await getChatRunQueue().getJob(`chat:${streamId}`);
+  if (runJob && (await runJob.getState()) !== "active") {
     await redis.del(ACTIVE_RUN_KEY(sessionId));
     return false;
   }
@@ -106,6 +112,9 @@ export async function deleteChatSession(
 ): Promise<{ deleted: true; hadActiveRun: boolean }> {
   const chatSession = await getChatSession(userId, sessionId);
   const hadActiveRun = await stopActiveRunForSession(userId, sessionId);
+
+  const relocked = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
+  if (relocked) throw new SessionRunActiveError();
 
   const reconsiderEnabled = profileConfig().enabled;
   const snapshot = reconsiderEnabled
