@@ -263,7 +263,10 @@ export async function resetProfile(scope: ProfileScope): Promise<void> {
 /**
  * Shared core for the worker and the remember tool: load existing profile,
  * read the delta since the watermark, summarize incrementally, save, advance
- * the watermark. Returns 0 processed when there is nothing new.
+ * the watermark. When the caller passes pending session-deletion
+ * reconsiderations, they are folded into the SAME summarizer call (no second
+ * LLM pass) and the job runs even with an empty delta. Returns 0 processed
+ * when there is nothing new and nothing to reconsider.
  */
 export async function summarizeProfileForScope(
   scope: ProfileScope,
@@ -297,7 +300,7 @@ export async function summarizeProfileForScope(
   const watermark =
     delta.length > 0
       ? new Date(delta[delta.length - 1]!.createdAt)
-      : existing?.lastProcessedAt ?? new Date();
+      : existing?.lastProcessedAt ?? new Date(0);
   await saveProfileResult(scope, { sections, watermark });
   return { processed: delta.length, watermark };
 }
