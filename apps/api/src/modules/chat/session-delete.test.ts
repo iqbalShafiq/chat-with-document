@@ -21,16 +21,17 @@ describe("buildSessionSnapshotText", () => {
     expect(out).toMatch(/\[.*\] x+…/);
   });
 
-  it("reserves separator chars so 11 short messages plus 1 huge hit exactly 8000", () => {
-    const rows = [
-      ...Array.from({ length: 11 }, (_, i) => ({
-        createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
-        text: `message ${i}`,
-      })),
-      { createdAt: new Date(Date.UTC(2026, 0, 12)), text: "x".repeat(10_000) },
-    ];
+  it("caps total chars exactly at 8000 with separators counted", () => {
+    const base = Date.UTC(2026, 0, 1);
+    const rows = Array.from({ length: 11 }, (_, i) => ({
+      createdAt: new Date(base + (i + 1) * 60_000),
+      text: `short message ${i}`,
+    }));
+    rows.unshift({ createdAt: new Date(base), text: "x".repeat(10_000) });
     const out = buildSessionSnapshotText(rows);
     expect(out.length).toBe(8000);
+    expect(out).toContain("short message 10");
+    expect(out).toContain("…");
   });
 
   it("returns empty string for no rows", () => {
@@ -87,6 +88,7 @@ describe("buildSessionSnapshotText", () => {
     for (const ch of Array.from(out)) {
       if (ch.length === 2) expect(ch).toBe("😀");
     }
+    expect(out).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
   it("keeps the newest messages when the budget runs out", () => {
