@@ -11,8 +11,9 @@ import { PopoverMenu } from "#/components/ui/popover-menu";
 import { EMPTY_CHAT_TITLE, type SessionSummary } from "#/lib/session-history";
 
 /**
- * Per-row session actions: hover-revealed "⋯" button, floating action menu
- * (rename / delete), rename form dialog and delete confirm dialog.
+ * Per-row session actions: hover-revealed "⋯" button (always visible on the
+ * active row), floating action menu (rename / delete), rename form dialog and
+ * delete confirm dialog.
  */
 export function SessionActionsMenu({
   session,
@@ -22,11 +23,14 @@ export function SessionActionsMenu({
   onDelete,
   onRemoved,
   restoreFocusRef,
+  anchorRef,
 }: {
   session: SessionSummary;
   running: boolean;
   /** Active row: keep the trigger visible without hover. */
   alwaysVisible?: boolean;
+  /** Floating menu anchor; defaults to the "⋯" trigger button. */
+  anchorRef?: RefObject<HTMLElement | null>;
   onRename: (sessionId: string, title: string) => Promise<void>;
   onDelete: (sessionId: string) => Promise<void>;
   /** Called after the exit animation so the parent can drop the row. */
@@ -105,7 +109,7 @@ export function SessionActionsMenu({
           className={`inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.08] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring active:scale-95 ${
             alwaysVisible || menuOpen
               ? "opacity-100"
-              : "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+              : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100"
           }`}
         >
           <MoreHorizontal className="size-4" strokeWidth={1.75} />
@@ -115,9 +119,10 @@ export function SessionActionsMenu({
       <PopoverMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
-        anchorRef={buttonRef}
+        anchorRef={anchorRef ?? buttonRef}
         align="start"
         floating
+        floatingOffset={8}
         label="Chat actions"
         items={[
           {

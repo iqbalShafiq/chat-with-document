@@ -40,6 +40,21 @@ export function SessionHistoryList({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(() => groupSessionsByDate(sessions), [sessions]);
 
+  // Stable ref objects per row, used as the floating menu anchor so the
+  // popover aligns with the history item (not the vertically-centered "⋯"
+  // button inside it).
+  const rowAnchorRefs = useRef(
+    new Map<string, { current: HTMLLIElement | null }>(),
+  );
+  const rowAnchorRef = (sessionId: string) => {
+    let ref = rowAnchorRefs.current.get(sessionId);
+    if (!ref) {
+      ref = { current: null };
+      rowAnchorRefs.current.set(sessionId, ref);
+    }
+    return ref;
+  };
+
   // Rows pending removal play a fade-out before the parent drops them.
   const [exitingIds, setExitingIds] = useState<ReadonlySet<string>>(new Set());
   const exitTimerRef = useRef<number | null>(null);
@@ -157,6 +172,7 @@ export function SessionHistoryList({
               return (
                 <li
                   key={session.sessionId}
+                  ref={rowAnchorRef(session.sessionId)}
                   className={`group/row stagger-item relative ${
                     exiting ? "animate-fade-out" : ""
                   }`}
@@ -173,9 +189,9 @@ export function SessionHistoryList({
                       title={session.title}
                       aria-current={selected ? "page" : undefined}
                       aria-busy={running || undefined}
-                      className={`flex min-w-0 flex-1 cursor-pointer items-center py-1 text-left transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
+                      className={`flex min-w-0 flex-1 cursor-pointer items-center py-1 text-left transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] group-hover/row:pr-9 ${
                         selected
-                          ? "font-medium text-text"
+                          ? "pr-9 font-medium text-text"
                           : "text-text-muted group-hover/row:text-text"
                       }`}
                     >
@@ -184,7 +200,7 @@ export function SessionHistoryList({
                       </span>
                       {unread ? (
                         <span
-                          className="ml-2 size-1.5 shrink-0 rounded-full bg-accent"
+                          className="ml-2 size-1.5 shrink-0 rounded-full bg-accent opacity-100 transition-opacity duration-150 group-hover/row:opacity-0"
                           aria-label="Unread messages"
                           title="Unread"
                         />
@@ -226,6 +242,7 @@ export function SessionHistoryList({
                       session={session}
                       running={running}
                       alwaysVisible={selected}
+                      anchorRef={rowAnchorRef(session.sessionId)}
                       onRename={onRenameSession}
                       onDelete={onDeleteSession}
                       onRemoved={handleRemoved}
