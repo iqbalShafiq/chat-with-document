@@ -192,6 +192,49 @@ export async function getOrCreateEmptyChatSession(input?: {
   };
 }
 
+/** Rename a chat session (server normalizes: trim, collapse, max 48 chars). */
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<{ sessionId: string; title: string }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to rename chat");
+  }
+  const data = (await response.json()) as { sessionId?: unknown; title?: unknown };
+  return {
+    sessionId: String(data.sessionId ?? sessionId),
+    title: String(data.title ?? title),
+  };
+}
+
+/** Permanently delete a chat session (confirm required server-side). */
+export async function deleteChatSession(
+  sessionId: string,
+): Promise<{ deleted: true }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}?confirm=true`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to delete chat");
+  }
+  return { deleted: true };
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type ProjectListItem = {
@@ -751,12 +794,23 @@ export type ProfileSectionKey =
   | "expertise"
   | "goals";
 
-export type ProfileSections = Record<ProfileSectionKey, string[]>;
+/** One bullet of a summarized profile section with provenance session ids. */
+export type ProfileBullet = {
+  text: string;
+  sources?: string[];
+};
+
+export type ProfileSections = Record<ProfileSectionKey, ProfileBullet[]>;
 
 export type ExplicitFact = {
   section: ProfileSectionKey | null;
   fact: string;
   createdAt: string;
+  /** Conversation that produced this fact (explicit remember tool). */
+  source?: {
+    sessionId?: string | null;
+    messageId?: string | null;
+  } | null;
 };
 
 export type ProfileDto = {
