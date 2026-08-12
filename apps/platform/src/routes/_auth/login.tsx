@@ -110,6 +110,7 @@ function LoginPage() {
           type="email"
           placeholder="you@company.com"
           autoComplete="email"
+          autoFocus
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           error={emailError}
