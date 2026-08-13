@@ -35,14 +35,19 @@ export function useQueuedMessages(sessionId: string): {
   const [items, setItems] = useState<QueuedItem[]>(() => readQueue(sessionId));
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Session the current `items` were read from. An in-place sessionId change
+  // runs both effects in the same commit; the persist effect must write the
+  // OLD items under the OLD session's key, never the new one.
+  const loadedSessionRef = useRef(sessionId);
 
   useEffect(() => {
+    loadedSessionRef.current = sessionId;
     setItems(readQueue(sessionId));
   }, [sessionId]);
 
   useEffect(() => {
-    writeQueue(sessionId, items);
-  }, [sessionId, items]);
+    writeQueue(loadedSessionRef.current, items);
+  }, [items]);
 
   const update = useCallback((next: QueuedItem[]) => {
     setItems(next);
