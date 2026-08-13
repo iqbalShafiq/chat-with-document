@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import {
   createSteeringStore,
@@ -17,14 +17,17 @@ function createFakeRedis(): FakeRedis & {
   lists: Map<string, string[]>;
   sets: Map<string, Set<string>>;
   ttlKeys: Set<string>;
+  ttlValues: Map<string, number>;
 } {
   const lists = new Map<string, string[]>();
   const sets = new Map<string, Set<string>>();
   const ttlKeys = new Set<string>();
+  const ttlValues = new Map<string, number>();
   const fake = {
     lists,
     sets,
     ttlKeys,
+    ttlValues,
     async sadd(key: string, member: unknown) {
       const set = sets.get(key) ?? new Set<string>();
       const had = set.has(String(member));
@@ -32,8 +35,9 @@ function createFakeRedis(): FakeRedis & {
       sets.set(key, set);
       return had ? 0 : 1;
     },
-    async expire(key: string) {
+    async expire(key: string, ttl: number) {
       ttlKeys.add(key);
+      ttlValues.set(key, ttl);
       return 1;
     },
     async rpush(key: string, value: unknown) {
@@ -62,6 +66,10 @@ const sample: SteerMessage = {
   text: "follow up",
 };
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("createSteeringStore", () => {
   it("pushes a message into the per-stream list with a TTL", async () => {
     const redis = createFakeRedis();
@@ -71,6 +79,8 @@ describe("createSteeringStore", () => {
     expect(redis.lists.get("rs-steer:stream-1")).toEqual([JSON.stringify(sample)]);
     expect(redis.ttlKeys.has("rs-steer:stream-1")).toBe(true);
     expect(redis.ttlKeys.has("rs-steer-sent:stream-1")).toBe(true);
+    expect(redis.ttlValues.get("rs-steer:stream-1")).toBe(86400);
+    expect(redis.ttlValues.get("rs-steer-sent:stream-1")).toBe(86400);
   });
 
   it("is idempotent per stream (same clientMessageId pushes once)", async () => {
@@ -235,6 +245,7 @@ describe("SteeringPump", () => {
   });
 
   it("drops the message when steer() returns false (run terminal)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     const h = createHarness();
     h.target.steer = () => false;
     await h.store.push("stream-1", sample);
@@ -259,6 +270,30 @@ describe("SteeringPump", () => {
 
     await h.pump.beforeEvent(turnStart(1)); // steered turn of the new run
     expect(h.applied.map((item) => item.clientMessageId)).toEqual(["msg-1"]);
+  });
+
+  it("clears the pending steer when the re-armed target rejects it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const h = createHarness();
+    await h.store.push("stream-1", sample);
+    await h.pump.beforeEvent(turnStart(0));
+    await h.pump.afterEvent(); // steer msg-1 into target A
+    expect(h.steered).toEqual(["msg-1"]);
+
+    h.target.steer = (input: unknown) => {
+      const message = input as { metadata?: Record<string, unknown> };
+      h.steered.push(String(message.metadata?.clientMessageId));
+      return false; // new request rejects the re-steer
+    };
+    h.pump.rearmSteer(); // transient retry: new request instance
+    await h.pump.beforeEvent(turnStart(0)); // new run turn 0 = original prompt
+    await h.pump.afterEvent(); // re-steer rejected -> activeSteer cleared
+    expect(h.steered).toEqual(["msg-1", "msg-1"]); // steer attempted once more
+    expect(h.applied).toEqual([]);
+
+    await h.pump.beforeEvent(turnStart(1));
+    await h.pump.beforeEvent(turnStart(2));
+    expect(h.applied).toEqual([]); // never acked after the rejection
   });
 
   it("drain clears the active steer and discards the remaining list", async () => {

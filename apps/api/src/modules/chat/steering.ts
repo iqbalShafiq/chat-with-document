@@ -217,9 +217,18 @@ export class SteeringPump {
       this.rearmPending = false;
       if (this.activeSteer !== null) {
         const target = this.getTarget();
-        if (target !== null) {
-          target.steer(steerMessageToCoreMessage(this.activeSteer));
+        if (
+          target === null ||
+          !target.steer(steerMessageToCoreMessage(this.activeSteer))
+        ) {
+          console.warn("[chat-run] steer rejected (run terminal)", {
+            streamId: this.streamId,
+            clientMessageId: this.activeSteer.clientMessageId,
+          });
+          this.activeSteer = null;
+          return;
         }
+        this.steeredAfterTurn = this.lastTurn;
       }
       return;
     }
