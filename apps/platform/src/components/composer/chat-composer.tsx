@@ -1,11 +1,12 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
-import { FileX, ArrowUp, Square, X } from "lucide-react";
+import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
 import { useEffect, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
 import { FeaturesPopover } from "#/components/composer/features-popover";
+import { MessageQueueDock } from "#/components/composer/message-queue-dock";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import type {
@@ -18,6 +19,7 @@ import type {
 } from "#/lib/api";
 import { isImageAttachmentLike } from "#/lib/api";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
+import type { QueuedDraft, QueuedItem } from "#/lib/chat/queued-messages";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 
 /** 3 cards × 2.5rem + 2 gaps × 0.375rem — taller stacks scroll. */
@@ -65,6 +67,14 @@ export function ChatComposer({
   contextSnippet = null,
   contextSnippetError = null,
   onRemoveContextSnippet = () => {},
+  queuedItems = [],
+  onQueueSendNow = () => {},
+  onQueueRemove = () => {},
+  onQueueReorder = () => {},
+  onQueueRecall = () => {},
+  onQueueCancelEdit = () => {},
+  editHydration = null,
+  suppressOptimisticClear = null,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -113,6 +123,17 @@ export function ChatComposer({
   contextSnippet?: ContextSnippet | null;
   contextSnippetError?: string | null;
   onRemoveContextSnippet?: () => void;
+  /** Queue dock items (send-while-streaming). */
+  queuedItems?: QueuedItem[];
+  onQueueSendNow?: () => void;
+  onQueueRemove?: (id: string) => void;
+  onQueueReorder?: (fromIndex: number, toIndex: number) => void;
+  onQueueRecall?: (id: string) => void;
+  onQueueCancelEdit?: (id: string) => void;
+  /** Non-null when a queue item is being edited: hydrate the composer with it. */
+  editHydration?: { version: number; draft: QueuedDraft | null } | null;
+  /** When true at stream start, skip the optimistic composer clear (auto-flush). */
+  suppressOptimisticClear?: RefObject<boolean> | null;
 }) {
   const busy = isIngesting || chatStatus === "streaming";
   const modelsReady = modelsStatus === "success" && models.length > 0;
@@ -123,6 +144,10 @@ export function ChatComposer({
   // Local photo attachments (image/*) preview above the field; they are
   // uploaded as session images when the message is sent.
   const composer = useComposer();
+  const editingItem =
+    queuedItems.find((item) => item.status === "editing") ?? null;
+  const composerHasInput =
+    composer.input.trim().length > 0 || composer.attachments.length > 0;
   const localImageAttachments = composer.attachments.filter(
     (attachment) => isImageAttachmentLike(attachment),
   );
@@ -140,10 +165,20 @@ export function ChatComposer({
   // ComposerInput editor is stable.
   useEffect(() => {
     if (chatStatus !== "streaming") return;
+    if (suppressOptimisticClear?.current) return;
     composer.setInput("");
     composer.clearAttachments();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per stream start
   }, [chatStatus]);
+
+  // Queue-item edit hydration: replace the composer contents with the item's
+  // draft (text + attachments). A null draft clears the editor (cancel edit).
+  useEffect(() => {
+    if (!editHydration) return;
+    composer.setInput(editHydration.draft?.text ?? "");
+    composer.setAttachments(editHydration.draft?.attachments ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
+  }, [editHydration?.version]);
 
   // @anvia/react-ui's useEditor does not re-apply the Placeholder extension
   // when the prop changes, and Tiptap may recreate the empty <p> on clears.
@@ -318,6 +353,15 @@ export function ChatComposer({
         />
       ) : null}
 
+      <MessageQueueDock
+        items={queuedItems}
+        onSendNow={onQueueSendNow}
+        onRemove={onQueueRemove}
+        onReorder={onQueueReorder}
+        onRecall={onQueueRecall}
+        onCancelEdit={onQueueCancelEdit}
+      />
+
       <div className="relative flex min-h-[2.75rem] flex-col pb-11">
         <Composer.Input
           ref={composerInputRef}
@@ -367,20 +411,31 @@ export function ChatComposer({
               sessionId={sessionId}
               projectId={projectId}
               activeDocumentIds={activeDocumentIds}
-              disabled={busy || modelsUnavailable}
+              disabled={isIngesting || modelsUnavailable}
               onLinkedDocuments={onLinkedDocuments}
               onRejectedFiles={onAttachmentRejected}
             />
 
             {chatStatus === "streaming" ? (
-              <Composer.Stop
-                aria-label="Stop"
-                title="Stop"
-                onClick={onStopRun}
-                className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-text text-canvas transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96]"
-              >
-                <Square className="size-3 fill-current" strokeWidth={0} />
-              </Composer.Stop>
+              editingItem !== null || composerHasInput ? (
+                <Composer.Submit
+                  aria-label="Add to queue"
+                  title="Add to queue"
+                  disabled={isIngesting || !modelsReady}
+                  className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <CornerDownLeft className="size-4" strokeWidth={2.25} />
+                </Composer.Submit>
+              ) : (
+                <Composer.Stop
+                  aria-label="Stop"
+                  title="Stop"
+                  onClick={onStopRun}
+                  className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-text text-canvas transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96]"
+                >
+                  <Square className="size-3 fill-current" strokeWidth={0} />
+                </Composer.Stop>
+              )
             ) : (
               <Composer.Submit
                 aria-label={isIngesting ? "Processing document" : "Send"}
