@@ -2232,6 +2232,12 @@ function ChatSession({
             ],
           });
 
+          // Text context is single-use: drop the composer chip the moment the
+          // optimistic user bubble exists. Waiting for the stream made the
+          // chip linger on the field after Send. The server still clears its
+          // own row after the run reads it.
+          contextSnippetState.reset();
+
           // The user message is now in the chat (optimistic). The composer
           // (text + image attachments) is cleared by ChatComposer's streaming
           // effect; the full SDK clear() runs here — after the stream — where
@@ -2246,9 +2252,6 @@ function ChatSession({
           if (activeContextImages.length > 0) {
             setActiveContextImages([]);
           }
-          // Text context is single-use: consumed by this message, cleared from
-          // the composer (the server also clears after the run reads it).
-          contextSnippetState.reset();
           // Locally uploaded images now live in the session image store —
           // refresh the rail so they appear alongside generated images.
           if (uploadedImageAttachments.length > 0) {
@@ -2386,6 +2389,12 @@ function ChatSession({
                 scrollRef={chatViewportRef}
                 top="calc(3.5rem + 24px)"
                 bottom="calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))"
+              />
+
+              {/* Below the composer dock so Add as context cannot cover the field. */}
+              <div
+                id="chat-surface"
+                className="pointer-events-none absolute inset-0 z-10"
               />
 
               {/* Overlay dock — content scrolls underneath */}

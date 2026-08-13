@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, MessageSquareQuote, X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useState } from "react";
 import type { ContextSnippet } from "#/lib/api";
 import { HoverCard } from "#/components/ui/hover-card";
@@ -36,10 +36,6 @@ export function ContextSnippetChip({
       } ${removing ? "animate-fade-out" : ""}`}
     >
       <div className="flex min-w-0 items-start gap-2">
-        <MessageSquareQuote
-          className="mt-0.5 size-3.5 shrink-0 text-text-faint"
-          strokeWidth={1.75}
-        />
         <div className="min-w-0 flex-1">
           <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-medium text-text-faint">
             <span>Additional context</span>

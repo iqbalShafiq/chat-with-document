@@ -100,7 +100,7 @@ export function useContextSnippet(sessionId: string) {
     }
   }, [sessionId]);
 
-  /** Local clear after a successful send — the server clears its own row. */
+  /** Local clear as soon as send is dispatched — the server clears its own row. */
   const reset = useCallback(() => {
     mutationRef.current += 1;
     syncSnippet(null);
