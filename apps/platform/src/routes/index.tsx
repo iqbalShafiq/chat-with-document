@@ -15,6 +15,7 @@ import { CitationSessionProvider } from "#/components/chat/citation-session-cont
 import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { QueueConflictDialog } from "#/components/chat/queue-conflict-dialog";
 import { StaleSessionDialog } from "#/components/chat/stale-session-dialog";
 import {
   SessionDocumentsRail,
@@ -56,6 +57,9 @@ import {
   addSessionImageContext,
   removeSessionImageContext,
   fetchImageBytes,
+  isSteerNoActiveRunError,
+  steerChatMessages,
+  syncQueuedMessageIds,
   type ContextUsageInfo,
   type GeneratedImageMeta,
   type ImageGenSettings,
@@ -63,6 +67,7 @@ import {
   type ProjectListItem,
   type ReasoningEffortInfo,
   type SessionDocument,
+  type SteerMessageInput,
   type WebCapabilities,
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
@@ -91,6 +96,13 @@ import {
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
+  nextFlushableItem,
+  pendingBeforeEditing,
+  chunkIds,
+  type QueuedDraft,
+  type QueuedItem,
+} from "#/lib/chat/queued-messages";
+import {
   computeGenerationActionInfo,
   getMessageRawText,
 } from "#/lib/chat/message-text";
@@ -117,6 +129,7 @@ import {
 } from "#/lib/chat/models";
 import { useContextSnippet } from "#/hooks/use-context-snippet";
 import { useModels } from "#/hooks/use-models";
+import { useQueuedMessages } from "#/hooks/use-queued-messages";
 import {
   clearStoredSessionId,
   clearWorkspaceProjectState,
@@ -1100,6 +1113,35 @@ function ChatSession({
   /** Shared with doc rail so its bottom band matches the textfield dock. */
   const [composerDockH, setComposerDockH] = useState(120);
 
+  const queuedState = useQueuedMessages(sessionId);
+  const { items: queuedItems, actions: queueActions } = queuedState;
+  const queuedItemsRef = useRef(queuedItems);
+  queuedItemsRef.current = queuedItems;
+  const [queueHold, setQueueHold] = useState(false);
+  const [queueConflictOpen, setQueueConflictOpen] = useState(false);
+  const autoFlushBusyRef = useRef(false);
+  const autoFlushPreserveRef = useRef(false);
+  const submitBypassRef = useRef(false);
+  const pendingManualSubmitRef = useRef<{
+    input: string;
+    attachments: UIAttachment[];
+    chatController: ReturnType<typeof useChat>;
+    clear: () => void;
+  } | null>(null);
+  const [editHydration, setEditHydration] = useState<{
+    version: number;
+    draft: QueuedDraft | null;
+  } | null>(null);
+  const editHydrationVersionRef = useRef(0);
+  const [clearComposerSignal, setClearComposerSignal] = useState<{
+    version: number;
+  } | null>(null);
+  const clearSignalVersionRef = useRef(0);
+
+  useEffect(() => {
+    if (queuedItems.length === 0 && queueHold) setQueueHold(false);
+  }, [queuedItems.length, queueHold]);
+
   useEffect(() => {
     const el = composerDockRef.current;
     if (!el) return;
@@ -1258,6 +1300,62 @@ function ChatSession({
         void refreshContextUsage();
         return;
       }
+      if (record.type === "queued_message_applied") {
+        const clientMessageId =
+          typeof record.clientMessageId === "string"
+            ? record.clientMessageId
+            : null;
+        if (clientMessageId) {
+          const item = queuedItemsRef.current.find(
+            (entry) => entry.id === clientMessageId,
+          );
+          if (item) {
+            chatRef.current?.setMessages((current) => {
+              const exists = current.some(
+                (message) =>
+                  message.role === "user" &&
+                  readChatMessageMeta(message.metadata).clientMessageId ===
+                    clientMessageId,
+              );
+              if (exists) return current;
+              const parts: UIMessage["parts"] = [
+                ...item.attachments.map((attachment) => ({
+                  id: crypto.randomUUID(),
+                  type: "attachment" as const,
+                  attachment,
+                })),
+              ];
+              if (item.text.trim().length > 0) {
+                parts.push({
+                  id: crypto.randomUUID(),
+                  type: "text",
+                  text: item.text,
+                });
+              }
+              return [
+                ...current,
+                {
+                  id: crypto.randomUUID(),
+                  role: "user",
+                  parts,
+                  metadata: withChatMessageMeta(undefined, {
+                    sessionId,
+                    clientMessageId,
+                    createdAt: new Date().toISOString(),
+                    documentIds: item.documentIds,
+                    ...(item.contextSnippet
+                      ? { contextSnippet: item.contextSnippet }
+                      : {}),
+                  }),
+                },
+              ];
+            });
+            queueActions.applyAck(clientMessageId);
+            if (item.attachments.length > 0) void refreshSessionImages();
+          }
+        }
+        return;
+      }
       if (record.type === "error") {
         const errorText =
           record.error instanceof Error
@@ -1266,6 +1364,7 @@ function ChatSession({
               ? record.error
               : "The agent run failed";
         setComposerError(`Run failed: ${errorText}`);
+        setQueueHold(true);
         const failedText = failedUserMessageText(messagesRef.current);
         if (failedText !== null) {
           // The editor is read-only while streaming; apply once the stream ends.
@@ -1273,7 +1372,7 @@ function ChatSession({
         }
       }
     },
-    [refreshContextUsage],
+    [queueActions, refreshContextUsage, refreshSessionImages],
   );
 
   const chat = useChat({
@@ -1373,6 +1472,7 @@ function ChatSession({
       });
     }
     current.reset(finalizeInterruptedTools(current.messages));
+    setQueueHold(true);
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -1792,6 +1892,305 @@ function ChatSession({
   );
 
   /**
+   * Queue the composer draft (send-while-streaming / hold): pre-uploads
+   * documents at queue time, snapshots single-use context (snippet + pins)
+   * into the item, and clears the composer via the versioned clear signal.
+   */
+  const queueComposerDraft = useCallback(
+    async ({
+      input,
+      attachments,
+    }: {
+      input: string;
+      attachments: UIAttachment[];
+    }): Promise<void> => {
+      const trimmed = input.trim();
+      if (!trimmed && attachments.length === 0) return;
+
+      let documentIds: string[] = [];
+      try {
+        documentIds = await uploadComposerDocuments(attachments);
+      } catch {
+        return; // upload failed — composerError already set, nothing queued
+      }
+
+      const imageAttachments: UIAttachment[] = [];
+      for (const attachment of attachments) {
+        if (!isImageAttachmentLike(attachment)) continue;
+        if (attachment.url?.startsWith("blob:")) {
+          try {
+            const response = await fetch(attachment.url);
+            const blob = await response.blob();
+            imageAttachments.push({
+              ...attachment,
+              url: undefined,
+              data: await blobToDataUrl(blob),
+            });
+          } catch {
+            setComposerError("Could not read image attachment");
+            return;
+          }
+        } else {
+          imageAttachments.push(attachment);
+        }
+      }
+
+      const snippet = contextSnippetState.snippet;
+      const pinnedImageIds = activeContextImages.map((image) => image.id);
+
+      queueActions.queueItem({
+        text: trimmed,
+        attachments: imageAttachments,
+        documentIds,
+        contextSnippet: snippet
+          ? { text: snippet.text, sourceRole: snippet.sourceRole }
+          : null,
+        pinnedImageIds,
+      });
+
+      setClearComposerSignal({
+        version: ++clearSignalVersionRef.current,
+      });
+      // Single-use context moved into the item: clear chip (server row) + pins.
+      if (snippet) void contextSnippetState.remove().catch(() => {});
+      for (const image of activeContextImages) {
+        void removeSessionImageContext({ sessionId, imageId: image.id }).catch(
+          () => {},
+        );
+      }
+      if (pinnedImageIds.length > 0) void refreshActiveContext();
+      void refreshSessionDocuments();
+    },
+    [
+      activeContextImages,
+      contextSnippetState,
+      queueActions,
+      refreshActiveContext,
+      refreshSessionDocuments,
+      sessionId,
+      uploadComposerDocuments,
+    ],
+  );
+
+  /**
+   * Recall a queued item for editing: mark it editing, hydrate the composer
+   * with its draft, and restore its single-use context (snippet + pins).
+   */
+  const handleQueueRecall = useCallback(
+    (id: string) => {
+      const item = queuedItemsRef.current.find((entry) => entry.id === id);
+      if (!item || item.status !== "pending") return;
+      queueActions.startEdit(id);
+      setEditHydration({
+        version: ++editHydrationVersionRef.current,
+        draft: {
+          text: item.text,
+          attachments: item.attachments,
+          documentIds: item.documentIds,
+          contextSnippet: item.contextSnippet,
+          pinnedImageIds: item.pinnedImageIds,
+        },
+      });
+      contextSnippetState.setLocal(
+        item.contextSnippet
+          ? {
+              id: `queue-${item.id}`,
+              text: item.contextSnippet.text,
+              sourceRole: item.contextSnippet.sourceRole,
+              createdAt: new Date().toISOString(),
+            }
+          : null,
+      );
+      for (const imageId of item.pinnedImageIds) {
+        void addSessionImageContext({ sessionId, imageId }).catch(() => {});
+      }
+      if (item.pinnedImageIds.length > 0) void refreshActiveContext();
+      focusComposer();
+    },
+    [
+      addSessionImageContext,
+      contextSnippetState,
+      focusComposer,
+      queueActions,
+      refreshActiveContext,
+      sessionId,
+    ],
+  );
+
+  /** Commit the composer contents back into the editing queue item. */
+  const handleSubmitQueueEdit = useCallback(
+    async (input: string, attachments: UIAttachment[]) => {
+      const editing = queuedItemsRef.current.find(
+        (entry) => entry.status === "editing",
+      );
+      if (!editing) return;
+      const trimmed = input.trim();
+      if (!trimmed && attachments.length === 0) return;
+
+      let documentIds = editing.documentIds;
+      const docAttachments = attachments.filter(
+        (attachment) => !isImageAttachmentLike(attachment),
+      );
+      if (docAttachments.length > 0) {
+        try {
+          const uploaded = await uploadComposerDocuments(docAttachments);
+          documentIds = [...editing.documentIds, ...uploaded];
+        } catch {
+          return;
+        }
+      }
+
+      const imageAttachments: UIAttachment[] = [];
+      for (const attachment of attachments) {
+        if (!isImageAttachmentLike(attachment)) continue;
+        if (attachment.url?.startsWith("blob:")) {
+          try {
+            const response = await fetch(attachment.url);
+            const blob = await response.blob();
+            imageAttachments.push({
+              ...attachment,
+              url: undefined,
+              data: await blobToDataUrl(blob),
+            });
+          } catch {
+            setComposerError("Could not read image attachment");
+            return;
+          }
+        } else {
+          imageAttachments.push(attachment);
+        }
+      }
+
+      const snippet = contextSnippetState.snippet;
+      const pinnedImageIds = activeContextImages.map((image) => image.id);
+
+      queueActions.submitEdit(editing.id, {
+        text: trimmed,
+        attachments: imageAttachments,
+        documentIds,
+        contextSnippet: snippet
+          ? { text: snippet.text, sourceRole: snippet.sourceRole }
+          : null,
+        pinnedImageIds,
+      });
+
+      setEditHydration({ version: ++editHydrationVersionRef.current, draft: null });
+      setClearComposerSignal({ version: ++clearSignalVersionRef.current });
+      if (snippet) void contextSnippetState.remove().catch(() => {});
+      if (pinnedImageIds.length > 0) void refreshActiveContext();
+    },
+    [
+      activeContextImages,
+      contextSnippetState,
+      queueActions,
+      refreshActiveContext,
+      uploadComposerDocuments,
+    ],
+  );
+
+  /** Abort a queue edit: back to pending, composer cleared, context restored. */
+  const handleQueueCancelEdit = useCallback(
+    (id: string) => {
+      const item = queuedItemsRef.current.find((entry) => entry.id === id);
+      if (!item || item.status !== "editing") return;
+      queueActions.cancelEdit(id);
+      setEditHydration({ version: ++editHydrationVersionRef.current, draft: null });
+      setClearComposerSignal({ version: ++clearSignalVersionRef.current });
+      contextSnippetState.setLocal(null);
+      for (const imageId of item.pinnedImageIds) {
+        void removeSessionImageContext({ sessionId, imageId }).catch(() => {});
+      }
+      if (item.pinnedImageIds.length > 0) void refreshActiveContext();
+    },
+    [contextSnippetState, queueActions, refreshActiveContext, sessionId],
+  );
+
+  /**
+   * Build the steer payload for a queued item: record local images in the
+   * session gallery, then serialize image attachments + pinned images as
+   * base64 attachment data for the active run.
+   */
+  const buildSteerPayload = useCallback(
+    async (item: QueuedItem): Promise<SteerMessageInput> => {
+      const steerAttachments: { mediaType: string; data: string }[] = [];
+      for (const attachment of item.attachments) {
+        if (attachment.type !== "image") continue;
+        try {
+          // Record the image in the session gallery.
+          const file = await resolveAttachmentFile(attachment);
+          const dims = await imageDimensionsFromFile(file);
+          await uploadSessionImage({
+            sessionId,
+            file,
+            width: dims.width,
+            height: dims.height,
+            projectId,
+          });
+        } catch {
+          setComposerError("Could not upload queued image");
+          throw new Error("Could not upload queued image");
+        }
+        const raw = attachment.data ?? "";
+        const base64 = raw.startsWith("data:")
+          ? (raw.split(",", 2)[1] ?? "")
+          : raw;
+        if (base64.length === 0) continue;
+        steerAttachments.push({
+          mediaType: attachment.mediaType ?? "image/png",
+          data: base64,
+        });
+      }
+      for (const imageId of item.pinnedImageIds) {
+        try {
+          const { blob, mediaType } = await fetchImageBytes(imageId);
+          const dataUrl = await blobToDataUrl(blob);
+          steerAttachments.push({
+            mediaType,
+            data: dataUrl.split(",", 2)[1] ?? "",
+          });
+        } catch {
+          // skip images that fail to load
+        }
+      }
+      return {
+        clientMessageId: item.id,
+        text: item.text,
+        ...(steerAttachments.length > 0 ? { attachments: steerAttachments } : {}),
+        ...(item.contextSnippet ? { contextSnippet: item.contextSnippet } : {}),
+      };
+    },
+    [projectId, sessionId],
+  );
+
+  /** Send every pending item into the session's ACTIVE run via steer. */
+  const handleQueueSendNow = useCallback(async () => {
+    const toSend = pendingBeforeEditing(queuedItemsRef.current);
+    if (toSend.length === 0) return;
+    queueActions.markInflight(new Set(toSend.map((item) => item.id)));
+    try {
+      const payloads: SteerMessageInput[] = [];
+      for (const item of toSend) {
+        payloads.push(await buildSteerPayload(item));
+      }
+      await steerChatMessages({ sessionId, messages: payloads });
+      setQueueHold(false);
+    } catch (error) {
+      queueActions.revertInflight();
+      if (isSteerNoActiveRunError(error)) {
+        // The run ended between render and post — the auto-flush effect
+        // sends it as a new run once idle.
+        setQueueHold(false);
+      } else {
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not send queued messages",
+        );
+      }
+    }
+  }, [buildSteerPayload, queueActions, sessionId]);
+
+  /**
    * Shared send step for manual and queued sends: uploads local image
    * attachments, attaches pinned context, builds the bubble attachments and
    * metadata, and sends the message through the live chat controller.
@@ -1966,6 +2365,80 @@ function ChatSession({
       uploadComposerDocuments,
     ],
   );
+
+  /**
+   * Auto-flush: when the chat is idle and items wait, send the next one as
+   * a fresh run (queue-held items wait for "Send now" / hold release).
+   */
+  useEffect(() => {
+    if (chat.status !== "idle") return;
+    if (!initialMessages) return;
+    if (queueHold || autoFlushBusyRef.current) return;
+    if (nextFlushableItem(queuedItemsRef.current) === null) return;
+
+    autoFlushBusyRef.current = true;
+    void (async () => {
+      try {
+        // Purge items already applied server-side (missed acks across reloads).
+        const ids = queuedItemsRef.current.map((item) => item.id);
+        for (const chunk of chunkIds(ids, 50)) {
+          try {
+            const { appliedIds } = await syncQueuedMessageIds({
+              sessionId,
+              ids: chunk,
+            });
+            if (appliedIds.length > 0) {
+              const applied = new Set(appliedIds);
+              queueActions.replaceAll(
+                queuedItemsRef.current.filter((item) => !applied.has(item.id)),
+              );
+            }
+          } catch {
+            // best-effort dedupe — a duplicate would only re-ask the agent
+          }
+        }
+        const candidate = nextFlushableItem(queuedItemsRef.current);
+        if (!candidate) return;
+
+        const item = candidate.item;
+        if (item.contextSnippet) {
+          const ok = await contextSnippetState.setSnippet(
+            item.contextSnippet.text,
+            item.contextSnippet.sourceRole,
+          );
+          if (!ok) return;
+        }
+        for (const imageId of item.pinnedImageIds) {
+          await addSessionImageContext({ sessionId, imageId }).catch(() => {});
+        }
+
+        autoFlushPreserveRef.current = true;
+        try {
+          await sendDraft({
+            text: item.text,
+            attachments: item.attachments,
+            documentIds: item.documentIds,
+            pinnedImageIds: item.pinnedImageIds,
+            preserveComposer: true,
+          });
+        } finally {
+          autoFlushPreserveRef.current = false;
+        }
+        queueActions.removeItem(item.id);
+      } finally {
+        autoFlushBusyRef.current = false;
+      }
+    })();
+  }, [
+    chat.status,
+    contextSnippetState,
+    initialMessages,
+    queueActions,
+    queueHold,
+    queuedItems,
+    sendDraft,
+    sessionId,
+  ]);
 
   const isSessionStale = useCallback(async (): Promise<boolean> => {
     try {
@@ -2251,6 +2724,25 @@ function ChatSession({
     const trimmed = input.trim();
     if (!trimmed && attachments.length === 0) return;
 
+    // Queue conflict gate — bypassed for the modal's own "send new" action
+    // via submitBypassRef. Reached only while idle with a non-empty queue
+    // (auto-flush drains it unless held), so the queue is paused: ask the
+    // user whether this draft joins the queue or sends immediately.
+    if (
+      !submitBypassRef.current &&
+      chatRef.current?.status !== "streaming" &&
+      queuedItemsRef.current.length > 0
+    ) {
+      pendingManualSubmitRef.current = {
+        input,
+        attachments,
+        chatController,
+        clear,
+      };
+      setQueueConflictOpen(true);
+      return;
+    }
+
     // Optimistic send: the user bubble appears the moment sendMessage is
     // called below. The stale check runs in parallel and only surfaces a
     // non-blocking notice afterwards (normal sends are non-destructive).
@@ -2312,6 +2804,38 @@ function ChatSession({
     }
   };
 
+  /** Dialog "Send queue": the pending draft joins the queue; hold releases. */
+  const handleQueueConflictSendQueue = useCallback(async () => {
+    setQueueConflictOpen(false);
+    const pending = pendingManualSubmitRef.current;
+    pendingManualSubmitRef.current = null;
+    if (!pending) return;
+    await queueComposerDraft({
+      input: pending.input,
+      attachments: pending.attachments,
+    });
+    setQueueHold(false);
+  }, [queueComposerDraft]);
+
+  /** Dialog "Send new message": bypass the conflict gate and send now. */
+  const handleQueueConflictSendNew = useCallback(async () => {
+    setQueueConflictOpen(false);
+    const pending = pendingManualSubmitRef.current;
+    pendingManualSubmitRef.current = null;
+    if (!pending) return;
+    submitBypassRef.current = true;
+    try {
+      await submitComposerRef.current(
+        pending.input,
+        pending.attachments,
+        pending.chatController,
+        pending.clear,
+      );
+    } finally {
+      submitBypassRef.current = false;
+    }
+  }, []);
+
   return (
     <ChatProvider controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
@@ -2328,10 +2852,24 @@ function ChatSession({
           clear,
         }) => {
           if (modelsStatus !== "success") return;
-          // Normal sends are optimistic: the bubble appears the moment
-          // sendMessage is called. The freshness check runs in parallel and
-          // only surfaces a non-blocking notice afterwards (resubmit/revert
-          // still block — see resubmitFromUserMessage).
+          const editing = queuedItemsRef.current.find(
+            (item) => item.status === "editing",
+          );
+          if (chatRef.current?.status === "streaming") {
+            if (editing) {
+              await handleSubmitQueueEdit(input, attachments);
+            } else {
+              await queueComposerDraft({ input, attachments });
+            }
+            return;
+          }
+          // Idle + editing: the composer holds the recalled draft — commit it
+          // back into the queue item (a held queue would otherwise trap the
+          // submit behind the conflict gate).
+          if (editing) {
+            await handleSubmitQueueEdit(input, attachments);
+            return;
+          }
           await submitComposerRef.current(
             input,
             attachments,
@@ -2479,6 +3017,16 @@ function ChatSession({
                     onReload={handleStaleReload}
                   />
 
+                  <QueueConflictDialog
+                    open={queueConflictOpen}
+                    onClose={() => {
+                      pendingManualSubmitRef.current = null;
+                      setQueueConflictOpen(false);
+                    }}
+                    onSendQueue={() => void handleQueueConflictSendQueue()}
+                    onSendNew={() => void handleQueueConflictSendNew()}
+                  />
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -2523,6 +3071,15 @@ function ChatSession({
                     onRemoveContextSnippet={() => {
                       void contextSnippetState.remove();
                     }}
+                    queuedItems={queuedItems}
+                    onQueueSendNow={handleQueueSendNow}
+                    onQueueRemove={queueActions.removeItem}
+                    onQueueReorder={queueActions.reorder}
+                    onQueueRecall={handleQueueRecall}
+                    onQueueCancelEdit={handleQueueCancelEdit}
+                    editHydration={editHydration}
+                    clearComposerSignal={clearComposerSignal}
+                    suppressOptimisticClear={autoFlushPreserveRef}
                   />
                 </div>
               </div>

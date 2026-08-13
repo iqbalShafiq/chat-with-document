@@ -74,6 +74,7 @@ export function ChatComposer({
   onQueueRecall = () => {},
   onQueueCancelEdit = () => {},
   editHydration = null,
+  clearComposerSignal = null,
   suppressOptimisticClear = null,
 }: {
   sessionId: string;
@@ -132,6 +133,8 @@ export function ChatComposer({
   onQueueCancelEdit?: (id: string) => void;
   /** Non-null when a queue item is being edited: hydrate the composer with it. */
   editHydration?: { version: number; draft: QueuedDraft | null } | null;
+  /** Queue/cancel actions clear the composer outside a status transition. */
+  clearComposerSignal?: { version: number } | null;
   /** When true at stream start, skip the optimistic composer clear (auto-flush). */
   suppressOptimisticClear?: RefObject<boolean> | null;
 }) {
@@ -179,6 +182,15 @@ export function ChatComposer({
     composer.setAttachments(editHydration.draft?.attachments ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
   }, [editHydration?.version]);
+
+  // Queue/cancel actions clear the composer outside a status transition
+  // (mid-stream clear() crashes the SDK editor — use the safe primitives).
+  useEffect(() => {
+    if (!clearComposerSignal) return;
+    composer.setInput("");
+    composer.clearAttachments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
+  }, [clearComposerSignal?.version]);
 
   // @anvia/react-ui's useEditor does not re-apply the Placeholder extension
   // when the prop changes, and Tiptap may recreate the empty <p> on clears.
