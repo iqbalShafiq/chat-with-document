@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_STEER_ATTACHMENTS,
+  MAX_STEER_ATTACHMENT_BYTES,
+  MAX_STEER_CLIENT_ID_CHARS,
   MAX_STEER_MESSAGES,
+  MAX_STEER_SNIPPET_CHARS,
   MAX_STEER_TEXT_CHARS,
   parseSteerBody,
 } from "./steer-body.js";
@@ -63,6 +67,76 @@ describe("parseSteerBody", () => {
       parseSteerBody({
         ...validBody,
         messages: [{ clientMessageId: "m", text: "   " }],
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects more than the attachment count cap", () => {
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m",
+            text: "x",
+            attachments: Array.from(
+              { length: MAX_STEER_ATTACHMENTS + 1 },
+              () => ({ mediaType: "image/png", data: "AAAA" }),
+            ),
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects attachment data longer than the byte cap", () => {
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m",
+            text: "x",
+            attachments: [
+              {
+                mediaType: "image/png",
+                data: "A".repeat(MAX_STEER_ATTACHMENT_BYTES + 1),
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects clientMessageId longer than the cap", () => {
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m".repeat(MAX_STEER_CLIENT_ID_CHARS + 1),
+            text: "x",
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects contextSnippet text longer than the cap", () => {
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m",
+            text: "x",
+            contextSnippet: {
+              text: "y".repeat(MAX_STEER_SNIPPET_CHARS + 1),
+              sourceRole: "user",
+            },
+          },
+        ],
       }),
     ).toBeNull();
   });
