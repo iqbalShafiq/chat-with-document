@@ -1804,8 +1804,6 @@ function ChatSession({
       pinnedImageIds: string[];
       preserveComposer?: boolean;
     }): Promise<void> => {
-      const documentIds = [...input.documentIds];
-
       // Local images attach to the message like pinned context (uploaded
       // to the session image store + auto-pinned so the model sees them).
       const uploadedImageAttachments: Array<{
@@ -1844,6 +1842,17 @@ function ChatSession({
           text: meta.prompt || "Uploaded image",
         });
       }
+
+      // Documents ingest after images — the old manual-submit order, so a
+      // failed image upload never leaves freshly ingested docs orphaned.
+      // Queued-path compatibility (Task 12): queued items carry image-only
+      // attachments with their documentIds pre-uploaded at queue time, so
+      // the non-image filter finds nothing here and the prelinked ids pass
+      // through untouched.
+      const documentIds = [
+        ...input.documentIds,
+        ...(await uploadComposerDocuments(input.attachments)),
+      ];
 
       // Active image context: attach pinned images to the user bubble so
       // they are visible in the sent message (the worker injects them as
@@ -1901,7 +1910,7 @@ function ChatSession({
 
       const contextSnippet = contextSnippetState.snippet;
 
-      await chatRef.current!.sendMessage({
+      const sendPromise = chatRef.current!.sendMessage({
         text: input.text,
         metadata: withChatMessageMeta(undefined, {
           sessionId,
@@ -1925,12 +1934,15 @@ function ChatSession({
         ],
       });
 
-      // Text context is single-use: drop the composer chip once the
-      // optimistic user bubble exists (the server still clears its own row
-      // after the run reads it).
+      // Text context is single-use: drop the composer chip the moment the
+      // optimistic user bubble exists. Waiting for the stream made the
+      // chip linger on the field after Send. The server still clears its
+      // own row after the run reads it.
       if (contextSnippet) {
         contextSnippetState.reset();
       }
+      await sendPromise;
+
       if (!input.preserveComposer) {
         // The route clears via the `clear` callback for manual sends; nothing
         // to do here — sendDraft is called by submitComposerRef which clears.
@@ -1951,6 +1963,7 @@ function ChatSession({
       refreshActiveContext,
       refreshSessionImages,
       sessionId,
+      uploadComposerDocuments,
     ],
   );
 
@@ -2269,11 +2282,10 @@ function ChatSession({
     // Upload steps set composerError themselves before throwing; the catch
     // keeps the submit promise from rejecting (the composer awaits it).
     try {
-      const documentIds = await uploadComposerDocuments(attachments);
       await sendDraft({
         text: trimmed,
         attachments,
-        documentIds,
+        documentIds: [],
         pinnedImageIds: activeContextImages.map((image) => image.id),
       });
     } catch (error) {
