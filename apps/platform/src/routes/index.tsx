@@ -2164,6 +2164,7 @@ function ChatSession({
 
   /** Send every pending item into the session's ACTIVE run via steer. */
   const handleQueueSendNow = useCallback(async () => {
+    if (autoFlushBusyRef.current) return;
     const toSend = pendingBeforeEditing(queuedItemsRef.current);
     if (toSend.length === 0) return;
     queueActions.markInflight(new Set(toSend.map((item) => item.id)));
@@ -2380,24 +2381,27 @@ function ChatSession({
     void (async () => {
       try {
         // Purge items already applied server-side (missed acks across reloads).
+        // Applied ids accumulate into ONE set so every chunk's dedupe is
+        // applied at once — filtering per-chunk would read a stale snapshot.
         const ids = queuedItemsRef.current.map((item) => item.id);
+        const applied = new Set<string>();
         for (const chunk of chunkIds(ids, 50)) {
           try {
             const { appliedIds } = await syncQueuedMessageIds({
               sessionId,
               ids: chunk,
             });
-            if (appliedIds.length > 0) {
-              const applied = new Set(appliedIds);
-              queueActions.replaceAll(
-                queuedItemsRef.current.filter((item) => !applied.has(item.id)),
-              );
-            }
+            for (const id of appliedIds) applied.add(id);
           } catch {
             // best-effort dedupe — a duplicate would only re-ask the agent
           }
         }
-        const candidate = nextFlushableItem(queuedItemsRef.current);
+        let remaining = queuedItemsRef.current;
+        if (applied.size > 0) {
+          remaining = remaining.filter((item) => !applied.has(item.id));
+          queueActions.replaceAll(remaining);
+        }
+        const candidate = nextFlushableItem(remaining);
         if (!candidate) return;
 
         const item = candidate.item;
@@ -3024,7 +3028,9 @@ function ChatSession({
                       setQueueConflictOpen(false);
                     }}
                     onSendQueue={() => void handleQueueConflictSendQueue()}
-                    onSendNew={() => void handleQueueConflictSendNew()}
+                    onSendNew={() =>
+                      void handleQueueConflictSendNew().catch(() => {})
+                    }
                   />
 
                   <ChatComposer
