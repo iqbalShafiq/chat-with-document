@@ -6,6 +6,10 @@ import { CitationsInfoButton } from "#/components/chat/citations-info-button";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
 import { MessageCopyButton } from "#/components/chat/message-copy-button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
+import {
+  normalizeContextText,
+  type ContextSnippetSourceRole,
+} from "#/lib/chat/context-snippet-text";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import {
   canTargetMessageForTruncate,
@@ -20,12 +24,39 @@ import { getMessageRawText } from "#/lib/chat/message-text";
 const ACTION_ICON_CLASS =
   "inline-flex cursor-pointer p-0 text-text-faint transition hover:text-text active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40";
 
+/**
+ * Lucide Reply only paints ~y=7–18 of the 24 viewBox, so a size-4
+ * instance sits ~40% shorter than Copy/Pencil. Larger 7-unit chevron
+ * than stock Reply, paired with a shorter stem + r=5 so the glyph
+ * still spans y=1–21 without long jagged diagonals.
+ */
+function ReplyActionIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M21 21v-8a5 5 0 0 0-5-5H4" />
+      <path d="m11 15-7-7 7-7" />
+    </svg>
+  );
+}
+
 export type MessageActionsBarProps = {
   chatStatus: UseChatStatus;
   onRevert: (message: UIMessage) => Promise<void>;
   onStartEdit: (message: UIMessage) => void;
   /** Combined text of the whole generation (assistant footer copy). */
   generationText?: string;
+  /** Pin the whole message as additional context. */
+  onAddContext: (text: string, sourceRole: ContextSnippetSourceRole) => Promise<boolean>;
 };
 
 export function MessageActionsBar({
@@ -33,6 +64,7 @@ export function MessageActionsBar({
   onRevert,
   onStartEdit,
   generationText,
+  onAddContext,
 }: MessageActionsBarProps) {
   const { message } = useMessage();
   const messageCitations = useMessageCitations();
@@ -84,6 +116,24 @@ export function MessageActionsBar({
           ) : null}
           {hasText || (generationText && generationText.trim().length > 0) ? (
             <MessageCopyButton generationText={generationText} />
+          ) : null}
+          {hasText ? (
+            <button
+              type="button"
+              className={ACTION_ICON_CLASS}
+              aria-label="Add message as context"
+              title="Add as context"
+              onClick={() => {
+                const text = normalizeContextText(
+                  rawText,
+                  isUser ? "user" : "assistant",
+                );
+                if (text === null) return;
+                void onAddContext(text, isUser ? "user" : "assistant");
+              }}
+            >
+              <ReplyActionIcon className="size-4" />
+            </button>
           ) : null}
 
           {isUser ? (

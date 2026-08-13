@@ -247,6 +247,9 @@ export async function deleteChatSessionsHard(
     await tx.sessionImageContext.deleteMany({
       where: { userId, sessionId: { in: ids } },
     });
+    await tx.sessionContextSnippet.deleteMany({
+      where: { userId, sessionId: { in: ids } },
+    });
     await tx.agentUsageEvent.deleteMany({
       where: { userId, sessionId: { in: ids } },
     });

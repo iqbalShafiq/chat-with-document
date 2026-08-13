@@ -411,3 +411,16 @@ model SessionImageContext {
   @@index([userId, sessionId])
   @@map("session_image_context")
 }
+
+model SessionContextSnippet {
+  id         String   @id @default(cuid())
+  userId     String
+  sessionId  String   @unique
+  text       String   @db.Text
+  sourceRole String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("session_context_snippet")
+}

@@ -2,7 +2,9 @@ import type { UIMessage, UIMessagePart, UseChatStatus } from "@anvia/react";
 import { Message, useMessage } from "@anvia/react-ui";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
+import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { MessageCitationProvider } from "#/components/chat/message-citation-context";
+import { MessageSelectionToolbar } from "#/components/chat/message-selection-toolbar";
 import { ConversationSummaryDivider } from "#/components/chat/conversation-summary-divider";
 import { ErrorMessageBubble } from "#/components/chat/error-message-bubble";
 import { UserMessageEdit } from "#/components/chat/user-message-edit";
@@ -22,6 +24,7 @@ import {
   formatMessageBubbleTimestamp,
   formatMessageDateTime,
 } from "#/lib/chat/message-time";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import {
   getMessageRawText,
   messageHasUserFacingText,
@@ -91,6 +94,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   editAvailableImages,
   onEditContextAdd,
   onEditContextRemove,
+  onAddContext,
 }: {
   message: UIMessage;
   chatStatus: UseChatStatus;
@@ -107,6 +111,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   editAvailableImages?: GeneratedImageItem[];
   onEditContextAdd?: (image: GeneratedImageItem) => void;
   onEditContextRemove?: (image: GeneratedImageItem) => void;
+  /** Wired in Task 8 — declared now so routes/index.tsx can pass it. */
+  onAddContext?: (
+    text: string,
+    sourceRole: ContextSnippetSourceRole,
+  ) => Promise<boolean>;
 }) {
   const message = messageProp;
   const messageKind = readChatMessageMeta(message.metadata).kind;
@@ -149,6 +158,10 @@ export const ChatMessageRow = memo(function ChatMessageRow({
     message.role === "user" && editingMessageId === message.id;
 
   const userMeta = readChatMessageMeta(message.metadata);
+  const messageContextSnippet =
+    message.role === "user" && userMeta.contextSnippet
+      ? userMeta.contextSnippet
+      : null;
   const userTimeLabel =
     message.role === "user" && userMeta.createdAt
       ? formatMessageBubbleTimestamp(userMeta.createdAt)
@@ -212,6 +225,17 @@ export const ChatMessageRow = memo(function ChatMessageRow({
             />
           ) : (
             <>
+              {messageContextSnippet ? (
+                <ContextSnippetChip
+                  snippet={{
+                    id: "inline",
+                    text: messageContextSnippet.text,
+                    sourceRole: messageContextSnippet.sourceRole,
+                    createdAt: "",
+                  }}
+                  variant="bubble"
+                />
+              ) : null}
               <ChatMessageParts
                 chatStatus={chatStatus}
                 lastMessageId={lastMessageId}
@@ -229,6 +253,17 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           )}
         </Message.Content>
 
+        {message.role === "user" || message.role === "assistant" ? (
+          <MessageSelectionToolbar
+            containerRef={contentRef}
+            role={message.role === "user" ? "user" : "assistant"}
+            disabled={isEditing}
+            onAddContext={(text, sourceRole) =>
+              onAddContext ? onAddContext(text, sourceRole) : Promise.resolve(false)
+            }
+          />
+        ) : null}
+
         {showActions && !isEditing ? (
           <MessageActionsBar
             chatStatus={chatStatus}
@@ -241,6 +276,9 @@ export const ChatMessageRow = memo(function ChatMessageRow({
               }
               onStartEdit(target);
             }}
+            onAddContext={(text, sourceRole) =>
+              onAddContext ? onAddContext(text, sourceRole) : Promise.resolve(false)
+            }
           />
         ) : null}
       </Message.Root>

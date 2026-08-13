@@ -179,18 +179,20 @@ export function AppShell({
             onNewChat={onNewChat}
             newChatDisabled={newChatDisabled}
           />
-          <main className="vt-main relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            {/*
-              Curved L-separator — only while desktop sidebar is open;
-              opacity/border animate out when collapsed.
-            */}
-            <div
-              aria-hidden
-              className={`content-frame ${
-                !isMobile && sidebarOpen ? "content-frame--with-sidebar" : ""
-              }`}
-            />
-            {children}
+          <main className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/*
+                Curved L-separator — only while desktop sidebar is open;
+                opacity/border animate out when collapsed.
+              */}
+              <div
+                aria-hidden
+                className={`content-frame ${
+                  !isMobile && sidebarOpen ? "content-frame--with-sidebar" : ""
+                }`}
+              />
+              {children}
+            </div>
           </main>
         </div>
       </div>

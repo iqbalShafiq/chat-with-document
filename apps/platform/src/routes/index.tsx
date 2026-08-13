@@ -88,6 +88,7 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
   computeGenerationActionInfo,
@@ -114,6 +115,7 @@ import {
   modelById,
   resolveReasoningFallback,
 } from "#/lib/chat/models";
+import { useContextSnippet } from "#/hooks/use-context-snippet";
 import { useModels } from "#/hooks/use-models";
 import {
   clearStoredSessionId,
@@ -1400,6 +1402,16 @@ function ChatSession({
     }
   }, [sessionId]);
 
+  const contextSnippetState = useContextSnippet(sessionId);
+
+  const handleAddContext = useCallback(
+    async (text: string, sourceRole: ContextSnippetSourceRole) => {
+      return contextSnippetState.setSnippet(text, sourceRole);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snippet state is internal to the hook
+    [contextSnippetState.setSnippet],
+  );
+
   // Pinning works with any model: vision models receive the images as image
   // input, text-only models get them via the view_image helper tool.
   const handleToggleImageContext = useCallback(
@@ -2188,6 +2200,8 @@ function ChatSession({
             }
           }
 
+          const contextSnippet = contextSnippetState.snippet;
+
           const sendPromise = chatController.sendMessage({
             text: trimmed,
             metadata: withChatMessageMeta(undefined, {
@@ -2196,6 +2210,14 @@ function ChatSession({
               attachedDocuments,
               createdAt: new Date().toISOString(),
               clientMessageId: createClientMessageId(),
+              ...(contextSnippet
+                ? {
+                    contextSnippet: {
+                      text: contextSnippet.text,
+                      sourceRole: contextSnippet.sourceRole,
+                    },
+                  }
+                : {}),
             }),
             attachments: [
               ...documentAttachments.map((attachment) => ({
@@ -2209,6 +2231,12 @@ function ChatSession({
               ...contextAttachments,
             ],
           });
+
+          // Text context is single-use: drop the composer chip the moment the
+          // optimistic user bubble exists. Waiting for the stream made the
+          // chip linger on the field after Send. The server still clears its
+          // own row after the run reads it.
+          contextSnippetState.reset();
 
           // The user message is now in the chat (optimistic). The composer
           // (text + image attachments) is cleared by ChatComposer's streaming
@@ -2338,6 +2366,7 @@ function ChatSession({
                         editAvailableImages={editAvailableImages}
                         onEditContextAdd={handleEditContextAdd}
                         onEditContextRemove={handleEditContextRemove}
+                        onAddContext={handleAddContext}
                       />
                     )}
                   </Thread.Messages>
@@ -2360,6 +2389,12 @@ function ChatSession({
                 scrollRef={chatViewportRef}
                 top="calc(3.5rem + 24px)"
                 bottom="calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))"
+              />
+
+              {/* Below the composer dock so Add as context cannot cover the field. */}
+              <div
+                id="chat-surface"
+                className="pointer-events-none absolute inset-0 z-10"
               />
 
               {/* Overlay dock — content scrolls underneath */}
@@ -2439,6 +2474,11 @@ function ChatSession({
                     activeContextImages={activeContextImages}
                     onToggleImageContext={(image) => {
                       void handleToggleImageContext(image);
+                    }}
+                    contextSnippet={contextSnippetState.snippet}
+                    contextSnippetError={contextSnippetState.error}
+                    onRemoveContextSnippet={() => {
+                      void contextSnippetState.remove();
                     }}
                   />
                 </div>

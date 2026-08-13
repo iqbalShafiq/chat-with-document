@@ -1,4 +1,5 @@
 import type { UIMessage } from "@anvia/react";
+import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { MessageCitation } from "#/lib/chat/citations";
 import { parseCitationsFromMetadata } from "#/lib/chat/citations";
 
@@ -9,6 +10,8 @@ export type ChatMessageMeta = {
   documentIds?: string[];
   sessionId?: string;
   attachedDocuments?: Array<{ name: string; mediaType?: string }>;
+  /** Single pinned context snippet carried by a sent user message. */
+  contextSnippet?: { text: string; sourceRole: ContextSnippetSourceRole };
   /** Dual-written structured citations (server and/or client). */
   citations?: MessageCitation[];
   /** UI-only classification: failed run (error) or compaction boundary (summary). */
@@ -55,6 +58,19 @@ export function readChatMessageMeta(
     });
   }
 
+  const contextSnippet = metadata.contextSnippet;
+  if (
+    isPlainObject(contextSnippet) &&
+    typeof contextSnippet.text === "string" &&
+    (contextSnippet.sourceRole === "user" ||
+      contextSnippet.sourceRole === "assistant")
+  ) {
+    meta.contextSnippet = {
+      text: contextSnippet.text,
+      sourceRole: contextSnippet.sourceRole,
+    };
+  }
+
   if (metadata.kind === "summary" || metadata.kind === "error") {
     meta.kind = metadata.kind;
   }
@@ -70,7 +86,7 @@ export function readChatMessageMeta(
 export function withChatMessageMeta(
   base: UIMessage["metadata"],
   patch: ChatMessageMeta,
-): NonNullable<UIMessage["metadata"]> {
+): ChatMessageMeta {
   const current: Record<string, unknown> = isPlainObject(base)
     ? { ...base }
     : {};
@@ -90,6 +106,12 @@ export function withChatMessageMeta(
       return { name: doc.name, mediaType: doc.mediaType };
     });
   }
+  if (patch.contextSnippet !== undefined) {
+    current.contextSnippet = {
+      text: patch.contextSnippet.text,
+      sourceRole: patch.contextSnippet.sourceRole,
+    };
+  }
   if (patch.citations !== undefined) {
     current.citations = patch.citations.map((c) => {
       const row: Record<string, string | number | boolean> = {
@@ -107,7 +129,7 @@ export function withChatMessageMeta(
   }
   if (patch.kind !== undefined) current.kind = patch.kind;
 
-  return current as NonNullable<UIMessage["metadata"]>;
+  return current as ChatMessageMeta;
 }
 
 export function canTargetMessageForTruncate(meta: ChatMessageMeta): boolean {

@@ -31,7 +31,7 @@ type ImageModelsState =
  *
  * The panel is portaled to <body> and positioned `fixed` with a high z-index
  * (same pattern as the model/reasoning switcher menus) so it never loses a
- * stacking fight against the glass sidebar or the composer's `isolation`.
+ * stacking fight against the glass sidebar or the composer dock.
  *
  * When a feature is enabled, the trigger grows into a two-segment shell
  * (plus | vertical divider | active-feature icons in accent) mirroring the

@@ -143,50 +143,34 @@ body {
 }
 
 /*
-  Floating composer — near-black frosted field over the thread.
+  Floating composer / chips share the top-bar frost exactly:
+  rgb(5 5 5 / 0.82) + blur(24px) saturate(1.2). Hairline only marks
+  the floating shape — the bar itself stays borderless.
 */
+.glass-composer,
+.glass {
+  background: rgb(5 5 5 / 0.82);
+  background-clip: padding-box;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+
 .glass-composer {
-  background: linear-gradient(
-    165deg,
-    rgb(10 10 10 / 0.94) 0%,
-    rgb(5 5 5 / 0.91) 100%
-  );
-  border: 1px solid rgb(255 255 255 / 0.08);
-  box-shadow:
-    0 18px 48px -16px rgb(0 0 0 / 0.78),
-    0 6px 16px -8px rgb(0 0 0 / 0.5),
-    0 1px 0 rgb(255 255 255 / 0.05) inset,
-    0 -1px 0 rgb(0 0 0 / 0.35) inset;
-  -webkit-backdrop-filter: blur(36px) saturate(1.3);
-  backdrop-filter: blur(36px) saturate(1.3);
   transition:
     border-color 200ms var(--ease-out-premium),
-    box-shadow 200ms var(--ease-out-premium),
-    background 200ms var(--ease-out-premium);
+    box-shadow 200ms var(--ease-out-premium);
 }
 
 .glass-composer:focus-within {
   border-color: rgb(232 163 23 / 0.28);
-  background: linear-gradient(
-    165deg,
-    rgb(12 12 12 / 0.96) 0%,
-    rgb(6 6 6 / 0.94) 100%
-  );
-  box-shadow:
-    0 20px 52px -14px rgb(0 0 0 / 0.8),
-    0 8px 20px -8px rgb(0 0 0 / 0.55),
-    0 0 0 3px rgb(232 163 23 / 0.1),
-    0 1px 0 rgb(255 255 255 / 0.06) inset;
+  box-shadow: 0 0 0 3px rgb(232 163 23 / 0.1);
 }
 
-/*
-  Interactive glass chrome - keep floating controls and form fields on the
-  same material as the top bar instead of falling back to opaque surfaces.
-*/
-.glass,
 .glass-popover,
 .glass-field {
-  background: rgb(7 7 7 / 0.92);
+  background: rgb(8 8 8 / 0.86);
   background-clip: padding-box;
   border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow:
@@ -197,7 +181,6 @@ body {
 }
 
 .glass-field {
-  will-change: backdrop-filter;
   transition:
     border-color 200ms var(--ease-out-premium),
     box-shadow 200ms var(--ease-out-premium),
@@ -207,7 +190,7 @@ body {
 .glass-field:focus,
 .glass-field:focus-visible {
   border-color: rgb(232 163 23 / 0.28);
-  background: rgb(8 8 8 / 0.95);
+  background: rgb(10 10 10 / 0.9);
   outline: none;
   box-shadow:
     0 8px 24px -12px rgb(0 0 0 / 0.6),
@@ -215,21 +198,8 @@ body {
     inset 0 1px 0 rgb(255 255 255 / 0.08);
 }
 
-/*
-  Floating glass lives above scroll/transform layers. Explicit compositor
-  promotion keeps backdrop blur stable after a cold page load, not only HMR.
-*/
-.glass,
-.glass-popover,
-.glass-composer {
-  isolation: isolate;
-  will-change: backdrop-filter;
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
-
 .glass-interactive:hover {
-  background: rgb(12 12 12 / 0.95);
+  background: rgb(5 5 5 / 0.9);
 }
 
 /*
@@ -393,8 +363,10 @@ body {
   animation: fade-in var(--duration-med) var(--ease-out-premium) both;
 }
 
+/* backwards: do not keep transform: scale(1) after the animation —
+   a leftover transform on the wrapper traps backdrop-filter on .glass. */
 .animate-scale-in {
-  animation: scale-in var(--duration-fast) var(--ease-out-premium) both;
+  animation: scale-in var(--duration-fast) var(--ease-out-premium) backwards;
 }
 
 /*
@@ -410,9 +382,12 @@ body {
   view-transition-name: app-topbar;
 }
 
-.vt-main {
-  view-transition-name: app-main;
-}
+/*
+  Do not name the main pane. view-transition-name creates a grouping
+  container that flattens descendants and kills backdrop-filter on the
+  composer, Latest chip, and anything else inside the pane. Sidebar and
+  top bar keep their names because the frost lives on those nodes.
+*/
 
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -443,40 +418,12 @@ body {
   overflow: clip;
 }
 
-::view-transition-old(app-main) {
-  animation: vt-main-out 280ms var(--ease-out-premium) both;
-}
-
-::view-transition-new(app-main) {
-  animation: vt-main-in 320ms var(--ease-out-premium) both;
-}
-
-@keyframes vt-main-out {
-  to {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.992);
-  }
-}
-
-@keyframes vt-main-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.992);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 /* Prefer reduced motion: skip fancy morph, keep instant swap */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
   ::view-transition-new(root),
   ::view-transition-group(app-sidebar),
-  ::view-transition-group(app-topbar),
-  ::view-transition-old(app-main),
-  ::view-transition-new(app-main) {
+  ::view-transition-group(app-topbar) {
     animation-duration: 0.01ms !important;
   }
 }

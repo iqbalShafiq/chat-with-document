@@ -12,6 +12,7 @@ import { tapAgentStreamUsage } from "../usage/tap-agent-usage.js";
 import { getContext7McpServer } from "../../lib/context7-server.js";
 import { getApprovalRegistry } from "./approval-registry.js";
 import { getImageStore } from "../images/service.js";
+import { getContextSnippetStore as contextSnippetStore } from "./context-snippets.js";
 import { buildChatRunInput } from "./build-run-input.js";
 import { compactSessionMemory } from "./compaction.js";
 import { compactionConfig, estimateStaticContextTokens } from "./context-usage.js";
@@ -229,6 +230,16 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     if (runInput.activeContextImages.length > 0) {
       await getImageStore()
         .clearSessionImageContexts({ userId, sessionId })
+        .catch(() => {
+          // non-fatal: next run re-clears
+        });
+    }
+
+    // Active text context is single-use too: consumed by this run, cleared so
+    // the next message starts clean. Best-effort, like image context.
+    if (runInput.activeContextSnippet) {
+      await contextSnippetStore()
+        .clearSessionContextSnippet({ userId, sessionId })
         .catch(() => {
           // non-fatal: next run re-clears
         });

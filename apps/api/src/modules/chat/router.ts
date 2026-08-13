@@ -47,6 +47,21 @@ import {
   deleteChatSession,
   SessionRunActiveError,
 } from "./session-delete.js";
+import {
+  getContextSnippetStore,
+  parseContextSnippetBody,
+  ContextSnippetSessionNotFoundError,
+  type ContextSnippetRecord,
+} from "./context-snippets.js";
+
+function toContextSnippetDto(snippet: ContextSnippetRecord) {
+  return {
+    id: snippet.id,
+    text: snippet.text,
+    sourceRole: snippet.sourceRole,
+    createdAt: snippet.createdAt.toISOString(),
+  };
+}
 
 function requireSessionId(value: unknown): string | null {
   if (typeof value === "string") {
@@ -288,6 +303,60 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     return c.json(
       await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
     );
+  })
+  .get("/:sessionId/context-snippet", async (c) => {
+    const user = c.get("user");
+    const sessionId = c.req.param("sessionId");
+    if (!requireSessionId(sessionId)) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    const snippet = await getContextSnippetStore().getSessionContextSnippet({
+      userId: user.id,
+      sessionId,
+    });
+    return c.json({ snippet: snippet ? toContextSnippetDto(snippet) : null });
+  })
+  .put("/:sessionId/context-snippet", async (c) => {
+    const user = c.get("user");
+    const sessionId = c.req.param("sessionId");
+    if (!requireSessionId(sessionId)) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as unknown;
+    const parsed = parseContextSnippetBody(body);
+    if (!parsed) {
+      return c.json(
+        { error: "text (<= 2000 chars) and sourceRole (user|assistant) are required" },
+        400,
+      );
+    }
+    try {
+      const snippet = await getContextSnippetStore().upsertContextSnippet({
+        userId: user.id,
+        sessionId,
+        text: parsed.text,
+        sourceRole: parsed.sourceRole,
+      });
+      return c.json({ snippet: toContextSnippetDto(snippet) }, 201);
+    } catch (error) {
+      if (error instanceof ContextSnippetSessionNotFoundError) {
+        return c.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
+  })
+  .delete("/context-snippet/:snippetId", async (c) => {
+    const user = c.get("user");
+    const snippetId = c.req.param("snippetId");
+    const sessionId = c.req.query("sessionId");
+    if (!snippetId || !sessionId) {
+      return c.json({ error: "snippetId and sessionId are required" }, 400);
+    }
+    await getContextSnippetStore().removeContextSnippet({
+      userId: user.id,
+      snippetId,
+    });
+    return c.json({ ok: true });
   })
   .post("/sessions/mark-read", async (c) => {
     const user = c.get("user");
