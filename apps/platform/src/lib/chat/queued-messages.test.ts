@@ -107,6 +107,23 @@ describe("storage", () => {
     expect(restored[0]?.attachments[0]?.name).toBe("x.png");
   });
 
+  it("does not degrade on non-quota write errors", () => {
+    const { store, storage } = createStorage();
+    const withImage = item("a", {
+      attachments: [
+        { id: "att-1", type: "image", name: "x.png", data: "AAAA" },
+      ],
+    });
+    store.set(queueStorageKey("s1"), JSON.stringify([withImage]));
+    vi.spyOn(storage, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    writeQueue("s1", [withImage]);
+    const restored = readQueue("s1");
+    expect(restored).toHaveLength(1);
+    expect(restored[0]?.attachments[0]?.data).toBe("AAAA");
+  });
+
   it("returns an empty list for missing or corrupt storage", () => {
     const { store } = createStorage();
     expect(readQueue("s1")).toEqual([]);
@@ -180,5 +197,10 @@ describe("mutations", () => {
       ["c", "d"],
     ]);
     expect(chunkIds([], 2)).toEqual([]);
+  });
+
+  it("chunkIds with a non-positive size returns empty", () => {
+    expect(chunkIds(["a", "b"], 0)).toEqual([]);
+    expect(chunkIds(["a", "b"], -1)).toEqual([]);
   });
 });

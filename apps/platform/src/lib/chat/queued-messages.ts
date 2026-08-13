@@ -107,11 +107,20 @@ export function readQueue(sessionId: string): QueuedItem[] {
   }
 }
 
+function isQuotaError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" ||
+      error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+  );
+}
+
 export function writeQueue(sessionId: string, items: QueuedItem[]): void {
   const key = queueStorageKey(sessionId);
   try {
     localStorage.setItem(key, JSON.stringify(items));
-  } catch {
+  } catch (error) {
+    if (!isQuotaError(error)) return;
     // Quota exceeded (large image data) — degrade to text/reference only.
     try {
       const degraded = items.map((item) => ({
@@ -238,6 +247,7 @@ export function pendingBeforeEditing(items: QueuedItem[]): QueuedItem[] {
 }
 
 export function chunkIds(ids: string[], size: number): string[][] {
+  if (size <= 0) return [];
   const chunks: string[][] = [];
   for (let index = 0; index < ids.length; index += size) {
     chunks.push(ids.slice(index, index + size));
