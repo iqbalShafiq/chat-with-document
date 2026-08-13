@@ -110,5 +110,16 @@ export function useContextSnippet(sessionId: string) {
     setLoading(false);
   }, []);
 
-  return { snippet, loading, error, refresh, setSnippet, remove, reset };
+  /**
+   * Local-only display of a snippet snapshot (queued-item edit hydration):
+   * does not upsert or delete server state.
+   */
+  const setLocal = useCallback((snippet: ContextSnippet | null) => {
+    mutationRef.current += 1;
+    syncSnippet(snippet);
+    setError(null);
+    setLoading(false);
+  }, []);
+
+  return { snippet, loading, error, refresh, setSnippet, remove, reset, setLocal };
 }
