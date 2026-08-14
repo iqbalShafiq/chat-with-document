@@ -109,6 +109,44 @@ describe("parseSteerBody", () => {
     ).toBeNull();
   });
 
+  it("rejects a total attachment body over the cap", () => {
+    const chunk = "A".repeat(MAX_STEER_ATTACHMENT_BYTES);
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m",
+            text: "x",
+            attachments: [
+              { mediaType: "image/png", data: chunk },
+              { mediaType: "image/png", data: chunk },
+            ],
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a total attachment body under the cap", () => {
+    const chunk = "A".repeat(7_000_000);
+    expect(
+      parseSteerBody({
+        ...validBody,
+        messages: [
+          {
+            clientMessageId: "m",
+            text: "x",
+            attachments: [
+              { mediaType: "image/png", data: chunk },
+              { mediaType: "image/png", data: chunk },
+            ],
+          },
+        ],
+      }),
+    ).not.toBeNull();
+  });
+
   it("rejects clientMessageId longer than the cap", () => {
     expect(
       parseSteerBody({

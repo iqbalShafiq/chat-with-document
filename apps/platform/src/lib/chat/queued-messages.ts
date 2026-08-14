@@ -246,11 +246,11 @@ export function pendingBeforeEditing(items: QueuedItem[]): QueuedItem[] {
   return pending;
 }
 
-export function chunkIds(ids: string[], size: number): string[][] {
+export function chunkIds<T>(items: T[], size: number): T[][] {
   if (size <= 0) return [];
-  const chunks: string[][] = [];
-  for (let index = 0; index < ids.length; index += size) {
-    chunks.push(ids.slice(index, index + size));
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
   }
   return chunks;
 }

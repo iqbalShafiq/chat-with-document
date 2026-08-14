@@ -199,6 +199,12 @@ describe("mutations", () => {
     expect(chunkIds([], 2)).toEqual([]);
   });
 
+  it("chunkIds splits arbitrary item arrays into capped chunks", () => {
+    const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(chunkIds(items, 2)).toEqual([[{ id: "a" }, { id: "b" }], [{ id: "c" }]]);
+    expect(chunkIds(items, 1)).toEqual([[{ id: "a" }], [{ id: "b" }], [{ id: "c" }]]);
+  });
+
   it("chunkIds with a non-positive size returns empty", () => {
     expect(chunkIds(["a", "b"], 0)).toEqual([]);
     expect(chunkIds(["a", "b"], -1)).toEqual([]);

@@ -8,6 +8,7 @@ export const MAX_STEER_MESSAGES = 20;
 export const MAX_STEER_TEXT_CHARS = 32_000;
 export const MAX_STEER_ATTACHMENTS = 8;
 export const MAX_STEER_ATTACHMENT_BYTES = 8_000_000;
+export const MAX_STEER_TOTAL_BODY_BYTES = 15_000_000;
 export const MAX_STEER_CLIENT_ID_CHARS = 64;
 export const MAX_STEER_SNIPPET_CHARS = 2_000;
 
@@ -99,5 +100,12 @@ export function parseSteerBody(value: unknown): ParsedSteerBody | null {
     if (message === null) return null;
     messages.push(message);
   }
+  let totalAttachmentBytes = 0;
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      totalAttachmentBytes += attachment.data.length;
+    }
+  }
+  if (totalAttachmentBytes > MAX_STEER_TOTAL_BODY_BYTES) return null;
   return { sessionId, messages };
 }

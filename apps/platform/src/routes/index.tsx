@@ -1631,6 +1631,9 @@ function ChatSession({
         );
       });
       onStreamSettled();
+      // Anything still inflight at stream end was never acked — send-now
+      // items that lost their run revert to pending for the next flush.
+      queueActions.revertInflight();
       void markSessionRead(sessionId).catch(() => {});
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
@@ -1645,6 +1648,7 @@ function ChatSession({
     chat.status,
     focusComposer,
     onStreamSettled,
+    queueActions,
     sessionDocuments,
     setComposerInputText,
   ]);
@@ -2142,7 +2146,10 @@ function ChatSession({
         const base64 = raw.startsWith("data:")
           ? (raw.split(",", 2)[1] ?? "")
           : raw;
-        if (base64.length === 0) continue;
+        if (base64.length === 0) {
+          setComposerError("Queued image is missing data");
+          throw new Error("Queued image is missing data");
+        }
         steerAttachments.push({
           mediaType: attachment.mediaType ?? "image/png",
           data: base64,
@@ -2181,7 +2188,9 @@ function ChatSession({
       for (const item of toSend) {
         payloads.push(await buildSteerPayload(item));
       }
-      await steerChatMessages({ sessionId, messages: payloads });
+      for (const chunk of chunkIds(payloads, 20)) {
+        await steerChatMessages({ sessionId, messages: chunk });
+      }
       setQueueHold(false);
     } catch (error) {
       queueActions.revertInflight();
@@ -2210,7 +2219,7 @@ function ChatSession({
       attachments: UIAttachment[];
       documentIds: string[];
       pinnedImageIds: string[];
-      preserveComposer?: boolean;
+      clientMessageId?: string;
     }): Promise<void> => {
       // Local images attach to the message like pinned context (uploaded
       // to the session image store + auto-pinned so the model sees them).
@@ -2325,7 +2334,7 @@ function ChatSession({
           documentIds,
           attachedDocuments,
           createdAt: new Date().toISOString(),
-          clientMessageId: createClientMessageId(),
+          clientMessageId: input.clientMessageId ?? createClientMessageId(),
           ...(contextSnippet
             ? {
                 contextSnippet: {
@@ -2351,10 +2360,6 @@ function ChatSession({
       }
       await sendPromise;
 
-      if (!input.preserveComposer) {
-        // The route clears via the `clear` callback for manual sends; nothing
-        // to do here — sendDraft is called by submitComposerRef which clears.
-      }
       if (input.pinnedImageIds.length > 0) {
         await refreshActiveContext();
       }
@@ -2431,12 +2436,17 @@ function ChatSession({
             attachments: item.attachments,
             documentIds: item.documentIds,
             pinnedImageIds: item.pinnedImageIds,
-            preserveComposer: true,
+            clientMessageId: item.id,
           });
         } finally {
           autoFlushPreserveRef.current = false;
         }
         queueActions.removeItem(item.id);
+      } catch (error) {
+        setComposerError(
+          error instanceof Error ? error.message : "Auto-flush failed",
+        );
+        setQueueHold(true);
       } finally {
         autoFlushBusyRef.current = false;
       }
