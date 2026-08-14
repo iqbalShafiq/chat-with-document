@@ -1045,6 +1045,61 @@ export async function stopChatRun(streamId: string): Promise<void> {
   }
 }
 
+export type SteerMessageInput = {
+  clientMessageId: string;
+  text: string;
+  attachments?: { mediaType: string; data: string }[];
+  contextSnippet?: { text: string; sourceRole: "user" | "assistant" } | null;
+};
+
+export class SteerNoActiveRunError extends Error {
+  constructor() {
+    super("No active run for this session");
+    this.name = "SteerNoActiveRunError";
+  }
+}
+
+export function isSteerNoActiveRunError(
+  error: unknown,
+): error is SteerNoActiveRunError {
+  return error instanceof SteerNoActiveRunError;
+}
+
+/** Queue follow-up messages into the session's active run (steer). */
+export async function steerChatMessages(input: {
+  sessionId: string;
+  messages: SteerMessageInput[];
+}): Promise<{ ok: true; streamId: string; queued: number }> {
+  const response = await apiFetch(`${API_BASE}/api/chat/steer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (response.status === 409) {
+    throw new SteerNoActiveRunError();
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to send queued messages (${response.status})`);
+  }
+  return (await response.json()) as { ok: true; streamId: string; queued: number };
+}
+
+/** Which queued message ids were already applied to memory (missed acks). */
+export async function syncQueuedMessageIds(input: {
+  sessionId: string;
+  ids: string[];
+}): Promise<{ appliedIds: string[] }> {
+  const response = await apiFetch(`${API_BASE}/api/chat/queue/sync`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to sync queued messages (${response.status})`);
+  }
+  return (await response.json()) as { appliedIds: string[] };
+}
+
 export type WebCapabilities = {
   webSearchAvailable: boolean;
   imageGenerationAvailable: boolean;

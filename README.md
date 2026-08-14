@@ -42,6 +42,7 @@ Alur singkat:
 | Area | Detail |
 | --- | --- |
 | Chat streaming | `@anvia/react` + `@anvia/server` (`createEventStream`, format `jsonl`) |
+| Queued follow-ups | Kirim pesan saat streaming — antrean per session (localStorage), `PromptRequest.steer()` ke run aktif (1 pesan/turn FIFO), auto-flush saat idle, hold setelah stop/error, edit + drag reorder, persist lintas reload |
 | Multi-session | Session ID di `localStorage`; daftar session dari DB |
 | Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
 | Image generation | `generate_image`/`edit_image`, katalog model image, galeri session + proyek, background transparan |
@@ -211,6 +212,8 @@ Base path: `/api/chat` (semua endpoint **require auth cookie**)
 | `GET` | `/api/chat/sessions` | Daftar session milik user (urut `updatedAt` desc) |
 | `GET` | `/api/chat?sessionId=...` | Load history messages untuk session user |
 | `POST` | `/api/chat` | Kirim pesan; response **streaming** JSONL |
+| `POST` | `/api/chat/steer` | Queue follow-up ke run aktif (`{ sessionId, messages[] }`); worker meng-inject via `PromptRequest.steer()` 1/turn; `409 NO_ACTIVE_RUN` saat idle |
+| `POST` | `/api/chat/queue/sync` | Dedupe antrean lintas reload: `{ sessionId, ids[] }` → `{ appliedIds[] }` (id yang sudah masuk memory) |
 | `POST` | `/api/chat/approvals/:approvalId/decision` | Putusan approval card: `approved` (bool), opsional `grantScope` (`"session"` = Allow for session), `reason`, dan `overrideArgs` (arg tool yang diedit user, mis. param gambar) |
 | `POST` | `/api/chat/clarifications/:id/response` | Jawaban wizard klarifikasi: `answers` (object `string \| string[]`) + opsional `skipped` (string[]) |
 | `GET` | `/api/chat/capabilities` | Ketersediaan fitur: `webSearchAvailable`, `imageGenerationAvailable`, `context7Available` |
@@ -332,6 +335,8 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 - CORS di API diaktifkan agar Vite di `:3000` bisa memanggil `:3001`.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
+- **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK default mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.
+- Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
 
 ## Troubleshooting singkat
 

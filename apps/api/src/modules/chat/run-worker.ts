@@ -25,6 +25,8 @@ import {
   releaseActiveRun,
   type ChatRunJobData,
 } from "./run-queue.js";
+import { getSteeringStore, SteeringPump } from "./steering.js";
+import type { SteerableRequest } from "./steering.js";
 
 export { CHAT_RUN_QUEUE, type ChatRunJobData } from "./run-queue.js";
 
@@ -331,24 +333,57 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       }
     }
 
-    // The transient-retry wrapper sits between the raw agent stream and the
-    // audit taps, so a dropped attempt records nothing (no usage, no stream
-    // events, no citations) — only the retried stream flows into the taps.
-    const rawFactory = () =>
-      runInput.agent
+    // A narrow handle on the SDK PromptRequest: steering needs the live
+    // instance, and the transient-retry wrapper rebuilds it per attempt.
+    const buildRunRequest = (): SteerableRequest => {
+      const request = runInput.agent
         .session(sessionId, { userId })
         .prompt(effectivePrompt)
         .withTrace({
           sessionId,
           userId,
           ...(runInput.projectId ? { projectId: runInput.projectId } : {}),
-        })
-        .stream();
+        });
+      return {
+        steer: (input: MessageType) => request.steer(input),
+        stream: () => request.stream(),
+      };
+    };
 
-    const stream = withTransientModelRetry(
-      rawFactory,
-      () => removeAppendedPromptRow(sessionId, userId, promptMessage),
+    const requestRef: { current: SteerableRequest } = {
+      current: buildRunRequest(),
+    };
+
+    const pump = new SteeringPump(
+      streamId,
+      getSteeringStore(),
+      () => requestRef.current,
+      async (applied) => {
+        await store.append({
+          streamId,
+          event: {
+            type: "queued_message_applied",
+            clientMessageId: applied.clientMessageId,
+            text: applied.text,
+            attachmentCount: applied.attachments?.length ?? 0,
+          },
+        });
+      },
     );
+
+    // The transient-retry wrapper sits between the raw agent stream and the
+    // audit taps, so a dropped attempt records nothing (no usage, no stream
+    // events, no citations) — only the retried stream flows into the taps.
+    const rawFactory = () => {
+      requestRef.current = buildRunRequest();
+      return requestRef.current.stream();
+    };
+
+    const stream = withTransientModelRetry(rawFactory, () => {
+      // The rebuilt request must re-receive the not-yet-applied steer.
+      pump.rearmSteer();
+      return removeAppendedPromptRow(sessionId, userId, promptMessage);
+    });
 
     // Chain (outermost → raw stream): profile refresh → finalize citations →
     // usage audit → stop flag. Profile tap outermost so the background
@@ -369,7 +404,18 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     );
 
     for await (const event of profiled) {
+      await pump.beforeEvent(event);
       await store.append({ streamId, event });
+      await pump.afterEvent();
+    }
+
+    // Anything still queued never reached the model — the client owns those
+    // messages and re-sends them after the stream ends.
+    const drained = await pump.drain();
+    if (drained > 0) {
+      console.log(
+        `[chat-run] ${streamId}: discarded ${drained} unsteered queued message(s)`,
+      );
     }
 
     await store.close({ streamId, status: "completed" });

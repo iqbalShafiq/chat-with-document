@@ -53,6 +53,9 @@ import {
   ContextSnippetSessionNotFoundError,
   type ContextSnippetRecord,
 } from "./context-snippets.js";
+import { getSteeringStore } from "./steering.js";
+import { parseSteerBody } from "./steer-body.js";
+import { getSteerSyncService, MAX_SYNC_IDS } from "./steer-sync.js";
 
 function toContextSnippetDto(snippet: ContextSnippetRecord) {
   return {
@@ -639,6 +642,71 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       .cancelPendingForStream(streamId)
       .catch(() => ({ approvals: 0, clarifications: 0 }));
     return c.json({ ok: true, cancelled });
+  })
+  .post("/steer", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.json().catch(() => null);
+    const parsed = parseSteerBody(body);
+    if (!parsed) {
+      return c.json(
+        {
+          error:
+            "sessionId and messages (1-20 of { clientMessageId, text, attachments?, contextSnippet? }) are required",
+        },
+        400,
+      );
+    }
+    const streamId = await getRedis().get(ACTIVE_RUN_KEY(parsed.sessionId));
+    if (!streamId) {
+      return c.json(
+        { error: "No active run for this session", code: "NO_ACTIVE_RUN" },
+        409,
+      );
+    }
+    const meta = await getStreamStore().getMeta(streamId);
+    if (!meta || meta.userId !== user.id) {
+      return c.json({ error: "stream not found" }, 404);
+    }
+    const steering = getSteeringStore();
+    let queued = 0;
+    for (const message of parsed.messages) {
+      if (await steering.push(streamId, message)) {
+        queued += 1;
+      }
+    }
+    return c.json({ ok: true, streamId, queued });
+  })
+  .post("/queue/sync", async (c) => {
+    const user = c.get("user");
+    const body = await c.req.json().catch(() => null);
+    const record =
+      body !== null && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : null;
+    const sessionId = record ? requireSessionId(record.sessionId) : null;
+    if (!sessionId) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    const rawIds = record?.ids;
+    if (
+      !Array.isArray(rawIds) ||
+      rawIds.length === 0 ||
+      rawIds.length > MAX_SYNC_IDS ||
+      rawIds.some(
+        (id) => typeof id !== "string" || id.length === 0 || id.length > 64,
+      )
+    ) {
+      return c.json(
+        { error: "ids must be an array of 1-50 strings (max 64 chars each)" },
+        400,
+      );
+    }
+    const appliedIds = await getSteerSyncService().findAppliedClientMessageIds({
+      sessionId,
+      userId: user.id,
+      ids: rawIds as string[],
+    });
+    return c.json({ appliedIds });
   })
   .get("/capabilities", async (c) => {
     const context7Server = await getContext7McpServer();

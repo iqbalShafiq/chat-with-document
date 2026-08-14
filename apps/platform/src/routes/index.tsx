@@ -15,6 +15,7 @@ import { CitationSessionProvider } from "#/components/chat/citation-session-cont
 import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
+import { QueueConflictDialog } from "#/components/chat/queue-conflict-dialog";
 import { StaleSessionDialog } from "#/components/chat/stale-session-dialog";
 import {
   SessionDocumentsRail,
@@ -56,6 +57,9 @@ import {
   addSessionImageContext,
   removeSessionImageContext,
   fetchImageBytes,
+  isSteerNoActiveRunError,
+  steerChatMessages,
+  syncQueuedMessageIds,
   type ContextUsageInfo,
   type GeneratedImageMeta,
   type ImageGenSettings,
@@ -63,6 +67,7 @@ import {
   type ProjectListItem,
   type ReasoningEffortInfo,
   type SessionDocument,
+  type SteerMessageInput,
   type WebCapabilities,
 } from "#/lib/api";
 import { ProjectsBrowser } from "#/components/projects/projects-browser";
@@ -91,6 +96,13 @@ import {
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
+  nextFlushableItem,
+  pendingBeforeEditing,
+  chunkIds,
+  type QueuedDraft,
+  type QueuedItem,
+} from "#/lib/chat/queued-messages";
+import {
   computeGenerationActionInfo,
   getMessageRawText,
 } from "#/lib/chat/message-text";
@@ -117,6 +129,7 @@ import {
 } from "#/lib/chat/models";
 import { useContextSnippet } from "#/hooks/use-context-snippet";
 import { useModels } from "#/hooks/use-models";
+import { useQueuedMessages } from "#/hooks/use-queued-messages";
 import {
   clearStoredSessionId,
   clearWorkspaceProjectState,
@@ -1100,6 +1113,35 @@ function ChatSession({
   /** Shared with doc rail so its bottom band matches the textfield dock. */
   const [composerDockH, setComposerDockH] = useState(120);
 
+  const queuedState = useQueuedMessages(sessionId);
+  const { items: queuedItems, actions: queueActions } = queuedState;
+  const queuedItemsRef = useRef(queuedItems);
+  queuedItemsRef.current = queuedItems;
+  const [queueHold, setQueueHold] = useState(false);
+  const [queueConflictOpen, setQueueConflictOpen] = useState(false);
+  const autoFlushBusyRef = useRef(false);
+  const autoFlushPreserveRef = useRef(false);
+  const submitBypassRef = useRef(false);
+  const pendingManualSubmitRef = useRef<{
+    input: string;
+    attachments: UIAttachment[];
+    chatController: ReturnType<typeof useChat>;
+    clear: () => void;
+  } | null>(null);
+  const [editHydration, setEditHydration] = useState<{
+    version: number;
+    draft: QueuedDraft | null;
+  } | null>(null);
+  const editHydrationVersionRef = useRef(0);
+  const [clearComposerSignal, setClearComposerSignal] = useState<{
+    version: number;
+  } | null>(null);
+  const clearSignalVersionRef = useRef(0);
+
+  useEffect(() => {
+    if (queuedItems.length === 0 && queueHold) setQueueHold(false);
+  }, [queuedItems.length, queueHold]);
+
   useEffect(() => {
     const el = composerDockRef.current;
     if (!el) return;
@@ -1258,6 +1300,62 @@ function ChatSession({
         void refreshContextUsage();
         return;
       }
+      if (record.type === "queued_message_applied") {
+        const clientMessageId =
+          typeof record.clientMessageId === "string"
+            ? record.clientMessageId
+            : null;
+        if (clientMessageId) {
+          const item = queuedItemsRef.current.find(
+            (entry) => entry.id === clientMessageId,
+          );
+          if (item) {
+            chatRef.current?.setMessages((current) => {
+              const exists = current.some(
+                (message) =>
+                  message.role === "user" &&
+                  readChatMessageMeta(message.metadata).clientMessageId ===
+                    clientMessageId,
+              );
+              if (exists) return current;
+              const parts: UIMessage["parts"] = [
+                ...item.attachments.map((attachment) => ({
+                  id: crypto.randomUUID(),
+                  type: "attachment" as const,
+                  attachment,
+                })),
+              ];
+              if (item.text.trim().length > 0) {
+                parts.push({
+                  id: crypto.randomUUID(),
+                  type: "text",
+                  text: item.text,
+                });
+              }
+              return [
+                ...current,
+                {
+                  id: crypto.randomUUID(),
+                  role: "user",
+                  parts,
+                  metadata: withChatMessageMeta(undefined, {
+                    sessionId,
+                    clientMessageId,
+                    createdAt: new Date().toISOString(),
+                    documentIds: item.documentIds,
+                    ...(item.contextSnippet
+                      ? { contextSnippet: item.contextSnippet }
+                      : {}),
+                  }),
+                },
+              ];
+            });
+            queueActions.applyAck(clientMessageId);
+            if (item.attachments.length > 0) void refreshSessionImages();
+          }
+        }
+        return;
+      }
       if (record.type === "error") {
         const errorText =
           record.error instanceof Error
@@ -1266,6 +1364,7 @@ function ChatSession({
               ? record.error
               : "The agent run failed";
         setComposerError(`Run failed: ${errorText}`);
+        setQueueHold(true);
         const failedText = failedUserMessageText(messagesRef.current);
         if (failedText !== null) {
           // The editor is read-only while streaming; apply once the stream ends.
@@ -1273,7 +1372,7 @@ function ChatSession({
         }
       }
     },
-    [refreshContextUsage],
+    [queueActions, refreshContextUsage, refreshSessionImages],
   );
 
   const chat = useChat({
@@ -1373,6 +1472,7 @@ function ChatSession({
       });
     }
     current.reset(finalizeInterruptedTools(current.messages));
+    setQueueHold(true);
   }, []);
 
   const handleModelChange = useCallback((model: string) => {
@@ -1531,6 +1631,9 @@ function ChatSession({
         );
       });
       onStreamSettled();
+      // Anything still inflight at stream end was never acked — send-now
+      // items that lost their run revert to pending for the next flush.
+      queueActions.revertInflight();
       void markSessionRead(sessionId).catch(() => {});
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
@@ -1545,6 +1648,7 @@ function ChatSession({
     chat.status,
     focusComposer,
     onStreamSettled,
+    queueActions,
     sessionDocuments,
     setComposerInputText,
   ]);
@@ -1723,6 +1827,640 @@ function ChatSession({
       clear: () => void,
     ) => Promise<void>
   >(async () => {});
+
+  /**
+   * Shared doc-upload step for manual and queued sends: ingests every
+   * non-image attachment, returns their session document ids. Throws on
+   * failure (composerError already set by the caller).
+   */
+  const uploadComposerDocuments = useCallback(
+    async (attachments: UIAttachment[]): Promise<string[]> => {
+      const documentAttachments = attachments.filter(
+        (attachment) => !isImageAttachmentLike(attachment),
+      );
+      const documentIds: string[] = [];
+      if (documentAttachments.length === 0) return documentIds;
+
+      setIsIngesting(true);
+      setIngestionItems([]);
+      try {
+        for (const attachment of documentAttachments) {
+          const file = await resolveAttachmentFile(attachment);
+          if (file.size === 0) {
+            throw new Error(`File is empty: ${file.name}`);
+          }
+          const itemId = attachment.id || crypto.randomUUID();
+          setIngestionItems((current) => [
+            ...current,
+            { id: itemId, filename: file.name, status: "uploading" },
+          ]);
+          const uploaded = await uploadDocument({ sessionId, file, projectId });
+          const ready = await waitForDocumentReady({
+            sessionId,
+            documentId: uploaded.id,
+            onStatus: (status) => {
+              setIngestionItems((current) =>
+                current.map((item) =>
+                  item.id === itemId ? { ...item, status: status.status } : item,
+                ),
+              );
+            },
+          });
+          documentIds.push(ready.id);
+        }
+        await refreshSessionDocuments();
+        // Retry a failed image-history fetch alongside the docs refresh
+        // so the rail doesn't silently serve stale data.
+        if (sessionImagesError) void refreshSessionImages();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Document processing failed";
+        setComposerError(message);
+        setIngestionItems((current) =>
+          current.map((item) =>
+            item.status === "uploading" ||
+            item.status === "queued" ||
+            item.status === "ocr_processing" ||
+            item.status === "embedding_processing"
+              ? { ...item, status: "failed" }
+              : item,
+          ),
+        );
+        throw error;
+      } finally {
+        setIsIngesting(false);
+      }
+      return documentIds;
+    },
+    [projectId, refreshSessionDocuments, sessionId, sessionImagesError],
+  );
+
+  /**
+   * Queue the composer draft (send-while-streaming / hold): pre-uploads
+   * documents at queue time, snapshots single-use context (snippet + pins)
+   * into the item, and clears the composer via the versioned clear signal.
+   */
+  const queueComposerDraft = useCallback(
+    async ({
+      input,
+      attachments,
+    }: {
+      input: string;
+      attachments: UIAttachment[];
+    }): Promise<void> => {
+      const trimmed = input.trim();
+      if (!trimmed && attachments.length === 0) return;
+
+      let documentIds: string[] = [];
+      try {
+        documentIds = await uploadComposerDocuments(attachments);
+      } catch (error) {
+        // uploadComposerDocuments sets composerError on its own failure paths;
+        // this guard also surfaces non-Error throws so a failed queue is never
+        // silent (the composer keeps the draft, nothing is queued).
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not queue the message",
+        );
+        return;
+      }
+
+      const imageAttachments: UIAttachment[] = [];
+      for (const attachment of attachments) {
+        if (!isImageAttachmentLike(attachment)) continue;
+        if (attachment.url?.startsWith("blob:")) {
+          try {
+            const response = await fetch(attachment.url);
+            const blob = await response.blob();
+            imageAttachments.push({
+              ...attachment,
+              url: undefined,
+              data: await blobToDataUrl(blob),
+            });
+          } catch {
+            setComposerError("Could not read image attachment");
+            return;
+          }
+        } else {
+          imageAttachments.push(attachment);
+        }
+      }
+
+      const snippet = contextSnippetState.snippet;
+      const pinnedImageIds = activeContextImages.map((image) => image.id);
+
+      queueActions.queueItem({
+        text: trimmed,
+        attachments: imageAttachments,
+        documentIds,
+        contextSnippet: snippet
+          ? { text: snippet.text, sourceRole: snippet.sourceRole }
+          : null,
+        pinnedImageIds,
+      });
+
+      setClearComposerSignal({
+        version: ++clearSignalVersionRef.current,
+      });
+      // Single-use context moved into the item: clear chip (server row) + pins.
+      if (snippet) void contextSnippetState.remove().catch(() => {});
+      for (const image of activeContextImages) {
+        void removeSessionImageContext({ sessionId, imageId: image.id }).catch(
+          () => {},
+        );
+      }
+      if (pinnedImageIds.length > 0) void refreshActiveContext();
+      void refreshSessionDocuments();
+    },
+    [
+      activeContextImages,
+      contextSnippetState,
+      queueActions,
+      refreshActiveContext,
+      refreshSessionDocuments,
+      sessionId,
+      uploadComposerDocuments,
+    ],
+  );
+
+  /**
+   * Recall a queued item for editing: mark it editing, hydrate the composer
+   * with its draft, and restore its single-use context (snippet + pins).
+   */
+  const handleQueueRecall = useCallback(
+    (id: string) => {
+      const item = queuedItemsRef.current.find((entry) => entry.id === id);
+      if (!item || item.status !== "pending") return;
+      queueActions.startEdit(id);
+      setEditHydration({
+        version: ++editHydrationVersionRef.current,
+        draft: {
+          text: item.text,
+          attachments: item.attachments,
+          documentIds: item.documentIds,
+          contextSnippet: item.contextSnippet,
+          pinnedImageIds: item.pinnedImageIds,
+        },
+      });
+      contextSnippetState.setLocal(
+        item.contextSnippet
+          ? {
+              id: `queue-${item.id}`,
+              text: item.contextSnippet.text,
+              sourceRole: item.contextSnippet.sourceRole,
+              createdAt: new Date().toISOString(),
+            }
+          : null,
+      );
+      for (const imageId of item.pinnedImageIds) {
+        void addSessionImageContext({ sessionId, imageId }).catch(() => {});
+      }
+      if (item.pinnedImageIds.length > 0) void refreshActiveContext();
+      focusComposer();
+    },
+    [
+      addSessionImageContext,
+      contextSnippetState,
+      focusComposer,
+      queueActions,
+      refreshActiveContext,
+      sessionId,
+    ],
+  );
+
+  /** Commit the composer contents back into the editing queue item. */
+  const handleSubmitQueueEdit = useCallback(
+    async (input: string, attachments: UIAttachment[]) => {
+      const editing = queuedItemsRef.current.find(
+        (entry) => entry.status === "editing",
+      );
+      if (!editing) return;
+      const trimmed = input.trim();
+      if (!trimmed && attachments.length === 0) return;
+
+      let documentIds = editing.documentIds;
+      const docAttachments = attachments.filter(
+        (attachment) => !isImageAttachmentLike(attachment),
+      );
+      if (docAttachments.length > 0) {
+        try {
+          const uploaded = await uploadComposerDocuments(docAttachments);
+          documentIds = [...editing.documentIds, ...uploaded];
+        } catch {
+          return;
+        }
+      }
+
+      const imageAttachments: UIAttachment[] = [];
+      for (const attachment of attachments) {
+        if (!isImageAttachmentLike(attachment)) continue;
+        if (attachment.url?.startsWith("blob:")) {
+          try {
+            const response = await fetch(attachment.url);
+            const blob = await response.blob();
+            imageAttachments.push({
+              ...attachment,
+              url: undefined,
+              data: await blobToDataUrl(blob),
+            });
+          } catch {
+            setComposerError("Could not read image attachment");
+            return;
+          }
+        } else {
+          imageAttachments.push(attachment);
+        }
+      }
+
+      const snippet = contextSnippetState.snippet;
+      const pinnedImageIds = activeContextImages.map((image) => image.id);
+
+      queueActions.submitEdit(editing.id, {
+        text: trimmed,
+        attachments: imageAttachments,
+        documentIds,
+        contextSnippet: snippet
+          ? { text: snippet.text, sourceRole: snippet.sourceRole }
+          : null,
+        pinnedImageIds,
+      });
+
+      setEditHydration({ version: ++editHydrationVersionRef.current, draft: null });
+      setClearComposerSignal({ version: ++clearSignalVersionRef.current });
+      if (snippet) void contextSnippetState.remove().catch(() => {});
+      if (pinnedImageIds.length > 0) void refreshActiveContext();
+    },
+    [
+      activeContextImages,
+      contextSnippetState,
+      queueActions,
+      refreshActiveContext,
+      uploadComposerDocuments,
+    ],
+  );
+
+  /** Abort a queue edit: back to pending, composer cleared, context restored. */
+  const handleQueueCancelEdit = useCallback(
+    (id: string) => {
+      const item = queuedItemsRef.current.find((entry) => entry.id === id);
+      if (!item || item.status !== "editing") return;
+      queueActions.cancelEdit(id);
+      setEditHydration({ version: ++editHydrationVersionRef.current, draft: null });
+      setClearComposerSignal({ version: ++clearSignalVersionRef.current });
+      contextSnippetState.setLocal(null);
+      for (const imageId of item.pinnedImageIds) {
+        void removeSessionImageContext({ sessionId, imageId }).catch(() => {});
+      }
+      if (item.pinnedImageIds.length > 0) void refreshActiveContext();
+    },
+    [contextSnippetState, queueActions, refreshActiveContext, sessionId],
+  );
+
+  /**
+   * Build the steer payload for a queued item: record local images in the
+   * session gallery, then serialize image attachments + pinned images as
+   * base64 attachment data for the active run.
+   */
+  const buildSteerPayload = useCallback(
+    async (item: QueuedItem): Promise<SteerMessageInput> => {
+      const steerAttachments: { mediaType: string; data: string }[] = [];
+      for (const attachment of item.attachments) {
+        if (attachment.type !== "image") continue;
+        try {
+          // Record the image in the session gallery.
+          const file = await resolveAttachmentFile(attachment);
+          const dims = await imageDimensionsFromFile(file);
+          await uploadSessionImage({
+            sessionId,
+            file,
+            width: dims.width,
+            height: dims.height,
+            projectId,
+          });
+        } catch {
+          setComposerError("Could not upload queued image");
+          throw new Error("Could not upload queued image");
+        }
+        const raw = attachment.data ?? "";
+        const base64 = raw.startsWith("data:")
+          ? (raw.split(",", 2)[1] ?? "")
+          : raw;
+        if (base64.length === 0) {
+          setComposerError("Queued image is missing data");
+          throw new Error("Queued image is missing data");
+        }
+        steerAttachments.push({
+          mediaType: attachment.mediaType ?? "image/png",
+          data: base64,
+        });
+      }
+      for (const imageId of item.pinnedImageIds) {
+        try {
+          const { blob, mediaType } = await fetchImageBytes(imageId);
+          const dataUrl = await blobToDataUrl(blob);
+          steerAttachments.push({
+            mediaType,
+            data: dataUrl.split(",", 2)[1] ?? "",
+          });
+        } catch {
+          // skip images that fail to load
+        }
+      }
+      return {
+        clientMessageId: item.id,
+        text: item.text,
+        ...(steerAttachments.length > 0 ? { attachments: steerAttachments } : {}),
+        ...(item.contextSnippet ? { contextSnippet: item.contextSnippet } : {}),
+      };
+    },
+    [projectId, sessionId],
+  );
+
+  /** Send every pending item into the session's ACTIVE run via steer. */
+  const handleQueueSendNow = useCallback(async () => {
+    if (autoFlushBusyRef.current) return;
+    const toSend = pendingBeforeEditing(queuedItemsRef.current);
+    if (toSend.length === 0) return;
+    queueActions.markInflight(new Set(toSend.map((item) => item.id)));
+    try {
+      const payloads: SteerMessageInput[] = [];
+      for (const item of toSend) {
+        payloads.push(await buildSteerPayload(item));
+      }
+      for (const chunk of chunkIds(payloads, 20)) {
+        await steerChatMessages({ sessionId, messages: chunk });
+      }
+      setQueueHold(false);
+    } catch (error) {
+      queueActions.revertInflight();
+      if (isSteerNoActiveRunError(error)) {
+        // The run ended between render and post — the auto-flush effect
+        // sends it as a new run once idle.
+        setQueueHold(false);
+      } else {
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not send queued messages",
+        );
+      }
+    }
+  }, [buildSteerPayload, queueActions, sessionId]);
+
+  /**
+   * Shared send step for manual and queued sends: uploads local image
+   * attachments, attaches pinned context, builds the bubble attachments and
+   * metadata, and sends the message through the live chat controller.
+   */
+  const sendDraft = useCallback(
+    async (input: {
+      text: string;
+      attachments: UIAttachment[];
+      documentIds: string[];
+      pinnedImageIds: string[];
+      clientMessageId?: string;
+    }): Promise<void> => {
+      // Local images attach to the message like pinned context (uploaded
+      // to the session image store + auto-pinned so the model sees them).
+      const uploadedImageAttachments: Array<{
+        id: string;
+        type: "image";
+        name: string;
+        mediaType: string;
+        data?: string;
+        text?: string;
+      }> = [];
+      for (const attachment of input.attachments.filter((a) =>
+        isImageAttachmentLike(a),
+      )) {
+        const file = await resolveAttachmentFile(attachment);
+        if (file.size === 0) {
+          throw new Error(`File is empty: ${file.name}`);
+        }
+        const dims = await imageDimensionsFromFile(file);
+        const meta = await uploadSessionImage({
+          sessionId,
+          file,
+          width: dims.width,
+          height: dims.height,
+          projectId,
+        });
+        // Auto-pin so the worker injects it as image input (vision)
+        // or exposes it via view_image (text-only models).
+        await addSessionImageContext({ sessionId, imageId: meta.id });
+        const { blob, mediaType } = await fetchImageBytes(meta.id);
+        uploadedImageAttachments.push({
+          id: `ctx-${meta.id}`,
+          type: "image",
+          name: meta.prompt || "Uploaded image",
+          mediaType,
+          data: await blobToDataUrl(blob),
+          text: meta.prompt || "Uploaded image",
+        });
+      }
+
+      // Documents ingest after images — the old manual-submit order, so a
+      // failed image upload never leaves freshly ingested docs orphaned.
+      // Queued-path compatibility (Task 12): queued items carry image-only
+      // attachments with their documentIds pre-uploaded at queue time, so
+      // the non-image filter finds nothing here and the prelinked ids pass
+      // through untouched.
+      const documentIds = [
+        ...input.documentIds,
+        ...(await uploadComposerDocuments(input.attachments)),
+      ];
+
+      // Active image context: attach pinned images to the user bubble so
+      // they are visible in the sent message (the worker injects them as
+      // image input to the model).
+      const contextAttachments: Array<{
+        id: string;
+        type: "image";
+        name: string;
+        mediaType: string;
+        url?: string;
+        data?: string;
+        text?: string;
+      }> = [];
+      for (const imageId of input.pinnedImageIds) {
+        try {
+          const { blob, mediaType } = await fetchImageBytes(imageId);
+          contextAttachments.push({
+            id: `ctx-${imageId}`,
+            type: "image",
+            name: "Image context",
+            mediaType,
+            data: await blobToDataUrl(blob),
+            text: "Image context",
+          });
+        } catch {
+          // skip images that fail to load — the context still works
+        }
+      }
+
+      const attachedDocuments = input.attachments.map((attachment) => {
+        const name = attachment.name ?? "Document";
+        return attachment.mediaType
+          ? { name, mediaType: attachment.mediaType }
+          : { name };
+      });
+
+      // Bubble stubs for document attachments only. Uploaded images are
+      // attached via uploadedImageAttachments; a bare type:"file" stub with
+      // an image mediaType would trip @anvia/core's image-attachment
+      // conversion, which requires url/data.
+      const documentBubbleAttachments = input.attachments
+        .filter((attachment) => !isImageAttachmentLike(attachment))
+        .map((attachment) => {
+          const name = attachment.name ?? "Document";
+          return {
+            id: crypto.randomUUID(),
+            type: (name === "Document"
+              ? "document"
+              : "file") as UIAttachment["type"],
+            name,
+            mediaType: attachment.mediaType,
+            text: name,
+          };
+        });
+
+      const contextSnippet = contextSnippetState.snippet;
+
+      const sendPromise = chatRef.current!.sendMessage({
+        text: input.text,
+        metadata: withChatMessageMeta(undefined, {
+          sessionId,
+          documentIds,
+          attachedDocuments,
+          createdAt: new Date().toISOString(),
+          clientMessageId: input.clientMessageId ?? createClientMessageId(),
+          ...(contextSnippet
+            ? {
+                contextSnippet: {
+                  text: contextSnippet.text,
+                  sourceRole: contextSnippet.sourceRole,
+                },
+              }
+            : {}),
+        }),
+        attachments: [
+          ...documentBubbleAttachments,
+          ...uploadedImageAttachments,
+          ...contextAttachments,
+        ],
+      });
+
+      // Text context is single-use: drop the composer chip the moment the
+      // optimistic user bubble exists. Waiting for the stream made the
+      // chip linger on the field after Send. The server still clears its
+      // own row after the run reads it.
+      if (contextSnippet) {
+        contextSnippetState.reset();
+      }
+      await sendPromise;
+
+      if (input.pinnedImageIds.length > 0) {
+        await refreshActiveContext();
+      }
+      if (uploadedImageAttachments.length > 0) {
+        // Locally uploaded images now live in the session image store —
+        // refresh the rail so they appear alongside generated images.
+        void refreshSessionImages();
+      }
+    },
+    [
+      addSessionImageContext,
+      contextSnippetState,
+      projectId,
+      refreshActiveContext,
+      refreshSessionImages,
+      sessionId,
+      uploadComposerDocuments,
+    ],
+  );
+
+  /**
+   * Auto-flush: when the chat is idle and items wait, send the next one as
+   * a fresh run (queue-held items wait for "Send now" / hold release).
+   */
+  useEffect(() => {
+    if (chat.status !== "idle") return;
+    if (!initialMessages) return;
+    if (queueHold || autoFlushBusyRef.current) return;
+    if (nextFlushableItem(queuedItemsRef.current) === null) return;
+
+    autoFlushBusyRef.current = true;
+    void (async () => {
+      try {
+        // Purge items already applied server-side (missed acks across reloads).
+        // Applied ids accumulate into ONE set so every chunk's dedupe is
+        // applied at once — filtering per-chunk would read a stale snapshot.
+        const ids = queuedItemsRef.current.map((item) => item.id);
+        const applied = new Set<string>();
+        for (const chunk of chunkIds(ids, 50)) {
+          try {
+            const { appliedIds } = await syncQueuedMessageIds({
+              sessionId,
+              ids: chunk,
+            });
+            for (const id of appliedIds) applied.add(id);
+          } catch {
+            // best-effort dedupe — a duplicate would only re-ask the agent
+          }
+        }
+        let remaining = queuedItemsRef.current;
+        if (applied.size > 0) {
+          remaining = remaining.filter((item) => !applied.has(item.id));
+          queueActions.replaceAll(remaining);
+        }
+        const candidate = nextFlushableItem(remaining);
+        if (!candidate) return;
+
+        const item = candidate.item;
+        if (item.contextSnippet) {
+          const ok = await contextSnippetState.setSnippet(
+            item.contextSnippet.text,
+            item.contextSnippet.sourceRole,
+          );
+          if (!ok) return;
+        }
+        for (const imageId of item.pinnedImageIds) {
+          await addSessionImageContext({ sessionId, imageId }).catch(() => {});
+        }
+
+        autoFlushPreserveRef.current = true;
+        try {
+          await sendDraft({
+            text: item.text,
+            attachments: item.attachments,
+            documentIds: item.documentIds,
+            pinnedImageIds: item.pinnedImageIds,
+            clientMessageId: item.id,
+          });
+        } finally {
+          autoFlushPreserveRef.current = false;
+        }
+        queueActions.removeItem(item.id);
+      } catch (error) {
+        setComposerError(
+          error instanceof Error ? error.message : "Auto-flush failed",
+        );
+        setQueueHold(true);
+      } finally {
+        autoFlushBusyRef.current = false;
+      }
+    })();
+  }, [
+    chat.status,
+    contextSnippetState,
+    initialMessages,
+    queueActions,
+    queueHold,
+    queuedItems,
+    sendDraft,
+    sessionId,
+  ]);
 
   const isSessionStale = useCallback(async (): Promise<boolean> => {
     try {
@@ -2004,270 +2742,121 @@ function ChatSession({
     chatController,
     clear,
   ) => {
-          setComposerError(null);
-          const trimmed = input.trim();
-          if (!trimmed && attachments.length === 0) return;
+    setComposerError(null);
+    const trimmed = input.trim();
+    if (!trimmed && attachments.length === 0) return;
 
-          // Optimistic send: the user bubble appears the moment sendMessage
-          // is called below. The stale check runs in parallel and only
-          // surfaces a non-blocking notice afterwards (normal sends are
-          // non-destructive).
-          const stalePromise = isSessionStale();
+    // Queue conflict gate — bypassed for the modal's own "send new" action
+    // via submitBypassRef. Reached only while idle with a non-empty queue
+    // (auto-flush drains it unless held), so the queue is paused: ask the
+    // user whether this draft joins the queue or sends immediately.
+    if (
+      !submitBypassRef.current &&
+      chatRef.current?.status !== "streaming" &&
+      queuedItemsRef.current.length > 0
+    ) {
+      pendingManualSubmitRef.current = {
+        input,
+        attachments,
+        chatController,
+        clear,
+      };
+      setQueueConflictOpen(true);
+      return;
+    }
 
-          // Truncate-before-send: a persisted failed tail [user, assistant
-          // kind:"error"] would re-enter memory — drop it first.
-          const messages = chatController.messages;
-          const last = messages.at(-1);
-          const secondLast = messages.at(-2);
-          if (
-            last?.role === "assistant" &&
-            metadataKind(last.metadata) === "error" &&
-            secondLast?.role === "user"
-          ) {
-            const userMeta = readChatMessageMeta(secondLast.metadata);
-            if (userMeta.clientMessageId) {
-              void truncateSessionMemory({
-                sessionId,
-                mode: "exclude",
-                clientMessageId: userMeta.clientMessageId,
-              }).catch(() => {});
-            }
-            chatController.setMessages(messages.slice(0, -2));
-            // The failed tail is gone from live parts — resync image history.
-            void refreshSessionImages();
-          }
+    // Optimistic send: the user bubble appears the moment sendMessage is
+    // called below. The stale check runs in parallel and only surfaces a
+    // non-blocking notice afterwards (normal sends are non-destructive).
+    const stalePromise = isSessionStale();
 
-          const documentIds: string[] = [];
-          // Local images attach to the message like pinned context (uploaded
-          // to the session image store + auto-pinned so the model sees them).
-          const uploadedImageAttachments: Array<{
-            id: string;
-            type: "image";
-            name: string;
-            mediaType: string;
-            data?: string;
-            text?: string;
-          }> = [];
-          const documentAttachments: UIAttachment[] = [];
+    // Truncate-before-send: a persisted failed tail [user, assistant
+    // kind:"error"] would re-enter memory — drop it first.
+    const messages = chatController.messages;
+    const last = messages.at(-1);
+    const secondLast = messages.at(-2);
+    if (
+      last?.role === "assistant" &&
+      metadataKind(last.metadata) === "error" &&
+      secondLast?.role === "user"
+    ) {
+      const userMeta = readChatMessageMeta(secondLast.metadata);
+      if (userMeta.clientMessageId) {
+        void truncateSessionMemory({
+          sessionId,
+          mode: "exclude",
+          clientMessageId: userMeta.clientMessageId,
+        }).catch(() => {});
+      }
+      chatController.setMessages(messages.slice(0, -2));
+      // The failed tail is gone from live parts — resync image history.
+      void refreshSessionImages();
+    }
 
-          // Local "Upload from computer" queues on composer; ingest only on submit.
-          if (attachments.length > 0) {
-            for (const attachment of attachments) {
-              if (isImageAttachmentLike(attachment)) {
-                const file = await resolveAttachmentFile(attachment);
-                if (file.size === 0) {
-                  throw new Error(`File is empty: ${file.name}`);
-                }
-                try {
-                  const dims = await imageDimensionsFromFile(file);
-                  const meta = await uploadSessionImage({
-                    sessionId,
-                    file,
-                    width: dims.width,
-                    height: dims.height,
-                    projectId,
-                  });
-                  // Auto-pin so the worker injects it as image input (vision)
-                  // or exposes it via view_image (text-only models).
-                  await addSessionImageContext({
-                    sessionId,
-                    imageId: meta.id,
-                  });
-                  const { blob, mediaType } = await fetchImageBytes(meta.id);
-                  uploadedImageAttachments.push({
-                    id: `ctx-${meta.id}`,
-                    type: "image",
-                    name: meta.prompt || "Uploaded image",
-                    mediaType,
-                    data: await blobToDataUrl(blob),
-                    text: meta.prompt || "Uploaded image",
-                  });
-                } catch (error) {
-                  setComposerError(
-                    error instanceof Error
-                      ? error.message
-                      : "Could not upload image",
-                  );
-                  return;
-                }
-              } else {
-                documentAttachments.push(attachment);
-              }
-            }
+    // Upload steps set composerError themselves before throwing; the catch
+    // keeps the submit promise from rejecting (the composer awaits it).
+    try {
+      await sendDraft({
+        text: trimmed,
+        attachments,
+        documentIds: [],
+        pinnedImageIds: activeContextImages.map((image) => image.id),
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        setComposerError(error.message);
+      }
+      return;
+    }
 
-            if (documentAttachments.length > 0) {
-              setIsIngesting(true);
-              setIngestionItems([]);
+    clear();
 
-              try {
-                for (const attachment of documentAttachments) {
-                  const file = await resolveAttachmentFile(attachment);
-                  if (file.size === 0) {
-                    throw new Error(`File is empty: ${file.name}`);
-                  }
+    // Active image context is single-use: it was consumed by this message,
+    // so clear the pins (the server also clears after the run reads them).
+    if (activeContextImages.length > 0) {
+      setActiveContextImages([]);
+    }
+    setIngestionItems([]);
 
-                  const itemId = attachment.id || crypto.randomUUID();
-                  setIngestionItems((current) => [
-                    ...current,
-                    { id: itemId, filename: file.name, status: "uploading" },
-                  ]);
-
-                  const uploaded = await uploadDocument({
-                    sessionId,
-                    file,
-                    projectId,
-                  });
-
-                  const ready = await waitForDocumentReady({
-                    sessionId,
-                    documentId: uploaded.id,
-                    onStatus: (status) => {
-                      setIngestionItems((current) =>
-                        current.map((item) =>
-                          item.id === itemId
-                            ? { ...item, status: status.status }
-                            : item,
-                        ),
-                      );
-                    },
-                  });
-
-                  documentIds.push(ready.id);
-                }
-
-                await refreshSessionDocuments();
-                // Retry a failed image-history fetch alongside the docs refresh
-                // so the rail doesn't silently serve stale data.
-                if (sessionImagesError) void refreshSessionImages();
-              } catch (error) {
-                const message =
-                  error instanceof Error
-                    ? error.message
-                    : "Document processing failed";
-                setComposerError(message);
-                setIngestionItems((current) =>
-                  current.map((item) =>
-                    item.status === "uploading" ||
-                    item.status === "queued" ||
-                    item.status === "ocr_processing" ||
-                    item.status === "embedding_processing"
-                      ? { ...item, status: "failed" }
-                      : item,
-                  ),
-                );
-                setIsIngesting(false);
-                return;
-              }
-
-              setIsIngesting(false);
-            }
-          }
-
-          const attachedDocuments = attachments.map((attachment) => {
-            const name = attachment.name ?? "Document";
-            return attachment.mediaType
-              ? { name, mediaType: attachment.mediaType }
-              : { name };
-          });
-
-          // Active image context: attach pinned images to the user bubble so
-          // they are visible in the sent message (the worker injects them as
-          // image input to the model).
-          const contextAttachments: Array<{
-            id: string;
-            type: "image";
-            name: string;
-            mediaType: string;
-            url?: string;
-            data?: string;
-            text?: string;
-          }> = [];
-          if (activeContextImages.length > 0) {
-            for (const image of activeContextImages) {
-              try {
-                const { blob, mediaType } = await fetchImageBytes(image.id);
-                contextAttachments.push({
-                  id: `ctx-${image.id}`,
-                  type: "image",
-                  name: image.prompt || "Image context",
-                  mediaType,
-                  data: await blobToDataUrl(blob),
-                  text: image.prompt || "Image context",
-                });
-              } catch {
-                // skip images that fail to load — the context still works
-              }
-            }
-          }
-
-          const contextSnippet = contextSnippetState.snippet;
-
-          const sendPromise = chatController.sendMessage({
-            text: trimmed,
-            metadata: withChatMessageMeta(undefined, {
-              sessionId,
-              documentIds,
-              attachedDocuments,
-              createdAt: new Date().toISOString(),
-              clientMessageId: createClientMessageId(),
-              ...(contextSnippet
-                ? {
-                    contextSnippet: {
-                      text: contextSnippet.text,
-                      sourceRole: contextSnippet.sourceRole,
-                    },
-                  }
-                : {}),
-            }),
-            attachments: [
-              ...documentAttachments.map((attachment) => ({
-                id: attachment.id,
-                type: attachment.type,
-                name: attachment.name,
-                mediaType: attachment.mediaType,
-                text: attachment.name ?? "Document",
-              })),
-              ...uploadedImageAttachments,
-              ...contextAttachments,
-            ],
-          });
-
-          // Text context is single-use: drop the composer chip the moment the
-          // optimistic user bubble exists. Waiting for the stream made the
-          // chip linger on the field after Send. The server still clears its
-          // own row after the run reads it.
-          contextSnippetState.reset();
-
-          // The user message is now in the chat (optimistic). The composer
-          // (text + image attachments) is cleared by ChatComposer's streaming
-          // effect; the full SDK clear() runs here — after the stream — where
-          // it is safe (calling it mid-stream crashes @anvia/react-ui's
-          // ComposerInput editor).
-          await sendPromise;
-          clear();
-
-          // Active image context is single-use: it was consumed by this
-          // message, so clear the pins (the server also clears after the
-          // run reads them).
-          if (activeContextImages.length > 0) {
-            setActiveContextImages([]);
-          }
-          // Locally uploaded images now live in the session image store —
-          // refresh the rail so they appear alongside generated images.
-          if (uploadedImageAttachments.length > 0) {
-            void refreshSessionImages();
-            void refreshActiveContext();
-          }
-
-          setIngestionItems([]);
-
-          // Non-blocking freshness notice: the message was already sent
-          // (normal sends are non-destructive); offer a reload so the view
-          // catches up with the other window/device.
-          if (await stalePromise) {
-            setStaleDialog({ kind: "send" });
-          }
+    // Non-blocking freshness notice: the message was already sent (normal
+    // sends are non-destructive); offer a reload so the view catches up
+    // with the other window/device.
+    if (await stalePromise) {
+      setStaleDialog({ kind: "send" });
+    }
   };
+
+  /** Dialog "Send queue": the pending draft joins the queue; hold releases. */
+  const handleQueueConflictSendQueue = useCallback(async () => {
+    setQueueConflictOpen(false);
+    const pending = pendingManualSubmitRef.current;
+    pendingManualSubmitRef.current = null;
+    if (!pending) return;
+    await queueComposerDraft({
+      input: pending.input,
+      attachments: pending.attachments,
+    });
+    setQueueHold(false);
+  }, [queueComposerDraft]);
+
+  /** Dialog "Send new message": bypass the conflict gate and send now. */
+  const handleQueueConflictSendNew = useCallback(async () => {
+    setQueueConflictOpen(false);
+    const pending = pendingManualSubmitRef.current;
+    pendingManualSubmitRef.current = null;
+    if (!pending) return;
+    submitBypassRef.current = true;
+    try {
+      await submitComposerRef.current(
+        pending.input,
+        pending.attachments,
+        pending.chatController,
+        pending.clear,
+      );
+    } finally {
+      submitBypassRef.current = false;
+    }
+  }, []);
 
   return (
     <ChatProvider controller={chat}>
@@ -2285,10 +2874,24 @@ function ChatSession({
           clear,
         }) => {
           if (modelsStatus !== "success") return;
-          // Normal sends are optimistic: the bubble appears the moment
-          // sendMessage is called. The freshness check runs in parallel and
-          // only surfaces a non-blocking notice afterwards (resubmit/revert
-          // still block — see resubmitFromUserMessage).
+          const editing = queuedItemsRef.current.find(
+            (item) => item.status === "editing",
+          );
+          if (chatRef.current?.status === "streaming") {
+            if (editing) {
+              await handleSubmitQueueEdit(input, attachments);
+            } else {
+              await queueComposerDraft({ input, attachments });
+            }
+            return;
+          }
+          // Idle + editing: the composer holds the recalled draft — commit it
+          // back into the queue item (a held queue would otherwise trap the
+          // submit behind the conflict gate).
+          if (editing) {
+            await handleSubmitQueueEdit(input, attachments);
+            return;
+          }
           await submitComposerRef.current(
             input,
             attachments,
@@ -2436,6 +3039,18 @@ function ChatSession({
                     onReload={handleStaleReload}
                   />
 
+                  <QueueConflictDialog
+                    open={queueConflictOpen}
+                    onClose={() => {
+                      pendingManualSubmitRef.current = null;
+                      setQueueConflictOpen(false);
+                    }}
+                    onSendQueue={() => void handleQueueConflictSendQueue()}
+                    onSendNew={() =>
+                      void handleQueueConflictSendNew().catch(() => {})
+                    }
+                  />
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -2480,6 +3095,15 @@ function ChatSession({
                     onRemoveContextSnippet={() => {
                       void contextSnippetState.remove();
                     }}
+                    queuedItems={queuedItems}
+                    onQueueSendNow={handleQueueSendNow}
+                    onQueueRemove={queueActions.removeItem}
+                    onQueueReorder={queueActions.reorder}
+                    onQueueRecall={handleQueueRecall}
+                    onQueueCancelEdit={handleQueueCancelEdit}
+                    editHydration={editHydration}
+                    clearComposerSignal={clearComposerSignal}
+                    suppressOptimisticClear={autoFlushPreserveRef}
                   />
                 </div>
               </div>
