@@ -1,0 +1,46 @@
+diff --git a/dist/chunk-LM5SU5AP.js b/dist/chunk-LM5SU5AP.js
+index 0f66da038b1850560c4ae57b60489f7dfb4ad6c3..7cf8cb443723a90bf15b810348ec7dcd466f365e 100644
+--- a/dist/chunk-LM5SU5AP.js
++++ b/dist/chunk-LM5SU5AP.js
+@@ -1,4 +1,4 @@
+-import {
++﻿import {
+   Message,
+   shiftComposerEntityRanges
+ } from "./chunk-7I6XUWM7.js";
+@@ -89,7 +89,7 @@ var ComposerRoot = forwardRef(function ComposerRoot2({
+   const entitiesControlled = entitiesProp !== void 0;
+   const quoteControlled = quoteProp !== void 0;
+   const hasMessageContent = input.trim().length > 0 || attachments.length > 0 || entities.length > 0 || quote !== void 0;
+-  const canSubmit = hasMessageContent && chat.status !== "streaming";
++  const canSubmit = hasMessageContent;
+   const canStop = chat.status === "streaming";
+   const setInput = useCallback(
+     (nextInput) => {
+@@ -160,7 +160,7 @@ var ComposerRoot = forwardRef(function ComposerRoot2({
+   }, [clearQuote, setAttachments, setEntities, setInput]);
+   const submit = useCallback(async () => {
+     const prompt = input;
+-    if (prompt.trim().length === 0 && attachments.length === 0 && entities.length === 0 && quote === void 0 || chat.status === "streaming") {
++    if (prompt.trim().length === 0 && attachments.length === 0 && entities.length === 0 && quote === void 0) {
+       return;
+     }
+     if (submitMessage !== void 0) {
+@@ -356,7 +356,7 @@ var ComposerInput = forwardRef(function ComposerInput2({
+     {
+       extensions,
+       content: plainTextToComposerContent(composer.input),
+-      editable: composer.status !== "streaming",
++      editable: true,
+       editorProps: {
+         attributes: {
+           "aria-label": props["aria-label"] ?? "Message",
+@@ -383,7 +383,7 @@ var ComposerInput = forwardRef(function ComposerInput2({
+     [extensions]
+   );
+   const ariaDisabled = props["aria-disabled"] === true || props["aria-disabled"] === "true";
+-  const composerDisabled = disabled === true || ariaDisabled || composer.status === "streaming";
++  const composerDisabled = disabled === true || ariaDisabled;
+   const inputStyle = useMemo(() => {
+     if (!autoResize) {
+       return style;
