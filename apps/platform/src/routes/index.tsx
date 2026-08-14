@@ -1910,8 +1910,16 @@ function ChatSession({
       let documentIds: string[] = [];
       try {
         documentIds = await uploadComposerDocuments(attachments);
-      } catch {
-        return; // upload failed — composerError already set, nothing queued
+      } catch (error) {
+        // uploadComposerDocuments sets composerError on its own failure paths;
+        // this guard also surfaces non-Error throws so a failed queue is never
+        // silent (the composer keeps the draft, nothing is queued).
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not queue the message",
+        );
+        return;
       }
 
       const imageAttachments: UIAttachment[] = [];
