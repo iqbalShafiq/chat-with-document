@@ -1,32 +1,29 @@
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { chatRouter } from "./modules/chat/router.js";
-import { documentsRouter } from "./modules/documents/router.js";
-import { imagesRouter } from "./modules/images/router.js";
-import { modelsRouter } from "./modules/models/router.js";
-import { projectsRouter } from "./modules/projects/router.js";
-import { profilingRouter } from "./modules/profiling/router.js";
-import { usageRouter } from "./modules/usage/router.js";
-import { auth } from "./modules/auth/auth.js";
-import { createAppCors } from "./lib/cors.js";
+import { createApp } from "./app.js";
+import { getListenHostname, listLanIpv4Addresses } from "./lib/origins.js";
 
-const app = new Hono()
-  .use(createAppCors())
-  .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
-  .route("/api/chat", chatRouter)
-  .route("/api/documents", documentsRouter)
-  .route("/api/images", imagesRouter)
-  .route("/api/models", modelsRouter)
-  .route("/api/projects", projectsRouter)
-  .route("/api/profiling", profilingRouter)
-  .route("/api/usage", usageRouter);
+const app = createApp();
+const port = Number(process.env.PORT ?? 3001);
+const hostname = getListenHostname();
 
 serve(
   {
     fetch: app.fetch,
-    port: Number(process.env.PORT ?? 3001),
+    port,
+    hostname,
   },
   (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
+    const urls = [
+      `http://localhost:${info.port}`,
+      ...listLanIpv4Addresses().map((ip) => `http://${ip}:${info.port}`),
+    ];
+    for (const url of urls) {
+      console.log(`Server is running on ${url}`);
+    }
+    console.log(`API reference: ${urls[0]}/scalar`);
+    console.log(`OpenAPI document: ${urls[0]}/doc`);
+    if (urls.length > 1) {
+      console.log(`LAN docs: ${urls[1]}/scalar`);
+    }
   },
 );

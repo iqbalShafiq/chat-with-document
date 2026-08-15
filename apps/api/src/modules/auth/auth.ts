@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { bearer } from "better-auth/plugins";
+import { getApiOrigin, getTrustedOrigins } from "../../lib/origins.js";
 import { prisma } from "../../utils/prisma.js";
 
 function requireEnv(name: string): string {
@@ -10,10 +12,8 @@ function requireEnv(name: string): string {
   return value;
 }
 
-const platformOrigin =
-  process.env.PLATFORM_ORIGIN?.trim() || "http://localhost:3000";
 const betterAuthUrl =
-  process.env.BETTER_AUTH_URL?.trim() || "http://localhost:3001";
+  process.env.BETTER_AUTH_URL?.trim() || getApiOrigin();
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -21,10 +21,14 @@ export const auth = betterAuth({
   }),
   secret: requireEnv("BETTER_AUTH_SECRET"),
   baseURL: betterAuthUrl,
-  trustedOrigins: [platformOrigin],
+  trustedOrigins: getTrustedOrigins(),
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
     autoSignIn: true,
   },
+  // Lets native / extra-repo clients send `Authorization: Bearer <token>`
+  // (token is returned as the `set-auth-token` response header on sign-in).
+  // Cookie sessions for the web platform keep working unchanged.
+  plugins: [bearer()],
 });

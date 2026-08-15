@@ -123,7 +123,8 @@ Factory agent yang dipakai API:
    | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
    | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
    | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
-   | `PLATFORM_ORIGIN` | Origin frontend untuk CORS + trustedOrigins (default `http://localhost:3000`) |
+   | `PLATFORM_ORIGIN` | Origin frontend web untuk CORS + trustedOrigins (default `http://localhost:3000`) |
+   | `TRUSTED_ORIGINS` | Origin tambahan (comma-separated) yang boleh memanggil API dari browser / webview — Expo web, preview, custom scheme mobile, dll. Native HTTP client biasanya tidak mengirim `Origin` |
    | `PORT` | Port API (default `3001`) |
    | `NODE_ENV` | Environment untuk Langfuse (`development`, dll.) |
    | `PROFILE_ENABLED` | Master toggle for user profiling (default `true`) |
@@ -156,8 +157,14 @@ pnpm dev
 
 | App | URL |
 | --- | --- |
-| Platform (chat UI) | http://localhost:3000 |
-| API | http://localhost:3001 |
+| Platform (chat UI) | `http://localhost:3000` and `http://<lan-ip>:3000` |
+| API | `http://localhost:3001` and `http://<lan-ip>:3001` |
+| API docs (Scalar) | http://localhost:3001/scalar |
+| OpenAPI document | http://localhost:3001/doc |
+
+`pnpm dev` listen di **semua interface** (`0.0.0.0`), jadi HP di Wi-Fi yang sama bisa buka `http://192.168.x.x:3000` (UI) atau `http://192.168.x.x:3001` (API / Scalar). Vite mencetak baris **Network**; API mencetak setiap IP LAN di log.
+
+Kalau Windows Firewall prompt muncul, izinkan Node.js di **Private** network. Set `HOST=127.0.0.1` di `.env` kalau ingin kembali ke localhost saja.
 
 Apps memuat env dari root `.env` lewat `dotenv-cli` (script `with-env`).
 
@@ -197,11 +204,48 @@ Auth e2e dibuat otomatis di `globalSetup` (sign-up user baru + cookie session).
 
 ## Authentication
 
-- Email/password via **Better Auth** (`/api/auth/*`), HTTP-only cookie session.
+- Email/password via **Better Auth** (`/api/auth/*`).
+- **Web platform** memakai HTTP-only cookie session (`credentials: include`).
+- **Mobile / extra-repo clients** memakai Bearer token:
+  1. `POST /api/auth/sign-in/email` (atau sign-up)
+  2. Baca header respons `set-auth-token`
+  3. Simpan di secure storage
+  4. Kirim `Authorization: Bearer <token>` di setiap request
+- Cookie dan Bearer setara — `requireUser` memakai `auth.api.getSession({ headers })`, yang menerima keduanya.
+- Browser client harus mengirim `Origin` yang ada di `PLATFORM_ORIGIN`, origin API itu sendiri (agar Scalar "Try it" jalan), atau `TRUSTED_ORIGINS`.
 - Platform routes `/login` and `/register`; chat (`/`) requires a session.
 - Chat memory di-scope Anvia dengan `userId`: `scopeKey = [sessionId, userId]`.
 - Documents **owned by user** (no sharing). Storage quota **200MB per user** (`GET /api/documents/storage`).
 - Setiap chat agent run menulis `AgentUsageEvent` (token counts dari Anvia `Usage`; cost USD hanya jika provider mengirim cost — biasanya `null` di OpenAI).
+
+## OpenAPI / Scalar
+
+Dokumentasi interaktif memakai [Scalar](https://scalar.com/products/api-references/integrations/hono) (integrasi resmi Hono):
+
+| URL | Isi |
+| --- | --- |
+| http://localhost:3001/scalar | UI Scalar (auth Bearer di panel Authenticate) |
+| http://localhost:3001/doc | OpenAPI 3.1 JSON |
+| http://localhost:3001/openapi.json | Alias dokumen yang sama |
+| http://localhost:3001/health | Liveness (tanpa auth) |
+
+Setiap operation punya deskripsi, status sukses + error, dan contoh request/response. Spec ini yang dipakai mobile client / generator SDK.
+
+Contoh sign-in + panggilan terautentikasi dari luar repo:
+
+```bash
+# 1. Sign in
+curl -D - -X POST http://localhost:3001/api/auth/sign-in/email \
+  -H "content-type: application/json" \
+  -H "origin: http://localhost:3000" \
+  -d '{"email":"ada@example.com","password":"correct-horse-battery"}'
+
+# 2. Salin header set-auth-token, lalu:
+curl http://localhost:3001/api/chat/sessions \
+  -H "authorization: Bearer <token>"
+```
+
+Native mobile (React Native / Flutter / Kotlin / Swift) tidak terkena CORS. Webview / Expo web harus ditambahkan ke `TRUSTED_ORIGINS`.
 
 ## API chat
 
@@ -324,7 +368,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 
 ## Frontend notes
 
-- Endpoint chat di UI di-hardcode ke `http://localhost:3001` (lihat `apps/platform/src/routes/index.tsx`).
+- Endpoint API di UI mengikuti hostname halaman (localhost → `:3001`, `192.168.x.x` → `http://192.168.x.x:3001`). Override lewat `VITE_API_BASE`.
 - Session aktif disimpan di `localStorage` (`chat.sessionId`).
 - Pesan asisten dirender lewat `MathMarkdown`: normalisasi delimiter LaTeX umum (`\[...\]`, `\(...\)`, `[ \frac{...} ]`) lalu KaTeX.
 
@@ -332,7 +376,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 
 - Prisma Client di-generate ke `apps/api/src/generated/prisma` (gitignored). Jalankan `db:generate` setelah clone atau ubah schema.
 - Chat memory memakai `@anvia/memory-prisma` terhadap model `AgentMemory*` di `apps/api/prisma/schema.prisma`.
-- CORS di API diaktifkan agar Vite di `:3000` bisa memanggil `:3001`.
+- CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
 - **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK default mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.

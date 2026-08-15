@@ -1,6 +1,27 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 
-export const API_BASE = "http://localhost:3001";
+const DEFAULT_API_PORT = 3001;
+
+/**
+ * API origin for this page. Opening the UI at http://192.168.x.x:3000 talks to
+ * http://192.168.x.x:3001 — localhost would point at the phone itself.
+ * Override with VITE_API_BASE when the API is on a different host.
+ */
+export function resolveApiBase(hostname?: string, protocol?: string): string {
+  if (hostname === undefined) {
+    const fromEnv = import.meta.env.VITE_API_BASE?.trim();
+    if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  }
+  const host =
+    hostname ??
+    (typeof window === "undefined" ? "localhost" : window.location.hostname);
+  const proto =
+    protocol ??
+    (typeof window === "undefined" ? "http:" : window.location.protocol);
+  return `${proto}//${host}:${DEFAULT_API_PORT}`;
+}
+
+export const API_BASE = resolveApiBase();
 
 export class ApiAuthError extends Error {
   readonly status = 401;
