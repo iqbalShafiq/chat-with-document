@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { createViewImageTool, type ViewImageToolOptions } from "./vision-helper.js";
 import type { CompletionModel } from "@anvia/core/completion";
+import type { ToolResultContent } from "@anvia/core";
 import type { ImageStore } from "../images/service.js";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
+vi.mock("node:net", async (importOriginal) => {
+  const mod = (await importOriginal()) as typeof import("node:net");
+  return {
+    ...mod,
+    isIP: () => 0,
+  };
+});
 
 const USER = "user-1";
 const SESSION = "session-1";
@@ -66,5 +79,54 @@ describe("view_image document image resolution", () => {
 
     expect(output).toContain("Image not found in this session");
     expect(output).toContain("get_document_page_images");
+  });
+});
+
+describe("view_image universal", () => {
+  it("vision mode returns image ToolResultContent for a public URL", async () => {
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const tool = createViewImageTool(
+      makeOptions({ mode: "vision", fetchFn: fakeFetch as unknown as typeof fetch }),
+    );
+    const result = (await tool.call({
+      url: "https://example.com/photo.jpg",
+    })) as ToolResultContent[];
+    expect(Array.isArray(result)).toBe(true);
+    expect(result[0]).toMatchObject({ type: "text" });
+    expect(result[1]).toMatchObject({ type: "image", mediaType: "image/jpeg" });
+  });
+
+  it("description mode (non-vision) still returns text description", async () => {
+    const resolveDocumentImage = vi.fn(async () => ({
+      mediaType: "image/png",
+      buffer: new Uint8Array([9, 9, 9]),
+    }));
+    const tool = createViewImageTool(
+      makeOptions({ mode: "description", resolveDocumentImage }),
+    );
+    const output = await tool.call({ imageId: "doc-img-1" });
+    expect(typeof output).toBe("string");
+    expect(output).toBe("A chart showing quarterly revenue.");
+  });
+
+  it("vision mode also supports imageId by loading session image bytes", async () => {
+    const store = {
+      getImage: vi.fn(async () => ({
+        userId: USER,
+        sessionId: SESSION,
+        r2Key: "k1",
+        mediaType: "image/png",
+      })),
+      getObjectBuffer: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    } as unknown as ImageStore;
+    const tool = createViewImageTool(makeOptions({ mode: "vision", store }));
+    const result = (await tool.call({ imageId: "img-1" })) as ToolResultContent[];
+    expect(result.some((p) => p.type === "image")).toBe(true);
   });
 });

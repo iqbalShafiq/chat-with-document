@@ -1,4 +1,5 @@
 import { createTool } from "@anvia/core";
+import type { ToolResultContent } from "@anvia/core";
 import {
   createCompletion,
   Message,
@@ -20,19 +21,9 @@ const FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 
 export const VISION_HELPER_INSTRUCTION =
-  "Your model cannot receive image input directly. When you need to see what " +
-  "an image actually looks like, call view_image — it returns an accurate " +
-  "text description of the real pixels via a vision model.\n" +
-  "Sources you can pass:\n" +
-  "- imageId: a session image id from the active image context or session history, " +
-  "or an image id returned by get_document_page_images (document charts, photos, diagrams)\n" +
-  "- url: a public http(s) image URL (e.g. a logo or product photo from web_search / web_fetch)\n" +
-  "get_document_page_images returns image metadata without the actual pixels " +
-  "for your model; when the answer depends on visual content, pass the returned " +
-  "image id to view_image to see it.\n" +
-  "Prefer view_image over guessing visual details. External reference images " +
-  "from the web are supported — do not assume view_image is limited to " +
-  "conversation-only images.";
+  "When you need to see what an image looks like, call view_image — it returns the image for vision models or a text description for text-only models.\n" +
+  "Sources: imageId (session/document) or url (public http(s) image from web_search/web_fetch images).\n" +
+  "web_search now returns images[] with url and description; web_fetch returns images[] URLs. Pass the URL you want to inspect to view_image.";
 
 const VIEW_IMAGE_DESCRIPTION =
   "Describe what an image actually shows (via a vision model). Use for " +
@@ -97,7 +88,25 @@ export type ViewImageToolOptions = {
     userId: string,
     sessionId: string,
   ) => Promise<{ mediaType: string; buffer: Uint8Array } | null>;
+  /** Vision mode returns ToolResultContent image bytes; description mode returns text via helper model. Defaults to description. */
+  mode?: "vision" | "description";
 };
+
+function toVisionResult(
+  buffer: Buffer,
+  mediaType: string,
+  question?: string,
+): ToolResultContent[] {
+  return [
+    {
+      type: "text",
+      text: question
+        ? `Image query: ${question}`
+        : "Image from web search — describe what you see to answer the user.",
+    },
+    { type: "image", data: buffer.toString("base64"), mediaType },
+  ];
+}
 
 /**
  * Subagent-as-tool for text-only models: a narrow, read-only tool that
@@ -107,10 +116,19 @@ export type ViewImageToolOptions = {
  * actual image content instead of only prompt text or alt captions.
  */
 export function createViewImageTool(options: ViewImageToolOptions) {
-  const { userId, sessionId, store, model, fetchFn = fetch } = options;
+  const {
+    userId,
+    sessionId,
+    store,
+    model,
+    fetchFn = fetch,
+    mode = "description",
+  } = options;
   return createTool({
     name: "view_image",
-    description: VIEW_IMAGE_DESCRIPTION,
+    description:
+      VISION_HELPER_INSTRUCTION +
+      (mode === "vision" ? " Returns the image bytes for vision models." : ""),
     input: viewImageInput,
     execute: async ({ imageId, url, question }) => {
       try {
@@ -123,8 +141,14 @@ export function createViewImageTool(options: ViewImageToolOptions) {
               resolveDocumentImage: options.resolveDocumentImage,
             })
           : await loadRemoteImage({ url: url!, fetchFn });
-        if ("error" in loaded) return loaded.error;
-
+        if ("error" in loaded) {
+          return mode === "vision"
+            ? ([{ type: "text", text: loaded.error }] satisfies ToolResultContent[])
+            : loaded.error;
+        }
+        if (mode === "vision") {
+          return toVisionResult(loaded.buffer, loaded.mediaType, question);
+        }
         const result = await createCompletion(model, {
           messages: [
             Message.user([
@@ -147,7 +171,10 @@ export function createViewImageTool(options: ViewImageToolOptions) {
           url: url ?? null,
           error: error instanceof Error ? error.message : String(error),
         });
-        return "Failed to view the image. Try again or skip it.";
+        const msg = "Failed to view the image. Try again or skip it.";
+        return mode === "vision"
+          ? ([{ type: "text", text: msg }] satisfies ToolResultContent[])
+          : msg;
       }
     },
   });
@@ -439,9 +466,11 @@ export function createDefaultViewImageTool(options: {
   sessionId: string;
   model: CompletionModel;
   resolveDocumentImage?: ViewImageToolOptions["resolveDocumentImage"];
+  mode?: "vision" | "description";
 }) {
   return createViewImageTool({
     ...options,
     store: getImageStore(),
+    mode: options.mode,
   });
 }
