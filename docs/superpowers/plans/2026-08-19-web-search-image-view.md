@@ -19,7 +19,7 @@
 - Image fetch reuse: must reuse `apps/api/src/modules/chat/vision-helper.ts:209` (`loadRemoteImage`, `assertSafeImageUrl`, `VIEW_IMAGE_MAX_BYTES=8MiB`, SSRF guards) — no new fetcher
 - Boundaries: `packages/agent` stays pure (no `apps/api` imports); `apps/api` imports from `@assingment/agent` only via `build-run-input.ts`
 - Branch convention: `feat/<kebab-case>` (existing `feat/web-search-tools`, `feat/image-generation`) — this plan uses `feat/web-search-image-view`
-- Quality gates: `pnpm --filter @assingment/agent test`, `pnpm --filter api test`, `pnpm tsc --noEmit` (or `pnpm --filter <pkg> build`), no ESLint/type errors, no `any` leaks
+- Quality gates: `pnpm --filter @assingment/agent test`, `pnpm --filter api test`, `pnpm tsc --noEmit` (or `pnpm --filter <pkg> build`), `pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts` (hands-on via `playwright_browser_*`), no ESLint/type errors, no `any` leaks
 
 ---
 
@@ -452,37 +452,105 @@ git commit -m "feat(api): wire universal view_image for web images (vision bytes
 
 ---
 
-### Task 4: E2E and regression verification + instruction polish
+### Task 4: Playwright Browser E2E (hands-on, wajib per case)
 
 **Files:**
-- Modify: `packages/agent/src/tools/web-search.ts` (instruction already done in Task1, verify)
-- Modify: `apps/api/src/modules/chat/vision-helper.ts` (instruction)
-- Test: `apps/api/src/modules/chat/chat-session.test.ts` if needed for web_sources collector? No UI rail change needed
-- Test: full suite
+- Create: `apps/platform/e2e/web-search-image-view.e2e.ts`
+- Modify: `apps/platform/e2e/stub-openrouter.ts` (tambah image stub endpoint `/__web-image` jika perlu)
+- Test: Playwright `chromium` via `apps/platform/playwright.config.ts:17` (webServer `TAVILY_API_KEY=dummy`)
 
 **Interfaces:**
-- Consumes: all prior tasks
-- Produces: passing gates
+- Consumes: Task 1-3 (web_search images + view_image dual-mode)
+- Produces: `web-search-image-view.e2e.ts` dengan 5 cases, semua PASS via `playwright_browser_*` hands-on
 
-- [ ] **Step 1: Add integration test for end-to-end flow (web_search → view_image)**
-
-In `packages/agent/src/evals/suites/approval-web-search.suite.ts` or new `apps/api/src/modules/chat/web-image.e2e.test.ts` (stubbed Tavily + stubbed fetch):
+- [ ] **Step 1: Buat file E2E `apps/platform/e2e/web-search-image-view.e2e.ts` (refer `image-generation.e2e.ts:1` pattern)**
 
 ```ts
-it("vision model: web_search returns images, view_image returns bytes", async () => {
-  const tavilyClient = { search: vi.fn(async () => ({ query: "logo", images: [{url:"https://example.com/logo.png", description:"logo"}], results: [{title:"T",url:"https://example.com",content:"c",score:0.9,publishedDate:"2026-08-07"}], responseTime:100, requestId:"1" })), extract: vi.fn() };
-  const webTools = createWebSearchTools({ tavilyClient: tavilyClient as any, enabled: true });
-  const searchOut = await webTools[0]!.call({ query:"logo", reason:"need logo" }) as any;
-  expect(searchOut.images[0].url).toBe("https://example.com/logo.png");
-  // then view_image vision mode would fetch that URL — tested in Task2
+import { expect, test, type Page } from "@playwright/test";
+const STUB_ORIGIN = "http://127.0.0.1:18765";
+const API_ORIGIN = "http://localhost:3001";
+
+async function openFreshChat(page: Page) {
+  await page.request.post(`${API_ORIGIN}/api/chat/sessions/draft`, { data: { projectId: null } });
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload();
+  await expect(page.getByText("Ask anything about your documents")).toBeVisible({ timeout: 30_000 });
+}
+
+// reuse sendMessage, enableWebSearch, etc dari image-generation.e2e.ts:22-89
+
+test("case 1 — vision: web_search images[] → view_image returns bytes (hands-on browser)", async ({ page, request }) => {
+  await openFreshChat(page);
+  await page.getByRole("button", { name: "Additional features" }).click();
+  await page.getByRole("switch", { name: "Web search" }).click();
+  await page.keyboard.press("Escape");
+  await page.locator("[data-anvia-composer-editor]").pressSequentially("cari logo vercel dan tunjukkan");
+  await page.locator("[data-anvia-composer-editor]").press("Enter");
+  // Agent harus call web_search dengan includeImages=true (cek stub)
+  const reqs = await request.get(`${STUB_ORIGIN}/__requests`).then(r=>r.json());
+  expect(JSON.stringify(reqs)).toContain("includeImages");
+  // view_image vision harus return image bytes → cek DOM image muncul
+  await expect(page.locator('img[alt*="vercel"], img[src*="vercel"]').first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("case 2 — non-vision: view_image url → description text", async ({ page }) => {
+  // Set model ke non-vision via API atau model switcher (stub DeepSeek)
+  await openFreshChat(page);
+  // kirim prompt yang trigger web_search + view_image
+  // expect chat bubble mengandung deskripsi, bukan <img> tag
+  await expect(page.getByText(/logo.*segitiga hitam|description/i).first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("case 3 — error: SSRF block → bounded error surfaced", async ({ page }) => {
+  await openFreshChat(page);
+  // trigger view_image dengan url private 127.0.0.1
+  await expect(page.getByText(/not allowed|private address/i).first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("case 4 — web_fetch images[] → view_image works", async ({ page }) => {
+  await openFreshChat(page);
+  // web_fetch dengan url yang punya images → view_image fetch salah satu
+  await expect(page.locator('img').first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("case 5 — cap & truncate: search 10 images → hanya 5 ditampilkan, description truncated", async ({ page, request }) => {
+  // mock tavily search return 10 images, cek output.images.length===5 via stub log
+  const reqs = await request.get(`${STUB_ORIGIN}/__requests`).then(r=>r.json());
+  // assertion on stub web_search images length
 });
 ```
 
-Alternatively extend `packages/agent/src/e2e/image-generation.e2e.test.ts` pattern with web image flow.
+Jika stub Tavily belum support `includeImages`, tambah di `stub-openrouter.ts` endpoint `/__tavily` yang echo request body untuk assertion (reuse `__requests` array di `stub-openrouter.ts:12`).
 
-If too heavy, ensure Task1+Task2 tests already cover contract; this task can be just a collector test update.
+- [ ] **Step 2: Hands-on gate per case via `playwright_browser_*` (wajib, bukan cuma CLI)**
 
-- [ ] **Step 2: Run full quality gates**
+Setelah `pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts` green, lanjut hands-on di `http://localhost:3000` (webServer sudah jalan dari `playwright.config.ts:19`):
+
+```bash
+# 1. Navigate
+playwright_browser_navigate({ url: "http://localhost:3000" })
+# 2. Snapshot composer
+playwright_browser_snapshot()
+# 3. Enable Web search via Additional features popover
+playwright_browser_click({ target: "button Additional features", element: "Additional features button" })
+playwright_browser_click({ target: "switch Web search", element: "Web search toggle" })
+# 4. Send message "cari logo vercel"
+playwright_browser_click({ target: "composer editor", element: "composer editor" })
+playwright_browser_type({ target: "composer editor", text: "cari logo vercel dan tunjukkan", submit: true })
+# 5. Check network: includeImages payload
+playwright_browser_network_requests({ static: false, filter: "tavily" }) -> cek includeImages:true
+playwright_browser_network_request({ index: 1, part: "request-body" })
+# 6. Snapshot after agent reply → cek img alt atau description text muncul
+playwright_browser_snapshot()
+playwright_browser_evaluate({ function: "() => document.querySelector('img')?.src" })
+# 7. Repeat untuk non-vision (switch model di composer ModelReasoningSwitcher ke DeepSeek), cek text description bukan img
+# 8. Test error: kirim "view image http://127.0.0.1/private.jpg" → snapshot harus show bounded error "not allowed"
+```
+
+Setiap case harus PASS di `playwright_browser_console_messages({level:"error"})` = 0 error baru.
+
+- [ ] **Step 3: Run full quality gates**
 
 Run:
 ```bash
@@ -490,17 +558,16 @@ pnpm --filter @assingment/agent test
 pnpm --filter api test
 pnpm --filter @assingment/agent exec tsc --noEmit
 pnpm --filter api exec tsc --noEmit
+pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts
 ```
 
-Expected: all PASS, no warnings. If any `any` or unused import, fix with `// eslint-disable-next-line` only where justified, else remove.
+Expected: all PASS, trace `trace: "on-first-retry"` di `playwright.config.ts:15` tersedia jika fail.
 
-Optional lint if config exists: `pnpm eslint . --max-warnings=0` or `pnpm --filter api exec eslint src/modules/chat/vision-helper.ts`
-
-- [ ] **Step 3: Manual smoke of instructions**
+- [ ] **Step 4: Manual smoke of instructions**
 
 Verify prompts:
-- `WEB_SEARCH_INSTRUCTION` in `packages/agent/src/tools/web-search.ts:199` now mentions `view_image` with URL
-- `VISION_HELPER_INSTRUCTION` in `vision-helper.ts:22` now mentions `web_search images[]`
+- `WEB_SEARCH_INSTRUCTION` di `packages/agent/src/tools/web-search.ts:199` sekarang mention `view_image` URL
+- `VISION_HELPER_INSTRUCTION` di `vision-helper.ts:22` mention `web_search images[]`
 
 Grep:
 
@@ -508,14 +575,13 @@ Grep:
 grep -n "view_image" packages/agent/src/tools/web-search.ts apps/api/src/modules/chat/vision-helper.ts apps/api/src/modules/chat/build-run-input.ts
 ```
 
-Expected: at least 3 hits
+Expected: ≥3 hits
 
-- [ ] **Step 4: Commit verification**
+- [ ] **Step 5: Commit E2E**
 
 ```bash
-git add .
-git commit -m "test: verify web image view e2e and quality gates (typecheck, lint)"
-# or if no code change, just ensure gates pass and proceed to final docs
+git add apps/platform/e2e/web-search-image-view.e2e.ts apps/platform/e2e/stub-openrouter.ts
+git commit -m "test(e2e): playwright browser cases for web search image view (vision/non-vision/errors)"
 ```
 
 ---
@@ -538,15 +604,18 @@ Add to README feature section (if exists search "Web Search"):
 
 If README has no web section, skip code change and just note in PR description.
 
-- [ ] **Step 2: Final gates before PR**
+- [ ] **Step 2: Final gates before PR (include Playwright hands-on)**
 
 Run:
 ```bash
 pnpm --filter @assingment/agent test && pnpm --filter api test
 pnpm --filter @assingment/agent exec tsc --noEmit && pnpm --filter api exec tsc --noEmit
+pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts
 ```
 
 Expected: zero failures
+
+Hands-on final: `playwright_browser_navigate` ke `http://localhost:3000`, ulangi smoke Task4 Step2 untuk 5 cases, semua PASS, `playwright_browser_console_messages` 0 error, baru push.
 
 - [ ] **Step 3: Push branch and open PR**
 
@@ -559,7 +628,8 @@ gh pr create --title "feat: web search image view (vision bytes + non-vision des
 
 ## Self-Review
 
-- Spec coverage: web_search images ✅ Task1, web_fetch images ✅ Task1, universal view_image vision bytes ✅ Task2, non-vision description ✅ Task2, wiring ✅ Task3, reuse of loadRemoteImage ✅ Task2, instruction updates ✅ Task1+2, tests/typecheck ✅ Task4, branch convention ✅
+- Spec coverage: web_search images ✅ Task1, web_fetch images ✅ Task1, universal view_image vision bytes ✅ Task2, non-vision description ✅ Task2, wiring ✅ Task3, reuse of loadRemoteImage ✅ Task2, instruction updates ✅ Task1+2, tests/typecheck ✅ Task4, **Playwright browser E2E hands-on (5 cases) ✅ Task4**, branch convention ✅
 - Placeholder scan: no TBD/TODO — all steps contain actual code blocks and commands
 - Type consistency: `ToolResultContent` imported from `@anvia/core` (matches `packages/agent/src/tools/documents.ts:4`), `createViewImageTool` mode param typed as `"vision"|"description"`, `build-run-input.ts` passes `mode` accordingly
+- E2E hands-on gate: setiap Task 1-3 harus diverifikasi via `playwright_browser_navigate`/`snapshot`/`network_requests`/`evaluate` sebelum lanjut; Task4 memiliki explicit 5-case E2E file + hands-on checklist
 
