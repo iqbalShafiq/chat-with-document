@@ -479,6 +479,9 @@ export async function buildChatRunInput(input: {
   // Vision helper for text-only models: describe session images, document
   // page images, *or* public image URLs (e.g. logos from web_search) via the
   // cheapest active vision chat model (VISION_HELPER_MODEL overrides the pick).
+  // Universal wiring: non-vision always gets description mode; vision gets vision mode when web search is available.
+  let universalViewImageRegistered = false;
+
   if (!modelAcceptsImage) {
     const visionModel = await resolveVisionHelperModel();
     if (visionModel) {
@@ -489,9 +492,30 @@ export async function buildChatRunInput(input: {
           model: visionModel,
           resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
             findSessionDocumentImage(imageId, imageUserId, imageSessionId),
+          mode: "description",
+        }),
+      );
+      if (!universalViewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION);
+      universalViewImageRegistered = true;
+    }
+  }
+
+  if (webSearchAvailable && !universalViewImageRegistered) {
+    if (modelAcceptsImage) {
+      const dummyVisionModel =
+        (await resolveVisionHelperModel()) ?? createCompletionModel(model);
+      tools.push(
+        createDefaultViewImageTool({
+          userId,
+          sessionId,
+          model: dummyVisionModel,
+          resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
+            findSessionDocumentImage(imageId, imageUserId, imageSessionId),
+          mode: "vision",
         }),
       );
       instructions.push(VISION_HELPER_INSTRUCTION);
+      universalViewImageRegistered = true;
     }
   }
 
