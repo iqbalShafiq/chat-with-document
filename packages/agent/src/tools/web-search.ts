@@ -15,6 +15,8 @@ export function createTavilyClient(apiKey: string): TavilyClient {
  */
 
 const MAX_RESULTS = 5;
+const MAX_IMAGES = 5;
+const IMAGE_DESC_LIMIT = 300;
 
 const TIME_RANGE = ["day", "week", "month", "year"] as const;
 
@@ -88,6 +90,11 @@ function truncate(text: string, limit: number): string {
   return `${trimmed.slice(0, limit).replace(/\s+\S*$/, "")}…`;
 }
 
+function truncateDesc(text: string, limit: number): string {
+  const t = text.trim();
+  return t.length <= limit ? t : `${t.slice(0, limit).replace(/\s+\S*$/, "")}…`;
+}
+
 /** Map Tavily failures to bounded, non-sensitive messages. */
 export function mapTavilyError(error: unknown): string {
   if (!error || typeof error !== "object") {
@@ -135,6 +142,8 @@ export function createWebSearchTools(
             maxResults: Math.min(requestedMax ?? maxResults, MAX_RESULTS),
             ...(timeRange ? { timeRange } : {}),
             includeAnswer: "basic",
+            includeImages: true,
+            includeImageDescriptions: true,
           });
           return {
             query: response.query,
@@ -149,6 +158,10 @@ export function createWebSearchTools(
               ...(typeof item.score === "number"
                 ? { score: Number(item.score.toFixed(4)) }
                 : {}),
+            })),
+            images: (response.images ?? []).slice(0, MAX_IMAGES).map((img) => ({
+              url: img.url,
+              description: img.description ? truncateDesc(img.description, IMAGE_DESC_LIMIT) : undefined,
             })),
           };
         } catch (error) {
@@ -166,6 +179,7 @@ export function createWebSearchTools(
         try {
           const response = await scope.tavilyClient.extract([url], {
             format: "markdown",
+            includeImages: true,
           });
           const result = response.results[0];
           if (!result) {
@@ -182,6 +196,7 @@ export function createWebSearchTools(
             url: result.url,
             title: result.title,
             content: truncate(result.rawContent, contentLimitChars * 3),
+            images: (result.images ?? []).slice(0, MAX_IMAGES),
           };
         } catch (error) {
           return {
@@ -203,4 +218,5 @@ export const WEB_SEARCH_INSTRUCTION = [
   "When web_search or web_fetch requires approval, respect the user's decision — if declined, answer from the available context and say you could not verify online.",
   "For library/API documentation questions, prefer the context7 tools over web_search.",
   "Cite web sources in your answer with their URLs when you rely on them.",
+  "When you need to see an image from the results, call view_image with its URL — vision models will receive the image directly, text-only models will receive a description.",
 ].join("\n");

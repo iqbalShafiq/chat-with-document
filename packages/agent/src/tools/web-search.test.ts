@@ -209,6 +209,40 @@ describe("createWebSearchTools", () => {
 
       expect(output.error).toBe("Web access temporarily unavailable");
     });
+
+    it("requests and returns search images with descriptions", async () => {
+      const { client, search } = fakeClient();
+      search.mockResolvedValue({
+        query: QUERY,
+        responseTime: 100,
+        images: [
+          { url: "https://example.com/a.jpg", description: "A logo" },
+          { url: "https://example.com/b.jpg" },
+        ],
+        results: [result("R", "https://example.com/1", "content")],
+        requestId: "req-1",
+      });
+      const tools = createWebSearchTools({ tavilyClient: client, enabled: true });
+      const output = await tools[0]!.call({ query: QUERY, reason: REASON }) as any;
+      expect(search).toHaveBeenCalledWith(QUERY, expect.objectContaining({ includeImages: true, includeImageDescriptions: true }));
+      expect(output.images).toEqual([
+        { url: "https://example.com/a.jpg", description: "A logo" },
+        { url: "https://example.com/b.jpg", description: undefined },
+      ]);
+    });
+
+    it("caps images to 5 and truncates descriptions to 300 chars", async () => {
+      const { client, search } = fakeClient();
+      search.mockResolvedValue({
+        query: QUERY, responseTime: 100,
+        images: Array.from({ length: 10 }, (_, i) => ({ url: `https://example.com/${i}.jpg`, description: "x".repeat(500) })),
+        results: [], requestId: "req-1",
+      });
+      const tools = createWebSearchTools({ tavilyClient: client, enabled: true });
+      const output = await tools[0]!.call({ query: QUERY, reason: REASON }) as any;
+      expect(output.images).toHaveLength(5);
+      expect(output.images[0].description.length).toBeLessThanOrEqual(301); // 300 + ellipsis
+    });
   });
 
   describe("web_fetch", () => {
@@ -259,6 +293,18 @@ describe("createWebSearchTools", () => {
 
       expect(output.title).toBeNull();
       expect(output.content).toMatch(/blocked/);
+    });
+
+    it("returns fetch images from extract", async () => {
+      const { client, extract } = fakeClient();
+      extract.mockResolvedValue({
+        results: [{ url: "https://example.com/article", title: "T", rawContent: "content", images: ["https://example.com/img1.jpg", "https://example.com/img2.png"] }],
+        failedResults: [], responseTime: 100, requestId: "req-2",
+      });
+      const tools = createWebSearchTools({ tavilyClient: client, enabled: true });
+      const output = await tools[1]!.call({ url: "https://example.com/article", reason: REASON }) as any;
+      expect(extract).toHaveBeenCalledWith(["https://example.com/article"], expect.objectContaining({ includeImages: true }));
+      expect(output.images).toEqual(["https://example.com/img1.jpg", "https://example.com/img2.png"]);
     });
   });
 });
