@@ -31,7 +31,8 @@ Enable the agent to fetch and "see" images discovered via web search:
 | Wiring | Register `view_image` universally when `webSearchAvailable` (vision → bytes mode) plus keep non-vision fallback even without web search (document images). Single wiring point `build-run-input.ts` |
 | Instruction | Update `WEB_SEARCH_INSTRUCTION` and `VISION_HELPER_INSTRUCTION` to mention `images[]` + `view_image(url)` flow |
 | Fetch pragmatics | Reuse `loadRemoteImage` (8 MiB cap, 15s timeout, 3 redirects, SSRF) — no new infra, no R2 write for web images (transient, returned inline) |
-| Testing | Extend `web-search.test.ts` (image caps), `vision-helper.test.ts` (dual-mode), plus wiring check in `build-run-input`; keep existing gates green |
+| Testing | Extend `web-search.test.ts` (image caps), `vision-helper.test.ts` (dual-mode), plus wiring check in `build-run-input`; **E2E wajib via Playwright browser (hands-on)** — setiap case dicek langsung di browser (bukan hanya mock), lihat `apps/platform/e2e/web-search-image-view.e2e.ts`; keep existing gates green |
+| E2E hands-on | Setiap perubahan di Task 1-3 harus diverifikasi **hands-on via `playwright_browser_*` tools** (real browser, bukan hanya `pnpm test`): buka `http://localhost:3000`, cek web_search images muncul, cek view_image vision vs non-vision, cek error paths; semua case harus PASS sebelum commit final |
 
 ## 4. Agent tools (`packages/agent`)
 
@@ -135,11 +136,19 @@ No UI change required for v1. Web sources rail (`apps/platform/src/lib/chat/web-
 - `apps/api/src/modules/chat/vision-helper.test.ts`: dual-mode — vision `url` returns `[text,image]` content, vision `imageId` returns image, description mode returns string; SSRF/dns mocked via `vi.mock("node:dns/promises")`.
 - `apps/api/src/modules/chat/build-run-input.test.ts` or new `image-view-wiring.test.ts`: assert `view_image` present for vision+webSearch and non-vision cases.
 - Existing suites must stay green: `pnpm --filter @assingment/agent test`, `pnpm --filter api test`.
+- **E2E via Playwright browser (hands-on, wajib)** — buat `apps/platform/e2e/web-search-image-view.e2e.ts` (reuse `e2e/stub-openrouter.ts` + `playwright.config.ts:19` webServer). Cases dicek langsung via `playwright_browser_navigate`, `snapshot`, `click`, `network_requests`:
+  1. Vision: `web_search` kirim `images[]` → agent panggil `view_image(url)` → inline image bytes terlihat di chat/bubble (verifikasi via browser snapshot, bukan cuma stub).
+  2. Non-vision: `view_image(url)` return description text (stub vision helper) → cek pesan agent mengandung deskripsi, bukan image bytes.
+  3. Error paths: SSRF block / 404 / >8MiB → bounded error text muncul di tool result, agent surface error tanpa crash.
+  4. `web_fetch` images → `view_image` dari extract `images[]` juga works.
+  5. Hands-on gate: setiap Task 1-3 selesai, jalankan `pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts` + manual `playwright_browser_*` cek di `http://localhost:3000` sebelum lanjut task berikutnya.
 
 ## 9. Verification
 
 - `pnpm --filter @assingment/agent exec tsc --noEmit` and `pnpm --filter api exec tsc --noEmit` (no type errors)
 - `pnpm --filter @assingment/agent test` and `pnpm --filter api test` (0 failures)
+- `pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts` (atau `pnpm exec playwright test` via `apps/platform/playwright.config.ts`) — semua 5 E2E cases PASS; trace on retry tersedia
+- **Hands-on browser check (wajib per case)** — via `playwright_browser_navigate` ke `http://localhost:3000`, `playwright_browser_snapshot` cek composer, `playwright_browser_network_requests` cek `includeImages` payload, `playwright_browser_evaluate` cek DOM image render; fail → perbaiki sebelum commit
 - Grep: `grep -rn "view_image" packages/agent/src/tools/web-search.ts apps/api/src/modules/chat/vision-helper.ts apps/api/src/modules/chat/build-run-input.ts` → ≥3 hits
 - Manual (with `TAVILY_API_KEY`): `web_search "logo of vercel"` → `images[0].url` → `view_image(url)` → vision sees image / non-vision gets description.
 
