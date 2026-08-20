@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createViewImageTool, type ViewImageToolOptions } from "./vision-helper.js";
+import {
+  createViewImageTool,
+  loadRemoteImage,
+  type ViewImageToolOptions,
+} from "./vision-helper.js";
 import type { CompletionModel } from "@anvia/core/completion";
 import type { ToolResultContent } from "@anvia/core";
 import type { ImageStore } from "../images/service.js";
@@ -128,5 +132,39 @@ describe("view_image universal", () => {
     const tool = createViewImageTool(makeOptions({ mode: "vision", store }));
     const result = (await tool.call({ imageId: "img-1" })) as ToolResultContent[];
     expect(result.some((p) => p.type === "image")).toBe(true);
+  });
+});
+
+describe("loadRemoteImage format bounds", () => {
+  it("rejects non-raster images (e.g. SVG) so vision providers do not 400", async () => {
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'></svg>"), {
+          status: 200,
+          headers: { "content-type": "image/svg+xml" },
+        }),
+    );
+    const result = await loadRemoteImage({
+      url: "https://example.com/logo.svg",
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+    expect("error" in result).toBe(true);
+    expect((result as { error: string }).error).toMatch(/supported image format/i);
+  });
+
+  it("sniffs PNG magic bytes even when the content-type is generic", async () => {
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        }),
+    );
+    const result = await loadRemoteImage({
+      url: "https://example.com/photo",
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+    expect("mediaType" in result).toBe(true);
+    expect((result as { mediaType: string }).mediaType).toBe("image/png");
   });
 });

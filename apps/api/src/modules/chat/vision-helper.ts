@@ -305,12 +305,17 @@ export async function loadRemoteImage(input: {
     }
 
     const buffer = Buffer.from(arrayBuffer);
-    const sniffed = sniffImageMediaType(buffer);
-    const mediaType = headerType.startsWith("image/")
-      ? headerType
-      : sniffed ?? "image/jpeg";
-    if (!mediaType.startsWith("image/")) {
-      return { error: "URL did not return a recognizable image." };
+    // Magic-byte sniff is the source of truth: it both confirms the bytes are
+    // a real raster image AND limits us to formats vision providers accept
+    // (OpenRouter/Azure only support image/jpeg|png|gif|webp). A header alone
+    // (e.g. image/svg+xml) is not enough — sending SVG as input_image makes
+    // the model provider reject the whole run with a 400.
+    const mediaType = sniffImageMediaType(buffer);
+    if (!mediaType) {
+      return {
+        error:
+          "URL did not return a supported image format (JPEG, PNG, GIF, WebP).",
+      };
     }
     return { buffer, mediaType };
   }
