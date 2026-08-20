@@ -223,7 +223,7 @@ describe("collectGeneratedImagesFromMessages", () => {
                 sourceUrl: "https://example.com/a.jpg",
               },
             ],
-            sourceUrl: "https://example.com/a.jpg",
+            sourceUrl: "https://example.com/other.jpg",
           }),
         },
         { type: "image", data: "aGk=", mediaType: "image/jpeg" },
@@ -266,8 +266,8 @@ describe("collectGeneratedImagesFromMessages", () => {
     const images = collectGeneratedImagesFromMessages([message(parts)]);
     expect(images).toHaveLength(1);
     expect(images[0]!.imageId).toBe("w2");
-    expect(images[0]!.source).toBe("generated");
-    expect(images[0]!.sourceUrl).toBeNull();
+    expect(images[0]!.source).toBe("web");
+    expect(images[0]!.sourceUrl).toBe("https://example.com/c.png");
   });
 });
 

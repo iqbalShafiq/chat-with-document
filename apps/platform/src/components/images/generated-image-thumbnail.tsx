@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Pin, PinOff } from "lucide-react";
+import { Globe, Pin, PinOff } from "lucide-react";
 import { useImagePreview } from "#/components/images/image-preview";
 import { useGeneratedImage } from "#/components/images/use-generated-image";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
@@ -66,7 +66,7 @@ export function GeneratedImageThumbnail({
         }
       }}
       title={image.prompt || "View generated image"}
-      className="group/thumb relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-white/[0.06] transition hover:border-white/[0.14] active:scale-[0.98]"
+      className="group/thumb relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-white/[0.06] transition hover:border-white/[0.14] active:scale-[0.98] [container-type:inline-size]"
     >
       <img
         src={displaySrc}
@@ -115,6 +115,31 @@ export function GeneratedImageThumbnail({
         <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-3 opacity-0 transition-opacity duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/thumb:opacity-100">
           <span className="text-left text-[10px] leading-tight text-white/85 line-clamp-2">
             {image.prompt}
+          </span>
+        </span>
+      ) : null}
+      {image.source === "web" && image.sourceUrl ? (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label="Open image source"
+          title={image.sourceUrl}
+          onClick={(event) => {
+            event.stopPropagation();
+            window.open(image.sourceUrl!, "_blank", "noopener,noreferrer");
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              window.open(image.sourceUrl!, "_blank", "noopener,noreferrer");
+            }
+          }}
+          className="group/source absolute bottom-1 left-1 z-10 inline-flex cursor-pointer items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-white/85 backdrop-blur-sm transition hover:bg-black/75 hover:text-white active:scale-[0.94]"
+        >
+          <Globe className="size-3" strokeWidth={2} />
+          <span className="pointer-events-none absolute bottom-full left-0 mb-1.5 max-w-[min(50cqw,12rem)] truncate whitespace-nowrap rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] text-white/90 opacity-0 backdrop-blur-sm transition-opacity duration-150 group-hover/source:opacity-100">
+            {image.sourceUrl}
           </span>
         </span>
       ) : null}

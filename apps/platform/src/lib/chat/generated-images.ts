@@ -91,6 +91,7 @@ export function collectGeneratedImages(
     const parsed = parseToolOutput(part.output);
 
     let rawImages: unknown[] = [];
+    let topLevelSourceUrl: string | null = null;
     if (part.toolName === "view_image") {
       if (Array.isArray(parsed)) {
         const textPart = parsed.find(
@@ -102,6 +103,7 @@ export function collectGeneratedImages(
             const json = JSON.parse(textPart.text) as unknown;
             if (isRecord(json) && Array.isArray(json.images)) {
               rawImages = json.images;
+              topLevelSourceUrl = asString(json.sourceUrl);
             }
           } catch {
             // malformed — ignore
@@ -109,11 +111,14 @@ export function collectGeneratedImages(
         }
       } else if (isRecord(parsed) && Array.isArray(parsed.images)) {
         rawImages = parsed.images;
+        topLevelSourceUrl = asString(parsed.sourceUrl);
       }
     } else {
       rawImages =
         isRecord(parsed) && Array.isArray(parsed.images) ? parsed.images : [];
     }
+
+    const isViewImage = part.toolName === "view_image";
 
     for (const image of rawImages) {
       if (!isRecord(image)) continue;
@@ -130,8 +135,8 @@ export function collectGeneratedImages(
         mediaType: asString(image.mediaType) ?? "image/png",
         index: asFiniteNumber(image.index) ?? 0,
         total: asFiniteNumber(image.total) ?? 1,
-        source: asString(image.source) ?? "generated",
-        sourceUrl: asString(image.sourceUrl),
+        source: asString(image.source) ?? (isViewImage ? "web" : "generated"),
+        sourceUrl: asString(image.sourceUrl) ?? topLevelSourceUrl,
       });
     }
   }

@@ -80,7 +80,7 @@ export function ImageGalleryModal({
       open={open}
       onClose={onClose}
       title="Images"
-      description="Images you generated across chats"
+      description="Images you generated or viewed across chats"
       size="xl"
     >
       {/*
