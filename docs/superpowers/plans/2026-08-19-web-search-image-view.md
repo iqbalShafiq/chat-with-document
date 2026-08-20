@@ -1,6 +1,6 @@
 # Web Search Image View Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Enable the agent to fetch and "see" images discovered via `web_search`/`web_fetch` — vision models receive images natively as `type: image` tool results, non-vision models receive descriptions via the existing `view_image` vision-helper (reuse, no duplication).
 
@@ -47,7 +47,7 @@
 - Consumes: `TavilyClient.search(query, options)` where `options` now includes `includeImages?: boolean`, `includeImageDescriptions?: boolean`; `TavilyClient.extract(urls, options)` with `includeImages?: boolean` (from `@tavily/core` d.ts:121,146)
 - Produces: `WebSearchResultItem` unchanged, but `web_search` output gains `images: Array<{url:string, description?:string}>` and `web_fetch` output gains `images: string[]` (bounded, truncated)
 
-- [ ] **Step 1: Write failing tests for web_search images**
+- [x] **Step 1: Write failing tests for web_search images**
 
 In `packages/agent/src/tools/web-search.test.ts` add:
 
@@ -99,12 +99,12 @@ it("returns fetch images from extract", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter @assingment/agent test -- packages/agent/src/tools/web-search.test.ts -t "requests and returns search images"`
 Expected: FAIL — `output.images` undefined, `search` not called with `includeImages`
 
-- [ ] **Step 3: Implement minimal extension in `packages/agent/src/tools/web-search.ts`**
+- [x] **Step 3: Implement minimal extension in `packages/agent/src/tools/web-search.ts`**
 
 Edits (follow existing style at lines 130-195):
 
@@ -161,12 +161,12 @@ Also update `WEB_SEARCH_INSTRUCTION` last line add:
 "When you need to see an image from the results, call view_image with its URL — vision models will receive the image directly, text-only models will receive a description."
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter @assingment/agent test -- packages/agent/src/tools/web-search.test.ts`
 Expected: PASS (all 10+ tests including new 3)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent/src/tools/web-search.ts packages/agent/src/tools/web-search.test.ts
@@ -186,7 +186,7 @@ git commit -m "feat(agent): expose tavily images in web_search and web_fetch"
 - Consumes: `loadRemoteImage({url, fetchFn})` (existing, SSRF-safe), `ImageStore.getImage/getObjectBuffer`, `resolveDocumentImage`, `CompletionModel` (vision helper)
 - Produces: `createViewImageTool(options)` now returns `AnyTool` whose `execute` returns `string | ToolResultContent[]` depending on `options.mode`; plus new `createUniversalViewImageTool` or extended options with `mode: "vision" | "description"`; `VISION_HELPER_INSTRUCTION` updated
 
-- [ ] **Step 1: Write failing tests for dual-mode**
+- [x] **Step 1: Write failing tests for dual-mode**
 
 In `apps/api/src/modules/chat/vision-helper.test.ts` add:
 
@@ -223,12 +223,12 @@ describe("view_image universal", () => {
 
 You'll need to extend `makeOptions` helper to accept `mode` and `fetchFn`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter api test -- vision-helper`
 Expected: FAIL — `mode` not recognized, vision path not returning ToolResultContent[]
 
-- [ ] **Step 3: Implement dual-mode in `vision-helper.ts`**
+- [x] **Step 3: Implement dual-mode in `vision-helper.ts`**
 
 Changes:
 
@@ -305,14 +305,14 @@ For DNS mock stability in tests: stub `lookup` via `vi.mock("node:dns/promises",
 
 Add at top of test: `vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) }));` and `vi.mock("node:net", async (importOrig) => ({ ...(await importOrig()), isIP: () => 0 }))` — check actual test stability.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter api test -- apps/api/src/modules/chat/vision-helper.test.ts`
 Expected: PASS (3 new + 2 existing)
 
 Run also: `pnpm --filter api test` full to ensure no regression
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/modules/chat/vision-helper.ts apps/api/src/modules/chat/vision-helper.test.ts
@@ -330,7 +330,7 @@ git commit -m "feat(api): universal view_image dual-mode (vision bytes vs descri
 - Consumes: `resolveVisionHelperModel()`, `createDefaultViewImageTool`, `modelAcceptsImage`, `webSearchAvailable`
 - Produces: `ChatRunInput.tools` now always contains `view_image` when web search is available (dual-mode), plus retains fallback for non-vision without web search
 
-- [ ] **Step 1: Write failing integration test (or manual check) for wiring**
+- [x] **Step 1: Write failing integration test (or manual check) for wiring**
 
 Create/extend `apps/api/src/modules/chat/build-run-input.test.ts` if exists else add new `build-run-input.image-view.test.ts`:
 
@@ -358,12 +358,12 @@ If extracting is too invasive, we can instead do: after code change, run `pnpm -
 
 For plan purposes, define step as writing a wiring test, but allow fallback to manual verification if mocking proves brittle.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm --filter api test -- image-view-wiring`
 Expected: FAIL — no such tool registered for vision
 
-- [ ] **Step 3: Implement wiring in `build-run-input.ts`**
+- [x] **Step 3: Implement wiring in `build-run-input.ts`**
 
 Changes:
 
@@ -436,14 +436,14 @@ Update imports at top: `import { createCompletionModel } from "@assingment/agent
 
 Ensure `createDefaultViewImageTool` signature updated to accept `mode`.
 
-- [ ] **Step 4: Run tests to verify wiring**
+- [x] **Step 4: Run tests to verify wiring**
 
 Run: `pnpm --filter api test`
 Expected: PASS (including new wiring test, existing build-run-input tests)
 
 Run typecheck: `pnpm --filter api exec tsc --noEmit` or `pnpm --filter api build`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/modules/chat/build-run-input.ts apps/api/src/modules/chat/image-view-wiring.test.ts
@@ -463,7 +463,7 @@ git commit -m "feat(api): wire universal view_image for web images (vision bytes
 - Consumes: Task 1-3 (web_search images + view_image dual-mode)
 - Produces: `web-search-image-view.e2e.ts` dengan 5 cases, semua PASS via `playwright_browser_*` hands-on
 
-- [ ] **Step 1: Buat file E2E `apps/platform/e2e/web-search-image-view.e2e.ts` (refer `image-generation.e2e.ts:1` pattern)**
+- [x] **Step 1: Buat file E2E `apps/platform/e2e/web-search-image-view.e2e.ts` (refer `image-generation.e2e.ts:1` pattern)**
 
 ```ts
 import { expect, test, type Page } from "@playwright/test";
@@ -523,7 +523,7 @@ test("case 5 — cap & truncate: search 10 images → hanya 5 ditampilkan, descr
 
 Jika stub Tavily belum support `includeImages`, tambah di `stub-openrouter.ts` endpoint `/__tavily` yang echo request body untuk assertion (reuse `__requests` array di `stub-openrouter.ts:12`).
 
-- [ ] **Step 2: Hands-on gate per case via `playwright_browser_*` (wajib, bukan cuma CLI)**
+- [x] **Step 2: Hands-on gate per case via `playwright_browser_*` (wajib, bukan cuma CLI)**
 
 Setelah `pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts` green, lanjut hands-on di `http://localhost:3000` (webServer sudah jalan dari `playwright.config.ts:19`):
 
@@ -550,7 +550,7 @@ playwright_browser_evaluate({ function: "() => document.querySelector('img')?.sr
 
 Setiap case harus PASS di `playwright_browser_console_messages({level:"error"})` = 0 error baru.
 
-- [ ] **Step 3: Run full quality gates**
+- [x] **Step 3: Run full quality gates**
 
 Run:
 ```bash
@@ -563,7 +563,7 @@ pnpm --filter platform exec playwright test e2e/web-search-image-view.e2e.ts
 
 Expected: all PASS, trace `trace: "on-first-retry"` di `playwright.config.ts:15` tersedia jika fail.
 
-- [ ] **Step 4: Manual smoke of instructions**
+- [x] **Step 4: Manual smoke of instructions**
 
 Verify prompts:
 - `WEB_SEARCH_INSTRUCTION` di `packages/agent/src/tools/web-search.ts:199` sekarang mention `view_image` URL
@@ -577,7 +577,7 @@ grep -n "view_image" packages/agent/src/tools/web-search.ts apps/api/src/modules
 
 Expected: ≥3 hits
 
-- [ ] **Step 5: Commit E2E**
+- [x] **Step 5: Commit E2E**
 
 ```bash
 git add apps/platform/e2e/web-search-image-view.e2e.ts apps/platform/e2e/stub-openrouter.ts
@@ -593,7 +593,7 @@ git commit -m "test(e2e): playwright browser cases for web search image view (vi
 - Modify: `.env.example` comments (no new env needed)
 - Test: none — verification only
 
-- [ ] **Step 1: Update PR description / README snippet**
+- [x] **Step 1: Update PR description / README snippet**
 
 Add to README feature section (if exists search "Web Search"):
 
@@ -604,7 +604,7 @@ Add to README feature section (if exists search "Web Search"):
 
 If README has no web section, skip code change and just note in PR description.
 
-- [ ] **Step 2: Final gates before PR (include Playwright hands-on)**
+- [x] **Step 2: Final gates before PR (include Playwright hands-on)**
 
 Run:
 ```bash
@@ -617,7 +617,7 @@ Expected: zero failures
 
 Hands-on final: `playwright_browser_navigate` ke `http://localhost:3000`, ulangi smoke Task4 Step2 untuk 5 cases, semua PASS, `playwright_browser_console_messages` 0 error, baru push.
 
-- [ ] **Step 3: Push branch and open PR**
+- [x] **Step 3: Push branch and open PR**
 
 ```bash
 git push -u origin feat/web-search-image-view
