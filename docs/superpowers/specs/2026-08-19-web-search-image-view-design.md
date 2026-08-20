@@ -128,6 +128,7 @@ No UI change required for v1. Web sources rail (`apps/platform/src/lib/chat/web-
 - `loadRemoteImage` failures (SSRF block, DNS private, timeout, >8 MiB, non-image content-type) → return bounded text error (`"That image host is not allowed."`, `"Could not download the image (HTTP 404)."`, etc.) — for vision mode wrapped as `[{type:"text", text:error}]` so agent can surface it.
 - Redirect loops (`MAX_REDIRECTS=3`) → `"Image URL redirected too many times."`
 - Non-image URLs from Tavily (e.g. favicon mis-tagged) rejected by `sniffImageMediaType` / content-type check.
+- **Non-raster formats rejected (real-LLM finding)**: `loadRemoteImage` uses magic-byte sniff as the source of truth, so SVG/AVIF/etc. return a bounded error (`"URL did not return a supported image format (JPEG, PNG, GIF, WebP)."`) instead of being passed to a vision provider. OpenRouter/Azure only accept `image/jpeg|png|gif|webp` as `input_image` — sending SVG made the whole run fail with `400 Provider returned error`. Verified live with OpenRouter `gpt-5.6-luna` + Tavily.
 - No R2 persistence for web images — transient inline bytes keep storage bounded; session/document images still via R2.
 
 ## 8. Testing
