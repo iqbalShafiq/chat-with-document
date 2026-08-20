@@ -537,6 +537,7 @@ export async function resolveVisionHelperModel(): Promise<CompletionModel | null
 export function createDefaultViewImageTool(options: {
   userId: string;
   sessionId: string;
+  projectId?: string | null;
   model: CompletionModel;
   resolveDocumentImage?: ViewImageToolOptions["resolveDocumentImage"];
   mode?: "vision" | "description";

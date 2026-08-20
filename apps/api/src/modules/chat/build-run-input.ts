@@ -489,6 +489,7 @@ export async function buildChatRunInput(input: {
         createDefaultViewImageTool({
           userId,
           sessionId,
+          projectId,
           model: visionModel,
           resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
             findSessionDocumentImage(imageId, imageUserId, imageSessionId),
@@ -508,6 +509,7 @@ export async function buildChatRunInput(input: {
         createDefaultViewImageTool({
           userId,
           sessionId,
+          projectId,
           model: dummyVisionModel,
           resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
             findSessionDocumentImage(imageId, imageUserId, imageSessionId),
