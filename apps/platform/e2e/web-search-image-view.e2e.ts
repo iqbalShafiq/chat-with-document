@@ -140,6 +140,29 @@ test("case 1 — vision: web_search → view_image httpbin succeeds (hands-on)",
   await expect(page.getByText(/Unhandled|Error:.*view_image/i)).toHaveCount(0);
 });
 
+test("case 6 — web photo persisted as source=web and shown in the rail Images section", async ({ page, request }) => {
+  await openFreshChat(page);
+  await enableWebSearch(page);
+  await sendMessage(page, "cari logo vercel dan lihat detail");
+  await waitForRunDone(page);
+
+  const order = toolCallOrder(await stubRequests(request));
+  expect(order).toContain("view_image");
+
+  // Persisted to GeneratedImage with source="web"
+  const sessionId = await page.evaluate(() => localStorage.getItem("chat.sessionId") ?? "");
+  expect(sessionId).toBeTruthy();
+  const res = await request.get(`${API_ORIGIN}/api/images?sessionId=${encodeURIComponent(sessionId)}`);
+  const data = (await res.json()) as { images: Array<{ source?: string; sourceUrl?: string | null }> };
+  const webPhotos = data.images.filter((i) => i.source === "web");
+  expect(webPhotos.length).toBeGreaterThan(0);
+
+  // Rail "Images" section shows a thumbnail with the source chip
+  const chip = page.getByLabel("Open image source").first();
+  await expect(chip).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Images")).toBeVisible();
+});
+
 test("case 2 — view_image httpbin direct (non-vision description path also functional)", async ({
   page,
   request,
