@@ -296,8 +296,9 @@ Tools ini di-inject ke agent saat handle chat:
 | `descriptive_stats` | count, mean, median, mode, min/max, range, quartiles, IQR, variance, stdDev, skewness |
 | `pearson_correlation` | korelasi Pearson, covariance, arah, kekuatan, R² |
 | `linear_regression` | regresi sederhana `y = slope * x + intercept`, residual, prediksi opsional |
-| `web_search` | Cari web (Tavily) — butuh persetujuan saat toggle off |
-| `web_fetch` | Ambil isi halaman web tertentu (Tavily) |
+| `web_search` | Cari web (Tavily) — butuh persetujuan saat toggle off; kini juga `images[]` |
+| `web_fetch` | Ambil isi halaman web tertentu (Tavily) — kini juga `images[]` |
+| `view_image` | Lihat gambar dari `web_search`/`web_fetch` `images[]` atau `imageId` session/dokumen — vision: bytes, text-only: deskripsi (via vision helper) |
 | `generate_image` | Generate gambar dari prompt; param (model, aspect ratio, quality, background) hanya diisi saat user minta, selainnya pakai default session |
 | `edit_image` | Edit gambar generated sebelumnya (via `referenceImageId`) — dikirim sebagai `input_references` (data URL) |
 | `request_clarification` | Tanya user saat request ambigu (max 5 pertanyaan, tipe single/multiple choice/free text) |
@@ -307,6 +308,9 @@ Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”*
 ### Web search
 
 Web search aktif per-session lewat toggle di composer (ikon globe, tanpa label, default **off**). Saat toggle off, agent tetap bisa memanggil tool web lalu *suspend* dan meminta persetujuan user via *glass approval card* dengan alasan dinamis yang dihasilkan agent — user bisa **Allow once**, **Allow for session**, atau **Reject**. Sumber web yang dikumpulkan dari pencarian tampil di sidebar kanan (bagian **Web sources**). Tool web hanya terdaftar jika `TAVILY_API_KEY` diisi (toggle nonaktif jika kosong). Dokumentasi library/API via MCP context7 (`resolve-library-id`, `query-docs`) opsional dengan `CONTEXT7_API_KEY`.
+
+- `web_search` kini mengembalikan `images[]` (`{ url, description }`, max 5, deskripsi truncate 300 chars) dari Tavily `includeImages`+`includeImageDescriptions`; `web_fetch` mengembalikan `images[]` (string URLs, max 5) dari `extract` `includeImages`.
+- `view_image` universal: model vision menerima **image bytes** (`ToolResultContent` `{type:"image", data:base64, mediaType}`), model text-only menerima **deskripsi** via cheap vision helper model (sub-agent-as-tool). Pass `url` dari `web_search`/`web_fetch` `images[]` ke `view_image(url)` — lihat `docs/superpowers/specs/2026-08-19-web-search-image-view-design.md`.
 
 ### Image generation
 

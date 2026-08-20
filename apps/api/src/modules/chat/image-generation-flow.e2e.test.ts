@@ -237,14 +237,16 @@ beforeAll(async () => {
   server = stub.server;
   stubRequests = stub.requests;
   port = stub.port;
-});
+}, 30_000);
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
+  if (server) {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
   vi.unstubAllEnvs();
-});
+}, 30_000);
 
 beforeEach(() => {
   stubRequests.length = 0;
