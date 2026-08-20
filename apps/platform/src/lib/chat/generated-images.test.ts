@@ -7,6 +7,7 @@ import {
   groupImageToolRuns,
   imageItemsFromToolPart,
   isImageToolName,
+  isMessageImageToolName,
   mergeGeneratedImages,
   toGeneratedImageItem,
 } from "./generated-images";
@@ -43,6 +44,8 @@ function imageMeta(overrides: Record<string, unknown> = {}) {
     prompt: "a red panda",
     index: 0,
     total: 1,
+    source: "generated",
+    sourceUrl: null,
     ...overrides,
   };
 }
@@ -54,6 +57,15 @@ describe("isImageToolName", () => {
     expect(isImageToolName("web_search")).toBe(false);
     expect(isImageToolName("web_fetch")).toBe(false);
     expect(isImageToolName("")).toBe(false);
+  });
+});
+
+describe("isMessageImageToolName", () => {
+  it("includes view_image alongside the image tools", () => {
+    expect(isMessageImageToolName("view_image")).toBe(true);
+    expect(isMessageImageToolName("generate_image")).toBe(true);
+    expect(isMessageImageToolName("edit_image")).toBe(true);
+    expect(isMessageImageToolName("web_search")).toBe(false);
   });
 });
 
@@ -190,6 +202,73 @@ describe("collectGeneratedImagesFromMessages", () => {
       imageMeta({ imageId: "b" }),
     ]);
   });
+
+  it("collects a view_image web photo from a vision ToolResultContent output", () => {
+    const parts = [
+      toolPart("view_image", [
+        {
+          type: "text",
+          text: JSON.stringify({
+            images: [
+              {
+                imageId: "w1",
+                modelId: "web",
+                prompt: "q",
+                width: 0,
+                height: 0,
+                mediaType: "image/jpeg",
+                index: 0,
+                total: 1,
+                source: "web",
+                sourceUrl: "https://example.com/a.jpg",
+              },
+            ],
+            sourceUrl: "https://example.com/other.jpg",
+          }),
+        },
+        { type: "image", data: "aGk=", mediaType: "image/jpeg" },
+      ]),
+    ];
+
+    const images = collectGeneratedImagesFromMessages([message(parts)]);
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({
+      imageId: "w1",
+      mediaType: "image/jpeg",
+      source: "web",
+      sourceUrl: "https://example.com/a.jpg",
+    });
+  });
+
+  it("collects a view_image web photo from a description JSON string output", () => {
+    const parts = [
+      toolPart(
+        "view_image",
+        JSON.stringify({
+          images: [
+            {
+              imageId: "w2",
+              modelId: "web",
+              prompt: "q",
+              width: 0,
+              height: 0,
+              mediaType: "image/png",
+              index: 0,
+              total: 1,
+            },
+          ],
+          description: "A cat",
+          sourceUrl: "https://example.com/c.png",
+        }),
+      ),
+    ];
+
+    const images = collectGeneratedImagesFromMessages([message(parts)]);
+    expect(images).toHaveLength(1);
+    expect(images[0]!.imageId).toBe("w2");
+    expect(images[0]!.source).toBe("web");
+    expect(images[0]!.sourceUrl).toBe("https://example.com/c.png");
+  });
 });
 
 function storedMeta(overrides: Record<string, unknown> = {}): GeneratedImageMeta {
@@ -203,6 +282,8 @@ function storedMeta(overrides: Record<string, unknown> = {}): GeneratedImageMeta
     modelId: "openai/gpt-5-image-mini",
     prompt: "stored prompt",
     nOfTotal: null,
+    source: "generated",
+    sourceUrl: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -228,6 +309,8 @@ describe("mergeGeneratedImages", () => {
         height: 1024,
         mediaType: "image/png",
         nOfTotal: "2 of 2",
+        source: "generated",
+        sourceUrl: null,
       },
       {
         id: "both",
@@ -237,6 +320,8 @@ describe("mergeGeneratedImages", () => {
         height: 1024,
         mediaType: "image/png",
         nOfTotal: null,
+        source: "generated",
+        sourceUrl: null,
       },
       {
         id: "stored-2",
@@ -246,6 +331,8 @@ describe("mergeGeneratedImages", () => {
         height: 1024,
         mediaType: "image/png",
         nOfTotal: "1 of 4",
+        source: "generated",
+        sourceUrl: null,
       },
     ]);
   });
@@ -265,6 +352,8 @@ describe("toGeneratedImageItem", () => {
       height: 1024,
       mediaType: "image/png",
       nOfTotal: "3 of 4",
+      source: "generated",
+      sourceUrl: null,
     });
   });
 });
@@ -368,6 +457,8 @@ describe("imageItemsFromToolPart", () => {
         height: 1024,
         mediaType: "image/png",
         nOfTotal: "1 of 2",
+        source: "generated",
+        sourceUrl: null,
       },
       {
         id: "img-2",
@@ -377,6 +468,8 @@ describe("imageItemsFromToolPart", () => {
         height: 1024,
         mediaType: "image/png",
         nOfTotal: "2 of 2",
+        source: "generated",
+        sourceUrl: null,
       },
     ]);
   });

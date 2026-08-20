@@ -100,9 +100,18 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
   tools.push(createClarificationTool({ requester: createAutoClarificationResponder() }));
   instructions.push(CLARIFICATION_INSTRUCTION);
 
+  // Universal view_image: non-vision always gets description mode; vision gets vision mode when web search is available.
+  // In eval, web search is always available via stubTavilyClient, so vision models also receive view_image for web images.
+  let viewImageRegistered = false;
   if (!sessionConfig.visionModelAvailable) {
     tools.push(createStubViewImageTool({ model: createStubViewImageModel() }));
+    if (!viewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION);
+    viewImageRegistered = true;
+  }
+  if (sessionConfig.visionModelAvailable && !viewImageRegistered) {
+    tools.push(createStubViewImageTool({ model: createStubViewImageModel() }));
     instructions.push(VISION_HELPER_INSTRUCTION);
+    viewImageRegistered = true;
   }
 
   const needsApprovals = !sessionConfig.webSearchEnabled || !sessionConfig.imageGenEnabled;

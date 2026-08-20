@@ -27,6 +27,8 @@ function makeRecord(
     modelId: "model-1",
     prompt: "a cat on a sofa",
     nOfTotal: null,
+    source: "generated",
+    sourceUrl: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     ...overrides,
   };
@@ -223,6 +225,79 @@ describe("createImageStore", () => {
       });
 
       expect(deleteObject).not.toHaveBeenCalled();
+    });
+
+    it("persists source and sourceUrl when saving a web photo", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.generatedImage.create.mockResolvedValue({
+        ...makeRecord(),
+        source: "web",
+        sourceUrl: "https://example.com/photo.png",
+      });
+      const record = await store.saveGeneratedImage({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        projectId: PROJECT_ID,
+        buffer: new Uint8Array([1, 2, 3]),
+        mediaType: "image/png",
+        width: 0,
+        height: 0,
+        modelId: "web",
+        prompt: "https://example.com/photo.png",
+        source: "web",
+        sourceUrl: "https://example.com/photo.png",
+      });
+      expect(fakePrisma.generatedImage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          source: "web",
+          sourceUrl: "https://example.com/photo.png",
+        }),
+      });
+      expect(record.sourceUrl).toBe("https://example.com/photo.png");
+    });
+
+    it("defaults source to generated when omitted", async () => {
+      const { fakePrisma, store } = setup();
+      fakePrisma.generatedImage.create.mockResolvedValue(makeRecord());
+      await store.saveGeneratedImage({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        projectId: null,
+        buffer: new Uint8Array([1]),
+        mediaType: "image/png",
+        width: 1,
+        height: 1,
+        modelId: "m",
+        prompt: "p",
+      });
+      expect(fakePrisma.generatedImage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source: "generated" }),
+      });
+    });
+  });
+
+  describe("findSessionImageBySourceUrl", () => {
+    it("queries the generatedImage store by sourceUrl", async () => {
+      const { fakePrisma, store } = setup();
+      const row = {
+        ...makeRecord(),
+        source: "web",
+        sourceUrl: "https://example.com/a.png",
+      };
+      fakePrisma.generatedImage.findFirst.mockResolvedValue(row);
+      const found = await store.findSessionImageBySourceUrl({
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        sourceUrl: "https://example.com/a.png",
+      });
+      expect(fakePrisma.generatedImage.findFirst).toHaveBeenCalledWith({
+        where: {
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          sourceUrl: "https://example.com/a.png",
+        },
+      });
+      expect(found).toEqual(row);
     });
   });
 

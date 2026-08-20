@@ -81,9 +81,24 @@ function lastUserText(body: { input?: unknown }): string {
   return "";
 }
 
-type Scenario = "generate" | "clarify" | "websearch" | "edit" | "fallback";
+type Scenario =
+  | "generate"
+  | "clarify"
+  | "websearch"
+  | "websearch_view"
+  | "view_httpbin"
+  | "view_private"
+  | "webfetch_view"
+  | "cap_test"
+  | "edit"
+  | "fallback";
 
 function scenarioFor(text: string): Scenario {
+  if (text.includes("cari logo vercel dan lihat detail")) return "websearch_view";
+  if (text.includes("web_fetch gambar")) return "webfetch_view";
+  if (text.includes("lihat gambar private")) return "view_private";
+  if (text.includes("lihat gambar httpbin")) return "view_httpbin";
+  if (text.includes("test cap images")) return "cap_test";
   if (text.includes("cari referensi")) return "websearch";
   if (text.includes("kurang jelas")) return "clarify";
   if (text.includes("edit")) return "edit";
@@ -297,6 +312,43 @@ function handleResponses(
   } else if (turn === 1 && scenario === "websearch") {
     events = toolCallStream(
       { query: "kucing main di taman", reason: "riset referensi visual" },
+      "web_search",
+    );
+  } else if (turn === 1 && scenario === "websearch_view") {
+    events = toolCallStream(
+      { query: "logo vercel", reason: "butuh referensi visual logo vercel untuk akurasi" },
+      "web_search",
+    );
+  } else if (turn === 2 && scenario === "websearch_view") {
+    events = toolCallStream(
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe this logo image accurately" },
+      "view_image",
+    );
+  } else if (turn === 1 && scenario === "view_httpbin") {
+    events = toolCallStream(
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe what you see" },
+      "view_image",
+    );
+  } else if (turn === 1 && scenario === "view_private") {
+    events = toolCallStream(
+      { url: "http://127.0.0.1/private.jpg", question: "Describe what you see" },
+      "view_image",
+    );
+  } else if (turn === 1 && scenario === "webfetch_view") {
+    events = toolCallStream(
+      { url: "https://example.com/article", reason: "need to read page images" },
+      "web_fetch",
+    );
+  } else if (turn === 2 && scenario === "webfetch_view") {
+    events = toolCallStream(
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe image from fetched page" },
+      "view_image",
+    );
+  } else if (turn === 1 && scenario === "cap_test") {
+    // Query must stay <= 300 chars (webSearchInput.query.max(300)); cap 5 +
+    // truncate 300 is unit-tested in web-search.test.ts (mock Tavily images).
+    events = toolCallStream(
+      { query: "test cap images", reason: "cap test" },
       "web_search",
     );
   } else if (turn === 1 && scenario === "edit") {

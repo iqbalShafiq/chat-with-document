@@ -2,7 +2,10 @@ import type { UIMessagePart } from "@anvia/react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useImagePreview } from "#/components/images/image-preview";
-import { isImageToolName } from "#/lib/chat/generated-images";
+import {
+  isImageToolName,
+  isMessageImageToolName,
+} from "#/lib/chat/generated-images";
 import {
   formatToolInput,
   formatToolOutput,
@@ -288,7 +291,9 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         >
           <ToolSectionView section={requestSection} />
           <ToolSectionView section={resultSection} />
-          {isDone ? <ToolResultImages output={parseToolValue(part.output)} /> : null}
+          {isDone && !isMessageImageToolName(part.toolName) ? (
+            <ToolResultImages output={parseToolValue(part.output)} />
+          ) : null}
         </div>
       ) : (
         <div id={panelId} hidden />

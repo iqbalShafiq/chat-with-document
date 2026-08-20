@@ -390,12 +390,16 @@ model GeneratedImage {
   prompt    String
   /// e.g. "2 of 3" when generated in a multi-image call.
   nOfTotal  String?
+  /// "generated" (image tools) or "web" (view_image of a public web URL).
+  source     String  @default("generated")
+  sourceUrl  String?
   createdAt DateTime @default(now())
 
   sessionContexts SessionImageContext[]
 
   @@index([userId, projectId])
   @@index([sessionId])
+  @@index([sessionId, source])
   @@map("generated_image")
 }
 

@@ -1631,6 +1631,7 @@ function ChatSession({
         );
       });
       onStreamSettled();
+      void refreshSessionImages();
       // Anything still inflight at stream end was never acked — send-now
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();

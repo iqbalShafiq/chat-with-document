@@ -8,7 +8,10 @@ function requireQueryId(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Metadata view without the r2Key (never exposed to clients). */
+/**
+ * Metadata view without the r2Key (never exposed to clients). The record
+ * spread automatically carries the new source/sourceUrl fields to clients.
+ */
 function toImageMetadata(image: GeneratedImageRecord) {
   const { r2Key: _r2Key, createdAt, ...rest } = image;
   return { ...rest, createdAt: createdAt.toISOString() };

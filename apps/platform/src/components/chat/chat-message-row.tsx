@@ -17,7 +17,7 @@ import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
   imageItemsFromToolPart,
-  isImageToolName,
+  isMessageImageToolName,
   type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import {
@@ -390,7 +390,7 @@ function ChatMessageParts({
     const runs: ToolPart[][] = [];
     let current: ToolPart[] = [];
     for (const part of message.parts) {
-      if (part.type === "tool" && isImageToolName(part.toolName)) {
+      if (part.type === "tool" && isMessageImageToolName(part.toolName)) {
         current.push(part);
       } else if (current.length > 0) {
         runs.push(current);

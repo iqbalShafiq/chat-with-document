@@ -66,14 +66,14 @@ describe("buildEvalTools", () => {
     expect(instructions.join("\n")).toContain("view_image");
   });
 
-  it("omits view_image when the model accepts image input", () => {
+  it("registers view_image for vision model when web search is available (universal wiring)", () => {
     const { tools, instructions } = buildEvalTools({
       webSearchEnabled: true,
       imageGenEnabled: true,
       hasDocuments: false,
       visionModelAvailable: true,
     });
-    expect(tools.map((tool) => tool.name)).not.toContain("view_image");
-    expect(instructions.join("\n")).not.toContain("view_image");
+    expect(tools.map((tool) => tool.name)).toContain("view_image");
+    expect(instructions.join("\n")).toContain("view_image");
   });
 });

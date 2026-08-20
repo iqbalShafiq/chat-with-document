@@ -15,6 +15,8 @@ export type GeneratedImageRecord = {
   modelId: string;
   prompt: string;
   nOfTotal: string | null;
+  source: string;
+  sourceUrl: string | null;
   createdAt: Date;
 };
 
@@ -49,6 +51,8 @@ export function createImageStore(deps: ImageStoreDeps) {
       width: number;
       height: number;
       nOfTotal?: string;
+      source?: string;
+      sourceUrl?: string;
     }): Promise<GeneratedImageRecord> {
       const mediaType = input.mediaType ?? "image/png";
       const r2Key = `images/${input.userId}/${randomUUID()}`;
@@ -67,6 +71,10 @@ export function createImageStore(deps: ImageStoreDeps) {
             height: input.height,
             modelId: input.modelId,
             prompt: input.prompt,
+            source: input.source ?? "generated",
+            ...(input.sourceUrl !== undefined
+              ? { sourceUrl: input.sourceUrl }
+              : {}),
             ...(input.nOfTotal !== undefined
               ? { nOfTotal: input.nOfTotal }
               : {}),
@@ -140,6 +148,21 @@ export function createImageStore(deps: ImageStoreDeps) {
 
     getImage(id: string): Promise<GeneratedImageRecord | null> {
       return deps.prisma.generatedImage.findFirst({ where: { id } });
+    },
+
+    /** Dedup lookup: has this session already persisted a web photo at this URL? */
+    async findSessionImageBySourceUrl(input: {
+      userId: string;
+      sessionId: string;
+      sourceUrl: string;
+    }): Promise<GeneratedImageRecord | null> {
+      return deps.prisma.generatedImage.findFirst({
+        where: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+          sourceUrl: input.sourceUrl,
+        },
+      });
     },
 
     /** Fetch the stored image bytes for a row's r2Key. */

@@ -1,4 +1,5 @@
 import { createTool } from "@anvia/core";
+import type { ToolResultContent } from "@anvia/core";
 import {
   createCompletion,
   Message,
@@ -20,19 +21,9 @@ const FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 
 export const VISION_HELPER_INSTRUCTION =
-  "Your model cannot receive image input directly. When you need to see what " +
-  "an image actually looks like, call view_image — it returns an accurate " +
-  "text description of the real pixels via a vision model.\n" +
-  "Sources you can pass:\n" +
-  "- imageId: a session image id from the active image context or session history, " +
-  "or an image id returned by get_document_page_images (document charts, photos, diagrams)\n" +
-  "- url: a public http(s) image URL (e.g. a logo or product photo from web_search / web_fetch)\n" +
-  "get_document_page_images returns image metadata without the actual pixels " +
-  "for your model; when the answer depends on visual content, pass the returned " +
-  "image id to view_image to see it.\n" +
-  "Prefer view_image over guessing visual details. External reference images " +
-  "from the web are supported — do not assume view_image is limited to " +
-  "conversation-only images.";
+  "When you need to see what an image looks like, call view_image — it returns the image for vision models or a text description for text-only models.\n" +
+  "Sources: imageId (session/document) or url (public http(s) image from web_search/web_fetch images).\n" +
+  "web_search now returns images[] with url and description; web_fetch returns images[] URLs. Pass the URL you want to inspect to view_image.";
 
 const VIEW_IMAGE_DESCRIPTION =
   "Describe what an image actually shows (via a vision model). Use for " +
@@ -87,6 +78,7 @@ const viewImageInput = z
 export type ViewImageToolOptions = {
   userId: string;
   sessionId: string;
+  projectId?: string | null;
   store: ImageStore;
   model: CompletionModel;
   /** Injectable fetch for tests (defaults to global fetch). */
@@ -97,7 +89,34 @@ export type ViewImageToolOptions = {
     userId: string,
     sessionId: string,
   ) => Promise<{ mediaType: string; buffer: Uint8Array } | null>;
+  /** Vision mode returns ToolResultContent image bytes; description mode returns text via helper model. Defaults to description. */
+  mode?: "vision" | "description";
 };
+
+/** Parse width/height from common raster headers; fall back to 0x0. */
+export function imageDimensionsFromBuffer(
+  buffer: Buffer,
+  _mediaType: string,
+): { width: number; height: number } {
+  // PNG: IHDR at offset 16, big-endian.
+  if (buffer.length >= 24 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  }
+  // JPEG: scan for SOF0/SOF2 (0xFFC0/0xFFC2) markers.
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    for (let i = 2; i + 9 < buffer.length; i += 1) {
+      if (buffer[i] === 0xff && (buffer[i + 1] === 0xc0 || buffer[i + 1] === 0xc2)) {
+        return { height: buffer.readUInt16BE(i + 5), width: buffer.readUInt16BE(i + 7) };
+      }
+    }
+    return { width: 0, height: 0 };
+  }
+  // GIF: logical screen descriptor, little-endian.
+  if (buffer.length >= 10 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    return { width: buffer.readUInt16LE(6), height: buffer.readUInt16LE(8) };
+  }
+  return { width: 0, height: 0 };
+}
 
 /**
  * Subagent-as-tool for text-only models: a narrow, read-only tool that
@@ -107,10 +126,20 @@ export type ViewImageToolOptions = {
  * actual image content instead of only prompt text or alt captions.
  */
 export function createViewImageTool(options: ViewImageToolOptions) {
-  const { userId, sessionId, store, model, fetchFn = fetch } = options;
+  const {
+    userId,
+    sessionId,
+    projectId = null,
+    store,
+    model,
+    fetchFn = fetch,
+    mode = "description",
+  } = options;
   return createTool({
     name: "view_image",
-    description: VIEW_IMAGE_DESCRIPTION,
+    description:
+      VISION_HELPER_INSTRUCTION +
+      (mode === "vision" ? " Returns the image bytes for vision models." : ""),
     input: viewImageInput,
     execute: async ({ imageId, url, question }) => {
       try {
@@ -123,8 +152,69 @@ export function createViewImageTool(options: ViewImageToolOptions) {
               resolveDocumentImage: options.resolveDocumentImage,
             })
           : await loadRemoteImage({ url: url!, fetchFn });
-        if ("error" in loaded) return loaded.error;
+        if ("error" in loaded) {
+          return mode === "vision"
+            ? ([{ type: "text", text: loaded.error }] satisfies ToolResultContent[])
+            : loaded.error;
+        }
+        let persistedImageId: string | undefined;
+        let persistedSourceUrl: string | undefined;
+        if (url) {
+          persistedSourceUrl = url;
+          const existing = await store
+            .findSessionImageBySourceUrl({ userId, sessionId, sourceUrl: url })
+            .catch(() => null);
+          if (existing) {
+            persistedImageId = existing.id;
+          } else {
+            const dims = imageDimensionsFromBuffer(loaded.buffer, loaded.mediaType);
+            try {
+              const saved = await store.saveGeneratedImage({
+                userId,
+                sessionId,
+                projectId,
+                buffer: loaded.buffer,
+                mediaType: loaded.mediaType,
+                width: dims.width,
+                height: dims.height,
+                modelId: "web",
+                prompt: question ?? url,
+                source: "web",
+                sourceUrl: url,
+              });
+              persistedImageId = saved.id;
+            } catch (error) {
+              console.error("[chat] view_image persist failed", { url, error });
+            }
+          }
+        }
 
+        const images = persistedImageId
+          ? [
+              {
+                imageId: persistedImageId,
+                modelId: "web",
+                prompt: question ?? url,
+                width: 0,
+                height: 0,
+                mediaType: loaded.mediaType,
+                index: 0,
+                total: 1,
+              },
+            ]
+          : undefined;
+
+        if (mode === "vision") {
+          const content: ToolResultContent[] = images
+            ? [{ type: "text", text: JSON.stringify({ images, sourceUrl: persistedSourceUrl }) }]
+            : [];
+          content.push({
+            type: "image",
+            data: loaded.buffer.toString("base64"),
+            mediaType: loaded.mediaType,
+          });
+          return content;
+        }
         const result = await createCompletion(model, {
           messages: [
             Message.user([
@@ -140,14 +230,19 @@ export function createViewImageTool(options: ViewImageToolOptions) {
           ],
           instructions: VIEW_IMAGE_INSTRUCTIONS,
         });
-        return result.text;
+        return images
+          ? JSON.stringify({ images, description: result.text, sourceUrl: persistedSourceUrl })
+          : result.text;
       } catch (error) {
         console.error("[chat] view_image failed", {
           imageId: imageId ?? null,
           url: url ?? null,
           error: error instanceof Error ? error.message : String(error),
         });
-        return "Failed to view the image. Try again or skip it.";
+        const msg = "Failed to view the image. Try again or skip it.";
+        return mode === "vision"
+          ? ([{ type: "text", text: msg }] satisfies ToolResultContent[])
+          : msg;
       }
     },
   });
@@ -278,12 +373,17 @@ export async function loadRemoteImage(input: {
     }
 
     const buffer = Buffer.from(arrayBuffer);
-    const sniffed = sniffImageMediaType(buffer);
-    const mediaType = headerType.startsWith("image/")
-      ? headerType
-      : sniffed ?? "image/jpeg";
-    if (!mediaType.startsWith("image/")) {
-      return { error: "URL did not return a recognizable image." };
+    // Magic-byte sniff is the source of truth: it both confirms the bytes are
+    // a real raster image AND limits us to formats vision providers accept
+    // (OpenRouter/Azure only support image/jpeg|png|gif|webp). A header alone
+    // (e.g. image/svg+xml) is not enough — sending SVG as input_image makes
+    // the model provider reject the whole run with a 400.
+    const mediaType = sniffImageMediaType(buffer);
+    if (!mediaType) {
+      return {
+        error:
+          "URL did not return a supported image format (JPEG, PNG, GIF, WebP).",
+      };
     }
     return { buffer, mediaType };
   }
@@ -437,11 +537,14 @@ export async function resolveVisionHelperModel(): Promise<CompletionModel | null
 export function createDefaultViewImageTool(options: {
   userId: string;
   sessionId: string;
+  projectId?: string | null;
   model: CompletionModel;
   resolveDocumentImage?: ViewImageToolOptions["resolveDocumentImage"];
+  mode?: "vision" | "description";
 }) {
   return createViewImageTool({
     ...options,
     store: getImageStore(),
+    mode: options.mode,
   });
 }
