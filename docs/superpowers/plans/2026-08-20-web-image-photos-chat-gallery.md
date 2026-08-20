@@ -1,6 +1,6 @@
 # Web Image Photos in Chat, Gallery & Sidebar Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Persist web photos the agent viewed via `view_image` into `GeneratedImage` (tagged `source="web"` + `sourceUrl`), render them inline in the chat message, in the gallery modal "Images", and in the right-rail "Images" section (mixed with generated images), each web photo carrying a source chip (bottom-left globe; click opens source in new tab; hover reveals the URL capped at half the image width, one line).
 
@@ -58,7 +58,7 @@
 - Consumes: existing `createImageStore(deps)`.
 - Produces: `GeneratedImageRecord` gains `source: string` and `sourceUrl: string | null`; `saveGeneratedImage(input)` gains optional `source?` (default `"generated"`) and `sourceUrl?`; new `findSessionImageBySourceUrl(input: { userId: string; sessionId: string; sourceUrl: string }): Promise<GeneratedImageRecord | null>`.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 In `apps/api/src/modules/images/service.test.ts`, extend `setup()`'s fake prisma (already has `generatedImage.create/findMany/findFirst`) and add:
 
@@ -122,12 +122,12 @@ it("findSessionImageBySourceUrl queries the generatedImage store by sourceUrl", 
 Also update `makeRecord` to include the new fields:
 `source: "generated", sourceUrl: null,` (inside the returned object) and `makeRecord({ source: "web", sourceUrl: "..." })` remains overridable.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter api exec vitest run src/modules/images/service.test.ts`
 Expected: FAIL — `source`/`sourceUrl` not on `GeneratedImageRecord`; `findSessionImageBySourceUrl` not a function.
 
-- [ ] **Step 3: Migrate schema**
+- [x] **Step 3: Migrate schema**
 
 In `apps/api/prisma/schema.prisma`, `model GeneratedImage` add:
 
@@ -140,7 +140,7 @@ and extend the `@@index([sessionId])` area with `@@index([sessionId, source])`.
 
 Run: `pnpm --filter api db:generate` then `pnpm --filter api db:migrate -- --name web_photo_source`
 
-- [ ] **Step 4: Implement service changes**
+- [x] **Step 4: Implement service changes**
 
 In `apps/api/src/modules/images/service.ts`:
 
@@ -167,12 +167,12 @@ async findSessionImageBySourceUrl(input: {
 },
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm --filter api exec vitest run src/modules/images/service.test.ts`
 Expected: PASS (existing + 3 new).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/api/prisma/schema.prisma apps/api/src/modules/images/service.ts apps/api/src/modules/images/service.test.ts apps/api/prisma/migrations
@@ -196,7 +196,7 @@ git commit -m "feat(api): GeneratedImage source/sourceUrl columns + findSessionI
     - vision: `[{ type: "text", text: JSON.stringify({ images, sourceUrl }) }, { type: "image", data, mediaType }]`
     - description: `JSON.stringify({ images, description: <text>, sourceUrl })`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 In `apps/api/src/modules/chat/vision-helper.test.ts`, add to `makeOptions` a `store` that also exposes `saveGeneratedImage` and `findSessionImageBySourceUrl` (keep existing `getImage`/`getObjectBuffer`):
 
@@ -272,12 +272,12 @@ it("does NOT persist an imageId-path (session/document) view", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter api exec vitest run src/modules/chat/vision-helper.test.ts`
 Expected: FAIL — `saveGeneratedImage` not called; vision output text is not a JSON with `images`.
 
-- [ ] **Step 3: Add `imageDimensionsFromBuffer` + `projectId` option**
+- [x] **Step 3: Add `imageDimensionsFromBuffer` + `projectId` option**
 
 In `vision-helper.ts` add:
 
@@ -310,7 +310,7 @@ export function imageDimensionsFromBuffer(
 
 `ViewImageToolOptions`: add `projectId?: string | null;` and destructure `projectId = null` in `createViewImageTool`.
 
-- [ ] **Step 4: Implement persistence + output contract in `createViewImageTool.execute`**
+- [x] **Step 4: Implement persistence + output contract in `createViewImageTool.execute`**
 
 Inside `execute`, after `loaded` succeeds and before the mode branch, only when `url` is provided (not `imageId`):
 
@@ -379,12 +379,12 @@ return images
 
 Keep the existing error branches unchanged (vision → `[{type:"text", text:error}]`, description → error string).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm --filter api exec vitest run src/modules/chat/vision-helper.test.ts`
 Expected: PASS (existing 7 + 4 new). Then `pnpm --filter api exec tsc --noEmit` → 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/api/src/modules/chat/vision-helper.ts apps/api/src/modules/chat/vision-helper.test.ts
@@ -403,19 +403,19 @@ git commit -m "feat(api): view_image persists web photos (source=web) and return
 - Consumes: Task 2 `ViewImageToolOptions.projectId`.
 - Produces: `createDefaultViewImageTool` receives `projectId`; `GET /api/images` metadata includes `source`/`sourceUrl`.
 
-- [ ] **Step 1: Pass `projectId` in both wiring points**
+- [x] **Step 1: Pass `projectId` in both wiring points**
 
 In `build-run-input.ts`, both `createDefaultViewImageTool({ userId, sessionId, model, resolveDocumentImage, mode })` calls add `projectId,` (the local `projectId` variable is already in scope — see line 268).
 
-- [ ] **Step 2: Confirm router passthrough**
+- [x] **Step 2: Confirm router passthrough**
 
 `apps/api/src/modules/images/router.ts:12` `toImageMetadata` already spreads the record minus `r2Key`, so `source`/`sourceUrl` flow to clients automatically. Add a comment noting the new fields. No logic change.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `pnpm --filter api exec tsc --noEmit` → 0; `pnpm --filter api test` → PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/api/src/modules/chat/build-run-input.ts apps/api/src/modules/images/router.ts
@@ -439,7 +439,7 @@ git commit -m "feat(api): pass projectId to view_image store; expose source/sour
   - `isMessageImageToolName(name: string): boolean` (= `isImageToolName(name) || name === "view_image"`).
   - `collectGeneratedImages`/`collectGeneratedImagesFromMessages`/`countRunningImageToolParts`/`groupImageToolRuns`/`mergeGeneratedImages` treat `view_image` as an image tool and parse its output (vision array → text JSON; description JSON string).
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
 In `apps/platform/src/lib/chat/generated-images.test.ts` add:
 
@@ -476,12 +476,12 @@ it("isMessageImageToolName includes view_image", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter platform test -- src/lib/chat/generated-images.test.ts`
 Expected: FAIL — `collectGeneratedImages` ignores `view_image`; `isMessageImageToolName` undefined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `apps/platform/src/lib/api.ts`:
 - `GeneratedImageMeta`: add `source: string; sourceUrl: string | null;`
@@ -523,12 +523,12 @@ then iterate `rawImages` (replacing the current `output.images` loop) and add `s
 - `toItem`: include `source`/`sourceUrl` from both shapes.
 - `countRunningImageToolParts` / `groupImageToolRuns`: use `isMessageImageToolName`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter platform test -- src/lib/chat/generated-images.test.ts`
 Expected: PASS. Then `pnpm --filter platform exec tsc --noEmit` → 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/platform/src/lib/api.ts apps/platform/src/lib/chat/generated-images.ts apps/platform/src/lib/chat/generated-images.test.ts
@@ -547,11 +547,11 @@ git commit -m "feat(platform): treat view_image as a message image tool; parse w
 - Consumes: Task 4 `isMessageImageToolName`, `imageItemsFromToolPart`.
 - Produces: a `view_image` tool part renders an inline `GeneratedImageThumbnail`/`Strip`; `ToolResultImages` no longer duplicates it.
 
-- [ ] **Step 1: Update `chat-message-row.tsx`**
+- [x] **Step 1: Update `chat-message-row.tsx`**
 
 Replace the `isImageToolName` filter in the `imageRuns` useMemo (line ~393) with `isMessageImageToolName` (import it). Everything else (strip/thumbnail rendering via `imageItemsFromToolPart`) works unchanged.
 
-- [ ] **Step 2: Update `tool-activity-panel.tsx`**
+- [x] **Step 2: Update `tool-activity-panel.tsx`**
 
 Import `isMessageImageToolName`. In `ToolActivityPanel`, only render `<ToolResultImages .../>` when the tool is **not** a message-image tool:
 
@@ -561,11 +561,11 @@ Import `isMessageImageToolName`. In `ToolActivityPanel`, only render `<ToolResul
 ) : null}
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `pnpm --filter platform exec tsc --noEmit` → 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/platform/src/components/chat/chat-message-row.tsx apps/platform/src/components/tool-activity-panel.tsx
@@ -585,7 +585,7 @@ git commit -m "feat(platform): render view_image photos inline in chat (thumbnai
 - Consumes: Task 4 `GeneratedImageItem.source`/`sourceUrl`.
 - Produces: source chip in thumbnails for `source === "web"`; gallery copy; images refresh after each run.
 
-- [ ] **Step 1: Add the source chip to `generated-image-thumbnail.tsx`**
+- [x] **Step 1: Add the source chip to `generated-image-thumbnail.tsx`**
 
 Import `Globe` from `lucide-react`. Add `container-type` to the outer `<button>` (so `cqw` units work): `className="group/thumb relative block w-full ... [container-type:inline-size]"`.
 
@@ -621,19 +621,19 @@ Inside the button, after the prompt gradient overlay `<span>`, add (only for web
 
 Note: follows the existing pin-button pattern (`span role="button"` nested in the tile), glass styling matches, tooltip is `truncate` single-line with `max-w-[min(50cqw,12rem)]` (half the image width, capped at 12rem).
 
-- [ ] **Step 2: Gallery copy**
+- [x] **Step 2: Gallery copy**
 
 In `apps/platform/src/components/images/image-gallery-modal.tsx`, change the modal description (near line 83) to `"Images you generated or viewed across chats"`. Title stays `"Images"`.
 
-- [ ] **Step 3: Refresh images on stream settle**
+- [x] **Step 3: Refresh images on stream settle**
 
 In `apps/platform/src/routes/index.tsx`, in the effect that runs `onStreamSettled()` (around line 1633), add `void refreshSessionImages();` right after `onStreamSettled();` (it is already a stable callback in scope). This makes a newly persisted web photo appear in the rail + gallery without a reload.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `pnpm --filter platform exec tsc --noEmit` → 0; `pnpm --filter platform test` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/platform/src/components/images/generated-image-thumbnail.tsx apps/platform/src/components/images/image-gallery-modal.tsx apps/platform/src/routes/index.tsx
@@ -651,7 +651,7 @@ git commit -m "feat(platform): web photo source chip (globe + hover URL), galler
 **Interfaces:**
 - Consumes: Tasks 1-6. R2 configured (persistence works in E2E).
 
-- [ ] **Step 1: Add E2E persistence + rail assertions**
+- [x] **Step 1: Add E2E persistence + rail assertions**
 
 In `apps/platform/e2e/web-search-image-view.e2e.ts`, add a new test after case 1:
 
@@ -682,7 +682,7 @@ test("case 6 — web photo persisted as source=web and shown in the rail Images 
 
 Note: if R2 is not configured the persistence write is skipped by design; this E2E therefore requires `R2_*` env (same as the image-generation E2E suite).
 
-- [ ] **Step 2: Run the E2E suite (headed chromium)**
+- [x] **Step 2: Run the E2E suite (headed chromium)**
 
 Boot the stack manually (Postgres up, `PORT=3001`, `BETTER_AUTH_URL=http://localhost:3001`, LLM stub `:18765`), then:
 
@@ -692,7 +692,7 @@ npx playwright test e2e/web-search-image-view.e2e.ts --project chromium --headed
 
 Expected: all 6 cases PASS (case 1-5 existing + case 6).
 
-- [ ] **Step 3: Run all unit/type gates**
+- [x] **Step 3: Run all unit/type gates**
 
 ```bash
 pnpm --filter api test
@@ -705,7 +705,7 @@ pnpm --filter platform exec tsc --noEmit
 
 Expected: 0 failures, 0 type errors.
 
-- [ ] **Step 4: Real-LLM hands-on**
+- [x] **Step 4: Real-LLM hands-on**
 
 With the stack running against real `.env` (OpenRouter + Tavily), open `http://localhost:3000` in headed Chromium and run (vision model + non-vision model):
 - prompt: *"Cari logo Vercel di web, panggil view_image pada URL gambarnya, dan ceritakan."*
@@ -717,14 +717,14 @@ Verify per spec §7:
 5. Multiple `view_image` calls render as a strip, count matches.
 6. Non-vision (DeepSeek) run also stores + shows the photo (description path).
 
-- [ ] **Step 5: Update plan checkboxes + commit**
+- [x] **Step 5: Update plan checkboxes + commit**
 
 ```bash
 git add apps/platform/e2e/web-search-image-view.e2e.ts docs/superpowers/plans/2026-08-20-web-image-photos-chat-gallery.md
 git commit -m "test(e2e): web photo persisted as source=web and rail chip visible"
 ```
 
-- [ ] **Step 6: Push + update PR**
+- [x] **Step 6: Push + update PR**
 
 ```bash
 git push
