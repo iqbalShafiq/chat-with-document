@@ -129,7 +129,7 @@ test("case 1 — vision: web_search → view_image httpbin succeeds (hands-on)",
   const wsArgs = toolCallArgs(requests, "web_search");
   expect(wsArgs[0]).toMatchObject({ query: "logo vercel" });
   const viArgs = toolCallArgs(requests, "view_image");
-  expect(viArgs[0]).toMatchObject({ url: "https://httpbin.org/image/png" });
+  expect(viArgs[0]).toMatchObject({ url: "https://www.gstatic.com/webp/gallery/1.jpg" });
 
   // hands-on browser checks (playwright_browser_* equivalents):
   // - snapshot composer masih visible, tidak crash
@@ -160,7 +160,9 @@ test("case 6 — web photo persisted as source=web and shown in the rail Images 
   // Rail "Images" section shows a thumbnail with the source chip
   const chip = page.getByLabel("Open image source").first();
   await expect(chip).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("Images")).toBeVisible();
+  await expect(
+    page.locator('aside[aria-label="Session documents"]').getByText("Images").first(),
+  ).toBeVisible();
 });
 
 test("case 2 — view_image httpbin direct (non-vision description path also functional)", async ({
@@ -175,7 +177,7 @@ test("case 2 — view_image httpbin direct (non-vision description path also fun
   const order = toolCallOrder(requests);
   expect(order).toContain("view_image");
   const viArgs = toolCallArgs(requests, "view_image");
-  expect(viArgs[0]).toMatchObject({ url: "https://httpbin.org/image/png" });
+  expect(viArgs[0]).toMatchObject({ url: "https://www.gstatic.com/webp/gallery/1.jpg" });
   // description mode: unit test guarantees string return via vision helper model
   // E2E ensures run completes without image bytes crash and Selesai visible
   await expect(page.getByText(/Selesai:/).last()).toBeVisible();
@@ -229,7 +231,7 @@ test("case 4 — web_fetch → view_image works", async ({ page, request }) => {
   const fetchArgs = toolCallArgs(requests, "web_fetch");
   expect(fetchArgs[0]).toMatchObject({ url: "https://example.com/article" });
   const viArgs = toolCallArgs(requests, "view_image");
-  expect(viArgs[0]).toMatchObject({ url: "https://httpbin.org/image/png" });
+  expect(viArgs[0]).toMatchObject({ url: "https://www.gstatic.com/webp/gallery/1.jpg" });
 
   await expect(page.getByText(/Selesai:/).last()).toBeVisible();
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();

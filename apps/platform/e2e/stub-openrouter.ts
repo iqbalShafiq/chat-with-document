@@ -321,12 +321,12 @@ function handleResponses(
     );
   } else if (turn === 2 && scenario === "websearch_view") {
     events = toolCallStream(
-      { url: "https://httpbin.org/image/png", question: "Describe this logo image accurately" },
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe this logo image accurately" },
       "view_image",
     );
   } else if (turn === 1 && scenario === "view_httpbin") {
     events = toolCallStream(
-      { url: "https://httpbin.org/image/png", question: "Describe what you see" },
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe what you see" },
       "view_image",
     );
   } else if (turn === 1 && scenario === "view_private") {
@@ -341,7 +341,7 @@ function handleResponses(
     );
   } else if (turn === 2 && scenario === "webfetch_view") {
     events = toolCallStream(
-      { url: "https://httpbin.org/image/png", question: "Describe image from fetched page" },
+      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe image from fetched page" },
       "view_image",
     );
   } else if (turn === 1 && scenario === "cap_test") {
