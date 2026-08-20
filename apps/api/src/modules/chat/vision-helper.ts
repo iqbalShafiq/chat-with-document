@@ -78,6 +78,7 @@ const viewImageInput = z
 export type ViewImageToolOptions = {
   userId: string;
   sessionId: string;
+  projectId?: string | null;
   store: ImageStore;
   model: CompletionModel;
   /** Injectable fetch for tests (defaults to global fetch). */
@@ -92,20 +93,29 @@ export type ViewImageToolOptions = {
   mode?: "vision" | "description";
 };
 
-function toVisionResult(
+/** Parse width/height from common raster headers; fall back to 0x0. */
+export function imageDimensionsFromBuffer(
   buffer: Buffer,
-  mediaType: string,
-  question?: string,
-): ToolResultContent[] {
-  return [
-    {
-      type: "text",
-      text: question
-        ? `Image query: ${question}`
-        : "Image from web search — describe what you see to answer the user.",
-    },
-    { type: "image", data: buffer.toString("base64"), mediaType },
-  ];
+  _mediaType: string,
+): { width: number; height: number } {
+  // PNG: IHDR at offset 16, big-endian.
+  if (buffer.length >= 24 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  }
+  // JPEG: scan for SOF0/SOF2 (0xFFC0/0xFFC2) markers.
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    for (let i = 2; i + 9 < buffer.length; i += 1) {
+      if (buffer[i] === 0xff && (buffer[i + 1] === 0xc0 || buffer[i + 1] === 0xc2)) {
+        return { height: buffer.readUInt16BE(i + 5), width: buffer.readUInt16BE(i + 7) };
+      }
+    }
+    return { width: 0, height: 0 };
+  }
+  // GIF: logical screen descriptor, little-endian.
+  if (buffer.length >= 10 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    return { width: buffer.readUInt16LE(6), height: buffer.readUInt16LE(8) };
+  }
+  return { width: 0, height: 0 };
 }
 
 /**
@@ -119,6 +129,7 @@ export function createViewImageTool(options: ViewImageToolOptions) {
   const {
     userId,
     sessionId,
+    projectId = null,
     store,
     model,
     fetchFn = fetch,
@@ -146,8 +157,63 @@ export function createViewImageTool(options: ViewImageToolOptions) {
             ? ([{ type: "text", text: loaded.error }] satisfies ToolResultContent[])
             : loaded.error;
         }
+        let persistedImageId: string | undefined;
+        let persistedSourceUrl: string | undefined;
+        if (url) {
+          persistedSourceUrl = url;
+          const existing = await store
+            .findSessionImageBySourceUrl({ userId, sessionId, sourceUrl: url })
+            .catch(() => null);
+          if (existing) {
+            persistedImageId = existing.id;
+          } else {
+            const dims = imageDimensionsFromBuffer(loaded.buffer, loaded.mediaType);
+            try {
+              const saved = await store.saveGeneratedImage({
+                userId,
+                sessionId,
+                projectId,
+                buffer: loaded.buffer,
+                mediaType: loaded.mediaType,
+                width: dims.width,
+                height: dims.height,
+                modelId: "web",
+                prompt: question ?? url,
+                source: "web",
+                sourceUrl: url,
+              });
+              persistedImageId = saved.id;
+            } catch (error) {
+              console.error("[chat] view_image persist failed", { url, error });
+            }
+          }
+        }
+
+        const images = persistedImageId
+          ? [
+              {
+                imageId: persistedImageId,
+                modelId: "web",
+                prompt: question ?? url,
+                width: 0,
+                height: 0,
+                mediaType: loaded.mediaType,
+                index: 0,
+                total: 1,
+              },
+            ]
+          : undefined;
+
         if (mode === "vision") {
-          return toVisionResult(loaded.buffer, loaded.mediaType, question);
+          const content: ToolResultContent[] = images
+            ? [{ type: "text", text: JSON.stringify({ images, sourceUrl: persistedSourceUrl }) }]
+            : [];
+          content.push({
+            type: "image",
+            data: loaded.buffer.toString("base64"),
+            mediaType: loaded.mediaType,
+          });
+          return content;
         }
         const result = await createCompletion(model, {
           messages: [
@@ -164,7 +230,9 @@ export function createViewImageTool(options: ViewImageToolOptions) {
           ],
           instructions: VIEW_IMAGE_INSTRUCTIONS,
         });
-        return result.text;
+        return images
+          ? JSON.stringify({ images, description: result.text, sourceUrl: persistedSourceUrl })
+          : result.text;
       } catch (error) {
         console.error("[chat] view_image failed", {
           imageId: imageId ?? null,

@@ -32,6 +32,13 @@ function makeOptions(
     store: {
       getImage: vi.fn(async () => null),
       getObjectBuffer: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      saveGeneratedImage: vi.fn(async (input: Record<string, unknown>) => ({
+        id: "web-img-1", userId: USER, sessionId: SESSION, projectId: null,
+        r2Key: "images/user-1/web-1", mediaType: "image/png", width: 0, height: 0,
+        modelId: "web", prompt: String(input.prompt), nOfTotal: null,
+        source: "web", sourceUrl: String(input.sourceUrl), createdAt: new Date(),
+      })),
+      findSessionImageBySourceUrl: vi.fn(async () => null),
     } as unknown as ImageStore,
     model: {
       provider: "stub",
@@ -132,6 +139,63 @@ describe("view_image universal", () => {
     const tool = createViewImageTool(makeOptions({ mode: "vision", store }));
     const result = (await tool.call({ imageId: "img-1" })) as ToolResultContent[];
     expect(result.some((p) => p.type === "image")).toBe(true);
+  });
+
+  it("persists a web URL photo (vision mode) and returns imageId in the text JSON", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+    const options = makeOptions({ mode: "vision", fetchFn: fakeFetch as never });
+    const store = options.store as unknown as {
+      saveGeneratedImage: ReturnType<typeof vi.fn>;
+      findSessionImageBySourceUrl: ReturnType<typeof vi.fn>;
+    };
+    const tool = createViewImageTool(options);
+    const result = (await tool.call({ url: "https://example.com/photo.jpg" })) as ToolResultContent[];
+    expect(store.saveGeneratedImage).toHaveBeenCalledWith(expect.objectContaining({
+      source: "web", sourceUrl: "https://example.com/photo.jpg", modelId: "web",
+    }));
+    const text = result.find((p) => p.type === "text");
+    const parsed = JSON.parse((text as { text: string }).text) as { images: Array<{ imageId: string }> };
+    expect(parsed.images[0]!.imageId).toBe("web-img-1");
+  });
+
+  it("reuses an existing record when the same URL was already seen (dedup)", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+    const options = makeOptions({ mode: "vision", fetchFn: fakeFetch as never });
+    const store = options.store as unknown as {
+      saveGeneratedImage: ReturnType<typeof vi.fn>;
+      findSessionImageBySourceUrl: ReturnType<typeof vi.fn>;
+    };
+    store.findSessionImageBySourceUrl.mockResolvedValue({ id: "existing-1", userId: USER, sessionId: SESSION, projectId: null, r2Key: "r", mediaType: "image/jpeg", width: 0, height: 0, modelId: "web", prompt: "p", nOfTotal: null, source: "web", sourceUrl: "https://example.com/photo.jpg", createdAt: new Date() } as never);
+    const tool = createViewImageTool(options);
+    await tool.call({ url: "https://example.com/photo.jpg" });
+    expect(store.saveGeneratedImage).not.toHaveBeenCalled();
+  });
+
+  it("description mode returns JSON with images and description", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+    const tool = createViewImageTool(makeOptions({ mode: "description", fetchFn: fakeFetch as never }));
+    const output = (await tool.call({ url: "https://example.com/photo.jpg" })) as string;
+    const parsed = JSON.parse(output) as { images: unknown[]; description: string; sourceUrl: string };
+    expect(parsed.description).toBe("A chart showing quarterly revenue.");
+    expect(parsed.sourceUrl).toBe("https://example.com/photo.jpg");
+    expect(Array.isArray(parsed.images)).toBe(true);
+  });
+
+  it("does NOT persist an imageId-path (session/document) view", async () => {
+    const options = makeOptions({ mode: "vision" });
+    const store = options.store as unknown as {
+      saveGeneratedImage: ReturnType<typeof vi.fn>;
+    };
+    const resolveDoc = vi.fn(async () => ({ mediaType: "image/png", buffer: new Uint8Array([9, 9, 9]) }));
+    const tool = createViewImageTool(makeOptions({ mode: "vision", resolveDocumentImage: resolveDoc, store: store as never }));
+    await tool.call({ imageId: "doc-img-1" });
+    expect(store.saveGeneratedImage).not.toHaveBeenCalled();
   });
 });
 
