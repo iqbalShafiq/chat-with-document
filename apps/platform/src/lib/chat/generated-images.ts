@@ -10,6 +10,8 @@ export type CollectedGeneratedImage = {
   mediaType: string;
   index: number;
   total: number;
+  source: string;
+  sourceUrl: string | null;
 };
 
 /**
@@ -24,12 +26,22 @@ export type GeneratedImageItem = {
   height: number;
   mediaType: string;
   nOfTotal: string | null;
+  source: string;
+  sourceUrl: string | null;
 };
 
 const IMAGE_TOOL_NAMES = new Set(["generate_image", "edit_image"]);
 
 export function isImageToolName(name: string): boolean {
   return IMAGE_TOOL_NAMES.has(name);
+}
+
+/**
+ * Image tools that render into the message rail/gallery, including view_image
+ * (web photos) alongside the generative image tools.
+ */
+export function isMessageImageToolName(name: string): boolean {
+  return isImageToolName(name) || name === "view_image";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,14 +85,37 @@ export function collectGeneratedImages(
 
   for (const part of parts) {
     if (part.type !== "tool") continue;
-    if (!part.toolName || !isImageToolName(part.toolName)) continue;
+    if (!part.toolName || !isMessageImageToolName(part.toolName)) continue;
     if (part.state !== "output-available") continue;
 
     const parsed = parseToolOutput(part.output);
-    const output = isRecord(parsed) ? parsed : {};
-    const images = Array.isArray(output.images) ? output.images : [];
 
-    for (const image of images) {
+    let rawImages: unknown[] = [];
+    if (part.toolName === "view_image") {
+      if (Array.isArray(parsed)) {
+        const textPart = parsed.find(
+          (p): p is { type: "text"; text: string } =>
+            isRecord(p) && p.type === "text" && typeof p.text === "string",
+        );
+        if (textPart) {
+          try {
+            const json = JSON.parse(textPart.text) as unknown;
+            if (isRecord(json) && Array.isArray(json.images)) {
+              rawImages = json.images;
+            }
+          } catch {
+            // malformed — ignore
+          }
+        }
+      } else if (isRecord(parsed) && Array.isArray(parsed.images)) {
+        rawImages = parsed.images;
+      }
+    } else {
+      rawImages =
+        isRecord(parsed) && Array.isArray(parsed.images) ? parsed.images : [];
+    }
+
+    for (const image of rawImages) {
       if (!isRecord(image)) continue;
       const imageId = asString(image.imageId);
       if (!imageId) continue;
@@ -95,6 +130,8 @@ export function collectGeneratedImages(
         mediaType: asString(image.mediaType) ?? "image/png",
         index: asFiniteNumber(image.index) ?? 0,
         total: asFiniteNumber(image.total) ?? 1,
+        source: asString(image.source) ?? "generated",
+        sourceUrl: asString(image.sourceUrl),
       });
     }
   }
@@ -124,6 +161,8 @@ function toItem(
       mediaType: image.mediaType,
       nOfTotal:
         image.total > 1 ? `${image.index + 1} of ${image.total}` : null,
+      source: image.source,
+      sourceUrl: image.sourceUrl,
     };
   }
   return {
@@ -134,6 +173,8 @@ function toItem(
     height: image.height,
     mediaType: image.mediaType,
     nOfTotal: image.nOfTotal,
+    source: image.source,
+    sourceUrl: image.sourceUrl,
   };
 }
 
@@ -170,7 +211,7 @@ export function groupImageToolRuns<T extends { type?: string; toolName?: string 
   const runs: T[][] = [];
   let current: T[] = [];
   for (const part of parts) {
-    if (part.type === "tool" && isImageToolName(part.toolName ?? "")) {
+    if (part.type === "tool" && isMessageImageToolName(part.toolName ?? "")) {
       current.push(part);
     } else if (current.length > 0) {
       runs.push(current);
@@ -207,7 +248,7 @@ export function countRunningImageToolParts(
   const runningIds = new Set<string>();
   for (const part of parts) {
     if (part.type !== "tool") continue;
-    if (!part.toolName || !isImageToolName(part.toolName)) continue;
+    if (!part.toolName || !isMessageImageToolName(part.toolName)) continue;
     if (part.state === "output-available" || part.state === "error") continue;
     runningIds.add(part.id ?? part.toolName);
   }

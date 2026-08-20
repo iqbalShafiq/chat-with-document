@@ -1217,6 +1217,8 @@ export type GeneratedImageMeta = {
   modelId: string;
   prompt: string;
   nOfTotal: string | null;
+  source: string;
+  sourceUrl: string | null;
   createdAt: string;
 };
 
@@ -1345,6 +1347,8 @@ function isGeneratedImageMeta(value: unknown): value is GeneratedImageMeta {
     typeof value.modelId === "string" &&
     typeof value.prompt === "string" &&
     (value.nOfTotal === null || typeof value.nOfTotal === "string") &&
+    typeof value.source === "string" &&
+    (value.sourceUrl === null || typeof value.sourceUrl === "string") &&
     typeof value.createdAt === "string"
   );
 }
