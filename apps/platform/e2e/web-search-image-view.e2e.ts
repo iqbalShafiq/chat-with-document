@@ -223,8 +223,9 @@ test("case 5 — web_search cap & truncate (bounded API contract)", async ({ pag
   const order = toolCallOrder(requests);
   expect(order).toContain("web_search");
   const wsArgs = toolCallArgs(requests, "web_search");
-  // cap_test query is long (400+ chars) to trigger truncateDesc(300) path in web-search.ts:93
-  expect(String(wsArgs[0]?.query)).toContain("test cap truncation");
+  // cap_test scenario uses a valid query (<=300) — cap 5 + truncate 300 is
+  // unit-tested in web-search.test.ts (mock Tavily images with long descriptions)
+  expect(String(wsArgs[0]?.query)).toContain("test cap");
   // Verify run completed; cap 5 + truncate 300 is unit-tested in web-search.test.ts (16 tests)
   // This E2E ensures no regression in the integrated flow and no crash on long query.
   await expect(page.getByText(/Selesai:/).last()).toBeVisible();

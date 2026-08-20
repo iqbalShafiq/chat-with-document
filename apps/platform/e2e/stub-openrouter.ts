@@ -345,8 +345,10 @@ function handleResponses(
       "view_image",
     );
   } else if (turn === 1 && scenario === "cap_test") {
+    // Query must stay <= 300 chars (webSearchInput.query.max(300)); cap 5 +
+    // truncate 300 is unit-tested in web-search.test.ts (mock Tavily images).
     events = toolCallStream(
-      { query: "test cap truncation with long description " + "x".repeat(400), reason: "cap test" },
+      { query: "test cap images", reason: "cap test" },
       "web_search",
     );
   } else if (turn === 1 && scenario === "edit") {
