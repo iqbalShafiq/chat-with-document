@@ -24,12 +24,12 @@
   },
   "type": "module",
   "dependencies": {
-    "@anvia/core": "^0.25.1",
+    "@anvia/core": "^0.26.0",
     "@anvia/langfuse": "^0.6.1",
-    "@anvia/mistral": "^0.3.7",
-    "@anvia/openai": "^0.4.0",
-    "@anvia/qdrant": "^0.2.11",
-    "@qdrant/js-client-rest": "^1.13.0",
+    "@anvia/mistral": "^0.4.1",
+    "@anvia/openai": "^0.5.1",
+    "@anvia/qdrant": "^0.4.0",
+    "@qdrant/js-client-rest": "^1.19.0",
     "@tavily/core": "^0.7.6",
     "dotenv-cli": "^11.0.0",
     "zod": "^4.4.3"

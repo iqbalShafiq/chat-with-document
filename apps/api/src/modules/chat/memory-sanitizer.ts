@@ -121,6 +121,9 @@ export function createSanitizedMemoryStore(prisma: PrismaClient): MemoryStore {
   return {
     kind: inner.kind,
     inspector: inner.inspector,
+    // Official @anvia/memory-prisma compaction deletes prefix rows. This app
+    // stores segments in session metadata and must never enable that path.
+    compaction: undefined,
     load: async (context) => {
       const scopeKey = createDefaultMemoryScopeKey(
         context.sessionId,

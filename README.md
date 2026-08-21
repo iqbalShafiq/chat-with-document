@@ -56,9 +56,9 @@ Alur singkat:
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/react` + `@anvia/react-ui`, KaTeX |
-| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`) |
-| Agent | `@anvia/core`, `@anvia/openai`, Langfuse, Zod |
+| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/react` ^0.11.6 + `@anvia/react-ui` ^0.7.1, KaTeX |
+| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/server` ^0.7.6, `@anvia/memory-prisma` ^0.3.1 |
+| Agent | `@anvia/core` ^0.26.0 (v0 line), `@anvia/openai` ^0.5.1, `@anvia/mistral` ^0.4.1, `@anvia/qdrant` ^0.4.0, Langfuse, Zod |
 | Tooling | pnpm workspaces, Docker Compose (Postgres 16) |
 
 ## Struktur monorepo
@@ -201,6 +201,15 @@ Suite browser (8 test) di `apps/platform/e2e/` menguji alur image generation end
 - **Jangan menjalankan dev server dengan real keys** — stub menolak jika shell mengekspor `OPENAI_BASE_URL` selain URL stub; jalankan tanpa env provider di shell.
 
 Auth e2e dibuat otomatis di `globalSetup` (sign-up user baru + cookie session).
+
+E2E **LLM asli** (OpenRouter dari `.env`, browser headed, tanpa stub):
+
+```bash
+# API :3001 + platform :3000 sudah `pnpm dev` dengan key real
+pnpm --filter platform exec -- playwright test --config playwright.real-llm.config.ts
+```
+
+Jangan campur dengan suite stub: suite stub menolak `OPENAI_BASE_URL` selain `:18765`.
 
 ## Authentication
 
@@ -383,7 +392,9 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 - CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
-- **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK default mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.
+- Anvia tetap di kereta **v0** (`@anvia/core@0.26.x` + adapter yang matching). Dokumentasi resmi sudah menunjuk v1 (`1.0.0-rc.x`, `new Agent` tanpa `AgentBuilder`); rewrite itu belum diterapkan di app ini.
+- Compaction resmi `@anvia/memory-prisma` (hapus prefix baris) **tidak** dinyalakan. Compaction session tetap app-layer di `AgentMemorySession.metadata.compaction`.
+- **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK 0.7.1 masih mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.
 - Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
 
 ## Troubleshooting singkat

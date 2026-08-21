@@ -62,4 +62,12 @@ describe("createNonVisionMemoryProxy", () => {
     const stored = await inner.load();
     expect(stored[0]!.content).toHaveLength(2); // image + text still there
   });
+
+  it("does not expose official prisma compaction on a store without it", () => {
+    const inner = fakeInner([]);
+    const proxy = createNonVisionMemoryProxy(
+      inner as unknown as ReturnType<typeof createSanitizedMemoryStore>,
+    );
+    expect("compaction" in proxy ? proxy.compaction : undefined).toBeUndefined();
+  });
 });

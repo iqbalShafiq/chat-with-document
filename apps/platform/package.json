@@ -14,8 +14,8 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@anvia/react": "^0.9.3",
-    "@anvia/react-ui": "^0.6.2",
+    "@anvia/react": "^0.11.6",
+    "@anvia/react-ui": "^0.7.1",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@tailwindcss/vite": "^4.1.18",
