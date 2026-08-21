@@ -63,7 +63,7 @@ function mode(values: number[]) {
     .sort((a, b) => a - b);
 }
 
-function pearsonCorrelation(x: number[], y: number[]) {
+export function pearsonCorrelation(x: number[], y: number[]) {
   assertSameLength(x, y);
   if (x.length < 2) {
     throw new Error("Correlation requires at least 2 paired observations");
