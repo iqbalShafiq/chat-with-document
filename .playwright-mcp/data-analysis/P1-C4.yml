@@ -1,0 +1,11 @@
+﻿- generic:
+  - article:
+    - table [ref=1]:
+      - rowgroup:
+        - row:
+          - columnheader: product
+          - columnheader: total_revenue
+      - rowgroup:
+        - row:
+          - cell: Gamma
+          - cell: 15110

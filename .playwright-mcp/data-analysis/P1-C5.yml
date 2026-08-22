@@ -1,0 +1,7 @@
+﻿- generic:
+  - article:
+    - table [ref=1]:
+      - rowgroup:
+        - row:
+          - columnheader: DetailColumn
+          - columnheader: value

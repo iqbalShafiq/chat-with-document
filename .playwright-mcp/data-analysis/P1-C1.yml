@@ -1,0 +1,13 @@
+﻿- generic:
+  - article:
+    - table [ref=1]:
+      - rowgroup:
+        - row:
+          - columnheader: region
+          - columnheader: mean(revenue)
+      - rowgroup:
+        - row:
+          - cell: East
+          - cell: 983
+  - generic:
+    - generic [role='img'][aria-label='Data table']: DataTable visible for P1-C1

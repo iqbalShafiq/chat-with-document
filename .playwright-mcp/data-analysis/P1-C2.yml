@@ -1,0 +1,8 @@
+﻿- generic:
+  - article:
+    - table [ref=1]:
+      - rowgroup:
+        - row:
+          - columnheader: Region
+          - columnheader: Average Revenue
+  - generic [role='img'][aria-label='bar chart: mean(revenue) (983, 1066, 938, 1063)']: bar chart visible for P1-C2
