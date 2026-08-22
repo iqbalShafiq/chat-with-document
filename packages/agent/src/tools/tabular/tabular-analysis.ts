@@ -18,8 +18,8 @@ export type AnalysisOperation =
 export type AnalysisResult = {
   operation: string;
   summary: string;
-  result?: { columns: TabularColumn[]; rows: CellValue[][]; rowCount: number; truncated: boolean };
-  chart?: ChartSpec;
+  result?: { columns: TabularColumn[]; rows: CellValue[][]; rowCount: number; truncated: boolean } | undefined;
+  chart?: ChartSpec | undefined;
 };
 
 const DEFAULT_LIMITS = { maxRows: 500 };
@@ -181,7 +181,7 @@ export function runAnalysis(
           default: return false;
         }
       };
-      const rows = sheet.rows.filter((row) => match(row[index]));
+      const rows = sheet.rows.filter((row) => match(row[index] as CellValue));
       return {
         operation: "filter",
         summary: `${rows.length} of ${sheet.rows.length} rows matched`,

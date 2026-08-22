@@ -14,6 +14,7 @@ import {
   upsertDocumentChunks,
   type DocumentChunkMetadata,
   type DocumentPageImage,
+  type OcrPageTable,
   type TabularSheet,
 } from "@assingment/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
@@ -50,6 +51,23 @@ const TABULAR_MIME_TYPES = new Set([
   "text/csv",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
+
+function inlineOcrTables(markdown: string, tables: OcrPageTable[]): string {
+  let result = markdown;
+  for (const table of tables) {
+    const content = "\n\n" + table.markdown.trim() + "\n\n";
+    const linked = `[${table.filename}](${table.filename})`;
+    const bracket = `[${table.filename}]`;
+    if (result.includes(linked)) {
+      result = result.split(linked).join(content);
+    } else if (result.includes(bracket)) {
+      result = result.split(bracket).join(content);
+    } else {
+      result += content;
+    }
+  }
+  return result;
+}
 
 async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   const { documentId, userId, sessionId, r2Key, filename } = job.data;
@@ -112,7 +130,8 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
     await tx.documentPage.deleteMany({ where: { documentId } });
 
     for (const page of ocr.pages) {
-      const summary = firstLinesSummary(page.markdown);
+      const markdown = inlineOcrTables(page.markdown, page.tables);
+      const summary = firstLinesSummary(markdown);
       pageSummaries.push(summary);
 
       await tx.documentPage.create({
@@ -120,7 +139,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
           documentId,
           pageIndex: page.index,
           summary,
-          rawMarkdown: page.markdown,
+          rawMarkdown: markdown,
           images: (pageImages.get(page.index) ??
             []) as unknown as Prisma.InputJsonValue,
         },

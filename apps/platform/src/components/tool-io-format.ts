@@ -816,10 +816,21 @@ function formatAnalyzeDatasetOutput(output: unknown): FormattedSection {
 
 function formatQueryDatasetSqlOutput(output: unknown): FormattedSection {
   const record = isRecord(output) ? output : {};
+  const rawColumns = asArray(record.columns);
+  const columns = rawColumns
+    .map((c) => {
+      if (isRecord(c) && typeof c.name === "string") return c as { name: string; type: string };
+      if (typeof c === "string") return { name: c, type: "string" as const };
+      return null;
+    })
+    .filter((c): c is { name: string; type: string } => c !== null);
+  const rows = asArray(record.rows);
+  const rowCount = asNumber(record.rowCount) ?? rows.length;
+  const truncated = typeof record.truncated === "boolean" ? record.truncated : false;
   return {
     title: "Result",
-    summary: `${String(record.rowCount ?? 0)} row${Number(record.rowCount) === 1 ? "" : "s"}`,
-    table: record,
+    summary: `${String(rowCount)} row${rowCount === 1 ? "" : "s"}`,
+    table: { columns, rows, rowCount, truncated },
   };
 }
 
