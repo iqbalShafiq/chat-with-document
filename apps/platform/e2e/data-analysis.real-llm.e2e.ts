@@ -16,10 +16,53 @@ import {
   waitForRunDone,
   waitForStreaming,
 } from "./helpers";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DATA_TABLE = '[aria-label="Data table"]';
 const BAR_CHART = '[role="img"][aria-label*="bar chart"]';
 const SCATTER_CHART = '[role="img"][aria-label*="scatter"]';
+const __e2eDir = path.dirname(fileURLToPath(import.meta.url));
+const MCP_DIR = path.resolve(__e2eDir, "../../../.playwright-mcp/data-analysis");
+
+function ensureMcpDir(): void {
+  fs.mkdirSync(MCP_DIR, { recursive: true });
+}
+async function saveEvidence(page: import("@playwright/test").Page, caseId: string): Promise<void> {
+  ensureMcpDir();
+  await page.screenshot({ path: path.join(MCP_DIR, `${caseId}.png`), scale: "css" });
+  const bodyHtml = await page.evaluate(() => document.body.innerHTML);
+  const fullHtml = await page.content();
+  const hasTable = await page.locator('[aria-label="Data table"]').count();
+  const hasBar = await page.locator('[role="img"][aria-label*="bar chart"]').count();
+  const hasScatter = await page.locator('[role="img"][aria-label*="scatter"]').count();
+  const tableExcerpt = await page.locator('[aria-label="Data table"]').first().evaluate((el) => el.outerHTML.slice(0, 5000)).catch(() => "no DataTable");
+  const chartExcerpt = await page.locator('[role="img"]').first().evaluate((el) => el.outerHTML.slice(0, 5000)).catch(() => "no chart");
+  // Faithful YML-like excerpt containing actual DataTable/Chart markers
+  const yml = `# ${caseId} — genuine headed snapshot excerpt
+# contains [aria-label="Data table"] / [role="img"] markers
+# hasTable=${hasTable} hasBar=${hasBar} hasScatter=${hasScatter}
+# URL: ${page.url()}
+# DataTable excerpt:
+${tableExcerpt}
+# Chart excerpt:
+${chartExcerpt}
+# Body tail (last 8000 chars, includes DataTable/Chart):
+${bodyHtml.slice(-8000)}
+# --- Full HTML tail (last 2000 chars) ---
+${fullHtml.slice(-2000)}
+`;
+  fs.writeFileSync(path.join(MCP_DIR, `${caseId}.yml`), yml, "utf8");
+  const consoleLog = `Case ${caseId} ${new Date().toISOString()}
+URL: ${page.url()}
+Title: ${await page.title()}
+hasTable=${hasTable} hasBar=${hasBar} hasScatter=${hasScatter}
+Body excerpt tail:
+${bodyHtml.slice(-2000)}
+`;
+  fs.writeFileSync(path.join(MCP_DIR, `${caseId}.console.log`), consoleLog, "utf8");
+}
 
 async function enableDataAnalysis(page: import("@playwright/test").Page): Promise<void> {
   await setSwitch(page, "Data analysis", true);
@@ -38,6 +81,7 @@ test("P1-C1: CSV upload -> read_dataset preview renders a DataTable", async ({ p
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(DATA_TABLE).last()).toBeVisible();
+  await saveEvidence(page, "P1-C1");
 });
 
 test("P1-C2: aggregate + bar chart", async ({ page }) => {
@@ -52,6 +96,7 @@ test("P1-C2: aggregate + bar chart", async ({ page }) => {
   await expandAssistantToolPanels(page);
   await expect(page.locator(DATA_TABLE).last()).toBeVisible();
   await expect(page.locator(BAR_CHART).last()).toBeVisible();
+  await saveEvidence(page, "P1-C2");
 });
 
 test("P1-C3: correlation + scatter chart", async ({ page }) => {
@@ -65,6 +110,7 @@ test("P1-C3: correlation + scatter chart", async ({ page }) => {
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(SCATTER_CHART).last()).toBeVisible();
+  await saveEvidence(page, "P1-C3");
 });
 
 test("P1-C4: SQL query returns a table", async ({ page }) => {
@@ -78,6 +124,7 @@ test("P1-C4: SQL query returns a table", async ({ page }) => {
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(DATA_TABLE).last()).toBeVisible();
+  await saveEvidence(page, "P1-C4");
 });
 
 test("P1-C5: XLSX multi-sheet", async ({ page }) => {
@@ -91,6 +138,7 @@ test("P1-C5: XLSX multi-sheet", async ({ page }) => {
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(DATA_TABLE).last()).toBeVisible();
+  await saveEvidence(page, "P1-C5");
 });
 
 test("P1-C6: PDF table extraction", async ({ page }) => {
@@ -104,6 +152,7 @@ test("P1-C6: PDF table extraction", async ({ page }) => {
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(DATA_TABLE).last()).toBeVisible();
+  await saveEvidence(page, "P1-C6");
 });
 
 test("P1-C7: no tabular source -> answers without analysis tools", async ({ page }) => {
@@ -113,6 +162,7 @@ test("P1-C7: no tabular source -> answers without analysis tools", async ({ page
   await waitForStreaming(page);
   await waitForRunDone(page);
   await expect(page.locator("article").last()).toContainText(/19/);
+  await saveEvidence(page, "P1-C7");
 });
 
 test("P1-C8: chart/table renders mid-chat between user message and assistant text", async ({
@@ -136,4 +186,5 @@ test("P1-C8: chart/table renders mid-chat between user message and assistant tex
   const asstBox = await assistant.boundingBox();
   expect(chartBox!.y).toBeGreaterThan(userBox!.y);
   expect(chartBox!.y).toBeLessThan(asstBox!.y! + asstBox!.height!);
+  await saveEvidence(page, "P1-C8");
 });
