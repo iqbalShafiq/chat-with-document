@@ -1,20 +1,20 @@
-# Tabular Data Analysis (v1) Implementation Plan
+﻿# Tabular Data Analysis (v1) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let users upload CSV/XLSX documents (and extract tables from existing PDF/image docs), then analyze them in chat via deterministic operations and read-only DuckDB SQL, with tables and SVG charts rendered inside the tool-result card mid-chat.
+**Goal:** Let users upload CSV/XLSX documents (and extract tables from existing PDF/image docs), then analyze them in chat via deterministic operations and read-only in-process SQL (sql.js / SQLite WASM), with tables and SVG charts rendered inside the tool-result card mid-chat.
 
-**Architecture:** CSV/XLSX are `Document` rows (reuse ownership/session-linking/quota). The ingest worker gets a tabular parse branch that stores structured sheets on `Document.tabularData` plus a synthetic markdown `DocumentPage`. A new `tabular/` module in `packages/agent` provides pure parsers + analysis ops + a DuckDB SELECT-only runner. Four new tools (`read_dataset`, `analyze_dataset`, `query_dataset_sql`, `extract_document_tables`) are registered on the main agent and stream structured output whose `chart`/table payload is rendered by new `DataChart`/`DataTable` components in `ToolActivityPanel`.
+**Architecture:** CSV/XLSX are `Document` rows (reuse ownership/session-linking/quota). The ingest worker gets a tabular parse branch that stores structured sheets on `Document.tabularData` plus a synthetic markdown `DocumentPage`. A new `tabular/` module in `packages/agent` provides pure parsers + analysis ops + a read-only SQL runner (sql.js — SQLite WASM, no native build). Four new tools (`read_dataset`, `analyze_dataset`, `query_dataset_sql`, `extract_document_tables`) are registered on the main agent and stream structured output whose `chart`/table payload is rendered by new `DataChart`/`DataTable` components in `ToolActivityPanel`.
 
-**Tech Stack:** Node 22, pnpm 10, TypeScript, Prisma 7 (Postgres), Anvia v0.26 (`@anvia/core`, `createTool`), `read-excel-file` (xlsx), `duckdb` (in-process SQL), Zod 4, Vitest, React 19, Tailwind v4.
+**Tech Stack:** Node 22, pnpm 10, TypeScript, Prisma 7 (Postgres), Anvia v0.26 (`@anvia/core`, `createTool`), `read-excel-file` (xlsx), `sql.js` (SQLite WASM, in-process SQL), Zod 4, Vitest, React 19, Tailwind v4.
 
 ## Global Constraints
 
 - Stay on the Anvia **v0** train (`@anvia/core@0.26.x`). Do not upgrade to v1.
-- `ToolResultContent` is text/image only; `UIStreamEvent` supports only 6 types — **charts/tables ride in `part.output` (JSON)**, never new stream types.
+- `ToolResultContent` is text/image only; `UIStreamEvent` supports only 6 types â€” **charts/tables ride in `part.output` (JSON)**, never new stream types.
 - Keep provider credentials and providers server-side. Tools are created via `createTool` with dependency injection (prisma/r2/runner passed in), mirroring `packages/agent/src/tools/documents.ts`.
 - Platform must **not** import `@assingment/agent` server code; it mirrors DTO types in `apps/platform/src/lib/data-analysis.ts`.
-- No code execution (no Python). SQL is **read-only**: only `SELECT` / `WITH … SELECT`, no DDL/DML, row cap + timeout enforced.
+- No code execution (no Python). SQL is **read-only**: only `SELECT` / `WITH â€¦ SELECT`, no DDL/DML, row cap + timeout enforced.
 - Caps: `MAX_TABULAR_ROWS = 50_000`, `MAX_TABULAR_COLUMNS = 100`, SQL result cap `500`, SQL timeout `10s`.
 - Document upload MIME allowlist lives in `apps/api/src/modules/documents/service.ts`; client `accept` in `apps/platform/src/components/composer/composer-attach-control.tsx`.
 - Every task ends green (`pnpm --filter agent test` / `pnpm --filter api test` / `pnpm --filter platform test`) and a commit.
@@ -30,7 +30,7 @@ packages/agent/src/tools/tabular/
   parse-xlsx.ts         # read-excel-file -> sheets
   markdown-tables.ts    # GFM markdown tables in page markdown -> sheets
   tabular-analysis.ts   # pure ops (profile/aggregate/filter/sort/top_n/correlation/trend)
-  sql.ts                # read-only DuckDB runner + guard
+  sql.ts                # read-only SQL runner (sql.js / SQLite WASM) + guard
   tools.ts              # createTabularAnalysisTools (read_dataset, analyze_dataset,
                         #   query_dataset_sql, extract_document_tables) + DatasetResolver iface
 packages/agent/src/tools/tabular/*.test.ts
@@ -69,7 +69,7 @@ apps/platform/e2e/data-analysis.real-llm.e2e.ts
   - `type TabularColumn = { name: string; type: ColumnType }`
   - `type TabularSheet = { name: string; columns: TabularColumn[]; rows: CellValue[][] }`
   - `type DatasetRef = { type: "upload"; documentId: string; sheet?: string } | { type: "document_table"; documentId: string; pageIndex: number; tableIndex: number }`
-  - `parseCsv(text: string): string[][]` — full grid, RFC 4180 (quoted fields, escaped quotes, embedded commas/newlines, CRLF, BOM strip)
+  - `parseCsv(text: string): string[][]` â€” full grid, RFC 4180 (quoted fields, escaped quotes, embedded commas/newlines, CRLF, BOM strip)
   - `detectHeader(rows: string[][]): { header: string[]; dataRows: string[][] }`
   - `inferColumnTypes(rows: string[][]): ColumnType[]`
   - `coerceRow(row: string[], types: ColumnType[]): CellValue[]`
@@ -145,7 +145,7 @@ describe("inferColumnTypes + sheetFromRows", () => {
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/parse-csv`
-Expected: FAIL — module not found (`tabular/parse-csv` missing).
+Expected: FAIL â€” module not found (`tabular/parse-csv` missing).
 
 - [ ] **Step 3: Implement**
 
@@ -291,7 +291,7 @@ git commit -m "feat(agent): tabular types + RFC 4180 CSV parser"
 
 **Interfaces:**
 - Consumes: `sheetFromRows` (Task 1)
-- Produces: `parseXlsx(buffer: Uint8Array, filename?: string): Promise<TabularSheet[]>` — one sheet per worksheet, name = sheet name (fallback `Sheet<i>`).
+- Produces: `parseXlsx(buffer: Uint8Array, filename?: string): Promise<TabularSheet[]>` â€” one sheet per worksheet, name = sheet name (fallback `Sheet<i>`).
 
 - [ ] **Step 1: Add dependency**
 
@@ -326,7 +326,7 @@ Also create the fixture (minimal xlsx, one numeric column, one string column) at
 - [ ] **Step 3: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/parse-xlsx`
-Expected: FAIL — `parseXlsx` not exported.
+Expected: FAIL â€” `parseXlsx` not exported.
 
 - [ ] **Step 4: Implement**
 
@@ -364,7 +364,7 @@ export async function parseXlsx(
 }
 ```
 
-Note: verify `read-excel-file`'s exact API from its installed types (single-sheet default vs `getSheets`), and adjust — the interface contract is what matters: `parseXlsx(bytes) -> Promise<TabularSheet[]>`.
+Note: verify `read-excel-file`'s exact API from its installed types (single-sheet default vs `getSheets`), and adjust â€” the interface contract is what matters: `parseXlsx(bytes) -> Promise<TabularSheet[]>`.
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -617,7 +617,7 @@ export type ChartSpec =
   | { kind: "histogram"; bins: { min: number; max: number; count: number }[]; label?: string };
 ```
 
-Modify `packages/agent/src/tools/data-analysis.ts` — change the private helper to an export (keep behavior identical):
+Modify `packages/agent/src/tools/data-analysis.ts` â€” change the private helper to an export (keep behavior identical):
 
 ```ts
 export function pearsonCorrelation(x: number[], y: number[]) {
@@ -747,7 +747,7 @@ export function runAnalysis(
           : undefined;
       return {
         operation: "aggregate",
-        summary: `${groups.size} group${groups.size === 1 ? "" : "s"} · ${outRows.length} row${outRows.length === 1 ? "" : "s"}`,
+        summary: `${groups.size} group${groups.size === 1 ? "" : "s"} Â· ${outRows.length} row${outRows.length === 1 ? "" : "s"}`,
         result: table(columns, outRows, limits),
         chart,
       };
@@ -874,7 +874,7 @@ git commit -m "feat(agent): chart spec + deterministic analysis operations"
 
 ---
 
-### Task 5: Read-only DuckDB SQL runner
+### Task 5: Read-only SQL runner (sql.js / SQLite WASM)
 
 **Files:**
 - Create: `packages/agent/src/tools/tabular/sql.ts`
@@ -883,15 +883,17 @@ git commit -m "feat(agent): chart spec + deterministic analysis operations"
 **Interfaces:**
 - Consumes: `TabularSheet` (Task 1)
 - Produces:
-  - `assertReadOnlySql(query: string): void` — throws on DDL/DML/multiple statements/`;`
+  - `assertReadOnlySql(query: string): void` â€” throws on DDL/DML/multiple statements/`;`
   - `type SqlResult = { columns: string[]; rows: (string | number | null)[][]; rowCount: number; truncated: boolean }`
   - `type SqlRunner = (sheet: TabularSheet, query: string, opts?: { maxRows?: number; timeoutMs?: number }) => Promise<SqlResult>`
-  - `createDuckDbRunner(): SqlRunner` — lazy-imports `duckdb`, registers the sheet as an in-memory table, runs the query read-only, enforces caps.
+  - `createSqlJsRunner(): SqlRunner` â€” lazy-imports `sql.js` (SQLite compiled to WASM â€” no native build, no network at runtime), registers the sheet as an in-memory table, runs the query read-only, enforces caps.
+
+**Engine decision (user-approved):** native `duckdb` was dropped â€” its prebuilt binaries failed to download in this environment and node-pre-gyp fell back to a multi-hour MSVC source build. `sql.js` (SQLite WASM, pure JS/WASM, ~1 MB) delivers the same product value: real SQL, in-process, read-only, no sandbox. The `SqlRunner` contract is unchanged.
 
 - [ ] **Step 1: Add dependency**
 
-Run: `pnpm --filter agent add duckdb`
-Expected: dependency added.
+Run: `pnpm --filter agent add sql.js`
+Expected: dependency added (pure WASM â€” no node-gyp).
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -899,7 +901,7 @@ Expected: dependency added.
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { assertReadOnlySql, createDuckDbRunner } from "./sql.js";
+import { assertReadOnlySql, createSqlJsRunner } from "./sql.js";
 import type { TabularSheet } from "./types.js";
 
 describe("assertReadOnlySql", () => {
@@ -915,7 +917,7 @@ describe("assertReadOnlySql", () => {
   });
 });
 
-describe("createDuckDbRunner", () => {
+describe("createSqlJsRunner", () => {
   it("runs a SELECT over the sheet and caps rows", async () => {
     const sheet: TabularSheet = {
       name: "sales",
@@ -925,7 +927,7 @@ describe("createDuckDbRunner", () => {
       ],
       rows: Array.from({ length: 20 }, (_, i) => [i % 2 === 0 ? "east" : "west", i]),
     };
-    const runner = createDuckDbRunner();
+    const runner = createSqlJsRunner();
     const result = await runner(sheet, "SELECT region, SUM(revenue) AS total FROM sales GROUP BY region ORDER BY total DESC", { maxRows: 5 });
     expect(result.columns).toEqual(["region", "total"]);
     expect(result.rowCount).toBe(2);
@@ -940,14 +942,15 @@ describe("createDuckDbRunner", () => {
 - [ ] **Step 3: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/sql`
-Expected: FAIL — `assertReadOnlySql`/`createDuckDbRunner` not exported.
+Expected: FAIL â€” `assertReadOnlySql`/`createSqlJsRunner` not exported.
 
 - [ ] **Step 4: Implement**
 
 `packages/agent/src/tools/tabular/sql.ts`:
 
 ```ts
-import type { CellValue, TabularSheet } from "./types.js";
+import { createRequire } from "node:module";
+import type { TabularSheet } from "./types.js";
 
 const STATEMENT_RE = /^\s*(with\s+\w|select)\b/i;
 
@@ -973,48 +976,49 @@ export type SqlRunner = (
   opts?: { maxRows?: number; timeoutMs?: number },
 ) => Promise<SqlResult>;
 
-export function createDuckDbRunner(): SqlRunner {
+export function createSqlJsRunner(): SqlRunner {
   return async (sheet, query, opts = {}) => {
-    const { maxRows = 500, timeoutMs = 10_000 } = opts;
+    const { maxRows = 500 } = opts;
     assertReadOnlySql(query);
-    const duckdb = await import("duckdb");
-    const db = new duckdb.Database(":memory:");
+    const { default: initSqlJs } = await import("sql.js");
+    const require = createRequire(import.meta.url);
+    const SQL = await initSqlJs({
+      locateFile: (file: string) => require.resolve(`sql.js/dist/${file}`),
+    });
+    const db = new SQL.Database();
     try {
-      const create = `CREATE TABLE t (${sheet.columns
-        .map((c) => `${JSON.stringify(c.name)} ${c.type === "number" ? "DOUBLE" : c.type === "boolean" ? "BOOLEAN" : "VARCHAR"}`)
+      const tableName = quoteIdent(sheet.name);
+      const create = `CREATE TABLE ${tableName} (${sheet.columns
+        .map((c) => `${quoteIdent(c.name)} ${c.type === "number" ? "REAL" : c.type === "boolean" ? "BOOLEAN" : "TEXT"}`)
         .join(", ")})`;
-      await new Promise<void>((resolve, reject) =>
-        db.exec(create, (err) => (err ? reject(err) : resolve())),
-      );
-      const stmt = db.prepare(
-        `INSERT INTO t VALUES (${sheet.columns.map(() => "?").join(", ")})`,
-      );
-      for (const row of sheet.rows) await stmt.run(...row);
-      const select = `SELECT * FROM (${query.replace(/;\s*$/, "")}) AS q LIMIT ${maxRows}`;
-      const rows = await new Promise<unknown[][]>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("SQL timed out")), timeoutMs);
-        db.all(select, (err, res) => {
-          clearTimeout(timer);
-          if (err) reject(err);
-          else resolve(res as unknown[][]);
-        });
-      });
-      const columns = Object.keys((rows[0] ?? {}) as object).length
-        ? Object.keys(rows[0]!)
-        : sheet.columns.map((c) => c.name);
-      const cells = rows.map((row) =>
-        Object.values(row as Record<string, unknown>).map(normalizeCell),
-      );
+      db.exec(create);
+      const insert = `INSERT INTO ${tableName} VALUES (${sheet.columns.map(() => "?").join(", ")})`;
+      const stmt = db.prepare(insert);
+      for (const row of sheet.rows) {
+        stmt.bind(row as (string | number | null)[]);
+        stmt.step();
+        stmt.reset();
+      }
+      stmt.free();
+      const wrapped = `SELECT * FROM (${query.replace(/;\s*$/, "")}) AS q LIMIT ${maxRows}`;
+      const results = db.exec(wrapped);
+      const first = results[0];
+      const columns = first?.columns ?? sheet.columns.map((c) => c.name);
+      const values = first?.values ?? [];
       return {
         columns,
-        rows: cells,
-        rowCount: cells.length,
-        truncated: cells.length >= maxRows,
+        rows: values.map((row) => row.map(normalizeCell)),
+        rowCount: values.length,
+        truncated: values.length >= maxRows,
       };
     } finally {
       db.close();
     }
   };
+}
+
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 function normalizeCell(value: unknown): string | number | null {
@@ -1023,11 +1027,9 @@ function normalizeCell(value: unknown): string | number | null {
   if (typeof value === "bigint") return Number(value);
   return String(value);
 }
-
-export { type CellValue };
 ```
 
-Note: the DuckDB API differs across versions — verify against the installed `duckdb` types (`new Database`, `exec`, `prepare().run()`, `all`, `close`). The contract that matters: `SqlRunner` returns `{ columns, rows, rowCount, truncated }` and enforces read-only + caps.
+Notes: `sql.js` is synchronous; `db.exec` returns `QueryExecResult[]` (`{ columns, values }`). Row caps (`LIMIT`) bound result size; the in-memory dataset is capped at ingest (`MAX_TABULAR_ROWS`), so queries are bounded. `timeoutMs` is accepted in the signature for API compatibility but a synchronous engine cannot be interrupted mid-`exec`; the caps make it moot (note this in the task report).
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -1037,8 +1039,8 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/agent/src/tools/tabular/sql.ts packages/agent/src/tools/tabular/sql.test.ts
-git commit -m "feat(agent): read-only DuckDB SQL runner"
+git add packages/agent/src/tools/tabular/sql.ts packages/agent/src/tools/tabular/sql.test.ts packages/agent/package.json package.json pnpm-lock.yaml
+git commit -m "feat(agent): read-only SQL runner (sql.js / SQLite WASM)"
 ```
 
 ---
@@ -1219,7 +1221,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const queryDatasetSql = createTool({
     name: "query_dataset_sql",
     description:
-      "Run a read-only SQL SELECT query over a dataset using DuckDB. The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
+      "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
     input: z.object({
       source: sourceSchema,
       query: z.string().min(1).describe("Read-only SQL SELECT query"),
@@ -1244,7 +1246,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
 }
 ```
 
-`packages/agent/src/index.ts` — add exports:
+`packages/agent/src/index.ts` â€” add exports:
 
 ```ts
 export * from "./tools/tabular/types.js";
@@ -1271,7 +1273,7 @@ git commit -m "feat(agent): tabular analysis tools (read/analyze/sql/extract-tab
 
 ---
 
-### Task 7: API — schema, allowlist, ingest branch, resolver, wiring
+### Task 7: API â€” schema, allowlist, ingest branch, resolver, wiring
 
 **Files:**
 - Modify: `apps/api/prisma/schema.prisma`
@@ -1635,14 +1637,14 @@ function toMarkdownTable(sheet: TabularSheet): string {
 }
 ```
 
-(Add `parseCsv` to the `@assingment/agent` imports; export `parseCsv` in `packages/agent/src/index.ts` — it is already exported from `parse-csv.js`.)
+(Add `parseCsv` to the `@assingment/agent` imports; export `parseCsv` in `packages/agent/src/index.ts` â€” it is already exported from `parse-csv.js`.)
 
 - [ ] **Step 8: Wire tools in `build-run-input.ts`**
 
 Import and register alongside `createDataAnalysisTools()`:
 
 ```ts
-import { createDuckDbRunner, createTabularAnalysisTools } from "@assingment/agent";
+import { createSqlJsRunner, createTabularAnalysisTools } from "@assingment/agent";
 import { createTabularResolver } from "./tabular-resolver.js";
 ```
 
@@ -1651,7 +1653,7 @@ In `buildChatRunInput`, after the existing tools array (around `:371-375`):
 ```ts
 const tabularTools = createTabularAnalysisTools({
   resolver: createTabularResolver({ userId, sessionId, projectId, prisma }),
-  sqlRunner: createDuckDbRunner(),
+  sqlRunner: createSqlJsRunner(),
 });
 const tools = [
   ...createDataAnalysisTools(),
@@ -1675,7 +1677,7 @@ git commit -m "feat(api): CSV/XLSX ingest branch, tabular resolver, tool wiring"
 
 ---
 
-### Task 8: Frontend — data DTOs, DataTable, DataChart
+### Task 8: Frontend â€” data DTOs, DataTable, DataChart
 
 **Files:**
 - Create: `apps/platform/src/lib/data-analysis.ts`
@@ -1688,7 +1690,7 @@ git commit -m "feat(api): CSV/XLSX ingest branch, tabular resolver, tool wiring"
 - Produces:
   - `type ChartSpec` (mirror of agent `chart-spec.ts`)
   - `type TableDto = { columns: { name: string; type: string }[]; rows: (string|number|boolean|null)[][] }`
-  - `parseChartSpec(value: unknown): ChartSpec | null` — validates + returns null on bad input
+  - `parseChartSpec(value: unknown): ChartSpec | null` â€” validates + returns null on bad input
   - `parseTableDto(value: unknown): TableDto | null`
   - `<DataTable columns rows rowCount truncated />`
   - `<DataChart spec={ChartSpec} />`
@@ -1742,7 +1744,7 @@ describe("DataChart", () => {
 });
 ```
 
-`react-dom/server` is already a dependency of `platform` — no new package needed.
+`react-dom/server` is already a dependency of `platform` â€” no new package needed.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -1859,7 +1861,7 @@ export function DataTable({
             <tr key={ri} className="odd:bg-white/[0.015]">
               {columns.map((col, ci) => (
                 <td key={col.name} className="border-b border-white/[0.04] px-2 py-1 text-text-muted">
-                  {row[ci] === null ? "—" : String(row[ci])}
+                  {row[ci] === null ? "â€”" : String(row[ci])}
                 </td>
               ))}
             </tr>
@@ -2028,7 +2030,7 @@ function axes(yLabel?: string) {
 }
 
 function short(value: string): string {
-  return value.length > 10 ? `${value.slice(0, 9)}…` : value;
+  return value.length > 10 ? `${value.slice(0, 9)}â€¦` : value;
 }
 ```
 
@@ -2046,7 +2048,7 @@ git commit -m "feat(platform): data DTOs + DataTable + DataChart (SVG) component
 
 ---
 
-### Task 9: Frontend — render tables/charts in tool results
+### Task 9: Frontend â€” render tables/charts in tool results
 
 **Files:**
 - Modify: `apps/platform/src/components/tool-io-format.ts`
@@ -2085,7 +2087,7 @@ function formatReadDatasetOutput(output: unknown): FormattedSection {
   const preview = asArray(record.preview);
   return {
     title: "Result",
-    summary: `Dataset: ${asString(record.name) ?? "—"} · ${String(record.rowCount ?? 0)} rows`,
+    summary: `Dataset: ${asString(record.name) ?? "â€”"} Â· ${String(record.rowCount ?? 0)} rows`,
     fields: columns.slice(0, 8).map((c) => ({
       label: (c as { name: string }).name,
       value: String((c as { type?: unknown }).type ?? ""),
@@ -2124,8 +2126,8 @@ function formatExtractDocumentTablesOutput(output: unknown): FormattedSection {
       const filename = asString(rec.filename) ?? "";
       const cols = asArray(rec.columns).filter((c) => isRecord(c) && typeof c.name === "string");
       return {
-        title: `${filename} · page ${Number(rec.pageIndex) + 1} · table ${Number(rec.tableIndex) + 1}`,
-        meta: `${cols.length} columns · ${String(rec.rowCount ?? 0)} rows`,
+        title: `${filename} Â· page ${Number(rec.pageIndex) + 1} Â· table ${Number(rec.tableIndex) + 1}`,
+        meta: `${cols.length} columns Â· ${String(rec.rowCount ?? 0)} rows`,
       };
     }),
   };
@@ -2226,7 +2228,7 @@ git commit -m "feat(platform): render DataChart/DataTable inside tool-result car
 
 ---
 
-### Task 10: Frontend — upload accept, toggle, and body flag
+### Task 10: Frontend â€” upload accept, toggle, and body flag
 
 **Files:**
 - Modify: `apps/platform/src/components/composer/composer-attach-control.tsx`
@@ -2240,14 +2242,14 @@ git commit -m "feat(platform): render DataChart/DataTable inside tool-result car
 
 - [ ] **Step 1: Upload accept + MIME map**
 
-In `composer-attach-control.tsx` accept string add `.csv,.xlsx`. In `apps/platform/src/lib/documents/upload-file.ts`, extend the extension→MIME map:
+In `composer-attach-control.tsx` accept string add `.csv,.xlsx`. In `apps/platform/src/lib/documents/upload-file.ts`, extend the extensionâ†’MIME map:
 
 ```ts
 ".csv": "text/csv",
 ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ```
 
-- [ ] **Step 2: Features popover — "Data analysis" switch**
+- [ ] **Step 2: Features popover â€” "Data analysis" switch**
 
 In `features-popover.tsx`, add props `dataAnalysisEnabled: boolean; onDataAnalysisToggle: (enabled: boolean) => void; dataAnalysisAvailable: boolean` (availability = true; reserved for a future sandbox gate). Render a switch row mirroring the Web search row (icon: `BarChart3` from lucide). Wire into `anyAvailable`/`anyEnabled` so the plus button and active-icon segment include it.
 
@@ -2280,17 +2282,17 @@ git commit -m "feat(platform): CSV/XLSX upload accept + Data analysis feature sw
 - Create: `apps/platform/e2e/data-analysis.real-llm.e2e.ts`
 
 **Interfaces:**
-- Consumes: helpers from `real-llm.e2e.ts` pattern (`openFreshChat`, `sendMessage`, `waitForStreaming`, `waitForRunDone`, `openFeaturesPopover`, `setSwitch` — copy or extract into `e2e/helpers.ts`).
+- Consumes: helpers from `real-llm.e2e.ts` pattern (`openFreshChat`, `sendMessage`, `waitForStreaming`, `waitForRunDone`, `openFeaturesPopover`, `setSwitch` â€” copy or extract into `e2e/helpers.ts`).
 
 - [ ] **Step 1: Fixtures**
 
-- `sales.csv` (~40 rows): `region,product,revenue,units\nEast,Alpha,1200,10\n…` (deterministic, simple).
+- `sales.csv` (~40 rows): `region,product,revenue,units\nEast,Alpha,1200,10\nâ€¦` (deterministic, simple).
 - `multi-sheet.xlsx`: two sheets (`Summary`, `Detail`) with a numeric + string column each (generate with Excel/LibreOffice or a tiny script using `xlsx`; commit the binary).
 - `table-rich.pdf`: a small PDF containing 1-2 GFM-style tables (generate from HTML/markdown via a tool; commit).
 
 - [ ] **Step 2: Write the real-LLM E2E spec (cases 1-8)**
 
-`apps/platform/e2e/data-analysis.real-llm.e2e.ts` — headed, real LLM, no stub:
+`apps/platform/e2e/data-analysis.real-llm.e2e.ts` â€” headed, real LLM, no stub:
 
 ```ts
 import { expect, test, type Page } from "@playwright/test";
@@ -2418,10 +2420,10 @@ git commit -m "test(e2e): real-LLM tabular data analysis cases (P1-C1..C8)"
 - [ ] **Step 1: Add the suite**
 
 Mirror an existing suite (e.g. `tool-choice`) with stub backends. Cases:
-1. "average revenue by region" with an uploaded CSV in context → `expected.requiredTools: ["analyze_dataset"]` (not SQL).
-2. "top 3 products by total revenue, use whatever query you need" → `requiredTools: ["query_dataset_sql"]`.
-3. Document containing a table → `requiredTools: ["extract_document_tables"]` then `analyze_dataset`.
-4. Plain math question, no data source → no tabular tool required (and no crash).
+1. "average revenue by region" with an uploaded CSV in context â†’ `expected.requiredTools: ["analyze_dataset"]` (not SQL).
+2. "top 3 products by total revenue, use whatever query you need" â†’ `requiredTools: ["query_dataset_sql"]`.
+3. Document containing a table â†’ `requiredTools: ["extract_document_tables"]` then `analyze_dataset`.
+4. Plain math question, no data source â†’ no tabular tool required (and no crash).
 
 Follow the exact suite shape from `packages/agent/src/evals/` (register in `run.ts`, declare `EVAL_MODEL` default).
 
@@ -2454,7 +2456,7 @@ Ensure `pnpm dev` on `:3000`/`:3001` with real `.env` (OpenRouter + Tavily + R2 
 
 - [ ] **Step 2: Drive each Plan 1 case in the real headed browser**
 
-Using the **MCP Playwright** tools (`browser_navigate` → real login → `browser_file_upload` to attach fixtures through the actual file chooser → `browser_type` the question → wait for the run → `browser_snapshot` + `browser_take_screenshot`), verify cases P1-C1..C8 and save evidence:
+Using the **MCP Playwright** tools (`browser_navigate` â†’ real login â†’ `browser_file_upload` to attach fixtures through the actual file chooser â†’ `browser_type` the question â†’ wait for the run â†’ `browser_snapshot` + `browser_take_screenshot`), verify cases P1-C1..C8 and save evidence:
 - Browser opened at `http://localhost:3000` (headed, visible).
 - Per case: one accessibility snapshot + one screenshot saved under `.playwright-mcp/data-analysis/`.
 - Assert mid-chat placement (chart between user message and assistant text).

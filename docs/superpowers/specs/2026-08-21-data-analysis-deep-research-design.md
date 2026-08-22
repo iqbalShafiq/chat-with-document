@@ -9,7 +9,7 @@ Turn the app from "chat over documents" into "chat over documents **and data**" 
 1. **v1 — Tabular data analysis** (user-facing core):
    - Upload **CSV / XLSX** as documents (reusing the existing document pipeline, ownership, session-linking, quota).
    - Extract tables from **existing PDF/image documents** (OCR already emits markdown tables).
-   - Analyze datasets via **deterministic operations** (`analyze_dataset`) and **read-only in-process SQL** (`query_dataset_sql` via DuckDB).
+   - Analyze datasets via **deterministic operations** (`analyze_dataset`) and **read-only in-process SQL** (`query_dataset_sql` via sql.js / SQLite WASM).
    - Render results as **tables and charts that flow naturally in the middle of the chat** (inside tool-result cards, like `ToolResultImages` today).
 2. **Fase 2 — Deep research** (implicit, approval-gated):
    - A per-session "Deep research" feature (like Web search / Image generator). When **on**, the agent may call `deep_research` freely; when **off**, the agent may still decide it needs deep research and **ask for approval** (Allow once / Allow for session / Reject) via the existing glass approval card.
@@ -19,7 +19,7 @@ Turn the app from "chat over documents" into "chat over documents **and data**" 
 
 - **CSV/XLSX are documents.** They flow through the exact same `Document` lifecycle (`queued → uploading → … → ready | failed`), are linked per session, counted against the 200 MB quota, and appear in the document library/catalog. Only the *ingest* step differs: tabular files get a **text/table parse branch** (no OCR) that stores a structured dataset.
 - **One dataset contract for all sources.** CSV/XLSX sheets and PDF-extracted markdown tables are normalized into the same `TabularSheet` shape (`{ name, columns[], rows[] }`). The agent references a dataset by a `DatasetRef` (`{ documentId, sheet? }` for uploads, `{ documentId, pageIndex, tableIndex }` for extracted tables). All analysis tools consume this one contract.
-- **No code execution.** Analysis is (a) deterministic pure functions (safe, testable, no infra) plus (b) **DuckDB read-only SELECT** — real analytical SQL in-process, without a Python sandbox. Python sandbox is explicitly **out of scope** (no Python runtime in the stack, security surface, ops burden; revisit only if users hit hard walls).
+- **No code execution.** Analysis is (a) deterministic pure functions (safe, testable, no infra) plus (b) **read-only SQL via sql.js (SQLite compiled to WASM)** — real analytical SQL in-process, without a Python sandbox or native builds. Python sandbox is explicitly **out of scope** (no Python runtime in the stack, security surface, ops burden; revisit only if users hit hard walls). (Engine note: native `duckdb` was evaluated first but dropped — prebuilt binaries failed to download in this environment and node-pre-gyp fell back to a multi-hour MSVC source build; sql.js delivers the same product value.)
 - **Charts ride on tool output.** The Anvia v0.26 UI stream (`UIStreamEvent`) only supports 6 event types and `ToolResultContent` is text/image only. So a chart is a **JSON `ChartSpec` inside the tool result** (`part.output`), rendered by new `DataChart`/`DataTable` components in the tool-result card. No streaming changes.
 - **Deep research is one approval-gated tool** on the main agent, whose body is a bounded researcher sub-agent (`agent.asTool()`), not a swarm of per-step agents. The main data-analysis tools stay registered on the main agent too.
 
@@ -77,9 +77,9 @@ model Document {
 | `parse-xlsx.ts` | `read-excel-file` (MIT, read-only) → all sheets to `TabularSheet[]`; type inference shared with CSV |
 | `markdown-tables.ts` | Extract GFM markdown tables from `DocumentPage.rawMarkdown` → `TabularSheet[]` (per page, indexed) |
 | `tabular-analysis.ts` | Pure ops: `profile`, `aggregate`/`group_by`, `filter`, `sort`, `top_n`, `correlation`, `trend` + `ChartSpec` builders |
-| `sql.ts` | DuckDB wrapper: register dataset → run **SELECT-only** query, row cap, timeout |
+| `sql.ts` | sql.js (SQLite WASM) runner: register dataset → run **SELECT-only** query, row cap |
 
-Dependency: `read-excel-file` (xlsx) and `duckdb` (analytical SQL). CSV stays dependency-free (small, fully unit-tested RFC 4180 parser).
+Dependency: `read-excel-file` (xlsx) and `sql.js` (SQLite WASM — pure WASM, no native build). CSV stays dependency-free (small, fully unit-tested RFC 4180 parser).
 
 ### 3.5 Tools (registered on the main agent, like `createDataAnalysisTools()`)
 
@@ -95,7 +95,7 @@ New `createTabularAnalysisTools()` in `packages/agent/src/tools/tabular-analysis
    - `correlation`: `{ x, y }` → reuse the existing Pearson logic (`data-analysis.ts`) → `{ n, correlation, direction, strength, rSquared }` + scatter chart (with optional linear-fit line).
    - `trend`: `{ x, y }` → sorted series + line chart.
    - Returns `{ operation, summary, result?: { columns, rows, rowCount, truncated }, chart?: ChartSpec }`.
-3. **`query_dataset_sql`** — `{ source, query }` → DuckDB **read-only**: only `SELECT`/`WITH … SELECT` (reject DDL/DML/multi-statement), in-memory, row cap (default 500), timeout (default 10s), returns `{ columns, rows, rowCount, truncated }`. No chart (agent uses `analyze_dataset` when a chart is wanted).
+3. **`query_dataset_sql`** — `{ source, query }` → sql.js (SQLite WASM) **read-only**: only `SELECT`/`WITH … SELECT` (reject DDL/DML/multi-statement), in-memory, row cap (default 500), returns `{ columns, rows, rowCount, truncated }`. No chart (agent uses `analyze_dataset` when a chart is wanted).
 4. **`extract_document_tables`** — `{ documentId? }` (optional; default: all linked ready docs) → scans `DocumentPage.rawMarkdown` of ready linked documents, returns discovered `{ documentId, filename, pageIndex, tableIndex, columns, rowCount, preview }[]` so the agent can feed those to `read_dataset`/`analyze_dataset`.
 
 ### 3.6 Chart spec contract (shared)
@@ -181,7 +181,7 @@ Upload CSV/XLSX → service (allowlist+quota) → R2 → queue ingest
   → worker tabular branch → parse → DocumentPage(0, markdown) + Document.tabularData
   → chunk+embed (findable) → status ready
 Agent (chat) → read_dataset / analyze_dataset / query_dataset_sql / extract_document_tables
-  → resolveDataset(prisma/r2) → TabularSheet → pure ops or DuckDB
+  → resolveDataset(prisma/r2) → TabularSheet → pure ops or sql.js (SQLite WASM)
   → tool result { result, chart? } → tool_update → part.output (JsonValue)
 UI: tool-result card → DataTable / DataChart → rendered mid-chat, flows naturally
 ```
@@ -193,7 +193,7 @@ UI: tool-result card → DataTable / DataChart → rendered mid-chat, flows natu
 - Mixed-type column → coerced to the dominant type; non-coercible cells become `null` and are counted.
 - xlsx with many sheets → each sheet is a `TabularSheet`; `sheet` selector by name or index; row cap applies per sheet.
 - PDF markdown table that is malformed → skipped (extract_tables returns only well-formed tables).
-- DuckDB query safety: reject non-SELECT / multiple statements / `;`; enforce row cap + timeout; dataset registered read-only in-memory per call (never persisted, never writable).
+- SQL query safety: reject non-SELECT / multiple statements / `;`; enforce row cap; dataset registered read-only in-memory per call (never persisted, never writable).
 - `analyze_dataset` on a column with all `null` → operation returns an explicit "no usable data" result, not a crash.
 - Session with no tabular sources → catalog simply lists documents; agent abstains from analysis tools (behavior-eval covered).
 
