@@ -1,6 +1,9 @@
 import type { UIMessagePart } from "@anvia/react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { DataChart } from "#/components/data/data-chart";
+import { DataTable } from "#/components/data/data-table";
+import { parseChartSpec, parseTableDto } from "#/lib/data-analysis";
 import { useImagePreview } from "#/components/images/image-preview";
 import {
   isImageToolName,
@@ -25,6 +28,10 @@ const TOOL_LABELS: Record<string, string> = {
   web_fetch: "Fetching web page",
   generate_image: "Generating image",
   edit_image: "Editing image",
+  read_dataset: "Reading dataset",
+  analyze_dataset: "Analyzing data",
+  query_dataset_sql: "Querying data (SQL)",
+  extract_document_tables: "Extracting tables",
   view_image: "Viewing image",
   request_clarification: "Asking for clarification",
   "resolve-library-id": "Looking up library",
@@ -46,6 +53,28 @@ function statusLabel(part: ToolPart) {
   if (part.state === "error") return "Error";
   if (part.state === "output-available") return "Done";
   return "Working";
+}
+
+function ChartFromSection({ chart }: { chart: unknown }) {
+  const spec = parseChartSpec(chart);
+  return spec ? <DataChart spec={spec} /> : null;
+}
+
+function TableFromSection({ table }: { table: unknown }) {
+  const parsed = parseTableDto(table);
+  if (!parsed) return null;
+  return (
+    <DataTable
+      columns={parsed.columns}
+      rows={parsed.rows.slice(0, 20)}
+      rowCount={
+        typeof (table as { rowCount?: unknown }).rowCount === "number"
+          ? (table as { rowCount: number }).rowCount
+          : parsed.rows.length
+      }
+      truncated={Boolean((table as { truncated?: unknown }).truncated)}
+    />
+  );
 }
 
 function ToolSectionView({ section }: { section: FormattedSection }) {
@@ -97,6 +126,8 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
       {!section.summary && !hasFields && !hasItems && section.emptyText ? (
         <p className="text-[12px] text-text-faint">{section.emptyText}</p>
       ) : null}
+      {section.chart !== undefined ? <ChartFromSection chart={section.chart} /> : null}
+      {section.table !== undefined ? <TableFromSection table={section.table} /> : null}
       {section.imageLoading ? (
         <div
           className="flex items-center gap-2.5"

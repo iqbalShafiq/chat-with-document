@@ -17,6 +17,10 @@ export type FormattedSection = {
   emptyText?: string;
   /** Image tool in flight — render a skeleton tile instead of empty text. */
   imageLoading?: boolean;
+  /** Raw chart spec payload (validated by the panel via parseChartSpec). */
+  chart?: unknown;
+  /** Raw table payload (validated by the panel via parseTableDto). */
+  table?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -781,6 +785,64 @@ function formatEditImageOutput(output: unknown): FormattedSection {
   return formatImageGenOutput(output);
 }
 
+function formatReadDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const columns = asArray(record.columns).filter(
+    (c) => isRecord(c) && typeof c.name === "string",
+  );
+  const preview = asArray(record.preview);
+  return {
+    title: "Result",
+    summary: `Dataset: ${asString(record.name) ?? "—"} · ${String(record.rowCount ?? 0)} rows`,
+    fields: columns.slice(0, 8).map((c) => ({
+      label: (c as { name: string }).name,
+      value: String((c as { type?: unknown }).type ?? ""),
+    })),
+    table: isRecord(record)
+      ? { columns, rows: preview, rowCount: record.rowCount, truncated: false }
+      : undefined,
+  };
+}
+
+function formatAnalyzeDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  return {
+    title: "Result",
+    summary: asString(record.summary) ?? "Analysis",
+    ...(isRecord(record.result) ? { table: record.result } : {}),
+    ...(isRecord(record.chart) ? { chart: record.chart } : {}),
+  };
+}
+
+function formatQueryDatasetSqlOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  return {
+    title: "Result",
+    summary: `${String(record.rowCount ?? 0)} row${Number(record.rowCount) === 1 ? "" : "s"}`,
+    table: record,
+  };
+}
+
+function formatExtractDocumentTablesOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const tables = asArray(record.tables);
+  return {
+    title: "Result",
+    summary: `${tables.length} table${tables.length === 1 ? "" : "s"} found`,
+    items: tables.slice(0, 10).map((t) => {
+      const rec = isRecord(t) ? t : {};
+      const filename = asString(rec.filename) ?? "";
+      const cols = asArray(rec.columns).filter(
+        (c) => isRecord(c) && typeof c.name === "string",
+      );
+      return {
+        title: `${filename} · page ${Number(rec.pageIndex) + 1} · table ${Number(rec.tableIndex) + 1}`,
+        meta: `${cols.length} columns · ${String(rec.rowCount ?? 0)} rows`,
+      };
+    }),
+  };
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -840,6 +902,14 @@ export function formatToolOutput(
       return formatGenerateImageOutput(output);
     case "edit_image":
       return formatEditImageOutput(output);
+    case "read_dataset":
+      return formatReadDatasetOutput(output);
+    case "analyze_dataset":
+      return formatAnalyzeDatasetOutput(output);
+    case "query_dataset_sql":
+      return formatQueryDatasetSqlOutput(output);
+    case "extract_document_tables":
+      return formatExtractDocumentTablesOutput(output);
     default:
       return formatGenericOutput(output);
   }
