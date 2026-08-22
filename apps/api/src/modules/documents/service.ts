@@ -15,7 +15,12 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
   "image/webp",
+  "text/csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
+
+export const MAX_TABULAR_ROWS = 50_000;
+export const MAX_TABULAR_COLUMNS = 100;
 
 const DEFAULT_LIBRARY_LIMIT = 20;
 const MAX_LIBRARY_LIMIT = 50;

@@ -12,6 +12,8 @@ import {
   createDocumentTools,
   createImageGenerationTools,
   createRememberUserProfileTool,
+  createSqlJsRunner,
+  createTabularAnalysisTools,
   createTavilyClient,
   createWebSearchTools,
   DOCUMENT_IMAGE_INSTRUCTION,
@@ -35,6 +37,7 @@ import type { Message } from "@anvia/core/completion";
 import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
+import { createTabularResolver } from "./tabular-resolver.js";
 import {
   getImageStore,
   type GeneratedImageRecord,
@@ -368,8 +371,13 @@ export async function buildChatRunInput(input: {
     ...(projectContext ? [projectContext] : []),
     ...profileContext,
   ];
+  const tabularTools = createTabularAnalysisTools({
+    resolver: createTabularResolver({ userId, sessionId, projectId, prisma }),
+    sqlRunner: createSqlJsRunner(),
+  });
   const tools = [
     ...createDataAnalysisTools(),
+    ...tabularTools,
     ...documentTools,
     ...(profileTool ? [profileTool] : []),
   ];

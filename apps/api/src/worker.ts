@@ -7,10 +7,14 @@ import {
   deleteDocumentChunks,
   embeddingModel,
   firstLinesSummary,
+  parseCsv,
+  parseXlsx,
   runDocumentOcr,
+  sheetFromRows,
   upsertDocumentChunks,
   type DocumentChunkMetadata,
   type DocumentPageImage,
+  type TabularSheet,
 } from "@assingment/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
 import { buildPageImageR2Key, getObjectBuffer, putObject } from "./lib/r2.js";
@@ -19,6 +23,10 @@ import {
   type DocumentIngestJobData,
 } from "./lib/queue.js";
 import { getBullmqConnectionOptions } from "./lib/redis.js";
+import {
+  MAX_TABULAR_COLUMNS,
+  MAX_TABULAR_ROWS,
+} from "./modules/documents/service.js";
 import {
   enqueueProfileRefresh,
   takeNeedsProfileRefresh,
@@ -38,6 +46,11 @@ import {
 
 console.log("[worker] boot");
 
+const TABULAR_MIME_TYPES = new Set([
+  "text/csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
 async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   const { documentId, userId, sessionId, r2Key, filename } = job.data;
 
@@ -49,6 +62,11 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   });
 
   const fileBuffer = await getObjectBuffer(r2Key);
+  const mime = (await prisma.document.findUnique({ where: { id: documentId }, select: { mimeType: true } }))?.mimeType ?? "";
+  if (TABULAR_MIME_TYPES.has(mime)) {
+    await processTabularIngest({ documentId, userId, sessionId, filename, mime, fileBuffer });
+    return;
+  }
   const ocr = await runDocumentOcr({ filename, data: fileBuffer });
 
   const pageImages = new Map<number, DocumentPageImage[]>();
@@ -174,6 +192,87 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   });
 
   console.log(`[worker] ingest ready ${documentId}`);
+}
+
+async function processTabularIngest(input: {
+  documentId: string;
+  userId: string;
+  sessionId: string;
+  filename: string;
+  mime: string;
+  fileBuffer: Uint8Array;
+}) {
+  const { documentId, userId, sessionId, filename, mime, fileBuffer } = input;
+  const sheets: TabularSheet[] =
+    mime === "text/csv"
+      ? [sheetFromRows(filename.replace(/\.csv$/i, ""), parseCsv(Buffer.from(fileBuffer).toString("utf8")))]
+      : await parseXlsx(fileBuffer, filename);
+  const flattened = sheets.flatMap((s) => s.rows);
+  const maxColumns = Math.max(...sheets.map((s) => s.columns.length), 0);
+  if (flattened.length === 0) throw new Error("File contains no data rows");
+  if (flattened.length > MAX_TABULAR_ROWS) throw new Error(`Too many rows (max ${MAX_TABULAR_ROWS})`);
+  if (maxColumns > MAX_TABULAR_COLUMNS) throw new Error(`Too many columns (max ${MAX_TABULAR_COLUMNS})`);
+
+  const first = sheets[0]!;
+  const markdown = toMarkdownTable(first);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.documentPage.deleteMany({ where: { documentId } });
+    await tx.documentPage.create({
+      data: {
+        documentId,
+        pageIndex: 0,
+        summary: firstLinesSummary(markdown),
+        rawMarkdown: markdown,
+      },
+    });
+    await tx.document.update({
+      where: { id: documentId },
+      data: {
+        pageCount: 1,
+        summary: buildDocumentSummary([firstLinesSummary(markdown)]),
+        firstPageSummary: firstLinesSummary(markdown),
+        tabularData: { sheets } as Prisma.InputJsonValue,
+        status: "embedding_processing",
+      },
+    });
+  });
+
+  await deleteDocumentChunks(documentId);
+  const chunks = chunkText(markdown);
+  if (chunks.length > 0) {
+    const vectors = await embeddingModel.embedTexts(chunks.map((c) => c.text));
+    await upsertDocumentChunks(
+      chunks.map((chunk, i) => ({
+        id: `${documentId}:page0:${chunk.chunkIndex}`,
+        document: chunk.text,
+        embeddings: [{ document: chunk.text, vector: vectors[i]!.vector }],
+        metadata: {
+          userId, sessionId, documentId, filename,
+          pageId: documentId,
+          pageIndex: 0,
+          chunkIndex: chunk.chunkIndex,
+          chunkText: chunk.text,
+          documentPageCount: 1,
+        },
+      })),
+    );
+  }
+
+  await prisma.document.update({
+    where: { id: documentId },
+    data: { status: "ready", errorMessage: null },
+  });
+  console.log(`[worker] tabular ingest ready ${documentId}`);
+}
+
+function toMarkdownTable(sheet: TabularSheet): string {
+  const header = `| ${sheet.columns.map((c) => c.name).join(" | ")} |`;
+  const sep = `| ${sheet.columns.map(() => "---").join(" | ")} |`;
+  const body = sheet.rows
+    .slice(0, 200)
+    .map((row) => `| ${sheet.columns.map((_, i) => String(row[i] ?? "")).join(" | ")} |`);
+  return [header, sep, ...body].join("\n");
 }
 
 export const worker = new Worker<DocumentIngestJobData>(
