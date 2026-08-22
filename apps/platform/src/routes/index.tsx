@@ -1072,6 +1072,7 @@ function ChatSession({
     readSelectedModel(models),
   );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [dataAnalysisEnabled, setDataAnalysisEnabled] = useState(false);
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() =>
     readImageGenerationEnabled(),
   );
@@ -1093,11 +1094,13 @@ function ChatSession({
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
+  const dataAnalysisEnabledRef = useRef(dataAnalysisEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
   const imageGenSettingsRef = useRef(imageGenSettings);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
+  dataAnalysisEnabledRef.current = dataAnalysisEnabled;
   imageGenerationEnabledRef.current = imageGenerationEnabled;
   imageGenSettingsRef.current = imageGenSettings;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
@@ -1394,6 +1397,7 @@ function ChatSession({
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
         webSearchEnabled: webSearchEnabledRef.current,
+        dataAnalysisEnabled: dataAnalysisEnabledRef.current,
         imageGenerationEnabled: imageGenerationEnabledRef.current,
         imageGenSettings: imageGenSettingsRef.current,
         ...(resume ? { resume } : {}),
@@ -3080,6 +3084,9 @@ function ChatSession({
                     webSearchEnabled={webSearchEnabled}
                     webSearchAvailable={capabilities?.webSearchAvailable ?? false}
                     onWebSearchToggle={setWebSearchEnabled}
+                    dataAnalysisEnabled={dataAnalysisEnabled}
+                    dataAnalysisAvailable={true}
+                    onDataAnalysisToggle={setDataAnalysisEnabled}
                     imageGenerationEnabled={imageGenerationEnabled}
                     imageGenerationAvailable={
                       capabilities?.imageGenerationAvailable ?? false

@@ -1,4 +1,4 @@
-import { Globe, ImagePlus, Plus } from "lucide-react";
+import { BarChart3, Globe, ImagePlus, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ImageGenParamsEditor } from "#/components/composer/image-gen-params-editor";
@@ -13,6 +13,9 @@ type FeaturesPopoverProps = {
   webSearchEnabled: boolean;
   onWebSearchToggle: (enabled: boolean) => void;
   webSearchAvailable: boolean;
+  dataAnalysisEnabled: boolean;
+  onDataAnalysisToggle: (enabled: boolean) => void;
+  dataAnalysisAvailable: boolean;
   imageGenerationEnabled: boolean;
   onImageGenerationToggle: (enabled: boolean) => void;
   imageGenerationAvailable: boolean;
@@ -41,6 +44,9 @@ export function FeaturesPopover({
   webSearchEnabled,
   onWebSearchToggle,
   webSearchAvailable,
+  dataAnalysisEnabled,
+  onDataAnalysisToggle,
+  dataAnalysisAvailable,
   imageGenerationEnabled,
   onImageGenerationToggle,
   imageGenerationAvailable,
@@ -60,8 +66,10 @@ export function FeaturesPopover({
     items: [],
   });
 
-  const anyAvailable = webSearchAvailable || imageGenerationAvailable;
-  const anyEnabled = webSearchEnabled || imageGenerationEnabled;
+  const anyAvailable =
+    webSearchAvailable || dataAnalysisAvailable || imageGenerationAvailable;
+  const anyEnabled =
+    webSearchEnabled || dataAnalysisEnabled || imageGenerationEnabled;
 
   const loadImageModels = () => {
     setModels({ status: "loading", items: [] });
@@ -218,6 +226,30 @@ export function FeaturesPopover({
                   </button>
                 </HoverCard>
               ) : null}
+              {dataAnalysisEnabled ? (
+                <HoverCard
+                  disabled={open}
+                  variant="tooltip"
+                  content={
+                    dataAnalysisAvailable
+                      ? "Data analysis on — the agent analyzes tabular files"
+                      : "Data analysis is not available on the server"
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label="Open data analysis settings"
+                    title="Data analysis on"
+                    onClick={openFromIcon}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                  >
+                    <BarChart3
+                      className="size-4 text-accent"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </HoverCard>
+              ) : null}
               {imageGenerationEnabled ? (
                 <HoverCard
                   disabled={open}
@@ -310,6 +342,51 @@ export function FeaturesPopover({
                     <span
                       className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         webSearchEnabled
+                          ? "translate-x-3.5"
+                          : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={dataAnalysisEnabled}
+                  aria-label="Data analysis"
+                  title={
+                    dataAnalysisAvailable
+                      ? dataAnalysisEnabled
+                        ? "Data analysis on — the agent analyzes tabular files"
+                        : "Data analysis off — the agent asks before analyzing"
+                      : "Data analysis is not available on the server"
+                  }
+                  disabled={!dataAnalysisAvailable}
+                  onClick={() => onDataAnalysisToggle(!dataAnalysisEnabled)}
+                  className={`group flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition duration-150 hover:bg-white/[0.07] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
+                    !dataAnalysisAvailable ? "opacity-40" : ""
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-text">
+                    <BarChart3
+                      className={`size-4 shrink-0 transition-colors duration-200 ${
+                        dataAnalysisEnabled
+                          ? "text-accent"
+                          : "text-text-muted group-hover:text-text"
+                      }`}
+                      strokeWidth={1.75}
+                    />
+                    Data analysis
+                  </span>
+                  <span
+                    className={`relative h-4 w-7 shrink-0 rounded-full transition-colors duration-200 ${
+                      dataAnalysisEnabled ? "bg-accent/80" : "bg-white/12"
+                    }`}
+                    aria-hidden
+                  >
+                    <span
+                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                        dataAnalysisEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
                       }`}

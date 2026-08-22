@@ -57,6 +57,9 @@ export function ChatComposer({
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
+  dataAnalysisEnabled = false,
+  dataAnalysisAvailable = true,
+  onDataAnalysisToggle = () => {},
   imageGenerationEnabled = false,
   imageGenerationAvailable = true,
   onImageGenerationToggle = () => {},
@@ -109,6 +112,11 @@ export function ChatComposer({
   /** Server has web tools configured (TAVILY_API_KEY). */
   webSearchAvailable?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  /** Per-session data analysis toggle state (default off). */
+  dataAnalysisEnabled?: boolean;
+  /** Available (reserved for a future sandbox gate). */
+  dataAnalysisAvailable?: boolean;
+  onDataAnalysisToggle?: (enabled: boolean) => void;
   /** Per-session image generation toggle state (default off). */
   imageGenerationEnabled?: boolean;
   /** Server has an image model configured. */
@@ -390,6 +398,9 @@ export function ChatComposer({
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={onWebSearchToggle}
               webSearchAvailable={webSearchAvailable}
+              dataAnalysisEnabled={dataAnalysisEnabled}
+              onDataAnalysisToggle={onDataAnalysisToggle}
+              dataAnalysisAvailable={dataAnalysisAvailable}
               imageGenerationEnabled={imageGenerationEnabled}
               onImageGenerationToggle={onImageGenerationToggle}
               imageGenerationAvailable={imageGenerationAvailable}
