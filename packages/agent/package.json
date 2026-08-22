@@ -33,6 +33,7 @@
     "@tavily/core": "^0.7.6",
     "dotenv-cli": "^11.0.0",
     "read-excel-file": "^9.3.10",
+    "sql.js": "^1.14.2",
     "zod": "^4.4.3"
   }
 }
