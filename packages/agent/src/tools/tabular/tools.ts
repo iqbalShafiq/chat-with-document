@@ -98,7 +98,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const queryDatasetSql = createTool({
     name: "query_dataset_sql",
     description:
-      "Run a read-only SQL SELECT query over a dataset using DuckDB. The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
+      "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
     input: z.object({
       source: sourceSchema,
       query: z.string().min(1).describe("Read-only SQL SELECT query"),
