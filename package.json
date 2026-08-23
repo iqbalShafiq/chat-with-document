@@ -19,7 +19,7 @@
       "lightningcss"
     ],
     "patchedDependencies": {
-      "@anvia/react-ui": "patches/@anvia__react-ui.patch"
+      "@anvia/react-ui@1.0.0": "patches/@anvia__react-ui.patch"
     }
   },
   "devDependencies": {
