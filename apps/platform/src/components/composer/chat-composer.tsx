@@ -57,6 +57,9 @@ export function ChatComposer({
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
+  deepResearchEnabled = false,
+  deepResearchAvailable = true,
+  onDeepResearchToggle = () => {},
   imageGenerationEnabled = false,
   imageGenerationAvailable = true,
   onImageGenerationToggle = () => {},
@@ -109,6 +112,11 @@ export function ChatComposer({
   /** Server has web tools configured (TAVILY_API_KEY). */
   webSearchAvailable?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
+  /** Per-session Deep Research toggle state (default off). */
+  deepResearchEnabled?: boolean;
+  /** Available when web search or an active document exists. */
+  deepResearchAvailable?: boolean;
+  onDeepResearchToggle?: (enabled: boolean) => void;
   /** Per-session image generation toggle state (default off). */
   imageGenerationEnabled?: boolean;
   /** Server has an image model configured. */
@@ -390,6 +398,9 @@ export function ChatComposer({
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={onWebSearchToggle}
               webSearchAvailable={webSearchAvailable}
+              deepResearchEnabled={deepResearchEnabled}
+              onDeepResearchToggle={onDeepResearchToggle}
+              deepResearchAvailable={deepResearchAvailable}
               imageGenerationEnabled={imageGenerationEnabled}
               onImageGenerationToggle={onImageGenerationToggle}
               imageGenerationAvailable={imageGenerationAvailable}

@@ -115,6 +115,50 @@ describe("runAgentAndCollect", () => {
     }
   });
 
+  it("closes the provider stream iterator when an eval times out", async () => {
+    let iteratorClosed = false;
+    const stream = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<never>(() => {}),
+          return: async () => {
+            iteratorClosed = true;
+            return { done: true as const, value: undefined };
+          },
+        };
+      },
+    };
+    const hangingModel: StreamingCompletionModel = {
+      provider: "hanging",
+      defaultModel: "hanging",
+      capabilities: {
+        streaming: true,
+        tools: true,
+        toolChoice: false,
+        imageInput: false,
+        documentInput: false,
+        outputSchema: false,
+        reasoning: false,
+      },
+      completion: () => new Promise(() => {}),
+      streamCompletion: () => stream,
+    };
+    process.env.EVAL_TIMEOUT_MS = "50";
+    try {
+      await expect(
+        runAgentAndCollect({
+          prompt: "hello",
+          sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+          model: hangingModel,
+          tools: [],
+        }),
+      ).rejects.toThrow(/Eval case timed out after 50ms/);
+      expect(iteratorClosed).toBe(true);
+    } finally {
+      delete process.env.EVAL_TIMEOUT_MS;
+    }
+  });
+
   it("marks an errored tool call with status error", async () => {
     const model = createScriptedCompletionModel([
       { kind: "tool_call", name: "web_search", args: { query: "x", reason: "y" } },

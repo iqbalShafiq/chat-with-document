@@ -354,6 +354,7 @@ export const chatPaths = {
               reasoningEffort: { type: ["string", "null"] },
               webSearchEnabled: { type: "boolean" },
               imageGenerationEnabled: { type: "boolean" },
+              deepResearchEnabled: { type: "boolean" },
               imageGenSettings: {
                 type: "object",
                 properties: {
@@ -387,6 +388,7 @@ export const chatPaths = {
                 model: "openai/gpt-5.6-luna",
                 webSearchEnabled: false,
                 imageGenerationEnabled: false,
+                deepResearchEnabled: false,
                 messages: [
                   {
                     role: "user",
@@ -1053,7 +1055,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Feature flags for this deployment",
       description:
-        "Tells the client whether web search, image generation, and Context7 MCP are configured on the server. Does not require extra query params.",
+        "Tells the client whether web search, Deep Research, image generation, and Context7 MCP are available. Pass sessionId to include document-only Deep Research availability.",
       security: bearerOrCookie,
       responses: {
         "200": jsonResponse(
@@ -1062,11 +1064,13 @@ export const chatPaths = {
             type: "object",
             required: [
               "webSearchAvailable",
+              "deepResearchAvailable",
               "imageGenerationAvailable",
               "context7Available",
             ],
             properties: {
               webSearchAvailable: { type: "boolean" },
+              deepResearchAvailable: { type: "boolean" },
               imageGenerationAvailable: { type: "boolean" },
               context7Available: { type: "boolean" },
             },
@@ -1076,6 +1080,7 @@ export const chatPaths = {
               summary: "Typical local setup",
               value: {
                 webSearchAvailable: true,
+                deepResearchAvailable: true,
                 imageGenerationAvailable: true,
                 context7Available: false,
               },

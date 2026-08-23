@@ -232,10 +232,11 @@ export function createApprovalRegistry(redis: ApprovalRedis) {
           await removeApproval(approvalId);
           return {
             approved: false,
-            reason:
-              decision === "stopped"
-                ? STOPPED_BY_USER_REASON
-                : "Web access request timed out; answer from available knowledge.",
+              reason:
+                decision === "stopped"
+                  ? STOPPED_BY_USER_REASON
+                : request.rejectMessage ??
+                  "Tool approval request timed out; answer from available knowledge.",
           };
         }
 

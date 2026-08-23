@@ -218,6 +218,8 @@ model Document {
   errorMessage     String?
   summary          String            @default("") @db.Text
   firstPageSummary String            @default("") @db.Text
+  /// Structured tabular data for CSV/XLSX: { sheets: TabularSheet[] }.
+  tabularData      Json?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   pages            DocumentPage[]

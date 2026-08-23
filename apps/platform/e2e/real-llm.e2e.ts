@@ -2,56 +2,15 @@
  * Headed E2E against a live OpenRouter key (no local stub).
  * Requires `pnpm dev` on :3000 / :3001 with real OPENAI_* from `.env`.
  */
-import { expect, test, type Page } from "@playwright/test";
-
-const API_ORIGIN = "http://localhost:3001";
-
-async function openFreshChat(page: Page): Promise<void> {
-  const draft = await page.request.post(`${API_ORIGIN}/api/chat/sessions/draft`, {
-    data: { projectId: null },
-  });
-  expect(draft.ok()).toBe(true);
-  await page.goto("/");
-  await page.evaluate(() => window.localStorage.clear());
-  await page.reload();
-  await expect(page.getByText("Ask anything about your documents")).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();
-}
-
-async function sendMessage(page: Page, text: string): Promise<void> {
-  const editor = page.locator("[data-anvia-composer-editor]");
-  await editor.click();
-  await expect(editor).toHaveAttribute("contenteditable", "true");
-  await editor.pressSequentially(text, { delay: 15 });
-  await editor.press("Enter");
-}
-
-async function waitForStreaming(page: Page): Promise<void> {
-  await expect(
-    page.getByRole("button", { name: /^(Stop|Add to queue)$/ }),
-  ).toBeVisible({ timeout: 30_000 });
-}
-
-async function waitForRunDone(page: Page): Promise<void> {
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({
-    timeout: 150_000,
-  });
-}
-
-async function openFeaturesPopover(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Additional features" }).click();
-  await expect(page.getByRole("dialog", { name: "Additional features" })).toBeVisible();
-}
-
-async function setSwitch(page: Page, name: string, on: boolean): Promise<void> {
-  await openFeaturesPopover(page);
-  const toggle = page.getByRole("switch", { name });
-  const checked = (await toggle.getAttribute("aria-checked")) === "true";
-  if (checked !== on) await toggle.click();
-  await page.keyboard.press("Escape");
-}
+import { expect, test } from "@playwright/test";
+import {
+  API_ORIGIN,
+  openFreshChat,
+  sendMessage,
+  setSwitch,
+  waitForRunDone,
+  waitForStreaming,
+} from "./helpers";
 
 test("stream a short reply from the real model", async ({ page }) => {
   await openFreshChat(page);

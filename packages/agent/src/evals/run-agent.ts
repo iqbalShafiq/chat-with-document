@@ -8,6 +8,7 @@ import type {
   ToolApprovalRequest,
   ToolApprovalsOptions,
 } from "@anvia/core";
+import type { StreamingCompletionModel } from "@anvia/core/completion";
 import type { AgentObserver } from "@anvia/core/observability";
 import type { MemoryContext } from "@anvia/core/memory";
 import type { LangfuseTracing } from "@anvia/langfuse";
@@ -30,6 +31,8 @@ export async function runAgentAndCollect(input: {
   tracing?: LangfuseTracing;
   suiteName?: string;
   caseId?: string;
+  deepResearchProgress?: string[];
+  onTimeout?: () => void;
 }): Promise<BehaviorTrace> {
   const started = Date.now();
   const toolCalls: BehaviorTrace["toolCalls"] = [];
@@ -39,10 +42,16 @@ export async function runAgentAndCollect(input: {
   let usage: BehaviorTrace["usage"] = {};
   let trace: BehaviorTrace["trace"];
   const erroredToolCalls = new Map<string, BehaviorTrace["toolCalls"][number]>();
+  let closeProviderStream: (() => void) | undefined;
+  const model = input.model
+    ? wrapStreamingModel(input.model, (close) => {
+        closeProviderStream = close;
+      })
+    : undefined;
 
   const agent = createAgent({
     agentId: "eval-agent",
-    ...(input.model ? { model: input.model } : {}),
+    ...(model ? { model } : {}),
     ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
     additionalInstructions: input.instructions ?? [],
     additionalContext: input.contextBlocks ?? [],
@@ -68,9 +77,13 @@ export async function runAgentAndCollect(input: {
     });
   }
   const stream = session.stream();
+  const iterator = stream[Symbol.asyncIterator]();
 
   const collect = (async () => {
-    for await (const event of stream) {
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const event = next.value;
       switch (event.type) {
         case "text_delta":
           textParts.push(event.delta);
@@ -115,20 +128,47 @@ export async function runAgentAndCollect(input: {
       approvals,
       clarifications,
       citations,
+      ...(input.deepResearchProgress
+        ? { deepResearchProgress: input.deepResearchProgress }
+        : {}),
       usage,
       durationMs: Date.now() - started,
       ...(trace ? { trace } : {}),
     };
   })();
 
-  return await runWithTimeout(collect, evalConfig.timeoutMs);
+  return await runWithTimeout(collect, evalConfig.timeoutMs, () => {
+    closeProviderStream?.();
+    closeAsyncIterator(iterator);
+    input.onTimeout?.();
+  });
 }
 
-async function runWithTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+export function createCancellableCompletionModel(model: CompletionModel): {
+  model: CompletionModel;
+  cancel: () => void;
+} {
+  let closeProviderStream: (() => void) | undefined;
+  return {
+    model: wrapStreamingModel(model, (close) => {
+      closeProviderStream = close;
+    }),
+    cancel: () => closeProviderStream?.(),
+  };
+}
+
+async function runWithTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  onTimeout?: () => void,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Eval case timed out after ${timeoutMs}ms`)),
+      () => {
+        onTimeout?.();
+        reject(new Error(`Eval case timed out after ${timeoutMs}ms`));
+      },
       timeoutMs,
     );
   });
@@ -137,6 +177,36 @@ async function runWithTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+function closeAsyncIterator(iterator: AsyncIterator<unknown>): void {
+  try {
+    void Promise.resolve(iterator.return?.()).catch(() => {});
+  } catch {
+    // A provider's iterator may throw while closing; timeout handling must still return.
+  }
+}
+
+function wrapStreamingModel(
+  model: CompletionModel,
+  registerClose: (close: () => void) => void,
+): CompletionModel {
+  if (!("streamCompletion" in model) || typeof model.streamCompletion !== "function") {
+    return model;
+  }
+  const streamingModel = model as StreamingCompletionModel;
+  const wrapped: StreamingCompletionModel = {
+    ...model,
+    streamCompletion(request) {
+      const source = streamingModel.streamCompletion(request);
+      const iterator = source[Symbol.asyncIterator]();
+      registerClose(() => closeAsyncIterator(iterator));
+      return {
+        [Symbol.asyncIterator]: () => iterator,
+      };
+    },
+  };
+  return wrapped;
 }
 
 function createToolErrorObserver(

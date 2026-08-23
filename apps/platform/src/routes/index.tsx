@@ -22,6 +22,7 @@ import {
   type IngestionItem,
 } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
+import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
 import { AppShell } from "#/components/layout/app-shell";
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
@@ -113,6 +114,12 @@ import {
   sessionSummaryFromDraft,
   type SessionSummary,
 } from "#/lib/session-history";
+import {
+  initialDeepResearchActivityState,
+  reduceDeepResearchProgress,
+  resetDeepResearchActivity,
+  type DeepResearchActivityState,
+} from "#/lib/chat/deep-research-activity";
 import {
   persistImageGenSettings,
   persistImageGenerationEnabled,
@@ -1072,6 +1079,7 @@ function ChatSession({
     readSelectedModel(models),
   );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() =>
     readImageGenerationEnabled(),
   );
@@ -1084,6 +1092,9 @@ function ChatSession({
   const [compaction, setCompaction] = useState<{
     phase: "idle" | "start" | "complete" | "error";
   }>({ phase: "idle" });
+  const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
+    initialDeepResearchActivityState,
+  );
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -1093,11 +1104,13 @@ function ChatSession({
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
+  const deepResearchEnabledRef = useRef(deepResearchEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
   const imageGenSettingsRef = useRef(imageGenSettings);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
+  deepResearchEnabledRef.current = deepResearchEnabled;
   imageGenerationEnabledRef.current = imageGenerationEnabled;
   imageGenSettingsRef.current = imageGenSettings;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
@@ -1296,7 +1309,22 @@ function ChatSession({
         setCompaction({ phase });
         return;
       }
+      if (record.type === "deep_research_progress") {
+        setDeepResearch((state) =>
+          reduceDeepResearchProgress(state, {
+            phase: record.phase,
+            message:
+              typeof record.message === "string"
+                ? record.message
+                : "Deep Research is running",
+            activities: record.activities,
+            stats: record.stats,
+          }),
+        );
+        return;
+      }
       if (record.type === "message_end") {
+        setDeepResearch(resetDeepResearchActivity());
         void refreshContextUsage();
         return;
       }
@@ -1395,6 +1423,7 @@ function ChatSession({
         reasoningEffort: selectedReasoningEffortRef.current,
         webSearchEnabled: webSearchEnabledRef.current,
         imageGenerationEnabled: imageGenerationEnabledRef.current,
+        deepResearchEnabled: deepResearchEnabledRef.current,
         imageGenSettings: imageGenSettingsRef.current,
         ...(resume ? { resume } : {}),
       };
@@ -1670,6 +1699,7 @@ function ChatSession({
     setContextUsage(null);
     setContextUsageError(false);
     setCompaction({ phase: "idle" });
+    setDeepResearch({ phase: "idle", message: "" });
     setPreviousRunError(false);
     void refreshSessionDocuments();
     void refreshSessionImages();
@@ -1680,15 +1710,15 @@ function ChatSession({
     refreshActiveContext,
   ]);
 
-  // Capabilities are global (not per-session) — best-effort fetch; the
-  // module-wide promise cache in lib/api makes this cheap on remounts.
+  // Capability fetch is session-aware so document-only Deep Research can be
+  // enabled even when this deployment has no web-search key.
   useEffect(() => {
-    void fetchChatCapabilities()
+    void fetchChatCapabilities(sessionId)
       .then(setCapabilities)
       .catch(() => {
         // capabilities stay null; toggles render as unavailable
       });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     setEditingMessageId(null);
@@ -3052,6 +3082,12 @@ function ChatSession({
                     }
                   />
 
+                  {deepResearch.phase !== "idle" ? (
+                    <div className="mb-2">
+                      <DeepResearchActivityPanel state={deepResearch} />
+                    </div>
+                  ) : null}
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -3077,6 +3113,11 @@ function ChatSession({
                     compaction={compaction}
                     contextUsage={contextUsage}
                     contextUsageError={contextUsageError}
+                    deepResearchEnabled={deepResearchEnabled}
+                    deepResearchAvailable={
+                      capabilities?.deepResearchAvailable ?? false
+                    }
+                    onDeepResearchToggle={setDeepResearchEnabled}
                     webSearchEnabled={webSearchEnabled}
                     webSearchAvailable={capabilities?.webSearchAvailable ?? false}
                     onWebSearchToggle={setWebSearchEnabled}

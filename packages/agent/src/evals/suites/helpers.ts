@@ -74,6 +74,13 @@ export const expectationMetric: EvalMetric<
       return EvalOutcome.fail(false, {
         comment: "agent produced no output",
       });
+    if (
+      expected.requiresDeepResearchProgress &&
+      (output.deepResearchProgress?.length ?? 0) === 0
+    )
+      return EvalOutcome.fail(false, {
+        comment: "Deep Research produced no observable progress phase",
+      });
     return EvalOutcome.pass(true);
   },
 };

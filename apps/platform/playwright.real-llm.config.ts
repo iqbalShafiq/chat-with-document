@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "real-llm.e2e.ts",
+  testMatch: "*real-llm*.e2e.ts",
   globalSetup: "./e2e/real-llm.global-setup.ts",
   timeout: 180_000,
   expect: { timeout: 120_000 },

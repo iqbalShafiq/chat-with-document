@@ -14,7 +14,7 @@ import {
   type AttachmentReject,
 } from "#/lib/documents/upload-file";
 
-const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
+const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx";
 
 export function ComposerAttachControl({
   sessionId,
@@ -125,7 +125,7 @@ export function ComposerAttachControl({
             {
               id: "upload",
               label: "Upload from computer",
-              description: "PDF or image from this device",
+              description: "PDF, image, or spreadsheet from this device",
               icon: <Upload className="size-3.5" strokeWidth={1.75} />,
               disabled: busy,
               onSelect: () => {

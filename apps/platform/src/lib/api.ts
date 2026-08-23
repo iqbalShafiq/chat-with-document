@@ -1123,25 +1123,34 @@ export async function syncQueuedMessageIds(input: {
 
 export type WebCapabilities = {
   webSearchAvailable: boolean;
+  deepResearchAvailable: boolean;
   imageGenerationAvailable: boolean;
   context7Available: boolean;
 };
 
-let capabilitiesPromise: Promise<WebCapabilities> | null = null;
+const capabilitiesPromises = new Map<string, Promise<WebCapabilities>>();
 
-export async function fetchChatCapabilities(): Promise<WebCapabilities> {
-  if (capabilitiesPromise === null) {
-    capabilitiesPromise = fetchChatCapabilitiesRemote();
-    capabilitiesPromise.catch(() => {
-      // Drop the cache on failure so a transient error retries next call.
-      capabilitiesPromise = null;
-    });
-  }
-  return capabilitiesPromise;
+export async function fetchChatCapabilities(
+  sessionId?: string,
+): Promise<WebCapabilities> {
+  const key = sessionId ?? "global";
+  const existing = capabilitiesPromises.get(key);
+  if (existing) return existing;
+
+  const promise = fetchChatCapabilitiesRemote(sessionId);
+  capabilitiesPromises.set(key, promise);
+  promise.catch(() => {
+    // Drop the cache on failure so a transient error retries next call.
+    capabilitiesPromises.delete(key);
+  });
+  return promise;
 }
 
-async function fetchChatCapabilitiesRemote(): Promise<WebCapabilities> {
-  const response = await apiFetch(`${API_BASE}/api/chat/capabilities`);
+async function fetchChatCapabilitiesRemote(
+  sessionId?: string,
+): Promise<WebCapabilities> {
+  const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+  const response = await apiFetch(`${API_BASE}/api/chat/capabilities${query}`);
   if (!response.ok) throw new Error("Failed to load chat capabilities");
 
   const data: unknown = await response.json();
@@ -1149,6 +1158,7 @@ async function fetchChatCapabilitiesRemote(): Promise<WebCapabilities> {
     !data ||
     typeof data !== "object" ||
     typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
+    typeof (data as WebCapabilities).deepResearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).imageGenerationAvailable !== "boolean" ||
     typeof (data as WebCapabilities).context7Available !== "boolean"
   ) {

@@ -21,6 +21,7 @@ import {
   getApprovalRegistry,
 } from "./approval-registry.js";
 import { getContext7McpServer, isContext7Configured } from "../../lib/context7-server.js";
+import { resolveActiveDocuments } from "../documents/service.js";
 import {
   imageGenerationConfig,
   webSearchConfig,
@@ -539,6 +540,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
 
     const webSearchEnabled = parseBoolean(body.webSearchEnabled);
     const imageGenerationEnabled = parseBoolean(body.imageGenerationEnabled);
+    const deepResearchEnabled = parseBoolean(body.deepResearchEnabled);
     const imageGenSettings = parseImageGenSettings(body.imageGenSettings);
 
     const effortRaw = body.reasoningEffort;
@@ -583,6 +585,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     await enqueueChatRun(`chat:${streamId}`, {
       streamId, sessionId, userId: user.id, model, reasoningEffort,
       webSearchEnabled, imageGenerationEnabled, imageGenSettings,
+      deepResearchEnabled,
       promptMessage, createdAt: new Date().toISOString(),
     });
 
@@ -710,8 +713,22 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   })
   .get("/capabilities", async (c) => {
     const context7Server = await getContext7McpServer();
+    const sessionId = c.req.query("sessionId");
+    let hasActiveDocuments = false;
+    if (sessionId) {
+      const session = await prisma.chatSession.findFirst({
+        where: { id: sessionId, userId: c.get("user").id },
+        select: { projectId: true },
+      });
+      hasActiveDocuments = (await resolveActiveDocuments({
+        userId: c.get("user").id,
+        sessionId,
+        projectId: session?.projectId ?? null,
+      })).length > 0;
+    }
     return c.json({
       webSearchAvailable: webSearchConfig() !== null,
+      deepResearchAvailable: webSearchConfig() !== null || hasActiveDocuments,
       imageGenerationAvailable: imageGenerationConfig() !== null,
       context7Available: isContext7Configured() && context7Server !== null,
     });

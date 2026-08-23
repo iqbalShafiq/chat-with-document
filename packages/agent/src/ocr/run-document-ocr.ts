@@ -12,10 +12,16 @@ export interface OcrPageImage {
   annotation?: string | null;
 }
 
+export interface OcrPageTable {
+  filename: string;
+  markdown: string;
+}
+
 export interface OcrPage {
   index: number;
   markdown: string;
   images: OcrPageImage[];
+  tables: OcrPageTable[];
 }
 
 /** `data:image/png;base64,AAAA...` → `{ mediaType: "image/png", base64: "AAAA..." }` */
@@ -35,6 +41,37 @@ function pickNumber(
 ): number | null {
   const raw = record[camel] ?? record[snake];
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function toOcrPageTables(raw: unknown): OcrPageTable[] {
+  if (!Array.isArray(raw)) return [];
+  const tables: OcrPageTable[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const filename =
+      typeof record.filename === "string"
+        ? record.filename
+        : typeof record.file_name === "string"
+          ? record.file_name
+          : typeof record.name === "string"
+            ? record.name
+            : typeof record.id === "string"
+              ? record.id
+              : null;
+    if (filename === null) continue;
+    const markdownRaw =
+      typeof record.markdown === "string"
+        ? record.markdown
+        : typeof record.file_content === "string"
+          ? record.file_content
+          : typeof record.content === "string"
+            ? record.content
+            : null;
+    if (typeof markdownRaw !== "string" || markdownRaw.trim().length === 0) continue;
+    tables.push({ filename, markdown: markdownRaw });
+  }
+  return tables;
 }
 
 /** Mistral's raw `images` array: tolerate both snake_case and camelCase keys. */
@@ -86,11 +123,15 @@ export async function runDocumentOcr(input: {
   return {
     text: result.text,
     markdown: result.markdown,
-    pages: result.pages.map((page) => ({
-      index: page.index,
-      markdown: page.markdown,
-      images: toOcrPageImages(page.images),
-    })),
+    pages: result.pages.map((page) => {
+      const raw = page as unknown as Record<string, unknown>;
+      return {
+        index: page.index,
+        markdown: page.markdown,
+        images: toOcrPageImages(page.images),
+        tables: toOcrPageTables(raw.tables ?? raw.table ?? raw.files),
+      };
+    }),
     pageCount: result.pages.length,
   };
 }
