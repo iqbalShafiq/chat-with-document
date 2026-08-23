@@ -38,10 +38,9 @@ type ImageModelsState =
  * backend. Local deciding state replaces chat.decidingApprovals (read-only,
  * only populated by chat.approveTool).
  *
- * "Allow for session" (grantScope: "session") is offered only for image
- * tools — web_search/web_fetch approvals are not read by the backend's
- * session-grant check, so a session grant there would be written but never
- * consumed.
+ * "Allow for session" (grantScope: "session") is offered for image tools and
+ * the Deep Research boundary. Direct web-search approvals remain allow-once
+ * because web calls are still independently approval-gated.
  */
 export function ApprovalPanel() {
   const { approvals } = useHumanInput();
@@ -101,6 +100,7 @@ function ApprovalCard({
   onRetryModels: () => void;
 }) {
   const isImageTool = isImageToolName(approval.toolName);
+  const isDeepResearchTool = approval.toolName === "deep_research";
   const parsedImage = useMemo(
     () => parseImageArgs(approval.args),
     [approval.args],
@@ -145,6 +145,7 @@ function ApprovalCard({
   const decodedArgs = safeParseArgs(approval.args);
   const query = decodedArgs?.query ?? decodedArgs?.url ?? null;
   const prompt = isImageTool ? parsedImage?.prompt ?? null : null;
+  const researchPrompt = isDeepResearchTool ? decodedArgs?.prompt ?? null : null;
   const label = toolActivityLabelForName(approval.toolName);
 
   return (
@@ -172,6 +173,15 @@ function ApprovalCard({
           title={prompt}
         >
           {prompt}
+        </p>
+      ) : null}
+
+      {researchPrompt ? (
+        <p
+          className="mt-1 truncate font-mono text-[11px] text-text-muted"
+          title={researchPrompt}
+        >
+          {researchPrompt}
         </p>
       ) : null}
 
@@ -248,7 +258,7 @@ function ApprovalCard({
           >
             Allow once
           </button>
-          {isImageTool ? (
+          {isImageTool || isDeepResearchTool ? (
             <button
               type="button"
               disabled={deciding}
@@ -279,7 +289,9 @@ function ApprovalCard({
   );
 }
 
-function safeParseArgs(args?: string): { query?: string; url?: string } | null {
+function safeParseArgs(
+  args?: string,
+): { query?: string; url?: string; prompt?: string } | null {
   if (!args) return null;
   try {
     const parsed: unknown = JSON.parse(args);
@@ -289,7 +301,12 @@ function safeParseArgs(args?: string): { query?: string; url?: string } | null {
     const record = parsed as Record<string, unknown>;
     const query = typeof record.query === "string" ? record.query : undefined;
     const url = typeof record.url === "string" ? record.url : undefined;
-    return { ...(query ? { query } : {}), ...(url ? { url } : {}) };
+    const prompt = typeof record.prompt === "string" ? record.prompt : undefined;
+    return {
+      ...(query ? { query } : {}),
+      ...(url ? { url } : {}),
+      ...(prompt ? { prompt } : {}),
+    };
   } catch {
     return null;
   }

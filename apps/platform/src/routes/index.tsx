@@ -1072,7 +1072,7 @@ function ChatSession({
     readSelectedModel(models),
   );
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [dataAnalysisEnabled, setDataAnalysisEnabled] = useState(false);
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(() =>
     readImageGenerationEnabled(),
   );
@@ -1085,6 +1085,10 @@ function ChatSession({
   const [compaction, setCompaction] = useState<{
     phase: "idle" | "start" | "complete" | "error";
   }>({ phase: "idle" });
+  const [deepResearch, setDeepResearch] = useState<{
+    phase: "idle" | "planning" | "researching" | "synthesizing" | "completed" | "failed";
+    message: string;
+  }>({ phase: "idle", message: "" });
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -1094,13 +1098,13 @@ function ChatSession({
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
-  const dataAnalysisEnabledRef = useRef(dataAnalysisEnabled);
+  const deepResearchEnabledRef = useRef(deepResearchEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
   const imageGenSettingsRef = useRef(imageGenSettings);
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
-  dataAnalysisEnabledRef.current = dataAnalysisEnabled;
+  deepResearchEnabledRef.current = deepResearchEnabled;
   imageGenerationEnabledRef.current = imageGenerationEnabled;
   imageGenSettingsRef.current = imageGenSettings;
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
@@ -1299,7 +1303,26 @@ function ChatSession({
         setCompaction({ phase });
         return;
       }
+      if (record.type === "deep_research_progress") {
+        const phase =
+          record.phase === "planning" ||
+          record.phase === "researching" ||
+          record.phase === "synthesizing" ||
+          record.phase === "completed" ||
+          record.phase === "failed"
+            ? record.phase
+            : "idle";
+        setDeepResearch({
+          phase,
+          message:
+            typeof record.message === "string"
+              ? record.message
+              : "Deep Research is running",
+        });
+        return;
+      }
       if (record.type === "message_end") {
+        setDeepResearch({ phase: "idle", message: "" });
         void refreshContextUsage();
         return;
       }
@@ -1397,8 +1420,8 @@ function ChatSession({
         model: selectedModelRef.current,
         reasoningEffort: selectedReasoningEffortRef.current,
         webSearchEnabled: webSearchEnabledRef.current,
-        dataAnalysisEnabled: dataAnalysisEnabledRef.current,
         imageGenerationEnabled: imageGenerationEnabledRef.current,
+        deepResearchEnabled: deepResearchEnabledRef.current,
         imageGenSettings: imageGenSettingsRef.current,
         ...(resume ? { resume } : {}),
       };
@@ -1674,6 +1697,7 @@ function ChatSession({
     setContextUsage(null);
     setContextUsageError(false);
     setCompaction({ phase: "idle" });
+    setDeepResearch({ phase: "idle", message: "" });
     setPreviousRunError(false);
     void refreshSessionDocuments();
     void refreshSessionImages();
@@ -1684,15 +1708,15 @@ function ChatSession({
     refreshActiveContext,
   ]);
 
-  // Capabilities are global (not per-session) — best-effort fetch; the
-  // module-wide promise cache in lib/api makes this cheap on remounts.
+  // Capability fetch is session-aware so document-only Deep Research can be
+  // enabled even when this deployment has no web-search key.
   useEffect(() => {
-    void fetchChatCapabilities()
+    void fetchChatCapabilities(sessionId)
       .then(setCapabilities)
       .catch(() => {
         // capabilities stay null; toggles render as unavailable
       });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     setEditingMessageId(null);
@@ -3081,12 +3105,15 @@ function ChatSession({
                     compaction={compaction}
                     contextUsage={contextUsage}
                     contextUsageError={contextUsageError}
+                    deepResearch={deepResearch}
+                    deepResearchEnabled={deepResearchEnabled}
+                    deepResearchAvailable={
+                      capabilities?.deepResearchAvailable ?? false
+                    }
+                    onDeepResearchToggle={setDeepResearchEnabled}
                     webSearchEnabled={webSearchEnabled}
                     webSearchAvailable={capabilities?.webSearchAvailable ?? false}
                     onWebSearchToggle={setWebSearchEnabled}
-                    dataAnalysisEnabled={dataAnalysisEnabled}
-                    dataAnalysisAvailable={true}
-                    onDataAnalysisToggle={setDataAnalysisEnabled}
                     imageGenerationEnabled={imageGenerationEnabled}
                     imageGenerationAvailable={
                       capabilities?.imageGenerationAvailable ?? false

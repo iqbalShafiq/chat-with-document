@@ -15,6 +15,7 @@ export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";
 export * from "./tools/documents.js";
 export * from "./tools/web-search.js";
+export * from "./tools/deep-research.js";
 export * from "./tools/tabular/types.js";
 export * from "./tools/tabular/chart-spec.js";
 export * from "./tools/tabular/parse-csv.js";

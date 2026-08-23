@@ -150,6 +150,7 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
     reasoningEffort,
     webSearchEnabled,
     imageGenerationEnabled,
+    deepResearchEnabled,
     imageGenSettings,
     promptMessage,
   } = job.data;
@@ -218,10 +219,16 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
       promptMessage,
       webSearchEnabled,
       imageGenerationEnabled,
+      deepResearchEnabled,
       imageGenSettings,
       grantHelpers,
       clarificationRequester,
       approvals: { handler: approvalHandler },
+      onDeepResearchProgress: (event) =>
+        store.append({
+          streamId,
+          event: { type: "deep_research_progress", ...event },
+        }).then(() => undefined),
       context7Server: await getContext7McpServer(),
     });
 

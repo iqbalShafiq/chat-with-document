@@ -22,6 +22,8 @@ export type BehaviorTrace = {
   approvals: ApprovalRecord[];
   clarifications: ClarificationRecord[];
   citations: Array<{ source: string }>;
+  /** Coarse Deep Research lifecycle phases observed during the run. */
+  deepResearchProgress?: string[];
   usage: { inputTokens?: number; outputTokens?: number };
   durationMs: number;
   trace?: { traceId: string; observationId?: string };
@@ -33,6 +35,7 @@ export type SessionConfig = {
   webSearchEnabled: boolean;
   imageGenEnabled: boolean;
   hasDocuments: boolean;
+  deepResearchEnabled?: boolean;
   visionModelAvailable?: boolean;
   approvalMode?: ApprovalMode;
   models?: string[];
@@ -59,6 +62,8 @@ export type BehaviorExpectation = {
   outputNotContains?: string[];
   /** Requires the agent to produce non-empty output text. */
   requiresOutputNonEmpty?: boolean;
+  /** Requires the Deep Research lifecycle to report at least one phase. */
+  requiresDeepResearchProgress?: boolean;
 };
 
 export type EvalCaseInput = {

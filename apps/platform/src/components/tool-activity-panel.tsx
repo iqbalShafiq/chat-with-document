@@ -26,6 +26,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_document_page_images: "Inspecting page images",
   web_search: "Searching the web",
   web_fetch: "Fetching web page",
+  deep_research: "Running Deep Research",
   generate_image: "Generating image",
   edit_image: "Editing image",
   read_dataset: "Reading dataset",

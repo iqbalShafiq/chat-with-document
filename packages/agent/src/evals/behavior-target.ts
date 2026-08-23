@@ -1,4 +1,4 @@
-import type { AnyTool, ToolApprovalsOptions } from "@anvia/core";
+import type { AnyTool, CompletionModel, ToolApprovalsOptions } from "@anvia/core";
 import type { EvalCase, EvalTarget } from "@anvia/core/evals";
 import { TRANSPARENT_1X1_PNG_BASE64 } from "../e2e/image-e2e-helpers.js";
 import { tracing } from "../tracing.js";
@@ -16,11 +16,21 @@ import {
   WEB_SEARCH_INSTRUCTION,
 } from "../tools/web-search.js";
 import {
+  boundDeepResearchTools,
+  createDeepResearchTools,
+  DEEP_RESEARCH_INSTRUCTION,
+  deepResearchLimits,
+} from "../tools/deep-research.js";
+import { createAgent } from "../agent.js";
+import {
   createCompletionModel,
   parseReasoningEffort,
 } from "../providers/openai.js";
 import { evalConfig } from "./config.js";
-import { runAgentAndCollect } from "./run-agent.js";
+import {
+  createCancellableCompletionModel,
+  runAgentAndCollect,
+} from "./run-agent.js";
 import {
   createAutoClarificationResponder,
   createFakePrisma,
@@ -32,6 +42,7 @@ import {
 } from "./stub-scopes.js";
 import type { BehaviorTrace, EvalCaseInput, SessionConfig } from "./types.js";
 import { createTabularAnalysisTools, type DatasetResolver } from "../tools/tabular/tools.js";
+import { createDataAnalysisTools } from "../tools/data-analysis.js";
 import type { TabularSheet } from "../tools/tabular/types.js";
 import { assertReadOnlySql } from "../tools/tabular/sql.js";
 
@@ -186,16 +197,21 @@ function createStubSqlRunner() {
   };
 }
 
-export function buildEvalTools(sessionConfig: SessionConfig): {
+export function buildEvalTools(
+  sessionConfig: SessionConfig,
+  parentModel?: CompletionModel,
+): {
   tools: AnyTool[];
   instructions: string[];
   approvals: ToolApprovalsOptions | undefined;
+  deepResearchProgress: string[];
 } {
   const tools: AnyTool[] = [];
   const instructions: string[] = [];
+  const deepResearchProgress: string[] = [];
 
-  if (sessionConfig.hasDocuments) {
-    tools.push(...createDocumentTools({
+  const documentTools = sessionConfig.hasDocuments
+    ? createDocumentTools({
       userId: "eval-user", sessionId: "eval-session", projectId: null,
       prisma: createFakePrisma(), searchService: createStubChunkSearchService(),
       // Text-only models crash on tool-result image bytes (the completion
@@ -206,25 +222,66 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
       includeImageBytes: sessionConfig.visionModelAvailable !== false,
       fetchPageImage: async () =>
         new Uint8Array(Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64")),
-    }));
-  }
+    })
+    : [];
+  tools.push(...documentTools);
 
   // Tabular tools are always registered (mirrors build-run-input.ts which wires
   // them unconditionally); the stub resolver returns empty/error when no dataset
   // is linked so the "abstain" case can be scored without crashes.
-  tools.push(
-    ...createTabularAnalysisTools({
+  const tabularTools = createTabularAnalysisTools({
       resolver: createStubTabularResolver(Boolean(sessionConfig.hasDocuments)),
       sqlRunner: createStubSqlRunner() as never,
-    }),
-  );
+    });
+  tools.push(...tabularTools);
   instructions.push(sessionConfig.hasDocuments ? TABULAR_CATALOG_INSTRUCTION : TABULAR_EMPTY_INSTRUCTION);
 
-  tools.push(...createWebSearchTools({
+  const webTools = createWebSearchTools({
     tavilyClient: createStubTavilyClient(),
     enabled: sessionConfig.webSearchEnabled,
-  }));
+  });
+  tools.push(...webTools);
   instructions.push(WEB_SEARCH_INSTRUCTION);
+
+  // Eval wiring mirrors the server: Deep Research gets a separate set of
+  // direct web tools inside the nested researcher so one parent approval does
+  // not produce a second web approval.
+  if (sessionConfig.deepResearchEnabled !== undefined) {
+    const researchTools = boundDeepResearchTools(
+      [
+        ...documentTools,
+        ...tabularTools,
+        ...createDataAnalysisTools(),
+        ...createWebSearchTools({
+          tavilyClient: createStubTavilyClient(),
+          enabled: true,
+        }),
+      ],
+      deepResearchLimits().maxSearches,
+    );
+    const researcher = createAgent({
+      agentId: "eval-deep-researcher",
+      model: parentModel ?? createCompletionModel(evalConfig.model),
+      additionalInstructions: [
+        DEEP_RESEARCH_INSTRUCTION,
+        ...(sessionConfig.hasDocuments ? [TABULAR_CATALOG_INSTRUCTION] : []),
+        WEB_SEARCH_INSTRUCTION,
+      ],
+      additionalTools: researchTools,
+    });
+    tools.push(
+      ...createDeepResearchTools({
+        enabled: sessionConfig.deepResearchEnabled === true,
+        researcher,
+        maxTurns: deepResearchLimits().maxTurns,
+        maxSearches: deepResearchLimits().maxSearches,
+        onProgress: (event) => {
+          deepResearchProgress.push(event.phase);
+        },
+      }),
+    );
+    instructions.push(DEEP_RESEARCH_INSTRUCTION);
+  }
 
   tools.push(...createImageGenerationTools({
     model: createStubImageModel(),
@@ -264,7 +321,11 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
     viewImageRegistered = true;
   }
 
-  const needsApprovals = !sessionConfig.webSearchEnabled || !sessionConfig.imageGenEnabled;
+  const needsApprovals =
+    !sessionConfig.webSearchEnabled ||
+    !sessionConfig.imageGenEnabled ||
+    (sessionConfig.deepResearchEnabled !== undefined &&
+      sessionConfig.deepResearchEnabled !== true);
   const approvals: ToolApprovalsOptions | undefined = needsApprovals
     ? { handler: async (request) => {
         const mode = sessionConfig.approvalMode ?? "auto-approve";
@@ -272,14 +333,19 @@ export function buildEvalTools(sessionConfig: SessionConfig): {
       } }
     : undefined;
 
-  return { tools, instructions, approvals };
+  return { tools, instructions, approvals, deepResearchProgress };
 }
 
 export function createBehaviorTarget(
   suiteName?: string,
 ): EvalTarget<EvalCaseInput, BehaviorTrace> {
   return async (input: EvalCaseInput, testCase: EvalCase<EvalCaseInput>) => {
-    const { tools, instructions, approvals } = buildEvalTools(input.sessionConfig);
+    const model = createCompletionModel(
+      input.sessionConfig.models?.[0] ?? evalConfig.model,
+    );
+    const cancellableModel = createCancellableCompletionModel(model);
+    const { tools, instructions, approvals, deepResearchProgress } =
+      buildEvalTools(input.sessionConfig, cancellableModel.model);
     const langfuseConfigured = Boolean(
       process.env.LANGFUSE_BASE_URL &&
         process.env.LANGFUSE_PUBLIC_KEY &&
@@ -288,7 +354,7 @@ export function createBehaviorTarget(
     return runAgentAndCollect({
       prompt: input.prompt,
       sessionConfig: input.sessionConfig,
-      model: createCompletionModel(input.sessionConfig.models?.[0] ?? evalConfig.model),
+      model: cancellableModel.model,
       reasoningEffort: parseReasoningEffort(evalConfig.modelEffort) ?? "max",
       tools,
       instructions,
@@ -296,6 +362,8 @@ export function createBehaviorTarget(
       ...(langfuseConfigured ? { tracing } : {}),
       ...(suiteName ? { suiteName } : {}),
       caseId: testCase.id,
+      deepResearchProgress,
+      onTimeout: cancellableModel.cancel,
     });
   };
 }

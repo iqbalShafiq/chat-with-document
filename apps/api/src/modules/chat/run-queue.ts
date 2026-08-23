@@ -15,6 +15,8 @@ export type ChatRunJobData = {
   webSearchEnabled: boolean;
   /** Per-session image generation toggle state (default false). */
   imageGenerationEnabled: boolean;
+  /** Per-session Deep Research toggle state (default false). */
+  deepResearchEnabled: boolean;
   /** Session image defaults: model, aspect ratio, quality, background, count. */
   imageGenSettings: ImageGenSettings | null;
   promptMessage: Message;

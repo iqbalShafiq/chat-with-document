@@ -61,6 +61,7 @@ case stays on the default model.
 | `groundedness` | document-grounded answers cite sources and contain fixture facts; no fabrication of policies absent from the docs (judge-graded) |
 | `document-tools` | `search_document_pages` flow (`finds` then `search`), next-page continuation, `view_image` with and without a vision model |
 | `tabular-analysis` | read/analyze/sql tool choice, extract_document_tables, abstain without data |
+| `deep-research` | bounded nested researcher, approval modes, citations, mixed corpus, progress lifecycle |
 
 ### Env vars
 

@@ -39,9 +39,9 @@ export async function waitForStreaming(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 30_000 });
 }
 
-export async function waitForRunDone(page: Page): Promise<void> {
+export async function waitForRunDone(page: Page, timeout = 150_000): Promise<void> {
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({
-    timeout: 150_000,
+    timeout,
   });
 }
 

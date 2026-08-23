@@ -9,13 +9,16 @@ import {
   createClarificationTool,
   createCompletionModel,
   createDataAnalysisTools,
+  boundDeepResearchTools,
   createDocumentTools,
+  createDeepResearchTools,
   createImageGenerationTools,
   createRememberUserProfileTool,
   createSqlJsRunner,
   createTabularAnalysisTools,
   createTavilyClient,
   createWebSearchTools,
+  deepResearchLimits,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   buildImageGenerationInstruction,
@@ -24,6 +27,7 @@ import {
   renderProfileContextText,
   tracing,
   WEB_SEARCH_INSTRUCTION,
+  DEEP_RESEARCH_INSTRUCTION,
   type AgentContextBlock,
   type ClarificationRequest,
   type ClarificationResponse,
@@ -183,6 +187,8 @@ export type ChatRunInput = {
   hasActiveDocuments: boolean;
   /** Web tools registered (TAVILY_API_KEY set). */
   webSearchAvailable: boolean;
+  /** Deep Research is usable when web search or active documents exist. */
+  deepResearchAvailable: boolean;
   /** Image generation tools registered (OPENAI_API_KEY + OPENAI_BASE_URL set). */
   imageGenerationAvailable: boolean;
   /** Context7 MCP tools available (configured + connected). */
@@ -219,6 +225,8 @@ export async function buildChatRunInput(input: {
   webSearchEnabled?: boolean;
   /** Per-session image generation toggle (default false). */
   imageGenerationEnabled?: boolean;
+  /** Per-session Deep Research toggle (default false). */
+  deepResearchEnabled?: boolean;
   /** Session image defaults: model, aspect ratio, quality, background, count. */
   imageGenSettings?: ImageGenSettings | null;
   /** Grant/override lookups for approval-gated tools (per-session, live reads). */
@@ -229,6 +237,10 @@ export async function buildChatRunInput(input: {
   ) => Promise<ClarificationResponse>;
   /** Approval handler suspending web tools for user confirmation. */
   approvals?: ToolApprovalsOptions;
+  /** Coarse Deep Research lifecycle events for the resumable stream. */
+  onDeepResearchProgress?: (
+    event: import("@assingment/agent").DeepResearchProgress,
+  ) => Promise<void> | void;
   /** Connected context7 MCP server (nullable when unavailable). */
   context7Server?: McpServer | null;
 }): Promise<ChatRunInput> {
@@ -241,10 +253,12 @@ export async function buildChatRunInput(input: {
     promptMessage,
     webSearchEnabled = false,
     imageGenerationEnabled = false,
+    deepResearchEnabled = false,
     imageGenSettings = null,
     grantHelpers,
     clarificationRequester,
     approvals,
+    onDeepResearchProgress,
     context7Server,
   } = input;
 
@@ -431,6 +445,59 @@ export async function buildChatRunInput(input: {
     instructions.push(WEB_SEARCH_INSTRUCTION);
   }
 
+  // Deep Research is a single approval boundary around a nested researcher.
+  // Its web tools are enabled inside the researcher because the parent tool
+  // already owns the user's allow/reject decision; this avoids a second prompt
+  // for the same research run. The nested researcher receives no delegation
+  // tool, so this remains a one-level workflow.
+  const deepResearchAvailable = webSearchAvailable || hasActiveDocuments;
+  if (deepResearchAvailable) {
+    const researchWebTools = tavilyConfig
+      ? createWebSearchTools({
+          tavilyClient: createTavilyClient(tavilyConfig.apiKey),
+          enabled: true,
+        })
+      : [];
+    const researchTools = boundDeepResearchTools(
+      [
+        ...documentTools,
+        ...researchWebTools,
+        ...createDataAnalysisTools(),
+        ...tabularTools,
+      ],
+      deepResearchLimits().maxSearches,
+    );
+    const researcher = createAgent({
+      agentId: `${agentId ?? "my-agent"}-deep-researcher`,
+      model: createCompletionModel(
+        process.env.DEEP_RESEARCH_MODEL?.trim() || model,
+      ),
+      reasoningEffort: (reasoningEffort ?? undefined) as
+        | ReasoningEffort
+        | undefined,
+      additionalInstructions: [
+        DEEP_RESEARCH_INSTRUCTION,
+        ...(hasActiveDocuments ? [catalogInstruction] : []),
+        ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
+      ],
+      additionalContext: contextBlocks,
+      additionalTools: researchTools,
+      memory: undefined,
+    });
+    tools.push(
+      ...createDeepResearchTools({
+        enabled: deepResearchEnabled,
+        researcher,
+        maxTurns: deepResearchLimits().maxTurns,
+        maxSearches: deepResearchLimits().maxSearches,
+        hasGrant: (name) =>
+          grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+        onProgress: onDeepResearchProgress,
+      }),
+    );
+    instructions.push(DEEP_RESEARCH_INSTRUCTION);
+  }
+
   // Image generation tools: registered only when the image provider env pair
   // is set. Grants/overrides come from the approval registry (live per-call
   // reads); references resolve to generated or document images.
@@ -539,7 +606,7 @@ export async function buildChatRunInput(input: {
     additionalInstructions: instructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
-    ...((webSearchAvailable || imageGenerationAvailable) && approvals
+    ...((webSearchAvailable || imageGenerationAvailable || deepResearchAvailable) && approvals
       ? { approvals }
       : {}),
     ...(context7Available ? { mcpServers: [context7Server] } : {}),
@@ -559,6 +626,7 @@ export async function buildChatRunInput(input: {
     memory: runMemory,
     hasActiveDocuments,
     webSearchAvailable,
+    deepResearchAvailable,
     imageGenerationAvailable,
     context7Available,
     /** Images pinned as active context (bytes fetched by the worker). */

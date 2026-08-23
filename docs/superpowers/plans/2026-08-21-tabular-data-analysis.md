@@ -75,7 +75,7 @@ apps/platform/e2e/data-analysis.real-llm.e2e.ts
   - `coerceRow(row: string[], types: ColumnType[]): CellValue[]`
   - `sheetFromRows(name: string, rawRows: string[][]): TabularSheet`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/agent/src/tools/tabular/parse-csv.test.ts`:
 
@@ -142,12 +142,12 @@ describe("inferColumnTypes + sheetFromRows", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/parse-csv`
 Expected: FAIL â€” module not found (`tabular/parse-csv` missing).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/agent/src/tools/tabular/types.ts`:
 
@@ -269,12 +269,12 @@ export function sheetFromRows(name: string, rawRows: string[][]): TabularSheet {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/parse-csv`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular
@@ -293,12 +293,12 @@ git commit -m "feat(agent): tabular types + RFC 4180 CSV parser"
 - Consumes: `sheetFromRows` (Task 1)
 - Produces: `parseXlsx(buffer: Uint8Array, filename?: string): Promise<TabularSheet[]>` â€” one sheet per worksheet, name = sheet name (fallback `Sheet<i>`).
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 Run: `pnpm --filter agent add read-excel-file`
 Expected: dependency added.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `packages/agent/src/tools/tabular/parse-xlsx.test.ts`:
 
@@ -323,12 +323,12 @@ describe("parseXlsx", () => {
 
 Also create the fixture (minimal xlsx, one numeric column, one string column) at `packages/agent/src/tools/tabular/fixtures/multi-sheet.xlsx`. If no binary fixture is available yet, generate it in Task 11's fixture step; for this task, commit a tiny valid xlsx produced by any tool (e.g., Excel/LibreOffice or the `read-excel-file` author's sample). Keep it < 5 KB.
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/parse-xlsx`
 Expected: FAIL â€” `parseXlsx` not exported.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `packages/agent/src/tools/tabular/parse-xlsx.ts`:
 
@@ -366,12 +366,12 @@ export async function parseXlsx(
 
 Note: verify `read-excel-file`'s exact API from its installed types (single-sheet default vs `getSheets`), and adjust â€” the interface contract is what matters: `parseXlsx(bytes) -> Promise<TabularSheet[]>`.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/parse-xlsx`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular/parse-xlsx.ts packages/agent/src/tools/tabular/parse-xlsx.test.ts packages/agent/src/tools/tabular/fixtures
@@ -390,7 +390,7 @@ git commit -m "feat(agent): xlsx parser (multi-sheet)"
 - Consumes: `sheetFromRows` (Task 1)
 - Produces: `extractMarkdownTables(markdown: string): { columns: string[]; rows: string[][] }[]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `packages/agent/src/tools/tabular/markdown-tables.test.ts`:
 
@@ -428,12 +428,12 @@ describe("extractMarkdownTables", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/markdown-tables`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/agent/src/tools/tabular/markdown-tables.ts`:
 
@@ -474,12 +474,12 @@ export function extractMarkdownTables(markdown: string): MarkdownTable[] {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/markdown-tables`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular/markdown-tables.ts packages/agent/src/tools/tabular/markdown-tables.test.ts
@@ -504,7 +504,7 @@ git commit -m "feat(agent): GFM markdown table extraction"
   - `type AnalysisResult = { operation: string; summary: string; result?: { columns: TabularColumn[]; rows: CellValue[][]; rowCount: number; truncated: boolean }; chart?: ChartSpec }`
   - `runAnalysis(sheet: TabularSheet, operation: AnalysisOperation, limits?: { maxRows?: number }): AnalysisResult`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/agent/src/tools/tabular/tabular-analysis.test.ts`:
 
@@ -588,12 +588,12 @@ describe("runAnalysis", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/tabular-analysis`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/agent/src/tools/tabular/chart-spec.ts`:
 
@@ -860,12 +860,12 @@ export function runAnalysis(
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/tabular-analysis`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular packages/agent/src/tools/data-analysis.ts
@@ -890,12 +890,12 @@ git commit -m "feat(agent): chart spec + deterministic analysis operations"
 
 **Engine decision (user-approved):** native `duckdb` was dropped â€” its prebuilt binaries failed to download in this environment and node-pre-gyp fell back to a multi-hour MSVC source build. `sql.js` (SQLite WASM, pure JS/WASM, ~1 MB) delivers the same product value: real SQL, in-process, read-only, no sandbox. The `SqlRunner` contract is unchanged.
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 Run: `pnpm --filter agent add sql.js`
 Expected: dependency added (pure WASM â€” no node-gyp).
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `packages/agent/src/tools/tabular/sql.test.ts`:
 
@@ -939,12 +939,12 @@ describe("createSqlJsRunner", () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/sql`
 Expected: FAIL â€” `assertReadOnlySql`/`createSqlJsRunner` not exported.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `packages/agent/src/tools/tabular/sql.ts`:
 
@@ -1031,12 +1031,12 @@ function normalizeCell(value: unknown): string | number | null {
 
 Notes: `sql.js` is synchronous; `db.exec` returns `QueryExecResult[]` (`{ columns, values }`). Row caps (`LIMIT`) bound result size; the in-memory dataset is capped at ingest (`MAX_TABULAR_ROWS`), so queries are bounded. `timeoutMs` is accepted in the signature for API compatibility but a synchronous engine cannot be interrupted mid-`exec`; the caps make it moot (note this in the task report).
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/sql`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular/sql.ts packages/agent/src/tools/tabular/sql.test.ts packages/agent/package.json package.json pnpm-lock.yaml
@@ -1058,7 +1058,7 @@ git commit -m "feat(agent): read-only SQL runner (sql.js / SQLite WASM)"
   - `interface DatasetResolver { listUploads(): Promise<{ documentId: string; filename: string; sheets: { name: string; columns: {name:string;type:string}[]; rowCount: number }[] }[]>; resolveSheet(ref: DatasetRef): Promise<TabularSheet>; listDocumentTables(): Promise<{ documentId: string; filename: string; pageIndex: number; tableIndex: number; columns: {name:string;type:string}[]; rowCount: number }[]> }`
   - `createTabularAnalysisTools(deps: { resolver: DatasetResolver; sqlRunner: SqlRunner; limits?: { maxRows?: number } }): AnyTool[]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `packages/agent/src/tools/tabular/tools.test.ts`:
 
@@ -1135,12 +1135,12 @@ describe("tabular tools", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm --filter agent test -- tabular/tools`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/agent/src/tools/tabular/tools.ts`:
 
@@ -1259,12 +1259,12 @@ export * from "./tools/tabular/sql.js";
 export * from "./tools/tabular/tools.js";
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `pnpm --filter agent test -- tabular/tools`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/agent/src/tools/tabular/tools.ts packages/agent/src/tools/tabular/tools.test.ts packages/agent/src/index.ts
@@ -1290,7 +1290,7 @@ git commit -m "feat(agent): tabular analysis tools (read/analyze/sql/extract-tab
   - `createTabularResolver(deps: { userId: string; sessionId: string; projectId?: string | null; prisma: PrismaClient }): DatasetResolver`
   - Ingest: tabular MIME branch in `processDocumentIngest`
 
-- [ ] **Step 1: Schema + migration**
+- [x] **Step 1: Schema + migration**
 
 Add to `Document` in `apps/api/prisma/schema.prisma`:
 
@@ -1302,7 +1302,7 @@ tabularData Json?
 Run: `pnpm --filter api db:generate && pnpm --filter api db:migrate --name add_document_tabular_data`
 Expected: migration applied.
 
-- [ ] **Step 2: Allowlist + caps (`service.ts`)**
+- [x] **Step 2: Allowlist + caps (`service.ts`)**
 
 In `apps/api/src/modules/documents/service.ts`, extend the allowlist and add **exported** caps (the worker imports them for parse-time enforcement):
 
@@ -1319,7 +1319,7 @@ export const MAX_TABULAR_ROWS = 50_000;
 export const MAX_TABULAR_COLUMNS = 100;
 ```
 
-- [ ] **Step 3: Write the resolver test**
+- [x] **Step 3: Write the resolver test**
 
 `apps/api/src/modules/chat/tabular-resolver.test.ts`:
 
@@ -1385,12 +1385,12 @@ describe("tabular resolver", () => {
 });
 ```
 
-- [ ] **Step 4: Run to verify it fails**
+- [x] **Step 4: Run to verify it fails**
 
 Run: `pnpm --filter api test -- tabular-resolver`
 Expected: FAIL.
 
-- [ ] **Step 5: Implement resolver**
+- [x] **Step 5: Implement resolver**
 
 `apps/api/src/modules/chat/tabular-resolver.ts`:
 
@@ -1506,12 +1506,12 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
 }
 ```
 
-- [ ] **Step 6: Run to verify it passes**
+- [x] **Step 6: Run to verify it passes**
 
 Run: `pnpm --filter api test -- tabular-resolver`
 Expected: PASS.
 
-- [ ] **Step 7: Ingest tabular branch (`worker.ts`)**
+- [x] **Step 7: Ingest tabular branch (`worker.ts`)**
 
 Add a tabular branch at the top of `processDocumentIngest` (before OCR):
 
@@ -1639,7 +1639,7 @@ function toMarkdownTable(sheet: TabularSheet): string {
 
 (Add `parseCsv` to the `@assingment/agent` imports; export `parseCsv` in `packages/agent/src/index.ts` â€” it is already exported from `parse-csv.js`.)
 
-- [ ] **Step 8: Wire tools in `build-run-input.ts`**
+- [x] **Step 8: Wire tools in `build-run-input.ts`**
 
 Import and register alongside `createDataAnalysisTools()`:
 
@@ -1663,12 +1663,12 @@ const tools = [
 ];
 ```
 
-- [ ] **Step 9: Typecheck + run API tests**
+- [x] **Step 9: Typecheck + run API tests**
 
 Run: `pnpm --filter api test; pnpm --filter agent test`
 Expected: both PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/api/prisma/schema.prisma apps/api/src/modules/documents/service.ts apps/api/src/worker.ts apps/api/src/modules/chat/tabular-resolver.ts apps/api/src/modules/chat/tabular-resolver.test.ts apps/api/src/modules/chat/build-run-input.ts packages/agent/src/index.ts
@@ -1695,7 +1695,7 @@ git commit -m "feat(api): CSV/XLSX ingest branch, tabular resolver, tool wiring"
   - `<DataTable columns rows rowCount truncated />`
   - `<DataChart spec={ChartSpec} />`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `apps/platform/src/lib/data-analysis.test.ts`:
 
@@ -1746,12 +1746,12 @@ describe("DataChart", () => {
 
 `react-dom/server` is already a dependency of `platform` â€” no new package needed.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `pnpm --filter platform test -- data-analysis data-chart`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement DTOs**
+- [x] **Step 3: Implement DTOs**
 
 `apps/platform/src/lib/data-analysis.ts`:
 
@@ -1818,7 +1818,7 @@ export function parseTableDto(value: unknown): TableDto | null {
 }
 ```
 
-- [ ] **Step 4: Implement components**
+- [x] **Step 4: Implement components**
 
 `apps/platform/src/components/data/data-table.tsx`:
 
@@ -2034,12 +2034,12 @@ function short(value: string): string {
 }
 ```
 
-- [ ] **Step 5: Run to verify they pass**
+- [x] **Step 5: Run to verify they pass**
 
 Run: `pnpm --filter platform test -- data-analysis data-chart`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/platform/src/lib/data-analysis.ts apps/platform/src/lib/data-analysis.test.ts apps/platform/src/components/data
@@ -2059,7 +2059,7 @@ git commit -m "feat(platform): data DTOs + DataTable + DataChart (SVG) component
 - Consumes: `parseChartSpec`, `parseTableDto` (Task 8)
 - Produces: `FormattedSection` gains `chart?: unknown` and `table?: unknown` (raw payloads, validated by the panel)
 
-- [ ] **Step 1: Extend `FormattedSection` + add formatters**
+- [x] **Step 1: Extend `FormattedSection` + add formatters**
 
 In `apps/platform/src/components/tool-io-format.ts`:
 
@@ -2143,7 +2143,7 @@ case "query_dataset_sql": return formatQueryDatasetSqlOutput(output);
 case "extract_document_tables": return formatExtractDocumentTablesOutput(output);
 ```
 
-- [ ] **Step 2: Write a test for the formatters**
+- [x] **Step 2: Write a test for the formatters**
 
 `apps/platform/src/components/tool-io-format.test.ts`:
 
@@ -2166,7 +2166,7 @@ describe("formatToolOutput for tabular tools", () => {
 });
 ```
 
-- [ ] **Step 3: Render chart/table in `ToolActivityPanel`**
+- [x] **Step 3: Render chart/table in `ToolActivityPanel`**
 
 In `apps/platform/src/components/tool-activity-panel.tsx`, add imports and a renderer:
 
@@ -2203,7 +2203,7 @@ function TableFromSection({ table }: { table: unknown }) {
 }
 ```
 
-- [ ] **Step 4: Add labels for the new tools**
+- [x] **Step 4: Add labels for the new tools**
 
 In the `TOOL_LABELS` map:
 
@@ -2214,12 +2214,12 @@ query_dataset_sql: "Querying data (SQL)",
 extract_document_tables: "Extracting tables",
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm --filter platform test -- tool-io-format tool-activity-panel`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/platform/src/components/tool-io-format.ts apps/platform/src/components/tool-io-format.test.ts apps/platform/src/components/tool-activity-panel.tsx
@@ -2240,7 +2240,7 @@ git commit -m "feat(platform): render DataChart/DataTable inside tool-result car
 **Interfaces:**
 - Produces: `dataAnalysisEnabled` per-session state, sent in `POST /api/chat` body; upload accepts `.csv,.xlsx`; features popover shows a presentational "Data analysis" switch.
 
-- [ ] **Step 1: Upload accept + MIME map**
+- [x] **Step 1: Upload accept + MIME map**
 
 In `composer-attach-control.tsx` accept string add `.csv,.xlsx`. In `apps/platform/src/lib/documents/upload-file.ts`, extend the extensionâ†’MIME map:
 
@@ -2249,22 +2249,22 @@ In `composer-attach-control.tsx` accept string add `.csv,.xlsx`. In `apps/platfo
 ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ```
 
-- [ ] **Step 2: Features popover â€” "Data analysis" switch**
+- [x] **Step 2: Features popover â€” "Data analysis" switch**
 
 In `features-popover.tsx`, add props `dataAnalysisEnabled: boolean; onDataAnalysisToggle: (enabled: boolean) => void; dataAnalysisAvailable: boolean` (availability = true; reserved for a future sandbox gate). Render a switch row mirroring the Web search row (icon: `BarChart3` from lucide). Wire into `anyAvailable`/`anyEnabled` so the plus button and active-icon segment include it.
 
-- [ ] **Step 3: Chat composer + route state**
+- [x] **Step 3: Chat composer + route state**
 
 - `chat-composer.tsx`: thread `dataAnalysisEnabled`/`onDataAnalysisToggle` props through to `FeaturesPopover` (mirror `webSearchEnabled`, lines ~57-63/108-118/390-396).
 - `routes/index.tsx`: add `const [dataAnalysisEnabled, setDataAnalysisEnabled] = useState(false)`, a ref (mirror `webSearchEnabledRef`), include `dataAnalysisEnabled: dataAnalysisEnabledRef.current` in the `useChat` body (around `:1396-1398`), and pass state+setter to `ChatComposer` (around `:3080-3088`).
 - The API already ignores unknown body fields; no router change needed in v1 (toggle is presentational).
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `pnpm --filter platform exec tsc --noEmit`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/platform/src/components/composer apps/platform/src/lib/documents/upload-file.ts apps/platform/src/routes/index.tsx
@@ -2284,13 +2284,13 @@ git commit -m "feat(platform): CSV/XLSX upload accept + Data analysis feature sw
 **Interfaces:**
 - Consumes: helpers from `real-llm.e2e.ts` pattern (`openFreshChat`, `sendMessage`, `waitForStreaming`, `waitForRunDone`, `openFeaturesPopover`, `setSwitch` â€” copy or extract into `e2e/helpers.ts`).
 
-- [ ] **Step 1: Fixtures**
+- [x] **Step 1: Fixtures**
 
 - `sales.csv` (~40 rows): `region,product,revenue,units\nEast,Alpha,1200,10\nâ€¦` (deterministic, simple).
 - `multi-sheet.xlsx`: two sheets (`Summary`, `Detail`) with a numeric + string column each (generate with Excel/LibreOffice or a tiny script using `xlsx`; commit the binary).
 - `table-rich.pdf`: a small PDF containing 1-2 GFM-style tables (generate from HTML/markdown via a tool; commit).
 
-- [ ] **Step 2: Write the real-LLM E2E spec (cases 1-8)**
+- [x] **Step 2: Write the real-LLM E2E spec (cases 1-8)**
 
 `apps/platform/e2e/data-analysis.real-llm.e2e.ts` â€” headed, real LLM, no stub:
 
@@ -2392,14 +2392,14 @@ test("P1-C8: chart/table renders mid-chat between user message and assistant tex
 
 If helpers are not extracted, inline the helper functions from `real-llm.e2e.ts` (copy `openFreshChat`, `sendMessage`, `waitForStreaming`, `waitForRunDone`).
 
-- [ ] **Step 3: Run the suite (real LLM, headed)**
+- [x] **Step 3: Run the suite (real LLM, headed)**
 
 Prereq: `PORT=3001 BETTER_AUTH_URL=http://localhost:3001 pnpm dev` with real `.env` (OpenRouter), Docker/Postgres up, DB migrated. Then:
 
 Run: `pnpm --filter platform exec -- playwright test --config playwright.real-llm.config.ts`
 Expected: cases P1-C1..C8 pass (some cases may need a model switch to `openai/gpt-5.6-luna` or `deepseek/deepseek-v4-flash` via the UI to hit the SQL/tool path reliably).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/platform/e2e/fixtures apps/platform/e2e/data-analysis.real-llm.e2e.ts
@@ -2417,7 +2417,7 @@ git commit -m "test(e2e): real-LLM tabular data analysis cases (P1-C1..C8)"
 **Interfaces:**
 - Consumes: existing eval harness (`packages/agent/README.md` describes `BehaviorExpectation`, suites, `EVAL_MODEL` etc.)
 
-- [ ] **Step 1: Add the suite**
+- [x] **Step 1: Add the suite**
 
 Mirror an existing suite (e.g. `tool-choice`) with stub backends. Cases:
 1. "average revenue by region" with an uploaded CSV in context â†’ `expected.requiredTools: ["analyze_dataset"]` (not SQL).
@@ -2427,16 +2427,16 @@ Mirror an existing suite (e.g. `tool-choice`) with stub backends. Cases:
 
 Follow the exact suite shape from `packages/agent/src/evals/` (register in `run.ts`, declare `EVAL_MODEL` default).
 
-- [ ] **Step 2: Run the suite**
+- [x] **Step 2: Run the suite**
 
 Run: `pnpm --filter agent evals --suite tabular-analysis`
 Expected: all cases pass (real `EVAL_MODEL`, e.g. `deepseek/deepseek-v4-flash-0731`).
 
-- [ ] **Step 3: Update README suite table**
+- [x] **Step 3: Update README suite table**
 
 Add row: `tabular-analysis | read/analyze/sql tool choice, extract_document_tables, abstain without data`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/agent/src/evals packages/agent/README.md
@@ -2450,22 +2450,22 @@ git commit -m "test(evals): tabular-analysis tool-choice suite"
 **Files:**
 - Evidence under `.playwright-mcp/` (screenshots + console logs + page snapshots)
 
-- [ ] **Step 1: Boot the real stack**
+- [x] **Step 1: Boot the real stack**
 
 Ensure `pnpm dev` on `:3000`/`:3001` with real `.env` (OpenRouter + Tavily + R2 as needed), Docker up, DB migrated. Confirm `http://localhost:3000` loads and login works.
 
-- [ ] **Step 2: Drive each Plan 1 case in the real headed browser**
+- [x] **Step 2: Drive each Plan 1 case in the real headed browser**
 
 Using the **MCP Playwright** tools (`browser_navigate` â†’ real login â†’ `browser_file_upload` to attach fixtures through the actual file chooser â†’ `browser_type` the question â†’ wait for the run â†’ `browser_snapshot` + `browser_take_screenshot`), verify cases P1-C1..C8 and save evidence:
 - Browser opened at `http://localhost:3000` (headed, visible).
 - Per case: one accessibility snapshot + one screenshot saved under `.playwright-mcp/data-analysis/`.
 - Assert mid-chat placement (chart between user message and assistant text).
 
-- [ ] **Step 3: Record evidence + result**
+- [x] **Step 3: Record evidence + result**
 
 Console messages checked for errors (`browser_console_messages`, level error). Screenshots saved as `.playwright-mcp/data-analysis/<case>.png`.
 
-- [ ] **Step 4: Commit evidence summary**
+- [x] **Step 4: Commit evidence summary**
 
 ```bash
 git add .playwright-mcp/data-analysis

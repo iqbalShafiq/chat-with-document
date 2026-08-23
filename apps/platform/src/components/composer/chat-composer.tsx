@@ -1,6 +1,6 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
-import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
+import { ArrowUp, CornerDownLeft, FileX, Loader2, Square, X } from "lucide-react";
 import { useEffect, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
@@ -52,14 +52,15 @@ export function ChatComposer({
   modelsError = null,
   onRetryModels = () => {},
   compaction = { phase: "idle" },
+  deepResearch = { phase: "idle", message: "" },
   contextUsage = null,
   contextUsageError = false,
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
-  dataAnalysisEnabled = false,
-  dataAnalysisAvailable = true,
-  onDataAnalysisToggle = () => {},
+  deepResearchEnabled = false,
+  deepResearchAvailable = true,
+  onDeepResearchToggle = () => {},
   imageGenerationEnabled = false,
   imageGenerationAvailable = true,
   onImageGenerationToggle = () => {},
@@ -104,6 +105,16 @@ export function ChatComposer({
   onRetryModels?: () => void;
   /** Wired in Task 14 — declared now so `routes/index.tsx` can pass them. */
   compaction?: { phase: "idle" | "start" | "complete" | "error" };
+  deepResearch?: {
+    phase:
+      | "idle"
+      | "planning"
+      | "researching"
+      | "synthesizing"
+      | "completed"
+      | "failed";
+    message: string;
+  };
   contextUsage?: ContextUsageInfo | null;
   /** Latest context-usage refresh failed (ring shows a transient hint). */
   contextUsageError?: boolean;
@@ -112,11 +123,11 @@ export function ChatComposer({
   /** Server has web tools configured (TAVILY_API_KEY). */
   webSearchAvailable?: boolean;
   onWebSearchToggle?: (enabled: boolean) => void;
-  /** Per-session data analysis toggle state (default off). */
-  dataAnalysisEnabled?: boolean;
-  /** Available (reserved for a future sandbox gate). */
-  dataAnalysisAvailable?: boolean;
-  onDataAnalysisToggle?: (enabled: boolean) => void;
+  /** Per-session Deep Research toggle state (default off). */
+  deepResearchEnabled?: boolean;
+  /** Available when web search or an active document exists. */
+  deepResearchAvailable?: boolean;
+  onDeepResearchToggle?: (enabled: boolean) => void;
   /** Per-session image generation toggle state (default off). */
   imageGenerationEnabled?: boolean;
   /** Server has an image model configured. */
@@ -398,9 +409,9 @@ export function ChatComposer({
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={onWebSearchToggle}
               webSearchAvailable={webSearchAvailable}
-              dataAnalysisEnabled={dataAnalysisEnabled}
-              onDataAnalysisToggle={onDataAnalysisToggle}
-              dataAnalysisAvailable={dataAnalysisAvailable}
+              deepResearchEnabled={deepResearchEnabled}
+              onDeepResearchToggle={onDeepResearchToggle}
+              deepResearchAvailable={deepResearchAvailable}
               imageGenerationEnabled={imageGenerationEnabled}
               onImageGenerationToggle={onImageGenerationToggle}
               imageGenerationAvailable={imageGenerationAvailable}
@@ -422,6 +433,23 @@ export function ChatComposer({
             {contextUsageError ? (
               <span className="shrink-0 text-[10px] font-medium text-danger/80 animate-fade-in">
                 Usage unavailable
+              </span>
+            ) : null}
+            {deepResearch.phase !== "idle" && deepResearch.phase !== "completed" ? (
+              <span
+                role="status"
+                aria-live="polite"
+                className={`inline-flex max-w-[12rem] items-center gap-1 truncate text-[10px] font-medium ${
+                  deepResearch.phase === "failed"
+                    ? "text-danger/80"
+                    : "text-accent"
+                }`}
+                title={deepResearch.message}
+              >
+                {deepResearch.phase === "failed" ? null : (
+                  <Loader2 className="size-3 shrink-0 animate-spin" />
+                )}
+                <span className="truncate">{deepResearch.message}</span>
               </span>
             ) : null}
             <ContextUsageIndicator
