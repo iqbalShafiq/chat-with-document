@@ -149,6 +149,7 @@ describe("createDeepResearchTools", () => {
       "synthesizing",
       "completed",
     ]);
+    expect(progress.every((event) => !("prompt" in event))).toBe(true);
   });
 
   it("reports a failed lifecycle event and rethrows researcher failures", async () => {
@@ -206,5 +207,66 @@ describe("boundDeepResearchTools", () => {
 
     expect(originalCall).toHaveBeenCalledTimes(1);
     expect(exhausted).toMatchObject({ error: expect.stringContaining("budget exhausted") });
+  });
+
+  it("reports safe retrieval activity without exposing tool arguments", async () => {
+    const progress: DeepResearchProgress[] = [];
+    const wrapped = boundDeepResearchTools(
+      [
+        {
+          name: "web_search",
+          definition: vi.fn(),
+          call: vi.fn(async () => ({ results: ["evidence"] })),
+        } as unknown as AnyTool,
+      ],
+      3,
+      (event) => progress.push(event),
+    )[0]!;
+
+    await wrapped.call({ query: "private query should never be streamed" });
+
+    expect(progress).toHaveLength(2);
+    expect(progress[0]).toMatchObject({
+      phase: "researching",
+      activities: [
+        {
+          kind: "retrieval",
+          label: "Searching the web",
+          status: "active",
+        },
+      ],
+      stats: { retrievalCalls: 1, retrievalLimit: 3 },
+    });
+    expect(progress[1]).toMatchObject({
+      activities: [{ status: "done", label: "Searching the web" }],
+    });
+    expect(JSON.stringify(progress)).not.toContain("private query");
+  });
+
+  it("reports failed safe activity without changing the tool error", async () => {
+    const progress: DeepResearchProgress[] = [];
+    const wrapped = boundDeepResearchTools(
+      [
+        {
+          name: "descriptive_stats",
+          definition: vi.fn(),
+          call: vi.fn(async () => {
+            throw new Error("analysis failed");
+          }),
+        } as unknown as AnyTool,
+      ],
+      3,
+      (event) => progress.push(event),
+    )[0]!;
+
+    await expect(wrapped.call({ dataset: "private.csv" })).rejects.toThrow(
+      "analysis failed",
+    );
+
+    expect(progress.at(-1)).toMatchObject({
+      phase: "researching",
+      activities: [{ kind: "analysis", status: "failed" }],
+    });
+    expect(JSON.stringify(progress)).not.toContain("private.csv");
   });
 });

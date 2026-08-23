@@ -1,6 +1,6 @@
 import type { UseChatStatus } from "@anvia/react";
 import { Composer, useComposer } from "@anvia/react-ui";
-import { ArrowUp, CornerDownLeft, FileX, Loader2, Square, X } from "lucide-react";
+import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
 import { useEffect, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
@@ -52,7 +52,6 @@ export function ChatComposer({
   modelsError = null,
   onRetryModels = () => {},
   compaction = { phase: "idle" },
-  deepResearch = { phase: "idle", message: "" },
   contextUsage = null,
   contextUsageError = false,
   webSearchEnabled = false,
@@ -105,16 +104,6 @@ export function ChatComposer({
   onRetryModels?: () => void;
   /** Wired in Task 14 — declared now so `routes/index.tsx` can pass them. */
   compaction?: { phase: "idle" | "start" | "complete" | "error" };
-  deepResearch?: {
-    phase:
-      | "idle"
-      | "planning"
-      | "researching"
-      | "synthesizing"
-      | "completed"
-      | "failed";
-    message: string;
-  };
   contextUsage?: ContextUsageInfo | null;
   /** Latest context-usage refresh failed (ring shows a transient hint). */
   contextUsageError?: boolean;
@@ -433,23 +422,6 @@ export function ChatComposer({
             {contextUsageError ? (
               <span className="shrink-0 text-[10px] font-medium text-danger/80 animate-fade-in">
                 Usage unavailable
-              </span>
-            ) : null}
-            {deepResearch.phase !== "idle" && deepResearch.phase !== "completed" ? (
-              <span
-                role="status"
-                aria-live="polite"
-                className={`inline-flex max-w-[12rem] items-center gap-1 truncate text-[10px] font-medium ${
-                  deepResearch.phase === "failed"
-                    ? "text-danger/80"
-                    : "text-accent"
-                }`}
-                title={deepResearch.message}
-              >
-                {deepResearch.phase === "failed" ? null : (
-                  <Loader2 className="size-3 shrink-0 animate-spin" />
-                )}
-                <span className="truncate">{deepResearch.message}</span>
               </span>
             ) : null}
             <ContextUsageIndicator

@@ -8,11 +8,37 @@ export type DeepResearchProgressPhase =
   | "completed"
   | "failed";
 
+export type DeepResearchActivityKind =
+  | "planning"
+  | "retrieval"
+  | "analysis"
+  | "verification"
+  | "synthesis";
+
+export type DeepResearchActivityStatus = "active" | "done" | "failed";
+
+export type DeepResearchActivity = {
+  id: string;
+  kind: DeepResearchActivityKind;
+  label: string;
+  status: DeepResearchActivityStatus;
+};
+
+export type DeepResearchProgressStats = {
+  retrievalCalls: number;
+  retrievalLimit: number;
+};
+
 export type DeepResearchProgress = {
   phase: DeepResearchProgressPhase;
   message: string;
-  prompt?: string;
+  activities?: DeepResearchActivity[];
+  stats?: DeepResearchProgressStats;
 };
+
+export type DeepResearchProgressReporter = (
+  event: DeepResearchProgress,
+) => Promise<void> | void;
 
 export type DeepResearchResearcher = {
   asTool(options: {
@@ -29,15 +55,47 @@ export type DeepResearchToolScope = {
   maxTurns?: number;
   maxSearches?: number;
   hasGrant?: (toolName: string) => Promise<boolean> | boolean;
-  onProgress?:
-    | ((event: DeepResearchProgress) => Promise<void> | void)
-    | undefined;
+  onProgress?: DeepResearchProgressReporter | undefined;
 };
 
 const DEFAULT_MAX_TURNS = 12;
 const DEFAULT_MAX_SEARCHES = 8;
 const MAX_TURNS = 30;
 const MAX_SEARCHES = 20;
+
+const ACTIVITY_METADATA: Record<
+  string,
+  { kind: DeepResearchActivityKind; label: string }
+> = {
+  find_documents: { kind: "retrieval", label: "Finding relevant documents" },
+  search_document_pages: {
+    kind: "retrieval",
+    label: "Searching document pages",
+  },
+  get_document_next_page: {
+    kind: "retrieval",
+    label: "Reading another document page",
+  },
+  get_document_page_images: {
+    kind: "retrieval",
+    label: "Inspecting document pages",
+  },
+  extract_document_tables: {
+    kind: "retrieval",
+    label: "Extracting document tables",
+  },
+  web_search: { kind: "retrieval", label: "Searching the web" },
+  web_fetch: { kind: "retrieval", label: "Reading a web page" },
+  read_dataset: { kind: "analysis", label: "Reading the dataset" },
+  analyze_dataset: { kind: "analysis", label: "Analyzing the dataset" },
+  query_dataset_sql: { kind: "analysis", label: "Querying the dataset" },
+  descriptive_stats: {
+    kind: "analysis",
+    label: "Computing descriptive statistics",
+  },
+  pearson_correlation: { kind: "analysis", label: "Computing correlation" },
+  linear_regression: { kind: "analysis", label: "Fitting regression" },
+};
 
 const deepResearchInput = z.object({
   prompt: z
@@ -152,7 +210,14 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
       await emit(scope, {
         phase: "planning",
         message: "Planning a bounded multi-source research run",
-        prompt,
+        activities: [
+          {
+            id: "deep-research-planning",
+            kind: "planning",
+            label: "Planning the research",
+            status: "active",
+          },
+        ],
       });
 
       const researcherTool = scope.researcher.asTool({
@@ -167,7 +232,18 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
         await emit(scope, {
           phase: "researching",
           message: "Searching and analyzing the available evidence",
-          prompt,
+          activities: [
+            {
+              id: "deep-research-planning",
+              kind: "planning",
+              label: "Planning the research",
+              status: "done",
+            },
+          ],
+          stats: {
+            retrievalCalls: 0,
+            retrievalLimit: maxSearches,
+          },
         });
         const result = await researcherTool.call(
           { prompt: buildDeepResearchPrompt(prompt, maxSearches) },
@@ -176,19 +252,46 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
         await emit(scope, {
           phase: "synthesizing",
           message: "Synthesizing findings and checking citations",
-          prompt,
+          activities: [
+            {
+              id: "deep-research-verification",
+              kind: "verification",
+              label: "Checking evidence and citations",
+              status: "active",
+            },
+          ],
         });
         await emit(scope, {
           phase: "completed",
           message: "Deep Research report is ready",
-          prompt,
+          activities: [
+            {
+              id: "deep-research-verification",
+              kind: "verification",
+              label: "Checking evidence and citations",
+              status: "done",
+            },
+            {
+              id: "deep-research-synthesis",
+              kind: "synthesis",
+              label: "Preparing the final report",
+              status: "done",
+            },
+          ],
         });
         return result;
       } catch (error) {
         await emit(scope, {
           phase: "failed",
           message: "Deep Research could not complete",
-          prompt,
+          activities: [
+            {
+              id: "deep-research-failure",
+              kind: "verification",
+              label: "Completing the research",
+              status: "failed",
+            },
+          ],
         });
         throw error;
       }
@@ -214,12 +317,15 @@ const SEARCH_TOOL_NAMES = new Set([
 export function boundDeepResearchTools(
   tools: AnyTool[],
   maxSearches: number,
+  onProgress?: DeepResearchProgressReporter,
 ): AnyTool[] {
   const limit = boundedInteger(maxSearches, DEFAULT_MAX_SEARCHES, MAX_SEARCHES);
   let calls = 0;
+  let activitySequence = 0;
 
   return tools.map((tool) => {
-    if (!SEARCH_TOOL_NAMES.has(tool.name)) return tool;
+    const metadata = ACTIVITY_METADATA[tool.name];
+    if (!metadata) return tool;
 
     return {
       name: tool.name,
@@ -227,14 +333,77 @@ export function boundDeepResearchTools(
       parseApprovalArgs: tool.parseApprovalArgs,
       definition: (prompt: string) => tool.definition(prompt),
       call: async (args: unknown, context?: ToolCallContext) => {
-        if (calls >= limit) {
+        const countsTowardBudget = SEARCH_TOOL_NAMES.has(tool.name);
+        if (countsTowardBudget && calls >= limit) {
           return {
             error: `Deep Research retrieval budget exhausted after ${limit} calls. Synthesize from the evidence already collected.`,
           };
         }
-        calls += 1;
-        return tool.call(args, context);
+        if (countsTowardBudget) calls += 1;
+
+        const activityId = `deep-research-activity-${++activitySequence}`;
+        const stats = {
+          retrievalCalls: calls,
+          retrievalLimit: limit,
+        };
+        await reportProgress(onProgress, {
+          phase: "researching",
+          message: `${metadata.label}…`,
+          activities: [
+            {
+              id: activityId,
+              kind: metadata.kind,
+              label: metadata.label,
+              status: "active",
+            },
+          ],
+          stats,
+        });
+
+        try {
+          const result = await tool.call(args, context);
+          await reportProgress(onProgress, {
+            phase: "researching",
+            message: `${metadata.label} complete`,
+            activities: [
+              {
+                id: activityId,
+                kind: metadata.kind,
+                label: metadata.label,
+                status: "done",
+              },
+            ],
+            stats,
+          });
+          return result;
+        } catch (error) {
+          await reportProgress(onProgress, {
+            phase: "researching",
+            message: `${metadata.label} failed`,
+            activities: [
+              {
+                id: activityId,
+                kind: metadata.kind,
+                label: metadata.label,
+                status: "failed",
+              },
+            ],
+            stats,
+          });
+          throw error;
+        }
       },
     } as AnyTool;
   });
+}
+
+async function reportProgress(
+  onProgress: DeepResearchProgressReporter | undefined,
+  event: DeepResearchProgress,
+): Promise<void> {
+  try {
+    await onProgress?.(event);
+  } catch (error) {
+    console.warn("[deep-research] activity callback failed", error);
+  }
 }

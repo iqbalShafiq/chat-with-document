@@ -22,6 +22,7 @@ import {
   type IngestionItem,
 } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
+import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
 import { AppShell } from "#/components/layout/app-shell";
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
@@ -113,6 +114,12 @@ import {
   sessionSummaryFromDraft,
   type SessionSummary,
 } from "#/lib/session-history";
+import {
+  initialDeepResearchActivityState,
+  reduceDeepResearchProgress,
+  resetDeepResearchActivity,
+  type DeepResearchActivityState,
+} from "#/lib/chat/deep-research-activity";
 import {
   persistImageGenSettings,
   persistImageGenerationEnabled,
@@ -1085,10 +1092,9 @@ function ChatSession({
   const [compaction, setCompaction] = useState<{
     phase: "idle" | "start" | "complete" | "error";
   }>({ phase: "idle" });
-  const [deepResearch, setDeepResearch] = useState<{
-    phase: "idle" | "planning" | "researching" | "synthesizing" | "completed" | "failed";
-    message: string;
-  }>({ phase: "idle", message: "" });
+  const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
+    initialDeepResearchActivityState,
+  );
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -1304,25 +1310,21 @@ function ChatSession({
         return;
       }
       if (record.type === "deep_research_progress") {
-        const phase =
-          record.phase === "planning" ||
-          record.phase === "researching" ||
-          record.phase === "synthesizing" ||
-          record.phase === "completed" ||
-          record.phase === "failed"
-            ? record.phase
-            : "idle";
-        setDeepResearch({
-          phase,
-          message:
-            typeof record.message === "string"
-              ? record.message
-              : "Deep Research is running",
-        });
+        setDeepResearch((state) =>
+          reduceDeepResearchProgress(state, {
+            phase: record.phase,
+            message:
+              typeof record.message === "string"
+                ? record.message
+                : "Deep Research is running",
+            activities: record.activities,
+            stats: record.stats,
+          }),
+        );
         return;
       }
       if (record.type === "message_end") {
-        setDeepResearch({ phase: "idle", message: "" });
+        setDeepResearch(resetDeepResearchActivity());
         void refreshContextUsage();
         return;
       }
@@ -3080,6 +3082,12 @@ function ChatSession({
                     }
                   />
 
+                  {deepResearch.phase !== "idle" ? (
+                    <div className="mb-2">
+                      <DeepResearchActivityPanel state={deepResearch} />
+                    </div>
+                  ) : null}
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -3105,7 +3113,6 @@ function ChatSession({
                     compaction={compaction}
                     contextUsage={contextUsage}
                     contextUsageError={contextUsageError}
-                    deepResearch={deepResearch}
                     deepResearchEnabled={deepResearchEnabled}
                     deepResearchAvailable={
                       capabilities?.deepResearchAvailable ?? false

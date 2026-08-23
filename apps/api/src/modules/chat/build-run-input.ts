@@ -466,6 +466,7 @@ export async function buildChatRunInput(input: {
         ...tabularTools,
       ],
       deepResearchLimits().maxSearches,
+      onDeepResearchProgress,
     );
     const researcher = createAgent({
       agentId: `${agentId ?? "my-agent"}-deep-researcher`,
