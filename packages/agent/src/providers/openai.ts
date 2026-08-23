@@ -1,4 +1,4 @@
-import type { CompletionModel } from "@anvia/core";
+import type { StreamingCompletionModel } from "@anvia/core/completion";
 import { OpenAIClient } from "@anvia/openai";
 
 /** Model ids are registered in the DB registry; any non-empty id is structurally valid. */
@@ -35,48 +35,32 @@ let openai: OpenAIClient | null = null;
 
 function getOpenAIClient(): OpenAIClient {
   openai ??= new OpenAIClient({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseUrl: process.env.OPENAI_BASE_URL,
-    completionApi: "responses",
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    ...(process.env.OPENAI_BASE_URL
+      ? { baseUrl: process.env.OPENAI_BASE_URL }
+      : {}),
   });
   return openai;
 }
 
 export function createCompletionModel(
   modelId: CompletionModelId = DEFAULT_COMPLETION_MODEL,
-): CompletionModel {
-  // GPT-5.6 Luna/Terra/Sol are not all in Anvia's known-name union yet.
-  return getOpenAIClient().completionModel(modelId) as CompletionModel;
+): StreamingCompletionModel {
+  return getOpenAIClient().completionModel({ modelId, api: "responses" });
 }
 
-/**
- * Wraps a model so every request carries the given reasoning effort, the same
- * mechanism createAgent uses (additionalParams -> provider reasoning params).
- */
-export function withReasoningEffort(
-  model: CompletionModel,
+/** Strict OpenAI Responses options supplied at Agent construction time. */
+export function providerOptionsForReasoning(
   effort: ReasoningEffort,
-): CompletionModel {
+): { reasoning: { effort: ReasoningEffort; summary: "auto" } } {
   return {
-    provider: model.provider,
-    defaultModel: model.defaultModel,
-    capabilities: model.capabilities,
-    ...(model.getModelInfo ? { getModelInfo: model.getModelInfo.bind(model) } : {}),
-    ...(model.traceRequest ? { traceRequest: model.traceRequest.bind(model) } : {}),
-    completion: async (request) =>
-      model.completion({
-        ...request,
-        additionalParams: {
-          ...((request.additionalParams as Record<string, unknown> | undefined) ?? {}),
-          reasoning: { effort, summary: "auto" },
-        },
-      }),
+    reasoning: { effort, summary: "auto" },
   };
 }
 
-let defaultModelValue: CompletionModel | null = null;
+let defaultModelValue: StreamingCompletionModel | null = null;
 
-export function defaultModel(): CompletionModel {
+export function defaultModel(): StreamingCompletionModel {
   defaultModelValue ??= createCompletionModel(DEFAULT_COMPLETION_MODEL);
   return defaultModelValue;
 }

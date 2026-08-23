@@ -4,6 +4,7 @@ import { Worker } from "bullmq";
 import {
   buildDocumentSummary,
   chunkText,
+  closeTracing,
   deleteDocumentChunks,
   embeddingModel,
   firstLinesSummary,
@@ -333,9 +334,9 @@ worker.on("error", (error) => {
   console.error("[worker] error", error);
 });
 
-if (profileConfig().enabled) {
-  const profileWorker = createProfileWorker();
+const profileWorker = profileConfig().enabled ? createProfileWorker() : null;
 
+if (profileWorker) {
   profileWorker.on("ready", () => {
     console.log(`[profile] ready on queue profile-summary`);
   });
@@ -401,3 +402,57 @@ chatRunWorker.on("failed", async (job, error) => {
 chatRunWorker.on("error", (error) =>
   console.error("[chat-run] worker error", error),
 );
+
+let shutdownPromise: Promise<void> | null = null;
+
+async function closeOwnedWorker(
+  name: string,
+  ownedWorker: { close(): Promise<void> },
+): Promise<void> {
+  try {
+    await ownedWorker.close();
+  } catch (error) {
+    console.error(`[worker] ${name} shutdown failed`, error);
+    throw error;
+  }
+}
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  console.log(`[worker] received ${signal}; shutting down`);
+  try {
+    const results = await Promise.allSettled([
+      closeOwnedWorker("document ingest", worker),
+      closeOwnedWorker("chat run", chatRunWorker),
+      ...(profileWorker
+        ? [closeOwnedWorker("profile", profileWorker)]
+        : []),
+    ]);
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "BullMQ worker shutdown failed");
+    }
+  } finally {
+    try {
+      await closeTracing();
+    } catch (error) {
+      console.error("[worker] tracing shutdown failed", error);
+      throw error;
+    }
+  }
+}
+
+function requestShutdown(signal: NodeJS.Signals): void {
+  shutdownPromise ??= shutdown(signal);
+  void shutdownPromise.then(
+    () => process.exit(0),
+    (error) => {
+      console.error(`[worker] shutdown failed after ${signal}`, error);
+      process.exit(1);
+    },
+  );
+}
+
+process.once("SIGINT", () => requestShutdown("SIGINT"));
+process.once("SIGTERM", () => requestShutdown("SIGTERM"));

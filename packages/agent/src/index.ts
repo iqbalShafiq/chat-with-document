@@ -1,5 +1,5 @@
 export * from "./agent.js";
-export * from "./tracing.js";
+export { closeTracing, flushTracing, tracing } from "./tracing.js";
 export * from "./tools/data-analysis.js";
 export * from "./providers/openai.js";
 export * from "./providers/mistral.js";

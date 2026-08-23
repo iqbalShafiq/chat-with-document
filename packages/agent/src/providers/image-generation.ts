@@ -2,7 +2,7 @@ import type {
   GeneratedImage,
   ImageGenerationModel,
   ImageGenerationRequest,
-  ImageGenerationResponse,
+  ImageGenerationResult,
 } from "@anvia/core/image-generation";
 
 export type OpenRouterImageGenerationModelOptions = {
@@ -80,10 +80,10 @@ type OpenRouterImageResponse = {
 
 /** OpenRouter image generation via its dedicated `POST /images` API. */
 export class OpenRouterImageGenerationModel
-  implements ImageGenerationModel<unknown, string>
+  implements ImageGenerationModel<unknown>
 {
   readonly provider = "openrouter";
-  readonly defaultModel: string;
+  readonly modelId: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -92,24 +92,24 @@ export class OpenRouterImageGenerationModel
   constructor(options: OpenRouterImageGenerationModelOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.defaultModel = options.defaultModel ?? "openai/gpt-5-image-mini";
+    this.modelId = options.defaultModel ?? "openai/gpt-5-image-mini";
     this.fetchFn = options.fetchFn ?? fetch;
     this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   }
 
   async imageGeneration(
     request: ImageGenerationRequest,
-  ): Promise<ImageGenerationResponse<unknown>> {
+  ): Promise<ImageGenerationResult<unknown>> {
     const body: Record<string, unknown> = {
-      model: this.defaultModel,
+      model: this.modelId,
       prompt: request.prompt,
     };
     if (
-      typeof request.additionalParams === "object" &&
-      request.additionalParams !== null &&
-      !Array.isArray(request.additionalParams)
+      typeof request.providerOptions === "object" &&
+      request.providerOptions !== null &&
+      !Array.isArray(request.providerOptions)
     ) {
-      Object.assign(body, request.additionalParams);
+      Object.assign(body, request.providerOptions);
     }
     // Gemini/Grok-style models do not accept `size` — the tool signals this
     // by passing `aspect_ratio` (+ `resolution`), so omit the pixel size.
@@ -173,15 +173,12 @@ export class OpenRouterImageGenerationModel
         },
       ];
     });
-    if (images.length === 0) {
+    const [first, ...remaining] = images;
+    if (!first) {
       throw new Error("Image generation returned no usable images");
     }
-
-    const first = images[0]!;
     return {
-      image: first.data,
-      images,
-      ...(first.mediaType ? { mediaType: first.mediaType } : {}),
+      images: [first, ...remaining],
       rawResponse: raw,
     };
   }
