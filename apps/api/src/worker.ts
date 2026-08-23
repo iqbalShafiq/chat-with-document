@@ -4,6 +4,7 @@ import { Worker } from "bullmq";
 import {
   buildDocumentSummary,
   chunkText,
+  closeQdrant,
   closeTracing,
   deleteDocumentChunks,
   embeddingModel,
@@ -45,6 +46,7 @@ import {
   processChatRunJob,
   type ChatRunJobData,
 } from "./modules/chat/run-worker.js";
+import { closeContext7Mcp } from "./lib/context7-server.js";
 
 console.log("[worker] boot");
 
@@ -405,12 +407,12 @@ chatRunWorker.on("error", (error) =>
 
 let shutdownPromise: Promise<void> | null = null;
 
-async function closeOwnedWorker(
+async function closeOwnedResource(
   name: string,
-  ownedWorker: { close(): Promise<void> },
+  resource: { close(): Promise<void> },
 ): Promise<void> {
   try {
-    await ownedWorker.close();
+    await resource.close();
   } catch (error) {
     console.error(`[worker] ${name} shutdown failed`, error);
     throw error;
@@ -420,18 +422,23 @@ async function closeOwnedWorker(
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   console.log(`[worker] received ${signal}; shutting down`);
   try {
-    const results = await Promise.allSettled([
-      closeOwnedWorker("document ingest", worker),
-      closeOwnedWorker("chat run", chatRunWorker),
+    const workerResults = await Promise.allSettled([
+      closeOwnedResource("document ingest", worker),
+      closeOwnedResource("chat run", chatRunWorker),
       ...(profileWorker
-        ? [closeOwnedWorker("profile", profileWorker)]
+        ? [closeOwnedResource("profile", profileWorker)]
         : []),
     ]);
+    const clientResults = await Promise.allSettled([
+      closeOwnedResource("Qdrant", { close: closeQdrant }),
+      closeOwnedResource("Context7 MCP", { close: closeContext7Mcp }),
+    ]);
+    const results = [...workerResults, ...clientResults];
     const failures = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
     );
     if (failures.length > 0) {
-      throw new AggregateError(failures, "BullMQ worker shutdown failed");
+      throw new AggregateError(failures, "Worker resource shutdown failed");
     }
   } finally {
     try {

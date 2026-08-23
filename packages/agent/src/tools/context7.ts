@@ -1,11 +1,10 @@
-import { connectMcp, mcp, type McpServer } from "@anvia/core/mcp";
+import type { McpServer } from "@anvia/core/mcp";
+import { McpClient } from "@anvia/mcp";
 
 /**
  * Context7 MCP bridge: up-to-date, version-specific library documentation.
- * Connected through @anvia/core's native MCP client (streamable HTTP) so the
- * agent's context7 tools are the official `resolve-library-id` and
- * `query-docs` definitions. Unreachable servers degrade to `null` — the
- * caller logs and runs without them.
+ * The process owns one v1 Streamable HTTP client. Unreachable configured
+ * servers degrade to `null`, allowing chat to continue without Context7.
  */
 
 export const DEFAULT_CONTEXT7_URL = "https://mcp.context7.com/mcp";
@@ -16,31 +15,38 @@ export type Context7McpServerOptions = {
   url?: string;
 };
 
-export async function createContext7McpServer(
+let client: McpClient | null = null;
+let serverPromise: Promise<McpServer | null> | null = null;
+let closePromise: Promise<void> | null = null;
+let closed = false;
+
+export function createContext7McpServer(
   options: Context7McpServerOptions = {},
 ): Promise<McpServer | null> {
-  const url = options.url ?? DEFAULT_CONTEXT7_URL;
-  try {
-    return await connectMcp(
-      mcp.http({
-        name: "context7",
-        url,
-        ...(options.apiKey?.trim()
-          ? {
-              transport: {
-                requestInit: {
-                  headers: {
-                    authorization: `Bearer ${options.apiKey.trim()}`,
-                  },
-                },
-              },
-            }
-          : {}),
-      }),
-    );
-  } catch {
-    return null;
-  }
+  if (closed) return Promise.resolve(null);
+  if (serverPromise) return serverPromise;
+
+  const apiKey = options.apiKey?.trim();
+  client = new McpClient({
+    name: "context7",
+    transport: {
+      type: "streamableHttp",
+      url: options.url ?? DEFAULT_CONTEXT7_URL,
+      ssrfProtection: "strict",
+      ...(apiKey
+        ? { headers: { authorization: `Bearer ${apiKey}` } }
+        : {}),
+    },
+  });
+  serverPromise = client.connect().catch(() => null);
+  return serverPromise;
+}
+
+/** Close the process-owned Context7 transport once during shutdown. */
+export function closeContext7Mcp(): Promise<void> {
+  closed = true;
+  closePromise ??= client?.close() ?? Promise.resolve();
+  return closePromise;
 }
 
 /** Agent guidance on when to prefer context7 (added to instructions). */

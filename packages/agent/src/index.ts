@@ -26,8 +26,22 @@ export * from "./tools/tabular/sql.js";
 export * from "./tools/tabular/tools.js";
 export * from "./tools/image-generation.js";
 export * from "./tools/clarification.js";
-export * from "./tools/context7.js";
-export * from "./qdrant/chunk-store.js";
+export {
+  CONTEXT7_INSTRUCTION,
+  DEFAULT_CONTEXT7_URL,
+  closeContext7Mcp,
+  createContext7McpServer,
+  type Context7McpServerOptions,
+} from "./tools/context7.js";
+export {
+  closeQdrant,
+  createChunkSearchService,
+  createQdrantChunkStore,
+  deleteDocumentChunks,
+  upsertDocumentChunks,
+  type QdrantChunkStoreLifecycle,
+  type QdrantChunkStoreOptions,
+} from "./qdrant/chunk-store.js";
 export * from "./profiling/types.js";
 export * from "./profiling/profile-summarizer.js";
 export * from "./profiling/profile-tool.js";
