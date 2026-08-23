@@ -282,6 +282,27 @@ describe("OpenRouterImageGenerationModel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("forwards abortSignal and does not retry an aborted request", async () => {
+    const controller = new AbortController();
+    const abortError = new DOMException("The operation was aborted", "AbortError");
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBe(controller.signal);
+      controller.abort();
+      throw abortError;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await expect(
+      model.imageGeneration(
+        { prompt: "p", width: 256, height: 256 },
+        { abortSignal: controller.signal },
+      ),
+    ).rejects.toBe(abortError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to the bounded message when upstream omits details", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
