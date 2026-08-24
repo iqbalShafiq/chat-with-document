@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { MessageCitation } from "#/lib/chat/citations";
 import { parseCitationsFromMetadata } from "#/lib/chat/citations";
@@ -8,7 +8,6 @@ export type ChatMessageMeta = {
   clientMessageId?: string;
   memoryPosition?: number;
   documentIds?: string[];
-  sessionId?: string;
   attachedDocuments?: Array<{ name: string; mediaType?: string }>;
   /** Single pinned context snippet carried by a sent user message. */
   contextSnippet?: { text: string; sourceRole: ContextSnippetSourceRole };
@@ -40,9 +39,6 @@ export function readChatMessageMeta(
     Number.isInteger(metadata.memoryPosition)
   ) {
     meta.memoryPosition = metadata.memoryPosition;
-  }
-  if (typeof metadata.sessionId === "string") {
-    meta.sessionId = metadata.sessionId;
   }
   if (Array.isArray(metadata.documentIds)) {
     meta.documentIds = metadata.documentIds.filter(
@@ -99,7 +95,6 @@ export function withChatMessageMeta(
     current.memoryPosition = patch.memoryPosition;
   }
   if (patch.documentIds !== undefined) current.documentIds = patch.documentIds;
-  if (patch.sessionId !== undefined) current.sessionId = patch.sessionId;
   if (patch.attachedDocuments !== undefined) {
     current.attachedDocuments = patch.attachedDocuments.map((doc) => {
       if (doc.mediaType === undefined) return { name: doc.name };

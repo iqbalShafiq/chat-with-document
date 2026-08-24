@@ -1,10 +1,13 @@
 import {
-  createChatTransport,
-  EventStreamHttpError,
   initialMessagesFromMemory,
   useChat,
 } from "@anvia/react";
-import type { UIAttachment, UIMessage, UIMessagePart } from "@anvia/react";
+import type {
+  ClientStreamEvent,
+  UIAttachment,
+  UIMessage,
+  UIMessagePart,
+} from "@anvia/client";
 import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
@@ -29,7 +32,6 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
-  decideApproval,
   deleteChatSession,
   fetchContextUsage,
   fetchRunStatus,
@@ -94,6 +96,19 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
+import {
+  createAnviaChatTransport,
+  isAuthFailure,
+  isRunActiveConflict,
+  requireChatReasoningEffort,
+  stopChatPreservingMessages,
+  validateChatResumeSnapshot,
+  type ChatClientMetadata,
+  type ChatRequestMetadata,
+} from "#/lib/chat/anvia-transport";
+import {
+  type ChatDataMap,
+} from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
 import {
@@ -1100,7 +1115,7 @@ function ChatSession({
   );
   const [contextUsageError, setContextUsageError] = useState(false);
   const [previousRunError, setPreviousRunError] = useState(false);
-  /** Latest model/effort for createRequest (avoids stale closures). */
+  /** Latest request policy for the v1 transport (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
   const webSearchEnabledRef = useRef(webSearchEnabled);
@@ -1113,6 +1128,18 @@ function ChatSession({
   deepResearchEnabledRef.current = deepResearchEnabled;
   imageGenerationEnabledRef.current = imageGenerationEnabled;
   imageGenSettingsRef.current = imageGenSettings;
+  /** Last submitted turn's document subset for native interaction responses. */
+  const lastSubmittedDocumentIdsRef = useRef<string[]>(
+    (() => {
+      for (let index = initialMessages.length - 1; index >= 0; index -= 1) {
+        const message = initialMessages[index];
+        if (message?.role === "user") {
+          return documentIdsFromMetadata(message.metadata);
+        }
+      }
+      return [];
+    })(),
+  );
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
   const messagesRef = useRef<UIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
@@ -1236,14 +1263,34 @@ function ChatSession({
 
   const chatTransport = useMemo(
     () =>
-      createChatTransport({
+      createAnviaChatTransport({
         endpoint: `${API_BASE}/api/chat`,
-        format: "jsonl",
-        init: { credentials: "include" },
-        body: (request) => JSON.stringify(request),
-        headers: { "content-type": "application/json" },
+        getRequestMetadata: (request): ChatRequestMetadata => {
+          if (request.type === "messages") {
+            const last = request.messages.at(-1);
+            if (last?.role === "user") {
+              lastSubmittedDocumentIdsRef.current = documentIdsFromMetadata(
+                last.metadata,
+              );
+            }
+          }
+          return {
+            sessionId,
+            documentIds: lastSubmittedDocumentIdsRef.current,
+            modelId: selectedModelRef.current,
+            reasoningEffort: requireChatReasoningEffort(
+              selectedReasoningEffortRef.current,
+            ),
+            webSearchEnabled: webSearchEnabledRef.current,
+            imageGenerationEnabled: imageGenerationEnabledRef.current,
+            deepResearchEnabled: deepResearchEnabledRef.current,
+            imageGenSettings: imageGenerationEnabledRef.current
+              ? imageGenSettingsRef.current
+              : null,
+          };
+        },
       }),
-    [],
+    [sessionId],
   );
 
   /** Writes failed-run text into the composer editor (same selector as focusComposer). */
@@ -1294,59 +1341,31 @@ function ChatSession({
   }, [sessionId]);
 
   const handleChatEvent = useCallback(
-    (event: unknown) => {
-      if (!event || typeof event !== "object") return;
-      const record = event as Record<string, unknown>;
-      if (record.type === "compaction") {
-        const phase =
-          record.phase === "start"
-            ? "start"
-            : record.phase === "complete"
-              ? "complete"
-              : record.phase === "error"
-                ? "error"
-                : "idle";
-        setCompaction({ phase });
-        return;
-      }
-      if (record.type === "deep_research_progress") {
-        setDeepResearch((state) =>
-          reduceDeepResearchProgress(state, {
-            phase: record.phase,
-            message:
-              typeof record.message === "string"
-                ? record.message
-                : "Deep Research is running",
-            activities: record.activities,
-            stats: record.stats,
-          }),
-        );
-        return;
-      }
-      if (record.type === "message_end") {
-        setDeepResearch(resetDeepResearchActivity());
-        void refreshContextUsage();
-        return;
-      }
-      if (record.type === "queued_message_applied") {
-        const clientMessageId =
-          typeof record.clientMessageId === "string"
-            ? record.clientMessageId
-            : null;
-        if (clientMessageId) {
-          const item = queuedItemsRef.current.find(
-            (entry) => entry.id === clientMessageId,
-          );
-          if (item) {
+    (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
+      if (event.type === "data") {
+        switch (event.name) {
+          case "compactionStatus":
+            setCompaction({ phase: event.data.phase });
+            return;
+          case "deepResearchProgress":
+            setDeepResearch((state) =>
+              reduceDeepResearchProgress(state, event.data),
+            );
+            return;
+          case "queuedMessageApplied": {
+            const item = queuedItemsRef.current.find(
+              (entry) => entry.id === event.data.clientMessageId,
+            );
+            if (!item) return;
             chatRef.current?.setMessages((current) => {
               const exists = current.some(
                 (message) =>
                   message.role === "user" &&
                   readChatMessageMeta(message.metadata).clientMessageId ===
-                    clientMessageId,
+                    event.data.clientMessageId,
               );
               if (exists) return current;
-              const parts: UIMessage["parts"] = [
+              const parts: UIMessagePart<ChatDataMap>[] = [
                 ...item.attachments.map((attachment) => ({
                   id: crypto.randomUUID(),
                   type: "attachment" as const,
@@ -1367,8 +1386,7 @@ function ChatSession({
                   role: "user",
                   parts,
                   metadata: withChatMessageMeta(undefined, {
-                    sessionId,
-                    clientMessageId,
+                    clientMessageId: event.data.clientMessageId,
                     createdAt: new Date().toISOString(),
                     documentIds: item.documentIds,
                     ...(item.contextSnippet
@@ -1378,26 +1396,34 @@ function ChatSession({
                 },
               ];
             });
-            queueActions.applyAck(clientMessageId);
-            if (item.attachments.length > 0) void refreshSessionImages();
+            queueActions.applyAck(event.data.clientMessageId);
+            if (event.data.attachmentCount > 0) {
+              void refreshSessionImages();
+            }
+            return;
           }
         }
         return;
       }
-      if (record.type === "error") {
-        const errorText =
-          record.error instanceof Error
-            ? record.error.message
-            : typeof record.error === "string"
-              ? record.error
-              : "The agent run failed";
-        setComposerError(`Run failed: ${errorText}`);
-        setQueueHold(true);
-        const failedText = failedUserMessageText(messagesRef.current);
-        if (failedText !== null) {
-          // The editor is read-only while streaming; apply once the stream ends.
-          pendingFailedTextRef.current = failedText;
-        }
+
+      switch (event.type) {
+        case "message_end":
+          setDeepResearch(resetDeepResearchActivity());
+          void refreshContextUsage();
+          return;
+        case "error":
+          setComposerError(`Run failed: ${event.error.message}`);
+          setQueueHold(true);
+          {
+            const failedText = failedUserMessageText(messagesRef.current);
+            if (failedText !== null) {
+              // The editor is read-only while streaming; apply once the stream ends.
+              pendingFailedTextRef.current = failedText;
+            }
+          }
+          return;
+        default:
+          return;
       }
     },
     [queueActions, refreshContextUsage, refreshSessionImages],
@@ -1406,68 +1432,33 @@ function ChatSession({
   const chat = useChat({
     transport: chatTransport,
     initialMessages,
-        // Resume is driven explicitly by the run-status join effect: a stale
-        // snapshot must never replace the fresh history load (which carries
-        // compaction dividers / final messages).
-        resume: { key: sessionId, storage: "sessionStorage", auto: false },
-    createRequest: ({ coreMessages, uiMessages, resume }) => {
-      const last = uiMessages.at(-1);
-      const documentIds = documentIdsFromMetadata(last?.metadata);
-
-      return {
-        messages: coreMessages,
-        stream: true as const,
-        sessionId,
-        documentIds,
-        model: selectedModelRef.current,
-        reasoningEffort: selectedReasoningEffortRef.current,
-        webSearchEnabled: webSearchEnabledRef.current,
-        imageGenerationEnabled: imageGenerationEnabledRef.current,
-        deepResearchEnabled: deepResearchEnabledRef.current,
-        imageGenSettings: imageGenSettingsRef.current,
-        ...(resume ? { resume } : {}),
-      };
-    },
-    humanInput: {
-      // Custom decideApproval: defaultDecideApproval fetches without
-      // credentials, which 401s cross-origin (platform :3000 → API :3001).
-      // The api.ts helper sends credentials: "include", maps 401 →
-      // ApiAuthError, and carries optional grantScope/overrideArgs.
-      decideApproval: async (decision) => {
-        await decideApproval(decision);
-        // Server replies { ok: true } — not a ToolApproval. The stream event
-        // carries the resolved approval state, so nothing to return here.
-        return undefined;
-      },
-    },
+    // Resume is driven explicitly by the run-status join effect; the v1
+    // controller owns the version-3 snapshot and canonical request.
+    resume: { key: sessionId, storage: "sessionStorage", auto: false },
     onEvent: handleChatEvent,
     onError: (error) => {
       if (error instanceof ApiAuthError) {
         onAuthFailure();
         return;
       }
-      if (error instanceof EventStreamHttpError && error.response.status === 409) {
+      if (isAuthFailure(error)) {
+        onAuthFailure();
+        return;
+      }
+      if (isRunActiveConflict(error)) {
         // Another tab already holds the active-run lock for this session.
-        let runActive = true;
-        try {
-          const parsed: unknown = JSON.parse(error.body);
-          runActive =
-            typeof parsed === "object" &&
-            parsed !== null &&
-            (parsed as { code?: unknown }).code === "RUN_ACTIVE";
-        } catch {
-          // Unparseable body — fall back to the status check alone.
-        }
-        if (runActive) {
-          setComposerError(
-            "This session is already being processed in another tab.",
-          );
-          chatRef.current?.setMessages((current) => {
-            const last = current.at(-1);
-            if (!last || last.role !== "user") return current;
-            return current.slice(0, -1);
-          });
-        }
+        setComposerError(
+          "This session is already being processed in another tab.",
+        );
+        chatRef.current?.setMessages((current) => {
+          const last = current.at(-1);
+          if (!last || last.role !== "user") return current;
+          return current.slice(0, -1);
+        });
+        return;
+      }
+      if (error.name !== "AbortError") {
+        setComposerError("The chat request could not be completed.");
       }
     },
   });
@@ -1482,15 +1473,7 @@ function ChatSession({
   const resumeChatRef = useRef(chat.resume);
   resumeChatRef.current = chat.resume;
 
-  /**
-   * Stop button: ask the worker to end the run (including any pending
-   * approval / clarification waiters), finalize in-flight tool cards so they
-   * do not stay forever-"Working", then reset the local chat controller so
-   * status returns to idle and human-input panels close. `chat.stop()` alone
-   * aborts the fetch but leaves pending approvals/clarifications open and
-   * leaves tool parts at `input-available`. Composer.Stop still calls
-   * `chat.stop()` after this — harmless double abort.
-   */
+  /** Stop the server run, abort the v1 stream, and finalize visible tool cards. */
   const handleStopRun = useCallback(() => {
     const current = chatRef.current;
     if (!current) return;
@@ -1500,7 +1483,14 @@ function ChatSession({
         // best-effort: local reset still stops the client stream
       });
     }
-    current.reset(finalizeInterruptedTools(current.messages));
+    stopChatPreservingMessages(
+      {
+        messages: current.messages,
+        stop: () => current.stop(),
+        setMessages: (messages) => current.setMessages([...messages]),
+      },
+      (messages) => finalizeInterruptedTools([...messages]),
+    );
     setQueueHold(true);
   }, []);
 
@@ -1699,7 +1689,7 @@ function ChatSession({
     setContextUsage(null);
     setContextUsageError(false);
     setCompaction({ phase: "idle" });
-    setDeepResearch({ phase: "idle", message: "" });
+    setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
     void refreshSessionDocuments();
     void refreshSessionImages();
@@ -1792,25 +1782,24 @@ function ChatSession({
         const key = `anvia:chat-resume:${sessionId}`;
         if (status.status === "running" && status.streamId) {
           const stored = sessionStorage.getItem(key);
-          if (!stored) {
-            sessionStorage.setItem(
-              key,
-              JSON.stringify({
-                version: 1,
-                streamId: status.streamId,
-                lastEventId: 0,
-                messages: messagesRef.current,
-              }),
+          const validation = validateChatResumeSnapshot(stored, status.streamId);
+          if (!validation.valid) {
+            if (stored !== null) sessionStorage.removeItem(key);
+            setComposerError(
+              validation.reason === "stale"
+                ? "This browser resume state belongs to a previous run. Reload the session to recover it."
+                : validation.reason === "legacy"
+                ? "This session has an old browser resume state. Reload the session to recover it."
+                : "This active run has no valid browser resume state. Reload the session to recover it.",
             );
+            return;
           }
-          // Join regardless of whether a state snapshot already exists
-          // (auto-resume is off; this is the only rejoin path).
+          // The v1 controller validates the version-3 snapshot and preserves
+          // its canonical request and cursor; this route never reconstructs it.
           void resumeChatRef.current();
         } else {
-          // No active run: drop any leftover resume snapshot so it can never
-          // replace the fresh history load (e.g. compaction dividers) on a
-          // later mount.
-          sessionStorage.removeItem(key);
+          // The v1 controller owns snapshot cleanup after a terminal stream;
+          // this route never mutates the canonical resume record.
         }
       } catch {
         // ignore — resume state (if any) still handles rejoin
@@ -2361,7 +2350,6 @@ function ChatSession({
       const sendPromise = chatRef.current!.sendMessage({
         text: input.text,
         metadata: withChatMessageMeta(undefined, {
-          sessionId,
           documentIds,
           attachedDocuments,
           createdAt: new Date().toISOString(),
@@ -2416,7 +2404,7 @@ function ChatSession({
    * a fresh run (queue-held items wait for "Send now" / hold release).
    */
   useEffect(() => {
-    if (chat.status !== "idle") return;
+    if (chat.status !== "ready") return;
     if (!initialMessages) return;
     if (queueHold || autoFlushBusyRef.current) return;
     if (nextFlushableItem(queuedItemsRef.current) === null) return;
@@ -2618,7 +2606,6 @@ function ChatSession({
       await currentChat.sendMessage({
         text: trimmed,
         metadata: withChatMessageMeta(undefined, {
-          sessionId,
           documentIds: meta.documentIds ?? [],
           createdAt: new Date().toISOString(),
           clientMessageId: createClientMessageId(),
