@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Message } from "@anvia/core";
 import { buildSessionSnapshotText } from "./session-snapshot.js";
 
 describe("buildSessionSnapshotText", () => {
@@ -99,5 +100,32 @@ describe("buildSessionSnapshotText", () => {
     ]);
     expect(out).toContain("zzz");
     expect(out).not.toContain("old message");
+  });
+
+  it("extracts strict v1 string and text-part user messages without attachment bytes", () => {
+    const out = buildSessionSnapshotText([
+      {
+        createdAt: new Date("2026-08-24T00:00:00.000Z"),
+        text: { role: "user", content: "plain v1 prompt" } as Message,
+      },
+      {
+        createdAt: new Date("2026-08-24T00:01:00.000Z"),
+        text: {
+          role: "user",
+          content: [
+            { type: "text", text: "text part prompt" },
+            {
+              type: "file",
+              data: { type: "data", data: "aGVsbG8=" },
+              mediaType: "application/pdf",
+            },
+          ],
+        } as Message,
+      },
+    ]);
+
+    expect(out).toContain("plain v1 prompt");
+    expect(out).toContain("text part prompt");
+    expect(out).not.toContain("aGVsbG8=");
   });
 });

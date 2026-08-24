@@ -12,6 +12,7 @@
     "db:generate": "pnpm with-env prisma generate",
     "db:deploy": "pnpm with-env prisma migrate deploy",
     "db:seed": "pnpm with-env tsx prisma/seed.ts",
+    "memory:anvia-v1:migrate": "pnpm with-env tsx scripts/migrate-anvia-v1-memory.ts",
     "smoke:auth": "pnpm with-env tsx scripts/smoke-auth.ts",
     "test": "vitest run",
     "with-env": "dotenv -e ../../.env -- "

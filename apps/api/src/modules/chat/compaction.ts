@@ -1,5 +1,4 @@
-import { ExtractorBuilder } from "@anvia/core/extractor";
-import type { CompletionModel, Message, Usage } from "@anvia/core";
+import { parseMessage, type CompletionModel, type Message, type Usage } from "@anvia/core";
 import type { extractTextFromMessageJson } from "@assingment/agent";
 import z from "zod";
 import { prisma } from "../../utils/prisma.js";
@@ -15,6 +14,43 @@ export type MemoryGroup = {
   messages: Message[];
 };
 
+function hasStrictToolCall(message: Message): boolean {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return false;
+  }
+  return message.content.some(
+    (part) => isRecord(part) && part.type === "tool-call",
+  );
+}
+
+function strictToolCallIds(message: Message): Set<string> {
+  const ids = new Set<string>();
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return ids;
+  }
+  for (const part of message.content) {
+    if (
+      isRecord(part) &&
+      part.type === "tool-call" &&
+      typeof part.toolCallId === "string"
+    ) {
+      ids.add(part.toolCallId);
+    }
+  }
+  return ids;
+}
+
+function strictToolResultIds(message: Message): string[] {
+  if (message.role !== "tool" || !Array.isArray(message.content)) return [];
+  return message.content.flatMap((part) =>
+    isRecord(part) &&
+    part.type === "tool-result" &&
+    typeof part.toolCallId === "string"
+      ? [part.toolCallId]
+      : [],
+  );
+}
+
 /**
  * One compaction record. Segments are stored in
  * `AgentMemorySession.metadata.compaction` — memory rows are never deleted or
@@ -29,10 +65,10 @@ export type CompactionSegment =
  * Sequential pass over memory messages:
  * - system messages each form their own group
  * - user starts a new group
- * - assistant with tool calls merges with the immediately following tool
- *   messages into one group; plain assistant text is its own group
- * - tool messages not preceded by a tool-call assistant belong to the
- *   previous group (a leading orphan tool starts a "tool" group)
+ * - assistant with strict tool-call parts merges with immediately following
+ *   matching tool-result messages into one atomic group; plain assistant text
+ *   is its own group
+ * - unmatched/orphan tool messages stay in a separate "tool" group
  */
 export function groupMemoryMessages(messages: Message[]): MemoryGroup[] {
   const groups: MemoryGroup[] = [];
@@ -45,7 +81,23 @@ export function groupMemoryMessages(messages: Message[]): MemoryGroup[] {
       groups.push({ kind: "assistant", messages: [message] });
     } else {
       const previous = groups[groups.length - 1];
-      if (previous) {
+      const resultIds = strictToolResultIds(message);
+      const assistantToolCallIds =
+        previous?.kind === "assistant"
+          ? previous.messages.flatMap((item) => [
+              ...strictToolCallIds(item),
+            ])
+          : [];
+      if (
+        previous?.kind === "assistant" &&
+        previous.messages.some(hasStrictToolCall) &&
+        resultIds.length > 0 &&
+        resultIds.every((id) => assistantToolCallIds.includes(id))
+      ) {
+        previous.messages.push(message);
+      } else if (previous?.kind === "tool") {
+        // Keep consecutive orphan results together without pairing them with
+        // a user or plain assistant message.
         previous.messages.push(message);
       } else {
         groups.push({ kind: "tool", messages: [message] });
@@ -215,18 +267,137 @@ export function buildCompactedView(
   return view;
 }
 
-/** `[role] text` line; falls back to JSON when the message has no extractable text. */
-function renderMessageForSummary(
+function strictMessageText(message: Message): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+
+  const parts: string[] = [];
+  for (const value of message.content) {
+    if (!isRecord(value)) continue;
+    if (value.type === "text" && typeof value.text === "string") {
+      parts.push(value.text);
+      continue;
+    }
+    if (value.type === "tool-call") {
+      const name = typeof value.toolName === "string" ? value.toolName : "tool";
+      const input = safeSummaryJson(value.input);
+      let serializedInput: string | undefined;
+      try {
+        const serialized = JSON.stringify(input);
+        serializedInput = serialized === undefined ? undefined : serialized;
+      } catch {
+        serializedInput = undefined;
+      }
+      parts.push(
+        serializedInput === undefined
+          ? `[tool call ${name}]`
+          : `[tool call ${name} input ${serializedInput}]`,
+      );
+      continue;
+    }
+    if (value.type !== "tool-result" || !isRecord(value.output)) continue;
+
+    const output = value.output;
+    if (
+      (output.type === "text" || output.type === "error-text") &&
+      typeof output.value === "string"
+    ) {
+      parts.push(output.value);
+    } else if (
+      (output.type === "json" || output.type === "error-json") &&
+      output.value !== undefined
+    ) {
+      try {
+        parts.push(JSON.stringify(safeSummaryJson(output.value)));
+      } catch {
+        // Ignore an unserializable result and keep the rest of the turn.
+      }
+    } else if (output.type === "execution-denied") {
+      parts.push(
+        typeof output.reason === "string"
+          ? output.reason
+          : "Tool execution was denied.",
+      );
+    } else if (output.type === "content" && Array.isArray(output.value)) {
+      for (const content of output.value) {
+        if (
+          isRecord(content) &&
+          content.type === "text" &&
+          typeof content.text === "string"
+        ) {
+          parts.push(content.text);
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+function isLikelyBase64(value: string): boolean {
+  if (/^data:[^,]+;base64,/i.test(value)) return true;
+  return (
+    value.length >= 32 &&
+    value.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(value) &&
+    (value.includes("=") || value.length >= 32)
+  );
+}
+
+function safeSummaryJson(value: unknown, key?: string): unknown {
+  const keyLooksBinary =
+    key !== undefined && /(?:base64|bytes|blob|encoded|binary)/i.test(key);
+  const dataKeyLooksBinary =
+    typeof value === "string" &&
+    key === "data" &&
+    value.length >= 8 &&
+    /=+$/.test(value) &&
+    /^[A-Za-z0-9+/]+={1,2}$/.test(value);
+  if (
+    typeof value === "string" &&
+    (keyLooksBinary || dataKeyLooksBinary || isLikelyBase64(value))
+  ) {
+    return "[redacted binary data]";
+  }
+  if (Array.isArray(value)) return value.map((item) => safeSummaryJson(item));
+  if (!isRecord(value)) return value;
+  if (value.type === "image") {
+    return {
+      type: "image",
+      ...(typeof value.mediaType === "string"
+        ? { mediaType: value.mediaType }
+        : {}),
+    };
+  }
+  if (value.type === "file") {
+    return {
+      type: "file",
+      ...(typeof value.mediaType === "string"
+        ? { mediaType: value.mediaType }
+        : {}),
+      ...(typeof value.filename === "string"
+        ? { filename: value.filename }
+        : {}),
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([nestedKey, nested]) => [
+      nestedKey,
+      safeSummaryJson(nested, nestedKey),
+    ]),
+  );
+}
+
+/** `[role] text` line; falls back to sanitized JSON when no text is available. */
+export function renderMessageForSummary(
   message: Message,
   extractText: typeof extractTextFromMessageJson,
 ): string {
-  const content = message.content;
-  const text = typeof content === "string" ? content : extractText(message);
+  const text = strictMessageText(message) || extractText(message);
   if (text.trim().length > 0) {
     return `[${message.role}] ${text}`;
   }
   try {
-    return `[${message.role}] ${JSON.stringify(message)}`;
+    return `[${message.role}] ${JSON.stringify(safeSummaryJson(message))}`;
   } catch {
     return `[${message.role}]`;
   }
@@ -252,17 +423,18 @@ async function summarizeMessages(input: {
     .map((message) => renderMessageForSummary(message, extractTextFromMessageJson))
     .filter(Boolean)
     .join("\n");
-  const extractor = new ExtractorBuilder(input.model, summarySchema)
-    .instructions(
-      [
-        ...COMPACTION_SUMMARY_INSTRUCTIONS,
-        `Token budget: at most ${input.budgetTokens} tokens for the summary.`,
-      ].join("\n"),
-    )
-    .retries(1)
-    .build();
-  const result = await extractor.extractWithUsage(text);
-  return { summary: result.data.summary.trim(), usage: result.usage };
+  const { extract } = await import("@anvia/core/extractor");
+  const result = await extract({
+    model: input.model,
+    text,
+    outputSchema: summarySchema,
+    instructions: [
+      COMPACTION_SUMMARY_INSTRUCTIONS,
+      `Token budget: at most ${input.budgetTokens} tokens for the summary.`,
+    ].join("\n"),
+    retries: { maxAttempts: 2 },
+  });
+  return { summary: result.output.summary.trim(), usage: result.usage };
 }
 
 /**
@@ -295,7 +467,7 @@ export async function compactSessionMemory(input: {
     select: { position: true, message: true },
   });
   const filteredRows = rows
-    .map((row) => ({ position: row.position, message: row.message as Message }))
+    .map((row) => ({ position: row.position, message: parseMessage(row.message) }))
     .filter(
       (row) =>
         !(isRecord(row.message.metadata) && row.message.metadata.kind === "error"),

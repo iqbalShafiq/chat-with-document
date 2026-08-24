@@ -20,7 +20,7 @@
 - Follow `superpowers:test-driven-development`: demonstrate each focused RED failure before production edits, implement the smallest coherent GREEN change, then refactor while green.
 - On any unexpected failure, invoke `superpowers:systematic-debugging` before changing code. Record root cause; do not weaken assertions to hide provider/protocol flakes.
 - Preserve unrelated user changes. Stage exact intended-file allowlists for every commit.
-- No Prisma migration is expected. Run schema compatibility checks; add an additive/backward-compatible migration only if the check proves a delta.
+- No Prisma schema migration is expected. Run schema compatibility checks; add an additive/backward-compatible schema migration only if the check proves a delta. Persisted v0 message JSON must be normalized once by the audited, idempotent Task 7 command before v1 workers start; do not add a runtime dual parser.
 - Never serialize secrets, client instances, Prisma handles, or provider SDK objects into Redis/BullMQ/continuations.
 - Do not remove queued follow-ups, editable image approvals, app compaction, citations, or Deep Research behavior to make the upgrade easier. Clarification must move to native required-answer question semantics; do not preserve the old multi-select/skip/timeout protocol as compatibility code.
 - Do not add deterministic LLM fallbacks or stub-backed LLM acceptance gates. Final integration and E2E gates use the real DeepSeek V4 Flash model with reasoning effort `max`.
@@ -344,6 +344,10 @@ git commit -m "refactor(agent): adopt Anvia v1 agents and messages"
 ### Task 7: Adapt Prisma memory and prove data compatibility
 
 **Files:**
+- Create: `apps/api/src/modules/chat/anvia-v1-memory-migration.ts`
+- Create: `apps/api/src/modules/chat/anvia-v1-memory-migration.test.ts`
+- Create: `apps/api/scripts/migrate-anvia-v1-memory.ts`
+- Modify: `apps/api/package.json`
 - Modify: `apps/api/src/modules/chat/build-run-input.ts`
 - Modify: `apps/api/src/modules/chat/memory-sanitizer.ts`
 - Modify: `apps/api/src/modules/chat/memory-sanitizer.test.ts`
@@ -357,11 +361,11 @@ git commit -m "refactor(agent): adopt Anvia v1 agents and messages"
 
 **Interfaces:**
 - Consumes: existing `AgentMemory*` rows and session/user identity.
-- Produces: v1 `PrismaMemoryStore`, `MemoryScope` calls, strict-message compaction/snapshots, no data loss.
+- Produces: v1 `PrismaMemoryStore`, `MemoryScope` calls, strict-message compaction/snapshots, and an audited one-time v0-message normalization with no data loss or permanent compatibility parser.
 
-- [ ] **Step 1: Add RED memory compatibility tests**
+- [ ] **Step 1: Add RED memory compatibility and normalization tests**
 
-Seed representative existing user, assistant, tool, reasoning, attachment, citation, compacted-summary, and failed-run rows. Assert v1 store load, append, clear, retry cleanup, session snapshot, and profile inputs preserve required content and ownership.
+Seed representative existing user, assistant, tool, reasoning, image/document attachment, citation, compacted-summary, and failed-run rows from the published v0.26 message contract. Prove the unmodified v1 parser rejects the legacy shapes. Assert the normalizer maps every losslessly convertible shape to strict v1, preserves metadata/call pairing/citations, derives required tool names only from an unambiguous matching call, rejects ambiguous/orphan rows, and leaves already-v1 rows byte-for-byte unchanged. Cover both `AgentMemoryMessage.message` and `AgentMemoryError.messages`.
 
 - [ ] **Step 2: Construct and validate v1 store**
 
@@ -371,7 +375,11 @@ Replace removed factory with `new PrismaMemoryStore({ client: prisma, ... })`, e
 
 Keep application compaction enabled and Anvia automatic compaction disabled. Update all message parsing/building to strict v1 structures. Prove tool-call/result adjacency, citations, client message ids, attachment stripping, and summary divider behavior.
 
-- [ ] **Step 4: Verify schema compatibility before any migration**
+- [ ] **Step 4: Implement the one-time message normalization command**
+
+The command defaults to dry-run and reports anonymized counts only. `--write` first completes a global read-only audit, aborts on any unconvertible row, then rewrites per memory session in transactions while v0 writers/v1 workers are quiesced. It is idempotent and resumable: strict-v1 rows are skipped and rerunning after interruption converges without duplicate rows or position changes. Never disable v1 `validateMessages` and never call this converter from the runtime load path.
+
+- [ ] **Step 5: Verify schema compatibility before any schema migration**
 
 ```bash
 pnpm --filter api exec prisma validate
@@ -379,13 +387,14 @@ pnpm --filter api db:generate
 git diff --exit-code -- apps/api/prisma/schema.prisma
 ```
 
-Compare the three `AgentMemory*` models with the official v1 memory-prisma schema. Expected: no schema change; the app's extra `[userId, updatedAt]` index remains additive. If a real delta appears, stop, add a RED migration test, and design an additive/backward-compatible migration before proceeding.
+Compare the three `AgentMemory*` models with the official v1 memory-prisma schema. Expected: no schema change; the app's extra `[userId, updatedAt]` index remains additive. This check is independent of the required message-JSON normalization. If a real schema delta appears, stop, add a RED schema-migration test, and design an additive/backward-compatible migration before proceeding.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [ ] **Step 6: Run GREEN and commit**
 
 ```bash
-pnpm --filter api test -- src/modules/chat/memory-sanitizer.test.ts src/modules/chat/compaction.test.ts src/modules/chat/session-snapshot.test.ts
-git add apps/api/src/modules/chat apps/api/prisma/schema.prisma
+pnpm --filter api test -- src/modules/chat/anvia-v1-memory-migration.test.ts src/modules/chat/memory-sanitizer.test.ts src/modules/chat/compaction.test.ts src/modules/chat/session-snapshot.test.ts
+pnpm --filter api memory:anvia-v1:migrate
+git add apps/api/package.json apps/api/src/modules/chat apps/api/scripts/migrate-anvia-v1-memory.ts apps/api/prisma/schema.prisma
 git commit -m "refactor(api): adapt durable memory to Anvia v1"
 ```
 

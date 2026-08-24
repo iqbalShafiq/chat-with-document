@@ -1,4 +1,4 @@
-import type { Message } from "@anvia/core/completion";
+import { parseMessage, type Message } from "@anvia/core";
 import {
   citationsToJsonValue,
   extractTextFromMessageJson,
@@ -89,7 +89,10 @@ export async function loadEnrichedMemoryMessages(
 
   const output: Message[] = [];
   for (const row of rows) {
-    const message = row.message as Message;
+    // This raw query exists to preserve row positions and timestamps for the
+    // UI, but it must retain the same strict v1 validation as PrismaMemoryStore.
+    // Legacy v0 JSON is normalized offline before workers/readers run.
+    const message = parseMessage(row.message);
 
     // Tool / system rows must stay metadata-free for Anvia UI conversion.
     if (row.role === "tool" || message.role === "tool") {

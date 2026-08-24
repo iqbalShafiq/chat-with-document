@@ -21,14 +21,18 @@ describe("estimateMessageTokens", () => {
     expect(estimateMessageTokens(message)).toBe(4 + 100);
   });
 
-  it("counts tool_result nested text parts", () => {
+  it("counts strict v1 tool-result content text parts", () => {
     const message = {
       role: "tool",
       content: [
         {
-          type: "tool_result",
-          callId: "c1",
-          content: [{ type: "text", text: "a".repeat(400) }],
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "search_docs",
+          output: {
+            type: "content",
+            value: [{ type: "text", text: "a".repeat(400) }],
+          },
         },
       ],
     };

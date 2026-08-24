@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Message } from "@anvia/core";
+const db = vi.hoisted(() => ({
+  agentMemorySession: {
+    findUnique: vi.fn(),
+  },
+  agentMemoryMessage: {
+    findMany: vi.fn(),
+  },
+}));
+
+vi.mock("../../utils/prisma.js", () => ({ prisma: db }));
+
 import {
   buildCompactedView,
+  compactSessionMemory,
   findCompactionBoundary,
   groupMemoryMessages,
+  renderMessageForSummary,
   truncateGroupsToTarget,
   type CompactionSegment,
 } from "./compaction.js";
@@ -22,9 +35,10 @@ function assistantWithToolCall(id: string): Message {
     role: "assistant",
     content: [
       {
-        type: "tool_call",
-        id,
-        function: { name: "search_docs", arguments: "{}" },
+        type: "tool-call",
+        toolCallId: id,
+        toolName: "search_docs",
+        input: {},
       },
     ],
   } as Message;
@@ -35,9 +49,13 @@ function toolResult(id: string): Message {
     role: "tool",
     content: [
       {
-        type: "tool_result",
-        id,
-        content: [{ type: "text", text: "result payload" }],
+        type: "tool-result",
+        toolCallId: id,
+        toolName: "search_docs",
+        output: {
+          type: "content",
+          value: [{ type: "text", text: "result payload" }],
+        },
       },
     ],
   } as Message;
@@ -108,23 +126,135 @@ describe("groupMemoryMessages", () => {
     expect(groups[1]!.messages[1]).toMatchObject({ role: "tool" });
   });
 
+  it("does not pair a tool result with a different strict tool-call id", () => {
+    const groups = groupMemoryMessages([
+      assistantWithToolCall("call-1"),
+      toolResult("call-2"),
+    ]);
+
+    expect(groups.map((group) => group.kind)).toEqual(["assistant", "tool"]);
+    expect(groups[0]!.messages).toHaveLength(1);
+    expect(groups[1]!.messages).toHaveLength(1);
+  });
+
   it("gives plain assistant text its own group", () => {
     const groups = groupMemoryMessages([user("a"), assistant("reply")]);
     expect(groups.map((group) => group.kind)).toEqual(["user", "assistant"]);
     expect(groups[1]!.messages).toHaveLength(1);
   });
 
-  it("attaches orphan tool messages to the previous group", () => {
+  it("does not attach a tool result to an assistant without a strict tool-call part", () => {
+    const groups = groupMemoryMessages([
+      user("a"),
+      assistant("reply"),
+      toolResult("orphan-result"),
+    ]);
+
+    expect(groups.map((group) => group.kind)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+    ]);
+    expect(groups[1]!.messages).toHaveLength(1);
+    expect(groups[2]!.messages).toHaveLength(1);
+  });
+
+  it("keeps an orphan tool result in its own group", () => {
     const groups = groupMemoryMessages([user("a"), toolResult("c1")]);
-    expect(groups).toHaveLength(1);
+    expect(groups).toHaveLength(2);
     expect(groups[0]!.kind).toBe("user");
-    expect(groups[0]!.messages).toHaveLength(2);
+    expect(groups[0]!.messages).toHaveLength(1);
+    expect(groups[1]!.kind).toBe("tool");
+    expect(groups[1]!.messages).toHaveLength(1);
   });
 
   it("creates a tool group for a leading orphan tool message", () => {
     const groups = groupMemoryMessages([toolResult("c1")]);
     expect(groups[0]!.kind).toBe("tool");
     expect(groups[0]!.messages).toHaveLength(1);
+  });
+});
+
+describe("renderMessageForSummary", () => {
+  it("renders strict v1 tool-result text without serializing binary file data", () => {
+    const message = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "view_image",
+          output: {
+            type: "content",
+            value: [
+              { type: "text", text: "The image shows a red panda." },
+              {
+                type: "file",
+                data: { type: "data", data: "aGVsbG8=" },
+                mediaType: "image/png",
+              },
+            ],
+          },
+        },
+      ],
+    } as Message;
+
+    expect(renderMessageForSummary(message, () => "")).toBe(
+      "[tool] The image shows a red panda.",
+    );
+  });
+
+  it("keeps safe tool-call inputs while redacting embedded/base64 data", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "call-1",
+          toolName: "search_docs",
+          input: {
+            query: "budget",
+            attachment: {
+              type: "file",
+              data: { type: "data", data: "secret-base64" },
+              mediaType: "image/png",
+            },
+            encoded: "aGVsbG8=",
+            customerCode: "ABCDEFGHIJKLMNOP",
+          },
+        },
+      ],
+    } as Message;
+
+    const summary = renderMessageForSummary(message, () => "");
+
+    expect(summary).toContain('"query":"budget"');
+    expect(summary).toContain('"customerCode":"ABCDEFGHIJKLMNOP"');
+    expect(summary).toContain("[tool call search_docs input");
+    expect(summary).not.toContain("secret-base64");
+    expect(summary).not.toContain("aGVsbG8=");
+  });
+
+  it("redacts binary-looking values in JSON tool results", () => {
+    const message = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "download",
+          output: {
+            type: "json",
+            value: { filename: "brief.pdf", data: "aGVsbG8=" },
+          },
+        },
+      ],
+    } as Message;
+
+    const summary = renderMessageForSummary(message, () => "");
+
+    expect(summary).toContain("brief.pdf");
+    expect(summary).not.toContain("aGVsbG8=");
   });
 });
 
@@ -252,5 +382,41 @@ describe("buildCompactedView", () => {
       summarized(1, "earlier"),
     ]);
     expect(view).toEqual([summaryMessage("earlier"), summaryMessage("later")]);
+  });
+});
+
+describe("compactSessionMemory persisted rows", () => {
+  it("strictly parses rows before the app-owned compaction pass", async () => {
+    db.agentMemorySession.findUnique.mockResolvedValue({
+      id: "memory-session-1",
+      metadata: {},
+    });
+    db.agentMemoryMessage.findMany.mockResolvedValue([
+      {
+        position: 1,
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              id: "call-1",
+              function: { name: "search_docs", arguments: "{}" },
+            },
+          ],
+        },
+      },
+    ]);
+
+    await expect(
+      compactSessionMemory({
+        sessionId: "session-1",
+        userId: "user-1",
+        windowTokens: 100,
+        keepTurns: 1,
+        triggerRatio: 0,
+        targetRatio: 0.5,
+        summaryBudgetRatio: 0.1,
+      }),
+    ).rejects.toThrow();
   });
 });

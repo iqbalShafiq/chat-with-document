@@ -254,7 +254,9 @@ export async function processChatRunJob(job: Job<ChatRunJobData>): Promise<void>
         });
     }
 
-    const memoryMessages = await runInput.memory.load({ sessionId, userId });
+    const memoryMessages = await runInput.memory.load({
+      scope: { sessionId, userId },
+    });
     const estimated = estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);
     const modelInfo = await findActiveModel(model);
     const windowTokens = modelInfo?.contextWindowTokens ?? 1_050_000;

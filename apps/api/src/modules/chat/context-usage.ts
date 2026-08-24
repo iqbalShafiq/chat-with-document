@@ -71,8 +71,10 @@ export async function computeContextUsage(input: {
   });
 
   const memoryMessages = await runInput.memory.load({
-    sessionId: input.sessionId,
-    userId: input.userId,
+    scope: {
+      sessionId: input.sessionId,
+      userId: input.userId,
+    },
   });
 
   const estimatedTokens =

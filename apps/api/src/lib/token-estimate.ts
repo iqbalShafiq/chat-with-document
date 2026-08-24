@@ -21,15 +21,33 @@ function countPart(part: unknown): number {
     case "input_image":
     case "output_image":
       return IMAGE_TOKENS;
-    case "tool_result": {
-      const content = part.content;
-      let total = 0;
-      if (Array.isArray(content)) {
-        for (const item of content) total += countPart(item);
-      } else if (isRecord(content)) {
-        total += countPart(content);
+    case "tool-result": {
+      const output = part.output;
+      if (!isRecord(output)) return 0;
+      if (output.type === "text" || output.type === "error-text") {
+        return typeof output.value === "string"
+          ? estimateTextTokens(output.value)
+          : 0;
       }
-      return total;
+      if (output.type === "json" || output.type === "error-json") {
+        try {
+          return estimateTextTokens(JSON.stringify(output.value));
+        } catch {
+          return 0;
+        }
+      }
+      if (output.type === "execution-denied") {
+        return estimateTextTokens(
+          typeof output.reason === "string" ? output.reason : "",
+        );
+      }
+      if (output.type === "content" && Array.isArray(output.value)) {
+        return output.value.reduce(
+          (total, item) => total + countPart(item),
+          0,
+        );
+      }
+      return 0;
     }
     default: {
       try {

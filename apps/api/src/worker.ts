@@ -46,6 +46,10 @@ import {
   processChatRunJob,
   type ChatRunJobData,
 } from "./modules/chat/run-worker.js";
+import {
+  createMemoryValidationGate,
+  validateSanitizedMemoryStore,
+} from "./modules/chat/memory-sanitizer.js";
 import { closeContext7Mcp } from "./lib/context7-server.js";
 
 console.log("[worker] boot");
@@ -368,6 +372,14 @@ if (profileWorker) {
 }
 
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
+
+// Validate the Prisma memory adapter/delegates before the chat queue is
+// opened. Legacy v0 rows must be normalized offline; there is intentionally
+// no runtime compatibility parser here.
+const ensureMemoryStoreReady = createMemoryValidationGate(() =>
+  validateSanitizedMemoryStore(prisma),
+);
+await ensureMemoryStoreReady();
 
 const chatRunWorker = new Worker<ChatRunJobData>(
   CHAT_RUN_QUEUE,

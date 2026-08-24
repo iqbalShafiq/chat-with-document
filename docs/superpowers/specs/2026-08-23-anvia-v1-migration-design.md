@@ -178,7 +178,7 @@ Steering keeps the current Redis queue but targets the live v1 `AgentStream.stee
 
 ### 6.8 Memory and compaction
 
-Use `new PrismaMemoryStore({ client: prisma, ... })`, call `validate()` at worker startup, and use `{ scope: { sessionId, userId } }` for load/clear. The current Prisma models match v1 exactly except for an additive application index, so no schema migration or data rewrite is expected. Development must run a schema diff/generation check; create a migration only if that verification proves a real delta.
+Use `new PrismaMemoryStore({ client: prisma, ... })`, call `validate()` at worker startup, and use `{ scope: { sessionId, userId } }` for load/clear. The current Prisma models match v1 exactly except for an additive application index, so no schema migration is expected. However, direct verification against the published 0.26.0 and 1.0.1 message parsers proves that persisted v0 message JSON (`tool_call`, `tool_result`, legacy image/document sources, and reasoning content) is not accepted by v1 strict parsing. The cutover therefore includes an explicit one-time, idempotent data normalization command: dry-run/audit every `AgentMemoryMessage.message` and `AgentMemoryError.messages`, reject ambiguous or unconvertible rows without writing, then rewrite convertible rows in per-session transactions while chat workers are quiesced. Already-v1 rows are skipped, making interrupted execution safely resumable. The v1 runtime keeps strict validation and contains no legacy dual parser.
 
 Keep app-owned compaction for the first cutover because it also drives product context-usage behavior and has existing evidence. Do not enable Anvia automatic compaction simultaneously. Update compaction, sanitizer, profile, retry-cleanup, and session snapshot logic to strict structural messages and test tool/result/citation preservation. Native `memory_compaction` events may be adopted later after parity is demonstrated.
 
@@ -302,6 +302,6 @@ Observe error rate, stream resume failures, interaction suspension/resume counts
 - Native approval suspension is durable across request/worker lifetime and authorized/replay-safe.
 - Clarification uses native question interactions end to end.
 - Protocol-v3 framing, resume, queue steering, and custom progress coexist without raw undocumented events.
-- Memory data remains readable without unnecessary migration.
+- Memory data remains readable after the required one-time JSON normalization, with no permanent v0 parser or unnecessary schema migration.
 - Resources have explicit process lifecycle ownership.
 - The implementation plan traces every design decision to files, tests, commands, and fix loops.
