@@ -34,8 +34,15 @@ vi.mock("./approval-registry.js", () => ({
   }),
 }));
 
-const getInteraction = vi.fn();
-const stagePolicy = vi.fn();
+const { getInteraction, stagePolicy, findImageModel } = vi.hoisted(() => ({
+  getInteraction: vi.fn(),
+  stagePolicy: vi.fn(),
+  findImageModel: vi.fn(),
+}));
+
+vi.mock("../../utils/prisma.js", () => ({
+  prisma: { chatModel: { findFirst: findImageModel } },
+}));
 
 vi.mock("./interaction-store.js", async () => {
   const actual = await vi.importActual<typeof import("./interaction-store.js")>("./interaction-store.js");
@@ -79,6 +86,14 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
     vi.clearAllMocks();
     getInteraction.mockResolvedValue(record);
     stagePolicy.mockResolvedValue({ ...record, state: "staged" });
+    findImageModel.mockResolvedValue({
+      imageCapabilities: {
+        aspectRatios: ["1:1", "16:9"],
+        quality: ["auto", "high"],
+        background: ["opaque", "transparent"],
+        n: { min: 1, max: 4 },
+      },
+    });
   });
 
   it("validates the native response and writes only an interaction-scoped policy stage", async () => {
@@ -89,7 +104,7 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
       body: JSON.stringify({
         response,
         grantScope: "session",
-        overrideArgs: { prompt: "a different mountain landscape", aspectRatio: "16:9", n: 2 },
+        overrideArgs: { prompt: "a different mountain landscape", modelId: "image-model-1", aspectRatio: "16:9", n: 2 },
       }),
     });
 
@@ -103,7 +118,7 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
       toolName: "generate_image",
       responseFingerprint: interactionResponseFingerprint(response),
       grantScope: "session",
-      overrideArgs: { prompt: "a different mountain landscape", aspectRatio: "16:9", n: 2 },
+      overrideArgs: { prompt: "a different mountain landscape", modelId: "image-model-1", aspectRatio: "16:9", n: 2 },
     });
   });
 
@@ -112,12 +127,32 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
       { response: { type: "tool-approval", approved: false } },
       { response: { type: "tool-approval", approved: true }, overrideArgs: { unknown: true } },
       { response: { type: "tool-approval", approved: true }, overrideArgs: { n: 11 } },
+      { response: { type: "tool-approval", approved: true }, overrideArgs: { aspectRatio: "16:9" } },
+      { response: { type: "tool-approval", approved: true }, overrideArgs: { modelId: "image-model-1", aspectRatio: "unsupported" } },
       { response: { type: "tool-approval", approved: true }, grantScope: "all" },
     ]) {
       const result = await app.request(`/api/chat/interactions/${INTERACTION_ID}/stage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+      });
+      expect(result.status).toBe(400);
+    }
+    expect(stagePolicy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the authoritative image model or capabilities are unavailable", async () => {
+    for (const imageCapabilities of [null, { n: { min: 1, max: 4 }, unknown: true }]) {
+      findImageModel.mockResolvedValueOnce(
+        imageCapabilities === null ? null : { imageCapabilities },
+      );
+      const result = await app.request(`/api/chat/interactions/${INTERACTION_ID}/stage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          response: { type: "tool-approval", approved: true },
+          overrideArgs: { modelId: "missing-or-invalid", n: 2 },
+        }),
       });
       expect(result.status).toBe(400);
     }
@@ -198,7 +233,7 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         response: { type: "tool-approval", approved: true },
-        overrideArgs: { prompt: "changed" },
+        overrideArgs: { prompt: "changed", modelId: "image-model-1" },
       }),
     });
     expect(second.status).toBe(409);

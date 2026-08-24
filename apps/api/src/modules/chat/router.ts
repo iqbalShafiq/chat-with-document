@@ -220,7 +220,7 @@ function safeInteractionPolicyError(error: unknown, maskTerminal = false): Respo
 
 const imageOverrideCommonSchema = {
   prompt: z.string().min(3).max(4_000).optional(),
-  modelId: z.string().min(1).max(512).optional(),
+  modelId: z.string().min(1).max(512),
   aspectRatio: z.string().min(1).max(512).optional(),
   quality: z.string().min(1).max(512).optional(),
   background: z.string().min(1).max(512).optional(),
@@ -253,19 +253,55 @@ const SESSION_GRANTABLE_TOOLS = new Set([
   "edit_image",
 ]);
 
-function parseImageOverride(
+const authoritativeImageCapabilitiesSchema = z
+  .object({
+    quality: z.array(z.string().min(1).max(512)).min(1).max(64).optional(),
+    background: z.array(z.string().min(1).max(512)).min(1).max(64).optional(),
+    aspectRatios: z.array(z.string().min(1).max(512)).min(1).max(64).optional(),
+    resolutions: z.array(z.string().min(1).max(512)).min(1).max(64).optional(),
+    sizes: z.array(z.string().min(1).max(512)).min(1).max(64).optional(),
+    n: z.object({ min: z.number().int().min(1), max: z.number().int().min(1).max(100) }).strict().optional(),
+  })
+  .strict();
+
+async function parseImageOverride(
   toolName: string,
   value: unknown,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
+  let parsed: Record<string, unknown> | null = null;
   if (toolName === "generate_image") {
-    const parsed = generateImageOverrideSchema.safeParse(value);
-    return parsed.success ? (parsed.data as Record<string, unknown>) : null;
+    const result = generateImageOverrideSchema.safeParse(value);
+    parsed = result.success ? (result.data as Record<string, unknown>) : null;
+  } else if (toolName === "edit_image") {
+    const result = editImageOverrideSchema.safeParse(value);
+    parsed = result.success ? (result.data as Record<string, unknown>) : null;
   }
-  if (toolName === "edit_image") {
-    const parsed = editImageOverrideSchema.safeParse(value);
-    return parsed.success ? (parsed.data as Record<string, unknown>) : null;
+  if (!parsed || typeof parsed.modelId !== "string") return null;
+
+  const model = await prisma.chatModel.findFirst({
+    where: { modelId: parsed.modelId, outputType: "image", isActive: true },
+    select: { imageCapabilities: true },
+  });
+  const capabilities = authoritativeImageCapabilitiesSchema.safeParse(
+    model?.imageCapabilities,
+  );
+  if (!capabilities.success) return null;
+  const supported = capabilities.data;
+  if (
+    (parsed.aspectRatio !== undefined &&
+      (!supported.aspectRatios || !supported.aspectRatios.includes(String(parsed.aspectRatio)))) ||
+    (parsed.quality !== undefined &&
+      (!supported.quality || !supported.quality.includes(String(parsed.quality)))) ||
+    (parsed.background !== undefined &&
+      (!supported.background || !supported.background.includes(String(parsed.background)))) ||
+    (parsed.n !== undefined &&
+      (!supported.n ||
+        Number(parsed.n) < supported.n.min ||
+        Number(parsed.n) > supported.n.max))
+  ) {
+    return null;
   }
-  return null;
+  return parsed;
 }
 
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
@@ -953,7 +989,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     }
     let overrideArgs: Record<string, unknown> | undefined;
     if (candidate.overrideArgs !== undefined) {
-      const parsedOverride = parseImageOverride(record.request.toolName, candidate.overrideArgs);
+      const parsedOverride = await parseImageOverride(record.request.toolName, candidate.overrideArgs);
       if (!parsedOverride) {
         return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
       }

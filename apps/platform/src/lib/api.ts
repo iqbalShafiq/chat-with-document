@@ -1,4 +1,5 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
+import type { StageInteractionInput } from "#/lib/chat/interaction-response";
 
 const DEFAULT_API_PORT = 3001;
 
@@ -1167,44 +1168,134 @@ async function fetchChatCapabilitiesRemote(
   return data as WebCapabilities;
 }
 
-// ─── Approval decisions ──────────────────────────────────────────────────────
+// ─── Native interaction policy staging ─────────────────────────────────────
 
-export type DecideApprovalInput = {
-  approvalId: string;
-  approved: boolean;
-  reason?: string;
-  /** "session" persists a tool grant for the rest of the run; "once" (default) approves only the current call. */
-  grantScope?: "once" | "session";
-  /** UI-edited tool args staged for the tool's next call (e.g. image params). */
-  overrideArgs?: Record<string, unknown>;
-};
+const STAGE_OVERRIDE_KEYS = new Set([
+  "modelId",
+  "aspectRatio",
+  "quality",
+  "background",
+  "n",
+]);
 
-export async function decideApproval(
-  input: DecideApprovalInput,
+/**
+ * Stage application-owned policy for one native tool approval. The native
+ * response itself is sent by @anvia/react; this helper never answers it.
+ */
+export async function stageInteractionPolicy(
+  input: StageInteractionInput,
 ): Promise<void> {
+  if (!isValidStageInput(input)) {
+    throw new Error("Interaction policy request is invalid.");
+  }
+
   const response = await apiFetch(
-    `${API_BASE}/api/chat/approvals/${encodeURIComponent(input.approvalId)}/decision`,
+    `${API_BASE}/api/chat/interactions/${encodeURIComponent(input.interactionId)}/stage`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        approved: input.approved,
-        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        response: input.response,
         ...(input.grantScope !== undefined
           ? { grantScope: input.grantScope }
           : {}),
-        ...(input.overrideArgs && Object.keys(input.overrideArgs).length > 0
+        ...(input.overrideArgs !== undefined
           ? { overrideArgs: input.overrideArgs }
           : {}),
       }),
     },
   );
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "Failed to send approval decision");
+  if (response.ok) return;
+
+  const code = await safeResponseCode(response);
+  if (response.status === 404 || code === "INTERACTION_NOT_FOUND") {
+    throw new Error("This interaction is no longer available.");
   }
+  if (
+    response.status === 409 ||
+    code === "INTERACTION_STATE_CONFLICT" ||
+    code === "INTERACTION_POLICY_CONFLICT" ||
+    code === "INTERACTION_REPLAYED" ||
+    code === "INTERACTION_EXPIRED"
+  ) {
+    throw new Error("This interaction was already handled.");
+  }
+  if (
+    response.status === 503 ||
+    code === "INTERACTION_POLICY_UNAVAILABLE"
+  ) {
+    throw new Error("Interaction policy is temporarily unavailable.");
+  }
+  if (response.status === 400 || code === "INTERACTION_STAGE_INVALID") {
+    throw new Error("Interaction policy request is invalid.");
+  }
+  throw new Error("Interaction policy could not be staged.");
+}
+
+function isValidStageInput(value: unknown): value is StageInteractionInput {
+  if (!isRecord(value) || typeof value.interactionId !== "string") {
+    return false;
+  }
+  if (
+    value.interactionId.trim().length === 0 ||
+    value.interactionId.length > 256 ||
+    !isRecord(value.response) ||
+    value.response.type !== "tool-approval" ||
+    value.response.approved !== true
+  ) {
+    return false;
+  }
+  if (
+    value.response.reason !== undefined &&
+    (typeof value.response.reason !== "string" ||
+      value.response.reason.length > 500)
+  ) {
+    return false;
+  }
+  if (
+    value.grantScope !== undefined &&
+    value.grantScope !== "session"
+  ) {
+    return false;
+  }
+  if (value.overrideArgs !== undefined && !isValidStageOverride(value.overrideArgs)) {
+    return false;
+  }
+  return value.grantScope !== undefined || value.overrideArgs !== undefined;
+}
+
+function isValidStageOverride(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (
+    keys.length === 0 ||
+    !keys.includes("modelId") ||
+    keys.some((key) => !STAGE_OVERRIDE_KEYS.has(key))
+  ) {
+    return false;
+  }
+  return keys.every((key) => {
+    const item = value[key];
+    if (key === "n") {
+      return (
+        typeof item === "number" &&
+        Number.isInteger(item) &&
+        item >= 1 &&
+        item <= 10
+      );
+    }
+    return (
+      typeof item === "string" &&
+      item.trim().length > 0 &&
+      item.length <= 512
+    );
+  });
+}
+
+async function safeResponseCode(response: Response): Promise<string | undefined> {
+  const value: unknown = await response.json().catch(() => undefined);
+  if (!isRecord(value) || typeof value.code !== "string") return undefined;
+  return value.code;
 }
 
 // ─── Image generation ────────────────────────────────────────────────────────
@@ -1230,11 +1321,6 @@ export type GeneratedImageMeta = {
   source: string;
   sourceUrl: string | null;
   createdAt: string;
-};
-
-export type ClarificationResponseBody = {
-  answers: Record<string, string | string[]>;
-  skipped: string[];
 };
 
 export type ImageModelCapabilities = {
@@ -1602,24 +1688,4 @@ export async function removeContextSnippet(input: {
     { method: "DELETE" },
   );
   if (!response.ok) throw new Error("Failed to remove context snippet");
-}
-
-export async function submitClarification(input: {
-  clarificationId: string;
-  body: ClarificationResponseBody;
-}): Promise<void> {
-  const response = await apiFetch(
-    `${API_BASE}/api/chat/clarifications/${encodeURIComponent(input.clarificationId)}/response`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input.body),
-    },
-  );
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "Failed to send clarification response");
-  }
 }
