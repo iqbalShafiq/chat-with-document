@@ -68,7 +68,7 @@ export async function finalizeAssistantCitations(
   });
 
   await publishCitationGroundedness({
-    tracing,
+    client: tracing,
     rawAssistantText: rawText,
     sessionId,
   });

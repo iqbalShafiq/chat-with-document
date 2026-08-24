@@ -1,4 +1,4 @@
-import type { LangfuseTracing } from "@anvia/langfuse";
+import type { LangfuseClient } from "@anvia/langfuse";
 import {
   evaluateCitationGroundedness,
   type CitationGroundedness,
@@ -15,7 +15,8 @@ export type PublishGroundednessResult = {
  * or when Langfuse credentials are unavailable.
  */
 export async function publishCitationGroundedness(opts: {
-  tracing: LangfuseTracing;
+  client: LangfuseClient;
+  trace?: { traceId: string; observationId?: string };
   rawAssistantText: string;
   sessionId?: string;
 }): Promise<PublishGroundednessResult> {
@@ -25,7 +26,6 @@ export async function publishCitationGroundedness(opts: {
     return { groundedness, published: false };
   }
 
-  const trace = opts.tracing.getCurrentTrace?.();
   const metadata = {
     markerCount: groundedness.markerCount,
     trailerCount: groundedness.trailerCount,
@@ -36,8 +36,11 @@ export async function publishCitationGroundedness(opts: {
   };
 
   try {
-    await opts.tracing.score({
-      ...(trace?.traceId ? { traceId: trace.traceId } : {}),
+    await opts.client.score({
+      ...(opts.trace?.traceId ? { traceId: opts.trace.traceId } : {}),
+      ...(opts.trace?.observationId
+        ? { observationId: opts.trace.observationId }
+        : {}),
       name: "citation_groundedness",
       value: groundedness.score,
       dataType: "NUMERIC",
@@ -47,11 +50,6 @@ export async function publishCitationGroundedness(opts: {
           ? "Markers and trailer fully aligned"
           : "Partial citation alignment",
       metadata,
-    });
-
-    trace?.addEvent?.("citations.scored", {
-      score: groundedness.score,
-      ...metadata,
     });
 
     return { groundedness, published: true };
