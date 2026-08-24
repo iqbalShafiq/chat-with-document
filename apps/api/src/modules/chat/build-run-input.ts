@@ -440,6 +440,8 @@ export async function buildChatRunInput(input: {
       ...createWebSearchTools({
         tavilyClient: createTavilyClient(tavilyConfig.apiKey),
         enabled: webSearchEnabled,
+        hasGrant: (name) =>
+          grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
       }),
     );
     instructions.push(WEB_SEARCH_INSTRUCTION);
@@ -456,6 +458,8 @@ export async function buildChatRunInput(input: {
       ? createWebSearchTools({
           tavilyClient: createTavilyClient(tavilyConfig.apiKey),
           enabled: true,
+          hasGrant: (name) =>
+            grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         })
       : [];
     const researchTools = boundDeepResearchTools(
