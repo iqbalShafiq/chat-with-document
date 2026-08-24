@@ -34,18 +34,24 @@ export function createRememberUserProfileTool(
       section: z.enum(PROFILE_SECTION_KEYS).optional(),
     }),
     outputSchema: z.json(),
-    execute: async ({ fact, section }) => {
+    execute: async ({ fact, section }, context) => {
       try {
+        context.abortSignal?.throwIfAborted();
         await deps.waitForActiveJob();
+        context.abortSignal?.throwIfAborted();
         await deps.appendFact({ section: section ?? null, fact, source: deps.source });
+        context.abortSignal?.throwIfAborted();
         const { processed } = await deps.refreshNow();
+        context.abortSignal?.throwIfAborted();
         await deps.reschedule();
+        context.abortSignal?.throwIfAborted();
         return {
           ok: true,
           remembered: fact,
           processed,
         };
       } catch (error) {
+        context.abortSignal?.throwIfAborted();
         // Facts are already persisted; the chat's stream-complete tap will
         // still enqueue the background refresh, so nothing is lost.
         const message = error instanceof Error ? error.message : String(error);

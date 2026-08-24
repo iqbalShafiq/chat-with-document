@@ -304,14 +304,6 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
   return [tool];
 }
 
-const SEARCH_TOOL_NAMES = new Set([
-  "web_search",
-  "web_fetch",
-  "search_document_pages",
-  "get_document_next_page",
-  "extract_document_tables",
-]);
-
 /**
  * Wraps researcher retrieval tools with a shared hard call budget. The model
  * also receives the limit in its instructions, but this guard remains true
@@ -336,7 +328,7 @@ export function boundDeepResearchTools(
       parseInput: tool.parseInput,
       definition: (prompt: string) => tool.definition(prompt),
       call: async (args: unknown, context?: ToolCallContext) => {
-        const countsTowardBudget = SEARCH_TOOL_NAMES.has(tool.name);
+        const countsTowardBudget = metadata.kind === "retrieval";
         if (countsTowardBudget && calls >= limit) {
           return {
             error: `Deep Research retrieval budget exhausted after ${limit} calls. Synthesize from the evidence already collected.`,

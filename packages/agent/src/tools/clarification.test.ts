@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { JsonValue } from "@anvia/core";
 import { isQuestionTool } from "@anvia/core/tool";
 import { parseAgentInteractionRequest } from "@anvia/core/agent/interactions";
 import {
@@ -7,6 +8,15 @@ import {
 } from "./clarification.js";
 
 describe("createClarificationTool", () => {
+  function parseInput(
+    tool: ReturnType<typeof createClarificationTool>,
+    input: JsonValue,
+  ) {
+    expect(tool.parseInput).toBeTypeOf("function");
+    if (!tool.parseInput) throw new Error("Question tool must expose parseInput");
+    return tool.parseInput(input);
+  }
+
   it("creates Anvia's native request_clarification question tool", () => {
     const tool = createClarificationTool();
 
@@ -18,7 +28,7 @@ describe("createClarificationTool", () => {
     const tool = createClarificationTool();
 
     expect(
-      tool.parseInput({
+      parseInput(tool, {
         questions: [
           {
             id: "scope",
@@ -57,7 +67,7 @@ describe("createClarificationTool", () => {
   it("rejects duplicate question ids", () => {
     const tool = createClarificationTool();
 
-    const input = tool.parseInput({
+    const input = parseInput(tool, {
         questions: [
           { id: "scope", text: "First?" },
           { id: "scope", text: "Second?" },

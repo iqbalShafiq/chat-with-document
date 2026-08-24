@@ -252,6 +252,31 @@ describe("boundDeepResearchTools", () => {
     expect(exhausted).toMatchObject({ error: expect.stringContaining("budget exhausted") });
   });
 
+  it.each(["find_documents", "get_document_page_images"])(
+    "counts %s against the same retrieval budget",
+    async (toolName) => {
+      const originalCall = vi.fn(async () => ({ results: ["evidence"] }));
+      const wrapped = boundDeepResearchTools(
+        [
+          {
+            name: toolName,
+            definition: vi.fn(),
+            call: originalCall,
+          } as unknown as AnyTool,
+        ],
+        1,
+      )[0]!;
+
+      await wrapped.call({});
+      const exhausted = await wrapped.call({});
+
+      expect(originalCall).toHaveBeenCalledTimes(1);
+      expect(exhausted).toMatchObject({
+        error: expect.stringContaining("budget exhausted"),
+      });
+    },
+  );
+
   it("reports safe retrieval activity without exposing tool arguments", async () => {
     const progress: DeepResearchProgress[] = [];
     const wrapped = boundDeepResearchTools(

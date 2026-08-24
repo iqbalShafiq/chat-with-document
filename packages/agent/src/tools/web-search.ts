@@ -1,4 +1,4 @@
-import { createTool, type AnyTool } from "@anvia/core";
+import { createTool, type AnyTool, type ToolCallContext } from "@anvia/core";
 import { tavily, type TavilyClient } from "@tavily/core";
 import z from "zod";
 
@@ -99,6 +99,10 @@ function truncateDesc(text: string, limit: number): string {
   return t.length <= limit ? t : `${t.slice(0, limit).replace(/\s+\S*$/, "")}…`;
 }
 
+function throwIfAborted(context: ToolCallContext): void {
+  context.abortSignal?.throwIfAborted();
+}
+
 async function safeHasGrant(
   scope: WebSearchToolScope,
   toolName: "web_search" | "web_fetch",
@@ -155,8 +159,9 @@ export function createWebSearchTools(
       inputSchema: webSearchInput,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("web_search"),
-      execute: async ({ query, maxResults: requestedMax, timeRange }) => {
+      execute: async ({ query, maxResults: requestedMax, timeRange }, context) => {
         try {
+          throwIfAborted(context);
           const response = await scope.tavilyClient.search(query, {
             searchDepth: "basic",
             maxResults: Math.min(requestedMax ?? maxResults, MAX_RESULTS),
@@ -165,6 +170,7 @@ export function createWebSearchTools(
             includeImages: true,
             includeImageDescriptions: true,
           });
+          throwIfAborted(context);
           return {
             query: response.query,
             answer: response.answer ?? null,
@@ -192,6 +198,7 @@ export function createWebSearchTools(
             })),
           };
         } catch (error) {
+          throwIfAborted(context);
           return { query, answer: null, results: [], error: mapTavilyError(error) };
         }
       },
@@ -203,12 +210,14 @@ export function createWebSearchTools(
       inputSchema: webFetchInput,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("web_fetch"),
-      execute: async ({ url }) => {
+      execute: async ({ url }, context) => {
         try {
+          throwIfAborted(context);
           const response = await scope.tavilyClient.extract([url], {
             format: "markdown",
             includeImages: true,
           });
+          throwIfAborted(context);
           const result = response.results[0];
           if (!result) {
             const failed = response.failedResults[0];
@@ -227,6 +236,7 @@ export function createWebSearchTools(
             images: (result.images ?? []).slice(0, MAX_IMAGES),
           };
         } catch (error) {
+          throwIfAborted(context);
           return {
             url,
             title: null,

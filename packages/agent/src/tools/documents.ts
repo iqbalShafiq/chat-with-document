@@ -1,8 +1,16 @@
-import type { AnyTool, ToolResultContentPart } from "@anvia/core";
+import type {
+  AnyTool,
+  ToolCallContext,
+  ToolResultContentPart,
+} from "@anvia/core";
 import { createTool } from "@anvia/core";
 import { ToolOutput } from "@anvia/core/tool";
 import z from "zod";
 import { normalizePageImages } from "../document/types.js";
+
+function throwIfAborted(context: ToolCallContext): void {
+  context.abortSignal?.throwIfAborted();
+}
 
 export interface FindDocumentsPrisma {
   document: {
@@ -138,13 +146,15 @@ export function createFindDocumentsTool(deps: {
       limit: z.number().int().min(1).max(20).optional().default(5),
     }),
     outputSchema: z.json(),
-    execute: async ({ query, limit }) => {
+    execute: async ({ query, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
       );
+      throwIfAborted(context);
       if (sessionDocIds.length === 0) {
         return { results: [] };
       }
@@ -170,6 +180,7 @@ export function createFindDocumentsTool(deps: {
           pageCount: true,
         },
       });
+      throwIfAborted(context);
 
       return {
         results: documents.map((doc) => ({
@@ -229,13 +240,15 @@ export function createSearchDocumentPagesTool(deps: {
       limit: z.number().int().min(1).max(10).optional().default(5),
     }),
     outputSchema: z.json(),
-    execute: async ({ query, documentIds, limit }) => {
+    execute: async ({ query, documentIds, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
       );
+      throwIfAborted(context);
       if (sessionDocIds.length === 0) {
         return { results: [] };
       }
@@ -257,6 +270,7 @@ export function createSearchDocumentPagesTool(deps: {
         documentIds: scopedIds,
         limit,
       });
+      throwIfAborted(context);
 
       const byPage = new Map<string, ChunkSearchHit[]>();
       for (const hit of hits) {
@@ -304,13 +318,15 @@ export function createGetDocumentNextPageTool(deps: {
       pageIndex: z.number().int().min(0),
     }),
     outputSchema: z.json(),
-    execute: async ({ documentId, pageIndex }) => {
+    execute: async ({ documentId, pageIndex }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
       );
+      throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {
         return { found: false, reason: "Document not found in current session" };
       }
@@ -325,6 +341,7 @@ export function createGetDocumentNextPageTool(deps: {
         },
         select: { id: true, pageCount: true, filename: true },
       });
+      throwIfAborted(context);
 
       if (!document) {
         return { found: false, reason: "Document not found in current session" };
@@ -349,6 +366,7 @@ export function createGetDocumentNextPageTool(deps: {
           rawMarkdown: true,
         },
       });
+      throwIfAborted(context);
 
       if (!page) {
         return {
@@ -421,13 +439,15 @@ export function createGetDocumentPageImagesTool(deps: {
         .default(5)
         .describe("Max images to return"),
     }),
-    execute: async ({ documentId, pageIndex, limit }) => {
+    execute: async ({ documentId, pageIndex, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
       );
+      throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {
         return ToolOutput.content([
           {
@@ -444,6 +464,7 @@ export function createGetDocumentPageImagesTool(deps: {
         where: { documentId, pageIndex },
         select: { id: true, images: true },
       });
+      throwIfAborted(context);
       const images = normalizePageImages(page?.images).slice(0, limit);
 
       if (images.length === 0) {
@@ -485,6 +506,7 @@ export function createGetDocumentPageImagesTool(deps: {
           data: await deps.fetchPageImage(image.r2Key),
         })),
       );
+      throwIfAborted(context);
       for (const result of results) {
         if (result.status === "rejected") continue;
         content.push({

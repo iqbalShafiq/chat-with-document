@@ -164,6 +164,21 @@ describe("createWebSearchTools", () => {
   });
 
   describe("web_search", () => {
+    it("does not start Tavily after cancellation", async () => {
+      const { client, search } = fakeClient();
+      const controller = new AbortController();
+      controller.abort(new DOMException("Stopped", "AbortError"));
+      const tools = createWebSearchTools({ tavilyClient: client, enabled: true });
+
+      await expect(
+        tools[0]!.call(
+          { query: QUERY, reason: REASON },
+          { abortSignal: controller.signal },
+        ),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(search).not.toHaveBeenCalled();
+    });
+
     it("normalizes search results and truncates content", async () => {
       const { client, search } = fakeClient();
       search.mockResolvedValue(

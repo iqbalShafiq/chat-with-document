@@ -69,4 +69,26 @@ describe("createRememberUserProfileTool", () => {
 
     await expect(tool.call({ fact: "Remember this" })).rejects.toThrow();
   });
+
+  it("does not start profile side effects after cancellation", async () => {
+    const appendFact = vi.fn(async () => undefined);
+    const controller = new AbortController();
+    controller.abort(new DOMException("Stopped", "AbortError"));
+    const tool = createRememberUserProfileTool({
+      scope: { kind: "user", userId: "user-1" },
+      source: { sessionId: "session-1", messageId: null },
+      waitForActiveJob: vi.fn(async () => undefined),
+      appendFact,
+      refreshNow: vi.fn(async () => ({ processed: 0 })),
+      reschedule: vi.fn(async () => undefined),
+    });
+
+    await expect(
+      tool.call(
+        { fact: "Remember this" },
+        { abortSignal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(appendFact).not.toHaveBeenCalled();
+  });
 });
