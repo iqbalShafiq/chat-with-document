@@ -122,7 +122,7 @@ function createFakeRedis() {
           fingerprint: fingerprint!,
         };
         hashes.set(key, fields);
-        hashes.set(tombstoneKey, { schemaVersion: "interaction-v1", id: id!, fingerprint: fingerprint!, state: "pending", expiresAt: fields.expiresAt! });
+        hashes.set(tombstoneKey, { schemaVersion: "interaction-v1", id: id!, userId: userId!, sessionId: sessionId!, fingerprint: fingerprint!, state: "pending", expiresAt: fields.expiresAt! });
         physicalExpiresAt.set(key, now + Number(ttl) * 1_000 + INTERACTION_PENDING_RETENTION_SECONDS * 1_000);
         physicalExpiresAt.set(tombstoneKey, now + 30 * 24 * 60 * 60 * 1_000);
         return "stored";
@@ -512,6 +512,26 @@ describe("InteractionStore", () => {
     await expect(store.consume(consumeInput("wrong-token"))).rejects.toMatchObject({ code: "state" });
     await expect(store.consume(consumeInput(claim.token, { response: { type: "tool-question", answers: [] } }))).rejects.toBeInstanceOf(InteractionTypeError);
     await expect(store.get(request.id, { userId: "other-user", sessionId: SESSION_ID })).rejects.toBeInstanceOf(InteractionOwnershipError);
+  });
+
+  it("masks terminal tombstones from a wrong user without accepting a client session", async () => {
+    const expired = setup();
+    const createdAt = Date.parse("2026-08-24T00:00:00.000Z");
+    expired.redis.__setNow(createdAt);
+    await expired.store.put(putInput({ ttlSeconds: 1 }));
+    expired.redis.__setNow(createdAt + 2_000);
+    await expect(expired.store.get(request.id)).resolves.toMatchObject({ state: "expired" });
+    expired.redis.__hashes.delete(interactionKey(request.id));
+    await expect(expired.store.getForUser(request.id, "other-user")).rejects.toBeInstanceOf(InteractionOwnershipError);
+    await expect(expired.store.getForUser(request.id, USER_ID)).rejects.toMatchObject({ code: "expired" });
+
+    const consumed = setup();
+    await consumed.store.put(putInput());
+    const claim = await consumed.store.claim(request.id, claimInput());
+    await consumed.store.consume(consumeInput(claim.token));
+    consumed.redis.__hashes.delete(interactionKey(request.id));
+    await expect(consumed.store.getForUser(request.id, "other-user")).rejects.toBeInstanceOf(InteractionOwnershipError);
+    await expect(consumed.store.getForUser(request.id, USER_ID)).rejects.toMatchObject({ code: "replayed" });
   });
 
   it("rejects a continuation with the wrong agent even when its recipe is otherwise valid", async () => {

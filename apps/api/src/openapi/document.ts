@@ -47,9 +47,10 @@ to them. They should use the Bearer token.
 
 ## Streaming
 
-\`POST /api/chat\` returns **JSON Lines** (\`application/x-ndjson\`). Each line
-is one Anvia event (text deltas, tool calls, approvals, finish). Resume a
-dropped stream with \`{ sessionId, resume: { streamId, after } }\`.
+\`POST /api/chat\` returns protocol-v3 **JSON Lines** (\`application/x-ndjson\`)
+with the \`x-anvia-stream-protocol: anvia.client.v3\` response header. Each line
+is a canonical Anvia client frame. Send a top-level \`resume: { streamId, after }\`
+cursor on either canonical request branch to subscribe without enqueuing work.
 
 ## Ownership
 
@@ -92,7 +93,7 @@ export function buildOpenApiDocument(input?: {
         name: "Auth",
         description: "Better Auth email/password. Cookie + Bearer token.",
       },
-      { name: "Chat", description: "Sessions, streaming runs, approvals, snippets." },
+      { name: "Chat", description: "Sessions, canonical Anvia v1 streams, interactions, and snippets." },
       { name: "Documents", description: "Upload, library, attach, preview, delete." },
       { name: "Images", description: "Generated and uploaded images + session pins." },
       { name: "Models", description: "Text and image model catalog." },

@@ -62,7 +62,7 @@ redis.call("HSET", KEYS[1],
   "request", ARGV[6], "continuation", ARGV[7], "recipe", ARGV[8],
   "state", "pending", "createdAt", tostring(nowMs), "updatedAt", tostring(nowMs),
   "expiresAt", tostring(expiresMs), "fingerprint", ARGV[10])
-redis.call("HSET", KEYS[2], "schemaVersion", "${INTERACTION_SCHEMA_VERSION}", "id", ARGV[1], "fingerprint", ARGV[10], "state", "pending", "expiresAt", tostring(expiresMs))
+redis.call("HSET", KEYS[2], "schemaVersion", "${INTERACTION_SCHEMA_VERSION}", "id", ARGV[1], "userId", ARGV[2], "sessionId", ARGV[3], "fingerprint", ARGV[10], "state", "pending", "expiresAt", tostring(expiresMs))
 redis.call("PEXPIREAT", KEYS[1], tostring(expiresMs + ${INTERACTION_PENDING_RETENTION_SECONDS * 1000}))
 redis.call("PEXPIREAT", KEYS[2], tostring(nowMs + ${INTERACTION_TOMBSTONE_RETENTION_SECONDS * 1000}))
 return "stored"`;
@@ -431,6 +431,8 @@ type InteractionTombstone = {
   schemaVersion: typeof INTERACTION_SCHEMA_VERSION;
   id: string;
   fingerprint: string;
+  userId?: string;
+  sessionId?: string;
   state: InteractionState;
   expiresAt: string;
   resumeStreamId?: string;
@@ -439,7 +441,7 @@ type InteractionTombstone = {
 
 function parseTombstone(raw: Record<string, string>, expectedId: string): InteractionTombstone {
   const allowed = new Set([
-    "schemaVersion", "id", "fingerprint", "state", "expiresAt", "resumeStreamId", "jobId",
+    "schemaVersion", "id", "userId", "sessionId", "fingerprint", "state", "expiresAt", "resumeStreamId", "jobId",
   ]);
   const unknown = Object.keys(raw).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new InteractionTypeError(`stored interaction tombstone has unknown fields: ${unknown.join(",")}`);
@@ -449,6 +451,8 @@ function parseTombstone(raw: Record<string, string>, expectedId: string): Intera
   if (!/^[a-f0-9]{64}$/.test(raw.fingerprint ?? "")) {
     throw new InteractionTypeError(`stored interaction ${expectedId} tombstone fingerprint is invalid`);
   }
+  if (raw.userId !== undefined) assertIdentity(raw.userId, "tombstone userId");
+  if (raw.sessionId !== undefined) assertIdentity(raw.sessionId, "tombstone sessionId");
   const state = parseState(raw.state ?? "", expectedId);
   const expiresAt = parseTimestamp(raw.expiresAt ?? "", "tombstone expiresAt");
   if (raw.resumeStreamId !== undefined) assertIdentity(raw.resumeStreamId, "tombstone resumeStreamId");
@@ -469,6 +473,8 @@ function parseTombstone(raw: Record<string, string>, expectedId: string): Intera
     schemaVersion: INTERACTION_SCHEMA_VERSION,
     id: expectedId,
     fingerprint: raw.fingerprint,
+    ...(raw.userId ? { userId: raw.userId } : {}),
+    ...(raw.sessionId ? { sessionId: raw.sessionId } : {}),
     state,
     expiresAt,
     ...(raw.resumeStreamId ? { resumeStreamId: raw.resumeStreamId } : {}),
@@ -632,6 +638,7 @@ export function createInteractionStore(
       const tombstone = await redis.hgetall(interactionTombstoneKey(id));
       if (!tombstone || Object.keys(tombstone).length === 0) return null;
       const parsedTombstone = parseTombstoneOrCorrupt(tombstone, id);
+      if (ownership && (parsedTombstone.userId !== ownership.userId || parsedTombstone.sessionId !== ownership.sessionId)) throw new InteractionOwnershipError(id);
       if (parsedTombstone.state === "expired" || parsedTombstone.state === "pending") throw new InteractionExpiredError(id);
       if (parsedTombstone.state === "consumed") throw new InteractionReplayedError(id);
       if (parsedTombstone.state === "claimed") throw new InteractionClaimedError(id);
@@ -645,6 +652,7 @@ export function createInteractionStore(
         const tombstone = await redis.hgetall(interactionTombstoneKey(id));
         if (Object.keys(tombstone).length > 0) {
           const parsedTombstone = parseTombstoneOrCorrupt(tombstone, id);
+          if (ownership && (parsedTombstone.userId !== ownership.userId || parsedTombstone.sessionId !== ownership.sessionId)) throw new InteractionOwnershipError(id);
           if (parsedTombstone.state === "expired" || parsedTombstone.state === "pending") throw new InteractionExpiredError(id);
           if (parsedTombstone.state === "consumed") throw new InteractionReplayedError(id);
           if (parsedTombstone.state === "claimed") throw new InteractionClaimedError(id);
@@ -652,6 +660,50 @@ export function createInteractionStore(
         return null;
       }
       record = parseStoredRecordOrCorrupt(raw);
+    }
+    return record;
+  };
+
+  /**
+   * Owner-aware lookup for endpoints that know the authenticated user but do
+   * not receive a client session id (for example policy staging). Terminal
+   * tombstones keep only a bounded identity marker, so ownership must be
+   * established before translating their state into a replay/expiry error.
+   * Missing or ownerless tombstones fail closed as ownership errors rather
+   * than becoming an interaction-state oracle.
+   */
+  const getForUser = async (
+    id: string,
+    userId: string,
+    _now: Date = new Date(),
+  ): Promise<InteractionRecord | null> => {
+    assertIdentity(id, "interaction id");
+    assertIdentity(userId, "userId");
+    const key = interactionKey(id);
+    let raw = await redis.hgetall(key);
+    const raiseTombstoneState = (state: InteractionState): never => {
+      if (state === "expired" || state === "pending") throw new InteractionExpiredError(id);
+      if (state === "consumed") throw new InteractionReplayedError(id);
+      if (state === "claimed") throw new InteractionClaimedError(id);
+      throw new InteractionTypeError(`stored interaction ${id} has an invalid tombstone state`);
+    };
+    const readOwnedTombstone = async (): Promise<InteractionRecord | null> => {
+      const tombstone = await redis.hgetall(interactionTombstoneKey(id));
+      if (!tombstone || Object.keys(tombstone).length === 0) return null;
+      const parsed = parseTombstoneOrCorrupt(tombstone, id);
+      if (parsed.userId !== userId) throw new InteractionOwnershipError(id);
+      return raiseTombstoneState(parsed.state);
+    };
+
+    if (!raw || Object.keys(raw).length === 0) return readOwnedTombstone();
+    let record = parseStoredRecordOrCorrupt(raw);
+    if (record.userId !== userId) throw new InteractionOwnershipError(id);
+    if (record.state !== "consumed" && record.state !== "expired") {
+      await redis.eval(MARK_EXPIRED_SCRIPT, 2, key, interactionTombstoneKey(id));
+      raw = await redis.hgetall(key);
+      if (!raw || Object.keys(raw).length === 0) return readOwnedTombstone();
+      record = parseStoredRecordOrCorrupt(raw);
+      if (record.userId !== userId) throw new InteractionOwnershipError(id);
     }
     return record;
   };
@@ -833,7 +885,7 @@ export function createInteractionStore(
     });
   };
 
-  return { get, put, claim, release, consume, onInteraction };
+  return { get, getForUser, put, claim, release, consume, onInteraction };
 }
 
 export type InteractionStore = ReturnType<typeof createInteractionStore>;

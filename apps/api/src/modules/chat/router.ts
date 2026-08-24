@@ -1,13 +1,19 @@
 import { Hono } from "hono";
-import { DEFAULT_COMPLETION_MODEL } from "@assingment/agent";
-import { createEventStream, resumeStreamEvents } from "@anvia/server";
+import { z } from "zod";
+import { resumeClientStreamResponse } from "@anvia/server";
+import {
+  assertAgentInteractionResponse,
+  parseAgentInteractionResponse,
+} from "@anvia/core/agent/interactions";
 import type { Message as MessageType } from "@anvia/core/completion";
+import { DEFAULT_COMPLETION_MODEL } from "@assingment/agent";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
-import { findActiveModel } from "../models/service.js";
 import {
   ACTIVE_RUN_KEY,
+  ChatRunReconciliationError,
+  enqueueChatResume,
   enqueueChatRun,
   releaseActiveRun,
   tryAcquireActiveRun,
@@ -18,16 +24,39 @@ import { prisma } from "../../utils/prisma.js";
 import { listSessionsPage, markChatSessionRead } from "./session-list.js";
 import { stripUserAttachments } from "./strip-user-attachments.js";
 import {
-  getApprovalRegistry,
-} from "./approval-registry.js";
+  ChatRequestError,
+  parseChatClientRequest,
+} from "./client-request.js";
+import {
+  ChatMetadataSchema,
+  ChatDataSchemas,
+} from "./client-events.js";
+import {
+  getInteractionStore,
+  InteractionClaimedError,
+  InteractionExpiredError,
+  InteractionOwnershipError,
+  InteractionReplayedError,
+  InteractionStoreError,
+} from "./interaction-store.js";
+import {
+  getInteractionPolicyStore,
+  interactionResponseFingerprint,
+  InteractionPolicyConflictError,
+  InteractionPolicyExpiredError,
+  InteractionPolicyOwnershipError,
+  InteractionPolicyReplayError,
+  InteractionPolicyStoreError,
+  InteractionPolicyUnavailableError,
+} from "./interaction-policy-store.js";
+import { resolveChatAgentRecipe } from "./build-run-input.js";
+import { releaseChatAgentRecipeClaim } from "./run-recipe.js";
 import { getContext7McpServer, isContext7Configured } from "../../lib/context7-server.js";
 import { resolveActiveDocuments } from "../documents/service.js";
 import {
   imageGenerationConfig,
   webSearchConfig,
 } from "./build-run-input.js";
-import { parseImageGenSettings } from "./image-gen-settings.js";
-import { parseClarificationResponseBody } from "./clarification-body.js";
 import {
   TruncateTargetNotFoundError,
   truncateSessionMemory,
@@ -79,12 +108,10 @@ function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
 
-function parseBoolean(value: unknown): boolean {
-  return value === true;
-}
-
 function extractUserTextForTitle(message: MessageType): string {
   if (message.role !== "user") return "";
+  if (typeof message.content === "string") return message.content.trim();
+  if (!Array.isArray(message.content)) return "";
   const parts = message.content
     .filter(
       (part): part is Extract<(typeof message.content)[number], { type: "text" }> =>
@@ -95,40 +122,150 @@ function extractUserTextForTitle(message: MessageType): string {
   return parts.join(" ");
 }
 
-function parseResume(value: unknown): { streamId: string; after: number } | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.streamId !== "string" || !record.streamId) return null;
-  if (typeof record.after !== "number" || !Number.isInteger(record.after) || record.after < 0) return null;
-  return { streamId: record.streamId, after: record.after };
+function requestErrorResponse(error: unknown): Response {
+  if (error instanceof ChatRequestError) {
+    return new Response(JSON.stringify({ error: error.message, code: error.code }), {
+      status: error.code === "INVALID_REQUEST_METADATA" ? 422 : 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify({ error: "client request is invalid", code: "INVALID_CLIENT_REQUEST" }), {
+    status: 400,
+    headers: { "content-type": "application/json" },
+  });
 }
 
-async function* withStartTimeout<T>(
-  source: AsyncIterable<T>,
-  streamId: string,
-  timeoutMs: number,
-): AsyncGenerator<T> {
-  const store = getStreamStore();
-  const iterator = source[Symbol.asyncIterator]();
-  let receivedAny = false;
-  const timer = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
-  while (true) {
-    const outcome = await Promise.race([
-      iterator.next().then((result) => ({ kind: "next" as const, result })),
-      receivedAny ? new Promise<never>(() => {}) : timer,
-    ]);
-    if (outcome === "timeout") {
-      await store.close({ streamId, status: "error" }).catch(() => {});
-      // Let the underlying source observe the closed stream and end.
-      const ended = await iterator.next().catch(() => ({ done: true as const }));
-      if (ended.done) break;
-      continue;
-    }
-    const { result } = outcome;
-    if (result.done) break;
-    receivedAny = true;
-    yield result.value;
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function streamResponse(streamId: string, after: number) {
+  return resumeClientStreamResponse({
+    streamId,
+    after,
+    store: getStreamStore() as never,
+    metadataSchema: ChatMetadataSchema,
+    dataSchemas: ChatDataSchemas,
+  });
+}
+
+function safeInteractionError(error: unknown): Response {
+  if (
+    error instanceof InteractionOwnershipError ||
+    error instanceof InteractionStoreError && (error.code === "not_found" || error.code === "ownership")
+  ) {
+    return new Response(JSON.stringify({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }), { status: 404, headers: { "content-type": "application/json" } });
   }
+  if (error instanceof InteractionExpiredError) {
+    return new Response(JSON.stringify({ error: "interaction expired", code: "INTERACTION_EXPIRED" }), { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if (error instanceof InteractionReplayedError) {
+    return new Response(JSON.stringify({ error: "interaction already replayed", code: "INTERACTION_REPLAYED" }), { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if (error instanceof InteractionClaimedError) {
+    return new Response(JSON.stringify({ error: "interaction is already being handled", code: "INTERACTION_CLAIMED" }), { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if (error instanceof InteractionStoreError && (error.code === "type" || error.code === "claim_mismatch" || error.code === "conflict")) {
+    return new Response(JSON.stringify({ error: "interaction response is invalid", code: "INTERACTION_RESPONSE_INVALID" }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+  return new Response(JSON.stringify({ error: "interaction could not be processed", code: "INTERACTION_PROCESSING_ERROR" }), { status: 500, headers: { "content-type": "application/json" } });
+}
+
+function safeInteractionPolicyError(error: unknown, maskTerminal = false): Response {
+  if (
+    error instanceof InteractionPolicyOwnershipError ||
+    (error instanceof InteractionPolicyStoreError && error.code === "not_found")
+  ) {
+    return new Response(
+      JSON.stringify({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }),
+      { status: 404, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (error instanceof InteractionPolicyExpiredError) {
+    if (maskTerminal) return new Response(JSON.stringify({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }), { status: 404, headers: { "content-type": "application/json" } });
+    return new Response(
+      JSON.stringify({ error: "interaction policy expired", code: "INTERACTION_EXPIRED" }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (
+    error instanceof InteractionPolicyConflictError ||
+    error instanceof InteractionPolicyReplayError
+  ) {
+    if (maskTerminal && error instanceof InteractionPolicyReplayError) return new Response(JSON.stringify({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }), { status: 404, headers: { "content-type": "application/json" } });
+    return new Response(
+      JSON.stringify({
+        error: "interaction policy conflicts with an existing stage",
+        code: "INTERACTION_POLICY_CONFLICT",
+      }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (error instanceof InteractionPolicyUnavailableError) {
+    return new Response(
+      JSON.stringify({
+        error: "interaction policy is temporarily unavailable",
+        code: "INTERACTION_POLICY_UNAVAILABLE",
+      }),
+      { status: 503, headers: { "content-type": "application/json" } },
+    );
+  }
+  return new Response(
+    JSON.stringify({ error: "interaction policy could not be staged", code: "INTERACTION_POLICY_ERROR" }),
+    { status: 500, headers: { "content-type": "application/json" } },
+  );
+}
+
+const imageOverrideCommonSchema = {
+  prompt: z.string().min(3).max(4_000).optional(),
+  modelId: z.string().min(1).max(512).optional(),
+  aspectRatio: z.string().min(1).max(512).optional(),
+  quality: z.string().min(1).max(512).optional(),
+  background: z.string().min(1).max(512).optional(),
+};
+
+/**
+ * These schemas mirror the v1 image tool inputs. Stage input is not allowed
+ * to be an arbitrary JSON object: the worker later merges it into an image
+ * tool call and re-validates the complete arguments.
+ */
+const generateImageOverrideSchema = z
+  .object({
+    ...imageOverrideCommonSchema,
+    n: z.number().int().min(1).max(10).optional(),
+  })
+  .strict();
+
+const editImageOverrideSchema = z
+  .object({
+    ...imageOverrideCommonSchema,
+    referenceImageId: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+
+const SESSION_GRANTABLE_TOOLS = new Set([
+  "web_search",
+  "web_fetch",
+  "deep_research",
+  "generate_image",
+  "edit_image",
+]);
+
+function parseImageOverride(
+  toolName: string,
+  value: unknown,
+): Record<string, unknown> | null {
+  if (toolName === "generate_image") {
+    const parsed = generateImageOverrideSchema.safeParse(value);
+    return parsed.success ? (parsed.data as Record<string, unknown>) : null;
+  }
+  if (toolName === "edit_image") {
+    const parsed = editImageOverrideSchema.safeParse(value);
+    return parsed.success ? (parsed.data as Record<string, unknown>) : null;
+  }
+  return null;
 }
 
 export const chatRouter = new Hono<{ Variables: AuthVariables }>()
@@ -467,134 +604,169 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
   })
   .post("/", async (c) => {
     const user = c.get("user");
-    const body = await c.req.json();
-    const sessionId = requireSessionId(body.sessionId ?? body.metadata?.sessionId);
-    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return requestErrorResponse(new ChatRequestError("INVALID_CLIENT_REQUEST", "client request is invalid"));
+    }
 
-    const resume = parseResume(body.resume);   // { streamId, after } | null
+    let parsed: ReturnType<typeof parseChatClientRequest>;
+    try {
+      parsed = parseChatClientRequest(body);
+    } catch (error) {
+      return requestErrorResponse(error);
+    }
+
     const store = getStreamStore();
-
-    if (resume) {
-      const meta = await store.getMeta(resume.streamId);
-      if (!meta || meta.userId !== user.id || meta.sessionId !== sessionId) {
+    if (parsed.kind === "resume") {
+      const meta = await store.getMeta(parsed.cursor.streamId);
+      if (!meta || meta.userId !== user.id || meta.sessionId !== parsed.metadata.sessionId) {
         return c.json({ error: "stream not found", code: "STREAM_NOT_FOUND" }, 404);
       }
-      // Rejoin recovery: a resuming client only receives events AFTER the
-      // resume cursor, so a pending human-approval/clarification request
-      // (already consumed by the previous page) would never re-render. Re-emit
-      // pending requests as fresh events so the UI shows the card again and
-      // the decision key still matches the original poller.
-      const registry = getApprovalRegistry();
+      const status = await store.status({ streamId: parsed.cursor.streamId });
+      if (status.status === "missing") return c.json({ error: "stream not found", code: "STREAM_NOT_FOUND" }, 404);
+      if (parsed.cursor.after > status.lastEventId) {
+        return c.json({ error: "resume cursor is invalid", code: "RESUME_CURSOR_INVALID" }, 409);
+      }
+      return streamResponse(parsed.cursor.streamId, parsed.cursor.after);
+    }
+
+    if (parsed.kind === "interaction_response") {
+      const interactionStore = getInteractionStore();
+      const sessionId = parsed.metadata.sessionId;
+      const ownership = { userId: user.id, sessionId };
+      let existing;
       try {
-        const pendingApprovals = await registry.listPendingApprovals(resume.streamId);
-        for (const approval of pendingApprovals) {
-          await store.append({
-            streamId: resume.streamId,
-            event: {
-              type: "tool_approval_request",
-              approval: {
-                id: approval.approvalId,
-                sessionId: meta.sessionId,
-                toolName: approval.toolName,
-                args: approval.args,
-                status: "pending",
-                requestedAt: approval.requestedAt,
-                ...(approval.reason ? { reason: approval.reason } : {}),
-              },
-            },
-          });
-        }
-        const pendingClarifications = await registry.listPendingClarifications(resume.streamId);
-        for (const clarification of pendingClarifications) {
-          await store.append({
-            streamId: resume.streamId,
-            event: {
-              type: "clarification_request",
-              clarification: {
-                id: clarification.id,
-                sessionId: meta.sessionId,
-                ...(clarification.title ? { title: clarification.title } : {}),
-                questions: clarification.questions,
-                status: "pending",
-                requestedAt: clarification.requestedAt,
-              },
-            },
-          });
-        }
+        existing = await interactionStore.get(parsed.interactionId, ownership);
       } catch (error) {
-        // Best-effort: the stream may have just ended; the normal replay
-        // below still works for message events.
-        console.error("[chat] resume re-emit failed", error);
+        return safeInteractionError(error);
       }
-      const events = resumeStreamEvents({ id: resume.streamId, after: resume.after, store });
-      return createEventStream(events, { format: "jsonl" });
+      if (!existing) return c.json({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }, 404);
+      if (existing.state === "consumed") return safeInteractionError(new InteractionReplayedError(parsed.interactionId));
+      if (existing.state === "expired") return safeInteractionError(new InteractionExpiredError(parsed.interactionId));
+      if (existing.state === "claimed") return safeInteractionError(new InteractionClaimedError(parsed.interactionId));
+      const sameDocuments = JSON.stringify([...existing.recipe.documents.ids].sort()) === JSON.stringify([...parsed.metadata.documentIds].sort());
+      const sameFeatures = existing.recipe.features.webSearchEnabled === parsed.metadata.webSearchEnabled
+        && existing.recipe.features.imageGenerationEnabled === parsed.metadata.imageGenerationEnabled
+        && existing.recipe.features.deepResearchEnabled === parsed.metadata.deepResearchEnabled;
+      const sameImageSettings = canonicalJson(existing.recipe.imageGenSettings) === canonicalJson(parsed.metadata.imageGenSettings);
+      if (existing.recipe.model.id !== parsed.metadata.modelId || existing.recipe.model.reasoningEffort !== parsed.metadata.reasoningEffort || !sameDocuments || !sameFeatures || !sameImageSettings) {
+        return c.json({ error: "interaction response metadata is invalid", code: "INTERACTION_RESPONSE_INVALID" }, 400);
+      }
+      try {
+        // Validate the native response against the persisted request before
+        // allocating a stream, acquiring the session lease, or claiming any
+        // durable interaction state. The worker repeats this assertion at its
+        // queue boundary; this early check closes the API side-effect gap.
+        assertAgentInteractionResponse(existing.request, parsed.response);
+      } catch {
+        return c.json({ error: "interaction response is invalid", code: "INTERACTION_RESPONSE_INVALID" }, 400);
+      }
+      const streamId = crypto.randomUUID();
+      const acquired = await tryAcquireActiveRun(sessionId, streamId, 2 * 60 * 60);
+      if (!acquired) return c.json({ error: "Session is already processing in another tab", code: "RUN_ACTIVE" }, 409);
+      let opened = false;
+      try {
+        await store.openWithMeta({ streamId }, {
+          userId: existing.userId,
+          sessionId: existing.sessionId,
+          modelId: existing.recipe.model.id,
+          reasoningEffort: existing.recipe.model.reasoningEffort,
+        });
+        opened = true;
+        await enqueueChatResume(parsed.interactionId, {
+          kind: "resume",
+          streamId,
+          sessionId: existing.sessionId,
+          userId: existing.userId,
+          recipe: existing.recipe,
+          continuation: existing.continuation,
+          response: parsed.response,
+          sourceInteractionId: parsed.interactionId,
+          createdAt: new Date().toISOString(),
+        }, { interactionStore, ownership });
+      } catch (error) {
+        if (error instanceof Error && error.name === "ChatResumeReconciliationError") {
+          return streamResponse(streamId, 0);
+        }
+        if (opened) await store.close({ streamId, status: "error" }).catch(() => {});
+        await releaseActiveRun(sessionId, streamId).catch(() => {});
+        return safeInteractionError(error);
+      }
+      return streamResponse(streamId, 0);
     }
 
-    // New run
-    const modelRaw = body.model;
-    const model = modelRaw && typeof modelRaw === "string" && modelRaw.trim()
-      ? modelRaw.trim()
-      : DEFAULT_COMPLETION_MODEL;
-    const modelInfo = await findActiveModel(model);
-    if (!modelInfo) return c.json({ error: `unknown model: ${model}` }, 400);
-
-    const webSearchEnabled = parseBoolean(body.webSearchEnabled);
-    const imageGenerationEnabled = parseBoolean(body.imageGenerationEnabled);
-    const deepResearchEnabled = parseBoolean(body.deepResearchEnabled);
-    const imageGenSettings = parseImageGenSettings(body.imageGenSettings);
-
-    const effortRaw = body.reasoningEffort;
-    let reasoningEffort: string | null = null;
-    if (effortRaw && typeof effortRaw === "string" && effortRaw.trim()) {
-      if (!modelInfo.reasoningEfforts.includes(effortRaw)) {
-        return c.json({ error: `model ${model} does not support reasoning effort: ${effortRaw}` }, 400);
-      }
-      reasoningEffort = effortRaw;
-    }
-
-    const messages = body.messages as MessageType[];
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) return c.json({ error: "messages are required" }, 400);
-
-    const chatSession = await ensureChatSession({ sessionId, userId: user.id, projectId: null });
-    await touchChatSession(user.id, sessionId);
-
+    const { metadata, messages } = parsed;
+    const lastMessage = messages.at(-1);
+    if (!lastMessage) return c.json({ error: "messages are invalid", code: "INVALID_MESSAGE" }, 400);
     const promptMessage = stripUserAttachments(lastMessage);
-    const titleSeed = extractUserTextForTitle(promptMessage);
-    if (titleSeed) {
-      void setChatSessionTitleIfEmpty({ userId: user.id, sessionId, title: titleSeed }).catch((error) => {
-        console.error("[chat] set title failed", error);
-      });
-    }
-
     const streamId = crypto.randomUUID();
-    const acquired = await tryAcquireActiveRun(sessionId, streamId, 2 * 60 * 60);
+    let recipe;
+    try {
+      recipe = await resolveChatAgentRecipe({
+        sessionId: metadata.sessionId,
+        userId: user.id,
+        model: metadata.modelId,
+        reasoningEffort: metadata.reasoningEffort,
+        promptMessage,
+        webSearchEnabled: metadata.webSearchEnabled,
+        imageGenerationEnabled: metadata.imageGenerationEnabled,
+        deepResearchEnabled: metadata.deepResearchEnabled,
+        imageGenSettings: metadata.imageGenSettings,
+        traceId: streamId,
+        streamId,
+        consumeSingleUseContext: true,
+      });
+    } catch {
+      return c.json({ error: "chat request is not authorized", code: "CHAT_REQUEST_NOT_AUTHORIZED" }, 404);
+    }
+    const requestedDocuments = [...metadata.documentIds].sort();
+    const resolvedDocuments = [...recipe.documents.ids].sort();
+    if (requestedDocuments.length !== resolvedDocuments.length || requestedDocuments.some((id, index) => id !== resolvedDocuments[index])) {
+      await releaseChatAgentRecipeClaim(recipe).catch(() => {});
+      return c.json({ error: "document selection is not authorized", code: "DOCUMENTS_NOT_AUTHORIZED" }, 404);
+    }
+    const acquired = await tryAcquireActiveRun(metadata.sessionId, streamId, 2 * 60 * 60);
     if (!acquired) {
+      await releaseChatAgentRecipeClaim(recipe).catch(() => {});
       return c.json({ error: "Session is already processing in another tab", code: "RUN_ACTIVE" }, 409);
     }
-
+    let opened = false;
     try {
       await store.openWithMeta({ streamId }, {
-        userId: user.id, sessionId, modelId: model, reasoningEffort,
+        userId: user.id,
+        sessionId: metadata.sessionId,
+        modelId: recipe.model.id,
+        reasoningEffort: recipe.model.reasoningEffort,
+      });
+      opened = true;
+      await enqueueChatRun(`chat:${streamId}`, {
+        kind: "start",
+        streamId,
+        sessionId: metadata.sessionId,
+        userId: user.id,
+        recipe,
+        prompt: promptMessage,
+        createdAt: new Date().toISOString(),
       });
     } catch (error) {
-      await releaseActiveRun(sessionId, streamId);
-      throw error;
+      if (error instanceof ChatRunReconciliationError) {
+        // BullMQ accepted the job. Keep the stream and active lease alive so
+        // worker execution and durable claim reconciliation remain coherent.
+        return streamResponse(streamId, 0);
+      }
+      if (opened) await store.close({ streamId, status: "error" }).catch(() => {});
+      await releaseActiveRun(metadata.sessionId, streamId).catch(() => {});
+      if (!opened) await releaseChatAgentRecipeClaim(recipe).catch(() => {});
+      return c.json({ error: "chat run could not be queued", code: "CHAT_RUN_QUEUE_ERROR" }, 503);
     }
-
-    await enqueueChatRun(`chat:${streamId}`, {
-      streamId, sessionId, userId: user.id, model, reasoningEffort,
-      webSearchEnabled, imageGenerationEnabled, imageGenSettings,
-      deepResearchEnabled,
-      promptMessage, createdAt: new Date().toISOString(),
-    });
-
-    const events = withStartTimeout(
-      resumeStreamEvents({ id: streamId, after: 0, store }),
-      streamId,
-      30_000,
-    );
-    return createEventStream(events, { format: "jsonl" });
+    await touchChatSession(user.id, metadata.sessionId);
+    const titleSeed = extractUserTextForTitle(promptMessage);
+    if (titleSeed) {
+      void setChatSessionTitleIfEmpty({ userId: user.id, sessionId: metadata.sessionId, title: titleSeed }).catch(() => {});
+    }
+    return streamResponse(streamId, 0);
   })
   .get("/run-status", async (c) => {
     const user = c.get("user");
@@ -638,13 +810,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const store = getStreamStore();
     const meta = await store.getMeta(streamId);
     if (!meta || meta.userId !== user.id) return c.json({ error: "stream not found" }, 404);
-    // Stop flag ends the event stream; also unblock any human-input waiters
-    // (approval / clarification) so the worker does not hang until timeout.
     await store.setStopFlag(streamId);
-    const cancelled = await getApprovalRegistry()
-      .cancelPendingForStream(streamId)
-      .catch(() => ({ approvals: 0, clarifications: 0 }));
-    return c.json({ ok: true, cancelled });
+    return c.json({ ok: true });
   })
   .post("/steer", async (c) => {
     const user = c.get("user");
@@ -733,100 +900,78 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       context7Available: isContext7Configured() && context7Server !== null,
     });
   })
-  .post("/approvals/:approvalId/decision", async (c) => {
+  .post("/interactions/:interactionId/stage", async (c) => {
     const user = c.get("user");
-    const approvalId = c.req.param("approvalId");
-    if (!approvalId) return c.json({ error: "approvalId is required" }, 400);
-
-    const body = (await c.req.json().catch(() => null)) as {
-      approved?: unknown;
-      reason?: unknown;
-      grantScope?: unknown;
-      overrideArgs?: unknown;
-    } | null;
-    if (body === null || typeof body.approved !== "boolean") {
-      return c.json({ error: "approved (boolean) is required" }, 400);
+    const interactionId = c.req.param("interactionId");
+    const body = await c.req.json().catch(() => null);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
     }
-
-    const registry = getApprovalRegistry();
-    const approval = await registry.getApproval(approvalId);
-    if (!approval) {
-      // Idempotent: the approval was already resolved and cleaned up (or TTL'd),
-      // so a late decision is a no-op success — the client must not throw.
-      return c.json({ ok: true, alreadyResolved: true });
+    const candidate = body as Record<string, unknown>;
+    const keys = Object.keys(candidate);
+    if (!keys.every((key) => key === "response" || key === "grantScope" || key === "overrideArgs") || !Object.hasOwn(candidate, "response")) {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
     }
-    if (approval.userId !== user.id) {
-      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
+    let response;
+    try {
+      response = parseAgentInteractionResponse(candidate.response);
+    } catch {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
     }
-    if (approval.status !== "pending") {
-      // Idempotent: an already-resolved approval is a no-op.
-      return c.json({ ok: true, alreadyResolved: true });
+    const interactionStore = getInteractionStore();
+    let record;
+    try {
+      // The interaction record carries the server-owned session binding. The
+      // owner-aware lookup establishes the authenticated user before a
+      // terminal tombstone can be translated into a replay/expiry response;
+      // sessionId is never accepted from the staging body.
+      record = await interactionStore.getForUser(interactionId, user.id);
+    } catch (error) {
+      return safeInteractionError(error);
     }
-
-    if (body.approved) {
-      // "Allow for session" makes the tool skip its approval gate for the
-      // rest of the session; the gate reads the grant on every call.
-      if (body.grantScope === "session") {
-        await registry.grantTool({
-          sessionId: approval.sessionId,
-          toolName: approval.toolName,
-        });
+    if (!record) return safeInteractionError(new InteractionStoreError("interaction not found", "not_found"));
+    if (record.userId !== user.id) return safeInteractionError(new InteractionOwnershipError(interactionId));
+    if (record.state !== "pending") {
+      return c.json({ error: "interaction cannot be staged in its current state", code: "INTERACTION_STATE_CONFLICT" }, 409);
+    }
+    if (record.request.type !== "tool-approval" || response.type !== "tool-approval") {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
+    }
+    try {
+      assertAgentInteractionResponse(record.request, response);
+    } catch {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
+    }
+    if (!response.approved) {
+      return c.json({ error: "only approved tool interactions can be staged", code: "INTERACTION_STAGE_INVALID" }, 400);
+    }
+    if (candidate.grantScope !== undefined && candidate.grantScope !== "session") {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
+    }
+    if (candidate.grantScope === "session" && !SESSION_GRANTABLE_TOOLS.has(record.request.toolName)) {
+      return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
+    }
+    let overrideArgs: Record<string, unknown> | undefined;
+    if (candidate.overrideArgs !== undefined) {
+      const parsedOverride = parseImageOverride(record.request.toolName, candidate.overrideArgs);
+      if (!parsedOverride) {
+        return c.json({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }, 400);
       }
-      // UI-edited tool args (e.g. image params) are staged once; the tool
-      // consumes them atomically on its next call.
-      if (
-        body.overrideArgs &&
-        typeof body.overrideArgs === "object" &&
-        !Array.isArray(body.overrideArgs) &&
-        Object.keys(body.overrideArgs).length > 0
-      ) {
-        await registry.setToolOverride({
-          sessionId: approval.sessionId,
-          toolName: approval.toolName,
-          args: body.overrideArgs as Record<string, unknown>,
-        });
-      }
+      overrideArgs = parsedOverride;
     }
-
-    await registry.publishDecision(approvalId, {
-      approved: body.approved,
-      ...(typeof body.reason === "string" && body.reason.trim()
-        ? { reason: body.reason.trim() }
-        : {}),
-    });
+    try {
+      await getInteractionPolicyStore().stage({
+        interactionId,
+        userId: record.userId,
+        sessionId: record.sessionId,
+        toolName: record.request.toolName,
+        responseFingerprint: interactionResponseFingerprint(response),
+        ...(candidate.grantScope === "session" ? { grantScope: "session" as const } : {}),
+        ...(overrideArgs ? { overrideArgs } : {}),
+      });
+    } catch (error) {
+      return safeInteractionPolicyError(error, true);
+    }
     return c.json({ ok: true });
   })
-  .post("/clarifications/:id/response", async (c) => {
-    const user = c.get("user");
-    const id = c.req.param("id");
-    if (!id) return c.json({ error: "id is required" }, 400);
-
-    const registry = getApprovalRegistry();
-    const record = await registry.getClarification(id);
-    if (!record) {
-      // Idempotent: the clarification was already answered, timed out, or
-      // TTL'd — a late response is a no-op success.
-      return c.json({ ok: true, alreadyResolved: true });
-    }
-    if (record.userId !== user.id) {
-      return c.json({ error: "forbidden", code: "FORBIDDEN" }, 403);
-    }
-    if (record.status !== "pending") {
-      return c.json({ ok: true, alreadyResolved: true });
-    }
-
-    const body = await c.req.json().catch(() => null);
-    const parsed = parseClarificationResponseBody(body);
-    if (!parsed) {
-      return c.json(
-        {
-          error:
-            "answers (object of string | string[]) and optional skipped (string[]) are required",
-        },
-        400,
-      );
-    }
-
-    await registry.publishClarificationResponse(id, parsed);
-    return c.json({ ok: true });
-  });
+  ;

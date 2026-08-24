@@ -52,14 +52,9 @@ const EXPECTED_OPERATIONS: Array<{
   { path: "/api/chat/queue/sync", method: "post", operationId: "syncChatQueue" },
   { path: "/api/chat/capabilities", method: "get", operationId: "getChatCapabilities" },
   {
-    path: "/api/chat/approvals/{approvalId}/decision",
+    path: "/api/chat/interactions/{interactionId}/stage",
     method: "post",
-    operationId: "decideToolApproval",
-  },
-  {
-    path: "/api/chat/clarifications/{id}/response",
-    method: "post",
-    operationId: "answerClarification",
+    operationId: "stageChatInteraction",
   },
   { path: "/api/documents/storage", method: "get", operationId: "getDocumentStorage" },
   { path: "/api/documents/library", method: "get", operationId: "listDocumentLibrary" },
@@ -172,5 +167,63 @@ describe("OpenAPI document", () => {
     }
 
     expect(missing).toEqual([]);
+  });
+
+  it("documents only the canonical Anvia v1 chat request and stream response", () => {
+    const chatPost = doc.paths["/api/chat"]?.post as {
+      requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
+      responses?: Record<string, { content?: Record<string, { schema?: unknown; examples?: unknown; example?: unknown }> }>;
+    };
+    const requestSchema = chatPost.requestBody?.content?.["application/json"]?.schema;
+    const requestText = JSON.stringify(requestSchema);
+    expect(requestSchema).toMatchObject({ oneOf: expect.any(Array) });
+    const branches = requestSchema?.oneOf as Array<{ properties?: Record<string, unknown> }>;
+    expect(branches.length).toBe(2);
+    for (const branch of branches) {
+      expect(branch.properties?.sessionId).toBeUndefined();
+      expect(branch.properties?.model).toBeUndefined();
+      expect(branch.properties?.stream).toBeUndefined();
+    }
+    expect(requestText).toContain('"interaction_response"');
+    expect(requestText).toContain('"documentIds"');
+
+    const response = chatPost.responses?.["200"];
+    expect(response?.content?.["application/x-ndjson"]).toBeDefined();
+    expect(JSON.stringify(response)).toContain("anvia.client.v3");
+  });
+
+  it("publishes the official role-specific Anvia Message grammar", () => {
+    const message = doc.components.schemas.ChatMessage as unknown as {
+      oneOf?: readonly { properties?: Readonly<Record<string, { readonly const?: string }>> }[];
+    };
+    const roles = (message.oneOf ?? []).map((branch) => branch.properties?.role?.const).sort();
+    expect(roles).toEqual(["assistant", "system", "tool", "user"]);
+    const schemaText = JSON.stringify(message);
+    expect(schemaText).toContain('"tool-call"');
+    expect(schemaText).toContain('"tool-result"');
+    expect(schemaText).toContain('"tool-question-response"');
+    expect(schemaText).not.toContain('"type":{"type":"string","enum":["text","image","file"]}');
+    for (const branch of message.oneOf ?? []) expect(branch.properties?.role).toBeDefined();
+  });
+
+  it("documents the runtime chat error status matrix and approval-only staging", () => {
+    const chatPost = doc.paths["/api/chat"]?.post as { responses?: Record<string, unknown> };
+    const chatResponses = JSON.stringify(chatPost.responses);
+    for (const code of ["INVALID_CLIENT_REQUEST", "INVALID_REQUEST_METADATA", "RESUME_CURSOR_INVALID", "RUN_ACTIVE", "INTERACTION_REPLAYED", "INTERACTION_EXPIRED", "INTERACTION_CLAIMED", "CHAT_RUN_QUEUE_ERROR"]) {
+      expect(chatResponses).toContain(code);
+    }
+    const staging = JSON.stringify(doc.paths["/api/chat/interactions/{interactionId}/stage"]?.post);
+    expect(staging).toContain("tool-approval");
+    expect(staging).not.toContain("tool-question-response");
+    expect(staging).toContain("INTERACTION_STATE_CONFLICT");
+  });
+
+  it("does not advertise removed v0 approval or clarification operations", () => {
+    expect(doc.paths["/api/chat/approvals/{approvalId}/decision"]).toBeUndefined();
+    expect(doc.paths["/api/chat/clarifications/{id}/response"]).toBeUndefined();
+    expect(JSON.stringify(doc)).not.toContain("decideToolApproval");
+    expect(JSON.stringify(doc)).not.toContain("answerClarification");
+    expect(JSON.stringify(doc)).not.toContain("tool_approval_request");
+    expect(JSON.stringify(doc)).not.toContain("clarification_request");
   });
 });

@@ -192,7 +192,7 @@ export async function enqueueChatRun(
   jobId: string,
   data: ChatRunJobData,
   queueOverride?: Pick<Queue<ChatRunJobData>, "add">,
-): Promise<void> {
+): Promise<{ accepted: true }> {
   const claimOwner = data.recipe;
   let accepted = false;
   try {
@@ -200,11 +200,12 @@ export async function enqueueChatRun(
     await (queueOverride ?? getChatRunQueue()).add(jobId, parsed);
     accepted = true;
     await commitChatAgentRecipeClaim(claimOwner);
+    return { accepted: true };
   } catch (error) {
     // Once BullMQ accepted the job, releasing its durable claim would expose
     // the same context to a second run. Keep the claim for commit retry/reap;
     // only a validation or enqueue failure is reversible here.
-    if (accepted) throw error;
+    if (accepted) throw new ChatRunReconciliationError(`chat:${data.streamId}`, error);
     try {
       await releaseChatAgentRecipeClaim(claimOwner);
     } catch (releaseError) {
@@ -214,6 +215,15 @@ export async function enqueueChatRun(
       );
     }
     throw error;
+  }
+}
+
+export class ChatRunReconciliationError extends Error {
+  readonly code = "run_reconciliation_pending" as const;
+  constructor(readonly jobId: string, cause?: unknown) {
+    super(`chat run ${jobId} was accepted but durable context reconciliation is pending`);
+    this.name = "ChatRunReconciliationError";
+    if (cause instanceof Error) this.cause = cause;
   }
 }
 

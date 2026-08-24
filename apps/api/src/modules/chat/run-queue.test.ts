@@ -14,7 +14,7 @@ import {
   CHAT_AGENT_ID,
   parseChatAgentRecipe,
 } from "./run-recipe.js";
-import { enqueueChatRun, interactionResumeJobId, enqueueChatResume, ChatResumeReconciliationError } from "./run-queue.js";
+import { enqueueChatRun, interactionResumeJobId, enqueueChatResume, ChatResumeReconciliationError, ChatRunReconciliationError } from "./run-queue.js";
 import { vi } from "vitest";
 import type { InteractionRecord, InteractionStore } from "./interaction-store.js";
 
@@ -346,13 +346,17 @@ describe("ChatRunJobData", () => {
       },
     });
 
-    await expect(
-      enqueueChatRun(
-        "job-commit-failed",
-        { ...startJob(), recipe: claimedRecipe },
-        { add: async () => ({}) as never },
-      ),
-    ).rejects.toThrow("database unavailable");
+    const error = await enqueueChatRun(
+      "job-commit-failed",
+      { ...startJob(), recipe: claimedRecipe },
+      { add: async () => ({}) as never },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChatRunReconciliationError);
+    expect(error).toMatchObject({
+      code: "run_reconciliation_pending",
+      jobId: "chat:stream-1",
+      cause: expect.objectContaining({ message: "database unavailable" }),
+    });
     expect(released).toBe(0);
   });
 
