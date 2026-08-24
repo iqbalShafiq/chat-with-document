@@ -16,7 +16,7 @@ import {
   QDRANT_COLLECTION,
   type DocumentChunkMetadata,
 } from "../document/types.js";
-import { embeddingModel } from "../providers/mistral.js";
+import { createEmbeddingModel } from "../providers/mistral.js";
 import type { ChunkSearchHit, ChunkSearchService } from "../tools/documents.js";
 
 export type QdrantChunkStoreOptions = {
@@ -75,7 +75,7 @@ export function createQdrantChunkStore(
       dimensions: EMBEDDING_DIMENSIONS,
       metric: "cosine",
     });
-  const model = options.model ?? embeddingModel;
+  const model = options.model ?? createEmbeddingModel();
   let ensurePromise: Promise<void> | null = null;
   let closePromise: Promise<void> | null = null;
 
@@ -203,22 +203,30 @@ function buildUserDocumentsFilter(userId: string, documentIds: string[]) {
   return vectorFilter.and(ownership, docOr);
 }
 
-const processChunkStore = createQdrantChunkStore();
+let processChunkStore: QdrantChunkStoreLifecycle | null = null;
+
+function getProcessChunkStore(): QdrantChunkStoreLifecycle {
+  // Both Qdrant and Mistral are live process dependencies. Keep their
+  // construction behind the first ingest/search call so importing the agent
+  // package remains credential-free and testable.
+  processChunkStore ??= createQdrantChunkStore();
+  return processChunkStore;
+}
 
 export function upsertDocumentChunks(
   documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
 ): Promise<void> {
-  return processChunkStore.upsertDocumentChunks(documents);
+  return getProcessChunkStore().upsertDocumentChunks(documents);
 }
 
 export function deleteDocumentChunks(documentId: string): Promise<void> {
-  return processChunkStore.deleteDocumentChunks(documentId);
+  return getProcessChunkStore().deleteDocumentChunks(documentId);
 }
 
 export function createChunkSearchService(): ChunkSearchService {
-  return processChunkStore.createChunkSearchService();
+  return getProcessChunkStore().createChunkSearchService();
 }
 
 export function closeQdrant(): Promise<void> {
-  return processChunkStore.close();
+  return getProcessChunkStore().close();
 }

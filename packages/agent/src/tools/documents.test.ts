@@ -3,7 +3,9 @@ import type { ToolResultContentPart } from "@anvia/core";
 import { normalizeToolResultOutput } from "@anvia/core/tool";
 import {
   createFindDocumentsTool,
+  createGetDocumentNextPageTool,
   createGetDocumentPageImagesTool,
+  type NextPagePrisma,
   type PageImagesPrisma,
   type SessionDocumentIdsPrisma,
 } from "./documents.js";
@@ -32,6 +34,72 @@ describe("document lookup v1 output contract", () => {
     });
 
     await expect(tool.call({ query: "report", limit: 5 })).rejects.toThrow();
+  });
+
+  it("uses frozen document ids without relinking the current session", async () => {
+    const linkedLookup = vi.fn(async () => {
+      throw new Error("session relink lookup must not run");
+    });
+    const documentLookup = vi.fn(async () => [
+      {
+        id: "doc-frozen",
+        filename: "frozen.pdf",
+        firstPageSummary: "Frozen summary",
+        summary: "Frozen summary",
+        pageCount: 1,
+      },
+    ]);
+    const tool = createFindDocumentsTool({
+      userId: "u-1",
+      sessionId: "s-1",
+      documentIds: ["doc-frozen"],
+      prisma: {
+        documentSession: { findMany: linkedLookup },
+        document: { findMany: documentLookup },
+      },
+    });
+
+    const result = await tool.call({ query: "frozen", limit: 5 });
+
+    expect(linkedLookup).not.toHaveBeenCalled();
+    expect(documentLookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["doc-frozen"] } }),
+      }),
+    );
+    expect(result).toMatchObject({ results: [{ documentId: "doc-frozen" }] });
+  });
+
+  it("uses frozen document ids for page continuation without a session relink check", async () => {
+    const linkedLookup = vi.fn(async () => {
+      throw new Error("session relink lookup must not run");
+    });
+    const documentLookup = vi.fn(async (args: Parameters<NextPagePrisma["document"]["findFirst"]>[0]) => {
+      expect(args.where).not.toHaveProperty("sessionLinks");
+      return { id: "doc-frozen", pageCount: 2, filename: "frozen.pdf" };
+    });
+    const pageLookup = vi.fn(async () => ({
+      id: "page-2",
+      pageIndex: 1,
+      summary: "Next page",
+      rawMarkdown: "next page text",
+    }));
+    const tool = createGetDocumentNextPageTool({
+      userId: "u-1",
+      sessionId: "s-1",
+      documentIds: ["doc-frozen"],
+      prisma: {
+        documentSession: { findMany: linkedLookup },
+        document: { findFirst: documentLookup },
+        documentPage: { findFirst: pageLookup },
+      },
+    });
+
+    const result = await tool.call({ documentId: "doc-frozen", pageIndex: 0 });
+
+    expect(linkedLookup).not.toHaveBeenCalled();
+    expect(pageLookup).toHaveBeenCalled();
+    expect(result).toMatchObject({ found: true, documentId: "doc-frozen" });
   });
 });
 

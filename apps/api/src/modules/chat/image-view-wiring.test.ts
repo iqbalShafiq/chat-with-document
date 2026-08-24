@@ -13,7 +13,7 @@ describe("image-view wiring", () => {
     expect(content).toContain('mode: "description"');
     expect(content).toContain('universalViewImageRegistered');
     // Ensure dummy fallback exists
-    expect(content).toContain('createCompletionModel(model)');
+    expect(content).toContain('makeCompletionModel(model)');
   });
 
   it("ensures VISION_HELPER_INSTRUCTION added once via guard", () => {
@@ -24,5 +24,18 @@ describe("image-view wiring", () => {
     // or at least two pushes with guard
     const pushes = (content.match(/VISION_HELPER_INSTRUCTION/g) || []).length;
     expect(pushes).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reconstructs image settings and capabilities from the frozen recipe", () => {
+    const currentDir = dirname(fileURLToPath(import.meta.url));
+    const content = readFileSync(resolve(currentDir, "./build-run-input.ts"), "utf8");
+    const reconstruction = content.slice(
+      content.indexOf("export async function reconstructChatRunInput"),
+    );
+
+    expect(reconstruction).toContain("recipe.imageGenSettings");
+    expect(reconstruction).toContain("recipe.capabilities.modelAcceptsImage");
+    expect(reconstruction).toContain("recipe.activeContext.images");
+    expect(reconstruction).not.toContain("listSessionImageContexts");
   });
 });

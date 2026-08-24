@@ -62,6 +62,12 @@ describe("imageGenSettingsSchema", () => {
       false,
     );
   });
+
+  it("rejects unknown fields instead of silently stripping them", () => {
+    expect(
+      imageGenSettingsSchema.safeParse({ n: 2, secret: "nope" }).success,
+    ).toBe(false);
+  });
 });
 
 describe("parseImageGenSettings", () => {

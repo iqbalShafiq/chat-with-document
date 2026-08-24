@@ -8,12 +8,12 @@ import {
 } from "../document/types.js";
 
 vi.mock("../providers/mistral.js", () => ({
-  embeddingModel: {
+  createEmbeddingModel: vi.fn(() => ({
     provider: "test",
     modelId: "process-test-embedding",
     dimensions: 1024,
     embedTexts: vi.fn(async () => []),
-  },
+  })),
 }));
 
 import * as chunkStoreModule from "./chunk-store.js";

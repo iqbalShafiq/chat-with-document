@@ -6,6 +6,66 @@ function prismaMock(overrides: Record<string, unknown>) {
 }
 
 describe("tabular resolver", () => {
+  it("uses frozen document ids without querying current session links", async () => {
+    let linkedLookupCalls = 0;
+    const prisma = prismaMock({
+      document: {
+        findMany: async () => [
+          {
+            id: "d-frozen",
+            filename: "frozen.csv",
+            tabularData: {
+              sheets: [{ name: "sheet", columns: [], rows: [] }],
+            },
+          },
+        ],
+      },
+      documentSession: {
+        findMany: async () => {
+          linkedLookupCalls += 1;
+          return [];
+        },
+      },
+    });
+    const resolver = createTabularResolver({
+      userId: "u1",
+      sessionId: "s1",
+      projectId: null,
+      documentIds: ["d-frozen"],
+      prisma,
+    });
+
+    await resolver.listUploads();
+
+    expect(linkedLookupCalls).toBe(0);
+  });
+
+  it("rejects a sheet outside the frozen document scope", async () => {
+    const documentLookup = async () => ({
+      id: "d-other",
+      filename: "other.csv",
+      mimeType: "text/csv",
+      tabularData: {
+        sheets: [{ name: "sheet", columns: [], rows: [] }],
+      },
+    });
+    const prisma = prismaMock({
+      document: { findFirst: documentLookup },
+      documentSession: { findMany: async () => [] },
+    });
+    const resolver = createTabularResolver({
+      userId: "u1",
+      sessionId: "s1",
+      projectId: null,
+      documentIds: ["d-frozen"],
+      prisma,
+    });
+
+    await expect(
+      resolver.resolveSheet({ type: "upload", documentId: "d-other" }),
+    ).rejects.toThrow("Dataset not found or empty");
+  });
+
   it("resolves an upload sheet from Document.tabularData", async () => {
     const prisma = prismaMock({
       document: {

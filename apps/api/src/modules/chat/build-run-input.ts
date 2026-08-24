@@ -1,4 +1,5 @@
 import { prisma } from "../../utils/prisma.js";
+import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
 import {
   buildDocumentCatalogInstruction,
@@ -25,33 +26,24 @@ import {
   normalizePageImages,
   OpenRouterImageGenerationModel,
   renderProfileContextText,
-  tracing,
   WEB_SEARCH_INSTRUCTION,
   DEEP_RESEARCH_INSTRUCTION,
   type AgentContextBlock,
-  type ClarificationRequest,
-  type ClarificationResponse,
   type ImageCapabilitySet,
-  type ImageGenSettings,
   type ProfileScope,
   type ProfileSectionKey,
   type ReasoningEffort,
 } from "@assingment/agent";
-import type { Message } from "@anvia/core/completion";
-import type { AnyTool, MemoryStore, ToolApprovalsOptions } from "@anvia/core";
+import { parseMessage, type Message } from "@anvia/core/completion";
+import type { AnyTool, MemoryStore } from "@anvia/core";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
 import { createTabularResolver } from "./tabular-resolver.js";
-import {
-  getImageStore,
-  type GeneratedImageRecord,
-} from "../images/service.js";
+import { getImageStore } from "../images/service.js";
 import {
   formatContextSnippetBlock,
   getContextSnippetStore,
-  type ContextSnippetRecord,
 } from "./context-snippets.js";
-import { parseImageCapabilities } from "./image-capabilities.js";
 import {
   resolveImageReference,
   type ImageResolveDeps,
@@ -60,12 +52,13 @@ import {
   createNonVisionMemoryProxy,
   createSanitizedMemoryStore,
 } from "./memory-sanitizer.js";
-import { findActiveModel, listModels } from "../models/service.js";
+import { findActiveModel } from "../models/service.js";
 import {
   createDefaultViewImageTool,
   resolveVisionHelperModel,
   VISION_HELPER_INSTRUCTION,
 } from "./vision-helper.js";
+import { parseImageCapabilities } from "./image-capabilities.js";
 import {
   rescheduleProfileRefresh,
   waitForActiveProfileJob,
@@ -73,9 +66,21 @@ import {
 import {
   appendExplicitFact,
   loadProfileData,
-  profileConfig,
   summarizeProfileForScope,
 } from "../profiling/service.js";
+import {
+  CHAT_AGENT_ID,
+  attachChatAgentRecipeClaim,
+  chatAgentImageGenSettingsSchema,
+  createChatAgentRecipe,
+  type ContextSnippetProjectionInput,
+  type ImageProjectionInput,
+  projectContextSnippet,
+  projectGeneratedImage,
+  type ChatAgentImageDescriptor,
+  type ChatAgentRecipe,
+  type ChatAgentSnippetDescriptor,
+} from "./run-recipe.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
 function buildProjectWorkspaceContext(input: {
@@ -117,25 +122,29 @@ export function imageGenerationConfig() {
   return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }
 
+type FrozenImageModelCapability = {
+  modelId: string;
+  capabilities: ImageCapabilitySet;
+};
+
+/** Resolve the active image-model catalog once for a resumable recipe. */
+async function loadImageModelCapabilities(): Promise<FrozenImageModelCapability[]> {
+  const models = await prisma.chatModel.findMany({
+    where: { outputType: "image", isActive: true },
+    select: { modelId: true, imageCapabilities: true },
+  });
+  return models.map((model) => ({
+    modelId: model.modelId,
+    capabilities: parseImageCapabilities(model.imageCapabilities),
+  }));
+}
+
 export type ToolGrantHelpers = {
   hasGrant(toolName: string): Promise<boolean> | boolean;
   takeToolOverride(
     toolName: string,
   ): Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
 };
-
-/** Capability map for active image models; unknown model ids → null (tool defaults). */
-async function loadImageCapabilities(): Promise<Map<string, ImageCapabilitySet>> {
-  const models = await prisma.chatModel.findMany({
-    where: { outputType: "image", isActive: true },
-    select: { modelId: true, imageCapabilities: true },
-  });
-  const capabilities = new Map<string, ImageCapabilitySet>();
-  for (const model of models) {
-    capabilities.set(model.modelId, parseImageCapabilities(model.imageCapabilities));
-  }
-  return capabilities;
-}
 
 /**
  * Document-page image lookup for edit_image references: a document image id
@@ -146,13 +155,16 @@ async function findSessionDocumentImage(
   imageId: string,
   userId: string,
   sessionId: string,
+  frozenDocumentIds?: readonly string[],
 ): Promise<{ mediaType: string; buffer: Uint8Array } | null> {
   const pages = await prisma.documentPage.findMany({
     where: {
       document: {
         userId,
         status: "ready",
-        sessionLinks: { some: { sessionId, userId } },
+        ...(frozenDocumentIds
+          ? { id: { in: [...frozenDocumentIds] } }
+          : { sessionLinks: { some: { sessionId, userId } } }),
       },
     },
     select: { images: true },
@@ -193,10 +205,10 @@ export type ChatRunInput = {
   imageGenerationAvailable: boolean;
   /** Context7 MCP tools available (configured + connected). */
   context7Available: boolean;
-  /** Images pinned as active context for this session (in pin order). */
-  activeContextImages: GeneratedImageRecord[];
-  /** The single text snippet pinned as additional context (null if none). */
-  activeContextSnippet: ContextSnippetRecord | null;
+  /** Frozen image descriptors pinned for this run (in pin order). */
+  activeContextImages: ChatAgentImageDescriptor[];
+  /** Frozen text snippet descriptor (null if none). */
+  activeContextSnippet: ChatAgentSnippetDescriptor | null;
 };
 
 /**
@@ -213,143 +225,674 @@ function promptClientMessageId(promptMessage: Message | undefined): string | nul
     : null;
 }
 
-export async function buildChatRunInput(input: {
+export type SingleUseContextClaim = {
+  claimId: string;
+  commit(): Promise<void>;
+  release(): Promise<void>;
+};
+
+/**
+ * Minimal transactional surface for the existing context rows. Claiming
+ * marks only the authenticated ids in one transaction; durable claim fields
+ * let a later process release or commit without a closure snapshot.
+ */
+export type SingleUseContextClaimStore = {
+  claim(input: {
+    claimId: string;
+    userId: string;
+    sessionId: string;
+    imageIds: string[];
+    snippetId: string | null;
+  }): Promise<SingleUseContextClaim>;
+};
+
+type SingleUseContextClaimTransaction = {
+  sessionImageContext: {
+    findMany(input: {
+      where: {
+        userId?: string;
+        sessionId?: string;
+        imageId: { in: string[] };
+      };
+      select: { imageId: true; claimId: true };
+    }): Promise<Array<{ imageId: string; claimId: string | null }>>;
+    updateMany(input: {
+      where: {
+        userId?: string;
+        sessionId?: string;
+        imageId?: { in: string[] };
+        claimId?: string | null | { not: null };
+        claimedAt?: { lt: Date };
+      };
+      data: { claimId: string | null; claimedAt: Date | null };
+    }): Promise<{ count: number }>;
+    deleteMany(input: { where: { claimId: string } }): Promise<{ count: number }>;
+  };
+  sessionContextSnippet: {
+    findFirst(input: {
+      where: {
+        id?: string;
+        sessionId?: string;
+        userId?: string;
+        claimId?: string | null | { not: null };
+      };
+      select: { id: true; userId: true; sessionId: true; text: true; sourceRole: true; claimId: true };
+    }): Promise<{
+      id: string;
+      userId: string;
+      sessionId: string;
+      text: string;
+      sourceRole: string;
+      claimId: string | null;
+    } | null>;
+    updateMany(input: {
+      where: {
+        id?: string;
+        sessionId?: string;
+        userId?: string;
+        claimId?: string | null | { not: null };
+        claimedAt?: { lt: Date };
+      };
+      data: { claimId: string | null; claimedAt: Date | null };
+    }): Promise<{ count: number }>;
+    deleteMany(input: { where: { claimId: string } }): Promise<{ count: number }>;
+  };
+};
+
+type ClaimableContextRow = {
+  id: string;
+  userId: string;
+  sessionId: string;
+  text: string;
+  sourceRole: string;
+  claimId: string | null;
+};
+
+export type PersistentClaimStore = SingleUseContextClaimStore & {
+  releaseClaim(claimId: string): Promise<void>;
+  commitClaim(claimId: string): Promise<void>;
+  reapExpiredClaims(before: Date): Promise<number>;
+};
+
+/**
+ * Claim rows remain in the database until commit/release. The list endpoints
+ * hide rows with a claim id, and a reaper can release stale claims after a
+ * process restart. No recipe or closure is required to recover a claim.
+ */
+export function createPrismaSingleUseContextClaimStore(
+  database: SingleUseContextClaimPrisma = prisma as unknown as SingleUseContextClaimPrisma,
+): PersistentClaimStore {
+  const releaseClaim = async (claimId: string): Promise<void> => {
+    await database.$transaction(async (transaction) => {
+      await transaction.sessionImageContext.updateMany({
+        where: { claimId },
+        data: { claimId: null, claimedAt: null },
+      });
+      await transaction.sessionContextSnippet.updateMany({
+        where: { claimId },
+        data: { claimId: null, claimedAt: null },
+      });
+    });
+  };
+
+  const commitClaim = async (claimId: string): Promise<void> => {
+    await database.$transaction(async (transaction) => {
+      await transaction.sessionImageContext.deleteMany({ where: { claimId } });
+      await transaction.sessionContextSnippet.deleteMany({ where: { claimId } });
+    });
+  };
+
+  return {
+    async claim(input) {
+      if (!input.claimId.trim()) throw new Error("context claim id is required");
+      const imageIds = [...new Set(input.imageIds)];
+      const claimedAt = new Date();
+
+      await database.$transaction(async (transaction) => {
+        const existingImages =
+          imageIds.length === 0
+            ? []
+            : await transaction.sessionImageContext.findMany({
+                where: {
+                  userId: input.userId,
+                  sessionId: input.sessionId,
+                  imageId: { in: imageIds },
+                },
+                select: { imageId: true, claimId: true },
+              });
+        if (
+          existingImages.some(
+            (row) => row.claimId !== null && row.claimId !== input.claimId,
+          )
+        ) {
+          throw new Error(`context claim ${input.claimId} is no longer available`);
+        }
+
+        let existingSnippet: ClaimableContextRow | null = null;
+        if (input.snippetId !== null) {
+          existingSnippet = await transaction.sessionContextSnippet.findFirst({
+            where: { id: input.snippetId, userId: input.userId, sessionId: input.sessionId },
+            select: {
+              id: true,
+              userId: true,
+              sessionId: true,
+              text: true,
+              sourceRole: true,
+              claimId: true,
+            },
+          });
+          if (
+            !existingSnippet ||
+            (existingSnippet.claimId !== null &&
+              existingSnippet.claimId !== input.claimId)
+          ) {
+            throw new Error(`context claim ${input.claimId} is no longer available`);
+          }
+        }
+
+        const alreadyClaimed =
+          existingImages.length === imageIds.length &&
+          existingImages.every((row) => row.claimId === input.claimId) &&
+          (input.snippetId === null || existingSnippet?.claimId === input.claimId);
+        if (alreadyClaimed) return;
+
+        if (existingImages.length !== imageIds.length) {
+          throw new Error(`context claim ${input.claimId} is no longer available`);
+        }
+        if (imageIds.length > 0) {
+          const result = await transaction.sessionImageContext.updateMany({
+            where: {
+              userId: input.userId,
+              sessionId: input.sessionId,
+              imageId: { in: imageIds },
+              claimId: null,
+            },
+            data: { claimId: input.claimId, claimedAt },
+          });
+          if (result.count !== imageIds.length) {
+            throw new Error(`context claim ${input.claimId} lost a context row`);
+          }
+        }
+        if (input.snippetId !== null) {
+          const result = await transaction.sessionContextSnippet.updateMany({
+            where: {
+              id: input.snippetId,
+              userId: input.userId,
+              sessionId: input.sessionId,
+              claimId: null,
+            },
+            data: { claimId: input.claimId, claimedAt },
+          });
+          if (result.count !== 1) {
+            throw new Error(`context claim ${input.claimId} lost its snippet`);
+          }
+        }
+      });
+
+      let status: "claimed" | "committed" | "released" = "claimed";
+      let transition: Promise<void> | null = null;
+      return {
+        claimId: input.claimId,
+        commit: async () => {
+          if (status !== "claimed") return;
+          if (!transition) {
+            transition = commitClaim(input.claimId).then(() => {
+              status = "committed";
+            });
+          }
+          try {
+            await transition;
+          } finally {
+            if (status === "claimed") transition = null;
+          }
+        },
+        release: async () => {
+          if (status !== "claimed") return;
+          if (!transition) {
+            transition = releaseClaim(input.claimId).then(() => {
+              status = "released";
+            });
+          }
+          try {
+            await transition;
+          } finally {
+            // A failed transition remains retryable after the dependency
+            // recovers; do not cache the rejected promise.
+            if (status === "claimed") transition = null;
+          }
+        },
+      };
+    },
+    releaseClaim,
+    commitClaim,
+    async reapExpiredClaims(before) {
+      let count = 0;
+      await database.$transaction(async (transaction) => {
+        const images = await transaction.sessionImageContext.updateMany({
+          where: { claimId: { not: null }, claimedAt: { lt: before } },
+          data: { claimId: null, claimedAt: null },
+        });
+        const snippets = await transaction.sessionContextSnippet.updateMany({
+          where: { claimId: { not: null }, claimedAt: { lt: before } },
+          data: { claimId: null, claimedAt: null },
+        });
+        count = images.count + snippets.count;
+      });
+      return count;
+    },
+  };
+}
+
+export type SingleUseContextClaimPrisma = {
+  $transaction<T>(
+    callback: (transaction: SingleUseContextClaimTransaction) => Promise<T>,
+  ): Promise<T>;
+};
+
+type RecipeModelResolution = {
+  reasoningEfforts: string[];
+  inputModalities: string[];
+};
+
+type RecipeDocumentResolution = {
+  id: string;
+  filename: string;
+  firstPageSummary: string | null;
+};
+
+export type ChatAgentRecipeResolverDependencies = {
+  prisma?: Pick<PrismaClient, "chatSession" | "project">;
+  findActiveModel?: (
+    modelId: string,
+  ) => Promise<RecipeModelResolution | null>;
+  resolveActiveDocuments?: (input: {
+    userId: string;
+    sessionId: string;
+    projectId: string | null;
+  }) => Promise<RecipeDocumentResolution[]>;
+  listActiveImages?: (input: {
+    userId: string;
+    sessionId: string;
+  }) => Promise<ImageProjectionInput[]>;
+  getActiveSnippet?: (input: {
+    userId: string;
+    sessionId: string;
+  }) => Promise<ContextSnippetProjectionInput | null>;
+  webSearchConfig?: typeof webSearchConfig;
+  imageGenerationConfig?: typeof imageGenerationConfig;
+  loadImageModelCapabilities?: () => Promise<FrozenImageModelCapability[]>;
+  profilingEnabled?: () => boolean;
+  loadProfileData?: typeof loadProfileData;
+  deepResearchLimits?: typeof deepResearchLimits;
+  context7Requested?: () => boolean;
+};
+
+export type ResolveChatAgentRecipeInput = {
   sessionId: string;
   userId: string;
   model: string;
   reasoningEffort: string | null;
-  agentId?: string;
-  /** Client message id source of the run's prompt (used for fact provenance). */
   promptMessage?: Message;
-  /** Per-session web-search toggle (default false). */
   webSearchEnabled?: boolean;
-  /** Per-session image generation toggle (default false). */
   imageGenerationEnabled?: boolean;
-  /** Per-session Deep Research toggle (default false). */
   deepResearchEnabled?: boolean;
-  /** Session image defaults: model, aspect ratio, quality, background, count. */
-  imageGenSettings?: ImageGenSettings | null;
+  imageGenSettings?: unknown;
+  traceId: string;
+  streamId?: string;
+  consumeSingleUseContext: boolean;
+  contextClaims?: SingleUseContextClaimStore;
+  /** Injectable authenticated readers for behavior-level resolver tests. */
+  dependencies?: ChatAgentRecipeResolverDependencies;
+};
+
+/**
+ * Narrow construction seam for behavior tests and process-owned adapters.
+ * These dependencies create live runtime objects only after a validated
+ * recipe has crossed the queue boundary; none are serialized in the recipe.
+ */
+export type ChatRunReconstructionRuntime = {
+  createAgent?: typeof createAgent;
+  createCompletionModel?: typeof createCompletionModel;
+  createMemoryStore?: (database: PrismaClient) => MemoryStore;
+};
+
+/**
+ * Resolve authenticated, persisted inputs exactly once for a fresh run. This
+ * function returns JSON only: it never constructs an Agent, provider model,
+ * tool, memory store, MCP transport, observer, or callback.
+ */
+export async function resolveChatAgentRecipe(
+  input: ResolveChatAgentRecipeInput,
+): Promise<ChatAgentRecipe> {
+  const dependencies = input.dependencies;
+  const resolverPrisma = dependencies?.prisma ?? prisma;
+  const resolveModel = dependencies?.findActiveModel ?? findActiveModel;
+  const resolveDocuments =
+    dependencies?.resolveActiveDocuments ?? resolveActiveDocuments;
+  const readActiveImages =
+    dependencies?.listActiveImages ??
+    ((scope) => getImageStore().listSessionImageContexts(scope));
+  const readActiveSnippet =
+    dependencies?.getActiveSnippet ??
+    (async (scope) =>
+      (await getContextSnippetStore().getSessionContextSnippet(scope).catch(() => null)) as
+        | ContextSnippetProjectionInput
+        | null);
+  const readWebSearchConfig =
+    dependencies?.webSearchConfig ?? webSearchConfig;
+  const readImageGenerationConfig =
+    dependencies?.imageGenerationConfig ?? imageGenerationConfig;
+  const readImageModelCapabilities =
+    dependencies?.loadImageModelCapabilities ?? loadImageModelCapabilities;
+  // Keep profile policy resolution data-only. profileConfig() also creates a
+  // completion-model handle for the profile worker, which does not belong in
+  // the authenticated recipe resolver.
+  const readProfilingEnabled =
+    dependencies?.profilingEnabled ??
+    (() => process.env.PROFILE_ENABLED !== "false");
+  const readProfileData = dependencies?.loadProfileData ?? loadProfileData;
+  const readDeepResearchLimits =
+    dependencies?.deepResearchLimits ?? deepResearchLimits;
+  const readContext7Requested =
+    dependencies?.context7Requested ??
+    (() => Boolean(process.env.CONTEXT7_API_KEY?.trim()));
+
+  const normalizedPrompt = input.promptMessage
+    ? parseMessage(input.promptMessage)
+    : undefined;
+  const modelInfo = await resolveModel(input.model);
+  if (!modelInfo) throw new Error(`unknown model: ${input.model}`);
+  if (
+    input.reasoningEffort !== null &&
+    !modelInfo.reasoningEfforts.includes(input.reasoningEffort)
+  ) {
+    throw new Error(
+      `model ${input.model} does not support reasoning effort: ${input.reasoningEffort}`,
+    );
+  }
+
+  const chatSession = await resolverPrisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+  if (!chatSession) throw new Error("chat session not found");
+  const projectId = chatSession.projectId ?? null;
+
+  const sessionDocuments = await resolveDocuments({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    projectId,
+  });
+  const catalog = sessionDocuments.map((document) => ({
+    id: document.id,
+    filename: document.filename,
+    firstPageSummary: document.firstPageSummary || "(empty)",
+  }));
+  const catalogInstruction = buildDocumentCatalogInstruction(catalog);
+  const hasActiveDocuments = catalog.length > 0;
+
+  const instructions = [
+    catalogInstruction,
+    ...(hasActiveDocuments ? [DOCUMENT_IMAGE_INSTRUCTION] : []),
+  ];
+  const contextDescriptors: Array<{ id: string; text: string }> = [];
+
+  if (projectId) {
+    const project = await resolverPrisma.project.findFirst({
+      where: { id: projectId, userId: input.userId },
+      select: { name: true, description: true },
+    });
+    if (project) {
+      instructions.push(PROJECT_WORKSPACE_INSTRUCTION);
+      contextDescriptors.push({
+        id: "project_workspace",
+        text: buildProjectWorkspaceContext(project),
+      });
+    }
+  }
+
+  const profilingEnabled = readProfilingEnabled();
+  if (profilingEnabled) {
+    instructions.push(PROFILE_INSTRUCTION);
+    const userProfile = await readProfileData({
+      kind: "user",
+      userId: input.userId,
+    });
+    if (userProfile && hasProfileContent(userProfile)) {
+      contextDescriptors.push({
+        id: "user_profile",
+        text: renderProfileContextText(userProfile, "User profile"),
+      });
+    }
+    if (projectId) {
+      const projectProfile = await readProfileData({
+        kind: "project",
+        userId: input.userId,
+        projectId,
+      });
+      if (projectProfile && hasProfileContent(projectProfile)) {
+        contextDescriptors.push({
+          id: "project_profile",
+          text: renderProfileContextText(projectProfile, "Project profile"),
+        });
+      }
+    }
+  }
+
+  const tavilyConfig = readWebSearchConfig();
+  const webSearchAvailable = tavilyConfig !== null;
+  if (webSearchAvailable) instructions.push(WEB_SEARCH_INSTRUCTION);
+
+  const imageConfig = readImageGenerationConfig();
+  const imageGenerationAvailable = imageConfig !== null;
+  const imageModelCapabilities = imageGenerationAvailable
+    ? await readImageModelCapabilities()
+    : [];
+  if (imageGenerationAvailable && imageModelCapabilities.length === 0) {
+    throw new Error("image-generation capability catalog is empty");
+  }
+  if (imageGenerationAvailable) {
+    instructions.push(
+      buildImageGenerationInstruction({ webSearchAvailable }),
+    );
+  }
+
+  const deepResearchAvailable = webSearchAvailable || hasActiveDocuments;
+  if (deepResearchAvailable) instructions.push(DEEP_RESEARCH_INSTRUCTION);
+
+  const activeImageRows = await readActiveImages({
+    userId: input.userId,
+    sessionId: input.sessionId,
+  });
+  const activeImages = activeImageRows.map((image) =>
+    projectGeneratedImage(image, {
+      userId: input.userId,
+      sessionId: input.sessionId,
+    }),
+  );
+  const activeSnippetRow = await readActiveSnippet({
+    userId: input.userId,
+    sessionId: input.sessionId,
+  });
+  const activeSnippet = activeSnippetRow
+    ? projectContextSnippet(activeSnippetRow, {
+        userId: input.userId,
+        sessionId: input.sessionId,
+      })
+    : null;
+
+  let contextClaim: SingleUseContextClaim | undefined;
+  if (input.consumeSingleUseContext && (activeImages.length > 0 || activeSnippet)) {
+    const claimStore =
+      input.contextClaims ?? createPrismaSingleUseContextClaimStore();
+    contextClaim = await claimStore.claim({
+      claimId: input.streamId ?? input.traceId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      imageIds: activeImages.map((image) => image.id),
+      snippetId: activeSnippet?.id ?? null,
+    });
+  }
+
+  const limits = readDeepResearchLimits();
+  try {
+    const recipe = createChatAgentRecipe({
+    version: 1,
+    agentId: CHAT_AGENT_ID,
+    identity: {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      projectId,
+    },
+    model: {
+      id: input.model,
+      reasoningEffort: input.reasoningEffort,
+    },
+    features: {
+      webSearchEnabled: input.webSearchEnabled ?? false,
+      imageGenerationEnabled: input.imageGenerationEnabled ?? false,
+      deepResearchEnabled: input.deepResearchEnabled ?? false,
+    },
+    imageGenSettings:
+      input.imageGenSettings === null || input.imageGenSettings === undefined
+        ? null
+        : chatAgentImageGenSettingsSchema.parse(input.imageGenSettings),
+    budgets: {
+      maxTurns: 20,
+      deepResearchMaxTurns: limits.maxTurns,
+      deepResearchMaxSearches: limits.maxSearches,
+    },
+    documents: { ids: catalog.map((document) => document.id), catalog },
+    instructionFragments: instructions,
+    contextDescriptors,
+    activeContext: { images: activeImages, snippet: activeSnippet },
+    capabilities: {
+      modelAcceptsImage: modelInfo.inputModalities.includes("image"),
+      webSearchAvailable,
+      imageGenerationAvailable,
+      deepResearchAvailable,
+      profilingEnabled,
+      context7Requested: readContext7Requested(),
+      imageModelCapabilities,
+    },
+    promptClientMessageId: promptClientMessageId(normalizedPrompt),
+    trace: { traceId: input.traceId },
+    });
+    if (contextClaim) attachChatAgentRecipeClaim(recipe, contextClaim);
+    return recipe;
+  } catch (error) {
+    // A claim belongs to the recipe only after strict construction succeeds.
+    // Release it on validation failure so oversized/corrupt resolved inputs do
+    // not strand single-use context.
+    if (contextClaim) {
+      try {
+        await contextClaim.release();
+      } catch (releaseError) {
+        throw new AggregateError(
+          [error, releaseError],
+          "recipe construction failed and context rollback failed",
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+export async function reconstructChatRunInput(input: {
+  recipe: ChatAgentRecipe;
   /** Grant/override lookups for approval-gated tools (per-session, live reads). */
   grantHelpers?: ToolGrantHelpers;
-  /** Suspends runs awaiting user answers to agent clarification questions. */
-  clarificationRequester?: (
-    request: ClarificationRequest,
-  ) => Promise<ClarificationResponse>;
-  /** Approval handler suspending web tools for user confirmation. */
-  approvals?: ToolApprovalsOptions;
   /** Coarse Deep Research lifecycle events for the resumable stream. */
   onDeepResearchProgress?: (
     event: import("@assingment/agent").DeepResearchProgress,
   ) => Promise<void> | void;
   /** Connected context7 MCP server (nullable when unavailable). */
   context7Server?: McpServer | null;
+  /** Injectable live constructors for focused resolver/reconstructor tests. */
+  runtime?: ChatRunReconstructionRuntime;
 }): Promise<ChatRunInput> {
   const {
-    sessionId,
-    userId,
-    model,
-    reasoningEffort,
-    agentId,
-    promptMessage,
-    webSearchEnabled = false,
-    imageGenerationEnabled = false,
-    deepResearchEnabled = false,
-    imageGenSettings = null,
+    recipe,
     grantHelpers,
-    clarificationRequester,
-    approvals,
     onDeepResearchProgress,
     context7Server,
+    runtime,
   } = input;
 
-  const memory = createSanitizedMemoryStore(prisma);
+  const sessionId = recipe.identity.sessionId;
+  const userId = recipe.identity.userId;
+  const projectId = recipe.identity.projectId;
+  const model = recipe.model.id;
+  const reasoningEffort = recipe.model.reasoningEffort;
+  const webSearchEnabled = recipe.features.webSearchEnabled;
+  const imageGenerationEnabled = recipe.features.imageGenerationEnabled;
+  const deepResearchEnabled = recipe.features.deepResearchEnabled;
+  const imageGenSettings = recipe.imageGenSettings;
+  const hasActiveDocuments = recipe.documents.ids.length > 0;
+  const modelAcceptsImage = recipe.capabilities.modelAcceptsImage;
+  const profilingEnabled = recipe.capabilities.profilingEnabled;
+  const resolvedWebConfig = webSearchConfig();
+  const resolvedImageConfig = imageGenerationConfig();
+
+  if (recipe.capabilities.webSearchAvailable && !resolvedWebConfig) {
+    throw new Error(
+      "frozen web-search capability is unavailable in this worker process",
+    );
+  }
+  if (recipe.capabilities.imageGenerationAvailable && !resolvedImageConfig) {
+    throw new Error(
+      "frozen image-generation capability is unavailable in this worker process",
+    );
+  }
+  if (
+    recipe.capabilities.deepResearchAvailable &&
+    !recipe.capabilities.webSearchAvailable &&
+    !hasActiveDocuments
+  ) {
+    throw new Error("frozen deep-research capability has no reconstructable source");
+  }
+
+  const makeAgent = runtime?.createAgent ?? createAgent;
+  const makeCompletionModel =
+    runtime?.createCompletionModel ?? createCompletionModel;
+  const memory = runtime?.createMemoryStore?.(prisma) ?? createSanitizedMemoryStore(prisma);
 
   // Model capability gate: text-only models (e.g. DeepSeek) 404 on image
   // content replayed from memory. For those runs, wrap the memory store so
   // loaded messages drop image parts (rows keep them — a later vision-model
   // run still sees the images), and register the view_image helper tool so
   // the model can still understand images via a cheap vision chat model.
-  const modelInfo = await findActiveModel(model);
-  const modelAcceptsImage =
-    modelInfo?.inputModalities?.includes("image") ?? false;
   const runMemory = modelAcceptsImage
     ? memory
     : createNonVisionMemoryProxy(memory);
 
-  // Session row is guaranteed to exist: the router runs ensureChatSession
-  // before building the run input.
-  const chatSession = await prisma.chatSession.findFirst({
-    where: { id: sessionId, userId },
-    select: { projectId: true },
-  });
-  const projectId = chatSession?.projectId ?? null;
-
-  const sessionDocuments = await resolveActiveDocuments({
-    userId,
-    sessionId,
-    projectId,
-  });
-  const catalogInstruction = buildDocumentCatalogInstruction(sessionDocuments);
-  const hasActiveDocuments = sessionDocuments.length > 0;
+  // The recipe already contains authenticated/frozen instructions and context.
+  // Reconstruction must never relink the current session or rediscover policy.
+  const catalogInstruction = recipe.instructionFragments.find((fragment) =>
+    fragment.startsWith("Session documents:"),
+  ) ?? "";
 
   // Document tools only when the session has linked ready docs — avoids the
   // model re-searching unlinked files based on conversation memory.
   const documentTools = hasActiveDocuments
-    ? createDocumentTools({
-        sessionId,
-        userId,
-        projectId,
-        prisma,
+      ? createDocumentTools({
+          sessionId,
+          userId,
+          projectId,
+          documentIds: recipe.documents.ids,
+          prisma,
         searchService: createChunkSearchService(),
         fetchPageImage: (r2Key) => getObjectBuffer(r2Key),
         includeImageBytes: modelAcceptsImage,
       })
     : [];
 
-  let projectContext: { text: string; id: string } | undefined;
-  let projectInstruction: string | undefined;
-  if (projectId) {
-    const project = await prisma.project.findFirst({
-      where: { id: projectId, userId },
-      select: { name: true, description: true },
-    });
-    if (project) {
-      projectContext = {
-        id: "project_workspace",
-        text: buildProjectWorkspaceContext(project),
-      };
-      projectInstruction = PROJECT_WORKSPACE_INSTRUCTION;
-    }
-  }
-
-  const profilingEnabled = profileConfig().enabled;
-
-  const profileContext: AgentContextBlock[] = [];
+  const profileContext: AgentContextBlock[] = recipe.contextDescriptors.map(
+    (descriptor) => ({ id: descriptor.id, text: descriptor.text }),
+  );
   let profileTool: ReturnType<typeof createRememberUserProfileTool> | undefined;
 
   if (profilingEnabled) {
-    const userProfile = await loadProfileData({ kind: "user", userId });
-    if (userProfile && hasProfileContent(userProfile)) {
-      profileContext.push({
-        id: "user_profile",
-        text: renderProfileContextText(userProfile, "User profile"),
-      });
-    }
-
-    if (projectId) {
-      const projectProfile = await loadProfileData({
-        kind: "project",
-        userId,
-        projectId,
-      });
-      if (projectProfile && hasProfileContent(projectProfile)) {
-        profileContext.push({
-          id: "project_profile",
-          text: renderProfileContextText(projectProfile, "Project profile"),
-        });
-      }
-    }
-
     const profileScope: ProfileScope = projectId
       ? { kind: "project", userId, projectId }
       : { kind: "user", userId };
@@ -358,7 +901,7 @@ export async function buildChatRunInput(input: {
       scope: profileScope,
       source: {
         sessionId,
-        messageId: promptClientMessageId(promptMessage),
+        messageId: recipe.promptClientMessageId,
       },
       waitForActiveJob: () => waitForActiveProfileJob(profileScope),
       appendFact: (factInput) =>
@@ -375,18 +918,16 @@ export async function buildChatRunInput(input: {
     });
   }
 
-  const instructions = [
-    catalogInstruction,
-    ...(hasActiveDocuments ? [DOCUMENT_IMAGE_INSTRUCTION] : []),
-    ...(projectInstruction ? [projectInstruction] : []),
-    ...(profilingEnabled ? [PROFILE_INSTRUCTION] : []),
-  ];
-  const contextBlocks = [
-    ...(projectContext ? [projectContext] : []),
-    ...profileContext,
-  ];
+  const instructions = [...recipe.instructionFragments];
+  const contextBlocks = [...profileContext];
   const tabularTools = createTabularAnalysisTools({
-    resolver: createTabularResolver({ userId, sessionId, projectId, prisma }),
+    resolver: createTabularResolver({
+      userId,
+      sessionId,
+      projectId,
+      documentIds: recipe.documents.ids,
+      prisma,
+    }),
     sqlRunner: createSqlJsRunner(),
   });
   const tools = [
@@ -396,12 +937,9 @@ export async function buildChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
-  // Active image context: images the user pinned for this session. They are
-  // injected into the agent prompt as image input (worker) when the selected
-  // model supports image input, and described in a prioritized context block
-  // so the model treats them as the primary visual reference.
-  const activeContextImages =
-    await getImageStore().listSessionImageContexts({ userId, sessionId });
+  // Active image context is frozen in the recipe. Reconstruction may fetch
+  // bytes by r2Key later, but it never lists or clears current session context.
+  const activeContextImages = recipe.activeContext.images;
   if (activeContextImages.length > 0) {
     contextBlocks.push({
       id: "active_image_context",
@@ -418,12 +956,8 @@ export async function buildChatRunInput(input: {
     });
   }
 
-  // Active text context: the single snippet the user pinned for this session.
-  // Injected as a prioritized context block so the model treats it as
-  // high-priority additional context for this message.
-  const activeContextSnippet = await getContextSnippetStore()
-    .getSessionContextSnippet({ userId, sessionId })
-    .catch(() => null);
+  // Active text context is likewise a bounded descriptor frozen at start.
+  const activeContextSnippet = recipe.activeContext.snippet;
   if (activeContextSnippet) {
     contextBlocks.push({
       id: "session_context_snippet",
@@ -433,9 +967,11 @@ export async function buildChatRunInput(input: {
 
   // Web tools: registered only when TAVILY_API_KEY is set; the per-session
   // toggle decides whether approval is required for each call.
-  const tavilyConfig = webSearchConfig();
-  const webSearchAvailable = tavilyConfig !== null;
-  if (webSearchAvailable) {
+  const tavilyConfig = recipe.capabilities.webSearchAvailable
+    ? resolvedWebConfig
+    : null;
+  const webSearchAvailable = recipe.capabilities.webSearchAvailable;
+  if (webSearchAvailable && tavilyConfig) {
     tools.push(
       ...createWebSearchTools({
         tavilyClient: createTavilyClient(tavilyConfig.apiKey),
@@ -444,7 +980,6 @@ export async function buildChatRunInput(input: {
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
       }),
     );
-    instructions.push(WEB_SEARCH_INSTRUCTION);
   }
 
   // Deep Research is a single approval boundary around a nested researcher.
@@ -452,7 +987,7 @@ export async function buildChatRunInput(input: {
   // already owns the user's allow/reject decision; this avoids a second prompt
   // for the same research run. The nested researcher receives no delegation
   // tool, so this remains a one-level workflow.
-  const deepResearchAvailable = webSearchAvailable || hasActiveDocuments;
+  const deepResearchAvailable = recipe.capabilities.deepResearchAvailable;
   if (deepResearchAvailable) {
     const researchWebTools = tavilyConfig
       ? createWebSearchTools({
@@ -469,20 +1004,18 @@ export async function buildChatRunInput(input: {
         ...createDataAnalysisTools(),
         ...tabularTools,
       ],
-      deepResearchLimits().maxSearches,
+      recipe.budgets.deepResearchMaxSearches,
       onDeepResearchProgress,
     );
-    const researcher = createAgent({
-      agentId: `${agentId ?? "my-agent"}-deep-researcher`,
-      model: createCompletionModel(
-        process.env.DEEP_RESEARCH_MODEL?.trim() || model,
-      ),
+    const researcher = makeAgent({
+      agentId: `${recipe.agentId}-deep-researcher`,
+      model: makeCompletionModel(model),
       reasoningEffort: (reasoningEffort ?? undefined) as
         | ReasoningEffort
         | undefined,
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
-        ...(hasActiveDocuments ? [catalogInstruction] : []),
+      ...(catalogInstruction ? [catalogInstruction] : []),
         ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
       ],
       additionalContext: contextBlocks,
@@ -493,27 +1026,46 @@ export async function buildChatRunInput(input: {
       ...createDeepResearchTools({
         enabled: deepResearchEnabled,
         researcher,
-        maxTurns: deepResearchLimits().maxTurns,
-        maxSearches: deepResearchLimits().maxSearches,
+        maxTurns: recipe.budgets.deepResearchMaxTurns,
+        maxSearches: recipe.budgets.deepResearchMaxSearches,
         hasGrant: (name) =>
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         onProgress: onDeepResearchProgress,
       }),
     );
-    instructions.push(DEEP_RESEARCH_INSTRUCTION);
   }
 
   // Image generation tools: registered only when the image provider env pair
   // is set. Grants/overrides come from the approval registry (live per-call
   // reads); references resolve to generated or document images.
-  const imgConfig = imageGenerationConfig();
-  const imageGenerationAvailable = imgConfig !== null;
-  if (imageGenerationAvailable) {
-    const capabilities = await loadImageCapabilities();
+  const imgConfig = recipe.capabilities.imageGenerationAvailable
+    ? resolvedImageConfig
+    : null;
+  const imageGenerationAvailable = recipe.capabilities.imageGenerationAvailable;
+  if (imageGenerationAvailable && imgConfig) {
+    // Model/image capability policy was resolved into the recipe. Unknown
+    // ids intentionally use the image tool's bounded defaults on resume.
+    const capabilities = new Map<string, ImageCapabilitySet>(
+      recipe.capabilities.imageModelCapabilities.map((entry) => [
+        entry.modelId,
+        entry.capabilities,
+      ]),
+    );
+    if (capabilities.size === 0) {
+      throw new Error(
+        "frozen image-generation capability catalog is empty",
+      );
+    }
     const resolveDeps: ImageResolveDeps = {
       getGeneratedImage: (id) => getImageStore().getImage(id),
       getObjectBuffer,
-      findDocumentImage: findSessionDocumentImage,
+      findDocumentImage: (imageId, imageUserId, imageSessionId) =>
+        findSessionDocumentImage(
+          imageId,
+          imageUserId,
+          imageSessionId,
+          recipe.documents.ids,
+        ),
     };
     tools.push(
       ...createImageGenerationTools({
@@ -534,24 +1086,22 @@ export async function buildChatRunInput(input: {
         resolveReference: (imageId) =>
           resolveImageReference({ imageId, userId, sessionId }, resolveDeps),
         capabilities: (modelId) => capabilities.get(modelId) ?? null,
-        defaultSettings: imageGenSettings ?? undefined,
+        defaultSettings: recipe.imageGenSettings ?? undefined,
       }),
-    );
-    // The instruction's web_search-first guidance only makes sense when web
-    // tools are actually registered this run.
-    instructions.push(
-      buildImageGenerationInstruction({ webSearchAvailable }),
     );
   }
 
   // Clarification: the generic request_clarification tool suspends the run
   // until the user answers (surfaced via the stream by the requester).
-  if (clarificationRequester) {
-    tools.push(createClarificationTool({ requester: clarificationRequester }));
-    instructions.push(CLARIFICATION_INSTRUCTION);
-  }
+  // Native v1 questions are serializable interactions and do not need an
+  // application Promise/Redis requester in the worker process.
+  tools.push(createClarificationTool());
+  instructions.push(CLARIFICATION_INSTRUCTION);
 
-  const context7Available = context7Server !== null && context7Server !== undefined;
+  const context7Available =
+    recipe.capabilities.context7Requested &&
+    context7Server !== null &&
+    context7Server !== undefined;
   if (context7Available) {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
@@ -572,7 +1122,12 @@ export async function buildChatRunInput(input: {
           projectId,
           model: visionModel,
           resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
-            findSessionDocumentImage(imageId, imageUserId, imageSessionId),
+            findSessionDocumentImage(
+              imageId,
+              imageUserId,
+              imageSessionId,
+              recipe.documents.ids,
+            ),
           mode: "description",
         }),
       );
@@ -584,7 +1139,7 @@ export async function buildChatRunInput(input: {
   if (webSearchAvailable && !universalViewImageRegistered) {
     if (modelAcceptsImage) {
       const dummyVisionModel =
-        (await resolveVisionHelperModel()) ?? createCompletionModel(model);
+        (await resolveVisionHelperModel()) ?? makeCompletionModel(model);
       tools.push(
         createDefaultViewImageTool({
           userId,
@@ -592,7 +1147,12 @@ export async function buildChatRunInput(input: {
           projectId,
           model: dummyVisionModel,
           resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
-            findSessionDocumentImage(imageId, imageUserId, imageSessionId),
+            findSessionDocumentImage(
+              imageId,
+              imageUserId,
+              imageSessionId,
+              recipe.documents.ids,
+            ),
           mode: "vision",
         }),
       );
@@ -601,19 +1161,15 @@ export async function buildChatRunInput(input: {
     }
   }
 
-  const agent = createAgent({
-    agentId: agentId ?? "my-agent",
-    model: createCompletionModel(model),
+  const agent = makeAgent({
+    agentId: recipe.agentId,
+    model: makeCompletionModel(model),
     reasoningEffort: (reasoningEffort ?? undefined) as
       | ReasoningEffort
       | undefined,
-    tracing: tracing,
     additionalInstructions: instructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
-    ...((webSearchAvailable || imageGenerationAvailable || deepResearchAvailable) && approvals
-      ? { approvals }
-      : {}),
     ...(context7Available ? { mcpServers: [context7Server] } : {}),
     memory: runMemory,
   });

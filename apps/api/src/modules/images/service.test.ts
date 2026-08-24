@@ -475,7 +475,7 @@ describe("createImageStore", () => {
           sessionId: SESSION_ID,
           imageId: "img-ctx",
         },
-        update: {},
+        update: { claimId: null, claimedAt: null },
       });
     });
 
@@ -559,7 +559,7 @@ describe("createImageStore", () => {
 
       expect(images.map((image) => image.id)).toEqual(["img-1", "img-2"]);
       expect(fakePrisma.sessionImageContext.findMany).toHaveBeenCalledWith({
-        where: { sessionId: SESSION_ID },
+        where: { sessionId: SESSION_ID, claimId: null },
         orderBy: { createdAt: "asc" },
         include: { image: true },
       });

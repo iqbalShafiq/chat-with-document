@@ -6,8 +6,8 @@ import {
   chunkText,
   closeQdrant,
   closeTracing,
+  createEmbeddingModel,
   deleteDocumentChunks,
-  embeddingModel,
   firstLinesSummary,
   parseCsv,
   parseXlsx,
@@ -51,6 +51,13 @@ import {
   validateSanitizedMemoryStore,
 } from "./modules/chat/memory-sanitizer.js";
 import { closeContext7Mcp } from "./lib/context7-server.js";
+
+let processEmbeddingModel: ReturnType<typeof createEmbeddingModel> | null = null;
+
+function getProcessEmbeddingModel(): ReturnType<typeof createEmbeddingModel> {
+  processEmbeddingModel ??= createEmbeddingModel();
+  return processEmbeddingModel;
+}
 
 console.log("[worker] boot");
 
@@ -182,7 +189,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
     const chunks = chunkText(page.rawMarkdown);
     if (chunks.length === 0) continue;
 
-    const vectors = await embeddingModel.embedTexts(
+    const vectors = await getProcessEmbeddingModel().embedTexts(
       chunks.map((chunk) => chunk.text),
     );
 
@@ -267,7 +274,9 @@ async function processTabularIngest(input: {
   await deleteDocumentChunks(documentId);
   const chunks = chunkText(markdown);
   if (chunks.length > 0) {
-    const vectors = await embeddingModel.embedTexts(chunks.map((c) => c.text));
+    const vectors = await getProcessEmbeddingModel().embedTexts(
+      chunks.map((c) => c.text),
+    );
     await upsertDocumentChunks(
       chunks.map((chunk, i) => ({
         id: `${documentId}:page0:${chunk.chunkIndex}`,

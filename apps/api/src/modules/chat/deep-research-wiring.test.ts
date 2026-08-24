@@ -10,18 +10,28 @@ function source(file: string): string {
 }
 
 describe("Deep Research server wiring", () => {
-  it("round-trips the toggle through router, queue, worker, and run input", () => {
-    const router = source("./router.ts");
-    const queue = source("./run-queue.ts");
-    const worker = source("./run-worker.ts");
+  it("round-trips the toggle through the recipe and live reconstruction", () => {
     const input = source("./build-run-input.ts");
+    const recipe = source("./run-recipe.ts");
 
-    expect(router).toContain("body.deepResearchEnabled");
-    expect(router).toContain("deepResearchEnabled,");
-    expect(queue).toContain("deepResearchEnabled: boolean");
-    expect(worker).toContain("deepResearchEnabled,");
-    expect(input).toContain("deepResearchEnabled = false");
+    expect(recipe).toContain("deepResearchEnabled: z.boolean()");
+    expect(input).toContain("recipe.features.deepResearchEnabled");
+    expect(input).toContain("recipe.capabilities.deepResearchAvailable");
     expect(input).toContain("createDeepResearchTools");
+  });
+
+  it("keeps the feature policy on the persisted recipe and stable agent id", () => {
+    const queue = source("./run-queue.ts");
+    const input = source("./build-run-input.ts");
+    const recipe = source("./run-recipe.ts");
+
+    expect(recipe).toContain('CHAT_AGENT_ID = "chat-agent"');
+    expect(recipe).toContain("deepResearchEnabled");
+    expect(input).toContain("resolveChatAgentRecipe");
+    expect(input).toContain("reconstructChatRunInput");
+    expect(input).toContain("recipe.features.deepResearchEnabled");
+    expect(input).toContain("recipe.agentId");
+    expect(queue).toContain("recipe: chatAgentRecipeSchema");
   });
 
   it("emits lifecycle progress and documents session-aware availability", () => {

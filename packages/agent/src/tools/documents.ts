@@ -53,7 +53,8 @@ export interface NextPagePrisma {
       where: {
         id: string;
         userId: string;
-        sessionLinks: { some: { sessionId: string; userId: string } };
+        status?: "ready";
+        sessionLinks?: { some: { sessionId: string; userId: string } };
       };
       select: { id: true; pageCount: true; filename: true };
     }): Promise<{ id: string; pageCount: number; filename: string } | null>;
@@ -119,6 +120,8 @@ export interface ChunkSearchService {
 export interface DocumentToolsDeps {
   userId: string;
   sessionId: string;
+  /** Authenticated document scope frozen into a resumable run recipe. */
+  documentIds?: readonly string[];
   /** When set, only project corpus docs may be resolved (defense in depth). */
   projectId?: string | null;
   prisma: FindDocumentsPrisma &
@@ -135,6 +138,7 @@ export function createFindDocumentsTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: FindDocumentsPrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
@@ -153,6 +157,7 @@ export function createFindDocumentsTool(deps: {
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
       throwIfAborted(context);
       if (sessionDocIds.length === 0) {
@@ -199,7 +204,9 @@ async function resolveSessionDocumentIds(
   userId: string,
   sessionId: string,
   projectId?: string | null,
+  frozenDocumentIds?: readonly string[],
 ): Promise<string[]> {
+  if (frozenDocumentIds !== undefined) return [...frozenDocumentIds];
   const links = await prisma.documentSession.findMany({
     where: {
       sessionId,
@@ -224,6 +231,7 @@ export function createSearchDocumentPagesTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }) {
@@ -247,6 +255,7 @@ export function createSearchDocumentPagesTool(deps: {
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
       throwIfAborted(context);
       if (sessionDocIds.length === 0) {
@@ -307,6 +316,7 @@ export function createGetDocumentNextPageTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: NextPagePrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
@@ -325,6 +335,7 @@ export function createGetDocumentNextPageTool(deps: {
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
       throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {
@@ -335,9 +346,13 @@ export function createGetDocumentNextPageTool(deps: {
         where: {
           id: documentId,
           userId: deps.userId,
-          sessionLinks: {
-            some: { sessionId: deps.sessionId, userId: deps.userId },
-          },
+          ...(deps.documentIds === undefined
+            ? {
+                sessionLinks: {
+                  some: { sessionId: deps.sessionId, userId: deps.userId },
+                },
+              }
+            : { status: "ready" }),
         },
         select: { id: true, pageCount: true, filename: true },
       });
@@ -417,6 +432,7 @@ export function createGetDocumentPageImagesTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: PageImagesPrisma & SessionDocumentIdsPrisma;
   fetchPageImage: FetchPageImage;
   maxImages?: number;
@@ -446,6 +462,7 @@ export function createGetDocumentPageImagesTool(deps: {
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
       throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {

@@ -1,7 +1,9 @@
 import { prisma } from "../../utils/prisma.js";
 import { estimateMessagesTokens, estimateTextTokens } from "../../lib/token-estimate.js";
 import { findActiveModel } from "../models/service.js";
-import { buildChatRunInput, type ChatRunInput } from "./build-run-input.js";
+import { resolveChatAgentRecipe } from "./build-run-input.js";
+import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
+import type { ChatAgentRecipe } from "./run-recipe.js";
 
 function envRatio(name: string, fallback: number): number {
   const value = Number(process.env[name]);
@@ -19,17 +21,21 @@ export const compactionConfig = {
  * Static context cost shared by the usage endpoint and the chat-run worker:
  * instructions + context blocks + tools (same math both places must use).
  */
-export function estimateStaticContextTokens(runInput: ChatRunInput): number {
+export function estimateStaticContextTokens(input: {
+  instructions: readonly string[];
+  contextBlocks: readonly { text: string }[];
+  tools?: readonly unknown[];
+}): number {
   let instructionsTokens = 0;
-  for (const instruction of runInput.instructions) {
+  for (const instruction of input.instructions) {
     instructionsTokens += estimateTextTokens(instruction);
   }
   let contextTokens = 0;
-  for (const block of runInput.contextBlocks) {
+  for (const block of input.contextBlocks) {
     contextTokens += estimateTextTokens(block.text);
   }
   let toolsTokens = 0;
-  for (const tool of runInput.tools) {
+  for (const tool of input.tools ?? []) {
     try {
       toolsTokens += estimateTextTokens(JSON.stringify(tool));
     } catch {
@@ -37,6 +43,22 @@ export function estimateStaticContextTokens(runInput: ChatRunInput): number {
     }
   }
   return instructionsTokens + contextTokens + toolsTokens;
+}
+
+/** Estimate the persisted recipe's static cost without live reconstruction. */
+export function estimateRecipeStaticContextTokens(recipe: ChatAgentRecipe): number {
+  return estimateStaticContextTokens({
+    instructions: recipe.instructionFragments,
+    contextBlocks: [
+      ...recipe.contextDescriptors,
+      ...recipe.activeContext.images.map((image) => ({
+        text: `${image.prompt} (${image.mediaType})`,
+      })),
+      ...(recipe.activeContext.snippet
+        ? [{ text: recipe.activeContext.snippet.text }]
+        : []),
+    ],
+  });
 }
 
 export type ContextUsageInfo = {
@@ -63,14 +85,16 @@ export async function computeContextUsage(input: {
   reasoningEffort: string | null;
 }): Promise<ContextUsageInfo> {
   const modelInfo = await findActiveModel(input.model);
-  const runInput = await buildChatRunInput({
+  const recipe = await resolveChatAgentRecipe({
     sessionId: input.sessionId,
     userId: input.userId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
+    traceId: `context-usage:${input.sessionId}:${input.model}`,
+    consumeSingleUseContext: false,
   });
 
-  const memoryMessages = await runInput.memory.load({
+  const memoryMessages = await createSanitizedMemoryStore(prisma).load({
     scope: {
       sessionId: input.sessionId,
       userId: input.userId,
@@ -78,7 +102,7 @@ export async function computeContextUsage(input: {
   });
 
   const estimatedTokens =
-    estimateMessagesTokens(memoryMessages) + estimateStaticContextTokens(runInput);
+    estimateMessagesTokens(memoryMessages) + estimateRecipeStaticContextTokens(recipe);
 
   const lastRun = await prisma.agentUsageEvent.findFirst({
     where: { userId: input.userId, sessionId: input.sessionId },
