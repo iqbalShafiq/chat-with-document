@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate the complete application from its current Anvia v0 package set to the synchronized Anvia v1.0.0 train while preserving every current chat, retrieval, approval, clarification, queue, Deep Research, memory, citation, and UI behavior.
+**Goal:** Migrate the complete application from its current Anvia v0 package set to the synchronized Anvia v1.0.1 stable train, replacing custom framework plumbing with native v1 semantics wherever Anvia owns the contract.
 
-**Architecture:** Perform one synchronized cutover on an isolated `feat/anvia-v1-migration` worktree, using application-owned adapters around v1 Agent construction, protocol-v3 queue streaming, durable native approval continuations, and React transport/interactions. Keep the richer custom clarification flow as a tested compatibility island. Deploy only after the entire vertical path and regression matrix pass.
+**Architecture:** Perform one synchronized cutover on an isolated `feat/anvia-v1-migration` worktree, using application-owned adapters around v1 Agent construction, protocol-v3 queue streaming, durable native approval/question continuations, and React transport/interactions. Remove v0 compatibility routes, package patches, callback waiters, and deterministic LLM fallbacks. Deploy only after the entire vertical path and regression matrix pass.
 
-**Tech Stack:** TypeScript, pnpm workspaces, Anvia v1.0.0, React 19/Vite, Hono, BullMQ, Redis/ioredis, Prisma 7/Postgres, Qdrant, Langfuse, MCP, Vitest, Playwright.
+**Tech Stack:** TypeScript, pnpm workspaces, Anvia v1.0.1, React 19/Vite, Hono, BullMQ, Redis/ioredis, Prisma 7/Postgres, Qdrant, Langfuse, MCP, Vitest, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-08-23-anvia-v1-migration-design.md`
 
@@ -15,14 +15,15 @@
 - Start from clean, current `main`; create a new branch using the repository convention: `feat/anvia-v1-migration`.
 - Use `superpowers:using-git-worktrees` before implementation. Suggested isolated path: `/Users/shafiq/VsCodeProjects/chat-with-document-anvia-v1`.
 - Do not develop on `main` or reuse `feat/data-analysis-deep-research`.
-- Upgrade all Anvia packages to exactly `1.0.0` in one dependency graph; do not leave mixed v0/v1 packages or permissive ranges during migration.
+- Upgrade all Anvia packages to exactly `1.0.1` in one dependency graph; do not leave mixed v0/v1 packages or permissive ranges during migration.
 - After Task 2, full API and platform compilation is intentionally RED until their remaining v0 boundaries are migrated in Tasks 12 and 15. Intermediate tasks must run their focused tests and the narrowest compilable package; do not claim a full workspace build is green early.
 - Follow `superpowers:test-driven-development`: demonstrate each focused RED failure before production edits, implement the smallest coherent GREEN change, then refactor while green.
 - On any unexpected failure, invoke `superpowers:systematic-debugging` before changing code. Record root cause; do not weaken assertions to hide provider/protocol flakes.
 - Preserve unrelated user changes. Stage exact intended-file allowlists for every commit.
 - No Prisma migration is expected. Run schema compatibility checks; add an additive/backward-compatible migration only if the check proves a delta.
 - Never serialize secrets, client instances, Prisma handles, or provider SDK objects into Redis/BullMQ/continuations.
-- Do not remove queued follow-ups, editable image approvals, custom multi-select clarification, app compaction, citations, or Deep Research behavior to make the upgrade easier.
+- Do not remove queued follow-ups, editable image approvals, app compaction, citations, or Deep Research behavior to make the upgrade easier. Clarification must move to native required-answer question semantics; do not preserve the old multi-select/skip/timeout protocol as compatibility code.
+- Do not add deterministic LLM fallbacks or stub-backed LLM acceptance gates. Final integration and E2E gates use the real DeepSeek V4 Flash model with reasoning effort `max`.
 - Before claiming completion use `superpowers:verification-before-completion`, then `superpowers:requesting-code-review` and `superpowers:finishing-a-development-branch`.
 
 ---
@@ -90,15 +91,15 @@ git commit -m "docs: capture Anvia v0 migration baseline"
 - Modify: `apps/api/package.json`
 - Modify: `apps/platform/package.json`
 - Modify: `pnpm-lock.yaml`
-- Modify later in this task: `patches/@anvia__react-ui.patch`
+- Delete: `patches/@anvia__react-ui.patch`
 
 **Interfaces:**
 - Consumes: package manifests and lock graph.
-- Produces: exact 1.0.0 Anvia graph, direct `@anvia/client`/`@anvia/mcp` ownership, and a machine-enforced guard.
+- Produces: exact 1.0.1 Anvia graph, direct `@anvia/client`/`@anvia/mcp` ownership, no package patch, and a machine-enforced guard.
 
 - [ ] **Step 1: Write the failing dependency guard**
 
-The script must inspect all workspace manifests and the lockfile, require every referenced `@anvia/*` package to resolve to `1.0.0`, require `@anvia/client` in API/platform, require `@anvia/mcp` in agent, reject legacy versions, and confirm the React UI patch points at v1.
+The script must inspect all workspace manifests and the lockfile, require every referenced `@anvia/*` package to resolve to `1.0.1`, require `@anvia/client` in API/platform, require `@anvia/mcp` in agent, reject legacy versions, and reject Anvia package patches.
 
 ```bash
 node scripts/verify-anvia-v1-dependencies.mjs
@@ -112,24 +113,23 @@ Target direct dependencies:
 
 ```text
 packages/agent: @anvia/core, @anvia/langfuse, @anvia/mistral,
-                @anvia/openai, @anvia/qdrant, @anvia/mcp = 1.0.0
+                @anvia/openai, @anvia/qdrant, @anvia/mcp = 1.0.1
 apps/api:      @anvia/core, @anvia/client, @anvia/memory-prisma,
-                @anvia/server = 1.0.0
-apps/platform: @anvia/client, @anvia/react, @anvia/react-ui = 1.0.0
+                @anvia/server = 1.0.1
+apps/platform: @anvia/client, @anvia/react, @anvia/react-ui = 1.0.1
 ```
 
 Use exact versions, not carets, during migration.
 
-Before installing, remove the old v0 `patchedDependencies` mapping from `package.json` with `apply_patch`; leave the old patch file recoverable in git until the v1 patch is finished.
+Before installing, remove the old v0 `patchedDependencies` mapping and patch file with `apply_patch`.
 
-- [ ] **Step 3: Regenerate the lockfile and recreate the UI patch**
+- [ ] **Step 3: Regenerate the lockfile without package patches**
 
 ```bash
 pnpm install
-pnpm patch @anvia/react-ui@1.0.0
 ```
 
-Reapply only the two product requirements against v1 built output: composer remains editable and submit-capable while the chat is submitted/streaming so the app can queue follow-ups. Finish with the path printed by pnpm, replace the old patch file/mapping with the new one using `apply_patch`, and reinstall with `--frozen-lockfile`. Do not copy the old patch blindly.
+Confirm the lockfile has no `patchedDependencies`. The active-state composer requirement is implemented in application code in Task 14.
 
 - [ ] **Step 4: Prove dependency GREEN and capture compile RED**
 
@@ -275,9 +275,9 @@ Migrate document, web, data-analysis, tabular, Context7-facing, and profile tool
 
 Use scoped async `requiresApproval(args, context)` to consult session grants. Keep validated override consumption inside `execute` so a native approval response cannot tamper with tool input. Ensure reject output remains safe and deterministic.
 
-- [ ] **Step 4: Preserve clarification as an explicit compatibility tool**
+- [ ] **Step 4: Replace clarification with the native question tool**
 
-Convert only its schema/output surface to v1. Keep `ClarificationToolScope.requester`, multiple choice, optional skip, recommendations, timeout, and custom Redis wait. Add a test proving it is not registered as a v1 `createQuestionTool` until product semantics can be represented.
+Replace `ClarificationToolScope.requester` and its Promise/Redis execution path with `createQuestionTool({ name: "request_clarification", ... })`. Assert `isQuestionTool(tool)`, validate required answers, bounded single-choice/custom-text prompts, and prove normal `execute()` cannot be used. Remove multi-select, optional skip, recommendation, placeholder, and timeout-answer semantics rather than translating them through a compatibility adapter.
 
 - [ ] **Step 5: Fix Deep Research delegation**
 
@@ -480,9 +480,9 @@ Cover `put -> pending -> claim -> consumed`, enqueue-failure release, expiry, wr
 
 Use explicit Redis keys and TTL. Store request, continuation, recipe, source stream/run, user/session, timestamps, and state. Use Lua or WATCH/MULTI for atomic claim/consume/release; never use get-then-set races.
 
-- [ ] **Step 3: Split native approvals from compatibility registry**
+- [ ] **Step 3: Split native interactions from legacy waiters**
 
-Remove blocking approval handlers from worker Agent configuration. Keep only app-owned session grants, staged argument overrides, and custom clarification wait/response records in `approval-registry.ts`. Add comments/tests explaining the boundary.
+Remove blocking approval and clarification handlers from worker Agent configuration. Keep only app-owned session grants and staged argument overrides. Delete clarification wait/response records after native interaction parity is green.
 
 - [ ] **Step 4: Expose persistence for the worker adapter**
 
@@ -532,9 +532,9 @@ Authorize `streamId` against stored metadata and session, then call `resumeClien
 
 Parse/validate official response, atomically claim owned interaction, create/open a new stream, enqueue `kind:"resume"`, mark consumed after acceptance, and return the new stream subscription. Stage session grant/image override through the existing authorized endpoint before this canonical call.
 
-- [ ] **Step 6: Keep steering/stop/custom clarification routes explicit**
+- [ ] **Step 6: Keep steering and stop routes explicit**
 
-Steer and stop remain app routes with current ownership rules. Old `/approval` execution should be narrowed to grant/override staging or removed after callers migrate. Clarification response remains its compatibility route.
+Steer and stop remain app routes with current ownership rules. Old `/approval` execution is narrowed to grant/override staging or removed after callers migrate. Remove the old clarification response route; questions use canonical `interaction_response`.
 
 - [ ] **Step 7: Update OpenAPI, run GREEN, commit**
 
@@ -653,22 +653,22 @@ Adapt message parts, tool output, attachments, sources, errors, metadata/data ma
 
 Use exact v1 exports (`ThreadPrimitive`, `MessagePrimitive`, `ComposerPrimitive`, `HumanInputPrimitive`, etc.) while preserving DOM hooks, CSS classes, accessibility labels, mobile layout, tool cards, reasoning panels, attachments, DataTable/DataChart, and message actions.
 
-- [ ] **Step 4: Verify the rebased composer patch contract**
+- [ ] **Step 4: Implement the application-owned composer contract**
 
-Add a deterministic installed-file guard or component test proving editor and submit are not disabled solely by submitted/streaming status. Update README patch notes to v1 and explain queued-follow-up ownership.
+Remove the pnpm patch. Add component/browser tests proving the application-owned editor stays editable during submitted/streaming states and routes submit to normal send while ready or queue/steering while active.
 
 - [ ] **Step 5: Run focused GREEN, record remaining interaction compile RED, and commit**
 
 ```bash
 pnpm --filter platform test -- src/lib/chat
 pnpm --filter platform exec tsc --noEmit
-git add apps/platform/src README.md patches/@anvia__react-ui.patch package.json pnpm-lock.yaml
+git add apps/platform/src README.md package.json pnpm-lock.yaml
 git commit -m "refactor(platform): migrate chat UI to Anvia v1 primitives"
 ```
 
 Expected: focused message/primitive tests pass. Any remaining TypeScript failures are limited to the old approval/human-input integration removed in Task 15; record the exact list.
 
-### Task 15: Migrate approval UI to unified interactions and preserve clarification
+### Task 15: Migrate approval and clarification UI to unified interactions
 
 **Files:**
 - Modify: `apps/platform/src/components/chat/approval-panel.tsx`
@@ -680,8 +680,8 @@ Expected: focused message/primitive tests pass. Any remaining TypeScript failure
 - Modify: `apps/platform/src/routes/index.tsx`
 
 **Interfaces:**
-- Consumes: `chat.interactions.pending`, existing grants/override form, custom clarification events.
-- Produces: canonical approval response after optional staging; unchanged rich clarification wizard.
+- Consumes: `chat.interactions.pending` and existing grants/override form.
+- Produces: canonical approval and question responses after optional approval staging.
 
 - [ ] **Step 1: Write RED interaction mapping tests**
 
@@ -691,9 +691,9 @@ Test allow once, session grant, reject with reason, validated image override sta
 
 Read pending tool-approval requests from the v1 controller. For session grant/image edits, call the authorized staging endpoint first; only then call `respondToInteraction({ interactionId, response })`. Use `respondingInteractions` for pending state and preserve focus/error recovery.
 
-- [ ] **Step 3: Keep clarification isolated and remove duplicate rendering**
+- [ ] **Step 3: Render native question interactions**
 
-Continue using the custom clarification hook/route and wizard schema. Ensure its events come through the typed data mapping or an explicitly separate compatibility source. Render exactly one `ClarificationPanel` and cover single/multiple/free/skip/timeout behavior.
+Remove the custom clarification hook/route and render exactly one `ClarificationPanel` from pending `tool-question` interactions. Submit required single-choice or custom-text answers via `respondToInteraction`; cover validation, duplicate response protection, reload, and wrong-user/replayed response rejection.
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -724,7 +724,7 @@ Add deterministic interaction responders for approval allow/reject and explicit 
 
 - [ ] **Step 2: Add API regression matrix**
 
-Cover normal message, stream resume, stop, transient retry, steering FIFO, active-run locking, session delete during queued work, profile/usage tap conditions, document/image single-use context, interaction process restart, and custom clarification timeout.
+Cover normal message, stream resume, stop, transient retry, steering FIFO, active-run locking, session delete during queued work, profile/usage tap conditions, document/image single-use context, interaction process restart, and native question resume/replay rejection.
 
 - [ ] **Step 3: Add platform pure regression matrix**
 
@@ -812,7 +812,7 @@ git commit -m "test: verify Anvia v1 service integration"
 
 - [ ] **Step 1: Add migration-specific E2E tests before changing assertions**
 
-Add cases for protocol reload resume, approval across worker restart, replay rejection, queue during streaming, and rich clarification. Run the new spec and capture RED caused by any incomplete browser wiring.
+Add cases for protocol reload resume, approval and question interactions across worker restart, replay rejection, and queue during streaming. Run the new spec and capture RED caused by any incomplete browser wiring.
 
 ```bash
 pnpm --filter platform e2e -- anvia-v1-migration.e2e.ts
@@ -907,7 +907,7 @@ Confirm no unplanned Prisma migration/seed change, existing sessions still load,
 
 - [ ] **Step 4: Request independent code review**
 
-Invoke `superpowers:requesting-code-review`. Reviewer must inspect design/spec traceability, package graph, interaction durability/security, custom clarification boundary, protocol adapter, resource disposal, memory/data safety, patch maintenance, and browser evidence. Convert every accepted finding into a RED regression before fixing.
+Invoke `superpowers:requesting-code-review`. Reviewer must inspect design/spec traceability, package graph, interaction durability/security, native question cutover, protocol adapter, resource disposal, memory/data safety, application-owned composer, and browser evidence. Convert every accepted finding into a RED regression before fixing.
 
 - [ ] **Step 5: Re-run impacted and full verification after fixes**
 
@@ -933,10 +933,10 @@ Invoke `superpowers:finishing-a-development-branch` and present the verified mer
 
 The migration is complete only when:
 
-- `feat/anvia-v1-migration` contains a synchronized exact Anvia 1.0.0 graph;
+- `feat/anvia-v1-migration` contains a synchronized exact Anvia 1.0.1 graph;
 - no runtime uses a removed v0 API or mixed-major protocol;
 - native approvals suspend without holding a worker and resume exactly once across restart;
-- custom rich clarification behavior is intact and separately tested;
+- native clarification questions suspend and resume exactly once with no legacy waiter/route;
 - queue steering, stop, retry, memory, compaction, citations, retrieval, Data Analysis, image generation, and Deep Research retain parity;
 - API emits only valid `anvia.client.v3` framed streams with authorized resume;
 - provider/Qdrant/MCP/Langfuse resources validate and close correctly;

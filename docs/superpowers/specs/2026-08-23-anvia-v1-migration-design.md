@@ -2,11 +2,11 @@
 
 Date: 2026-08-23
 Status: design complete; implementation intentionally not started
-Target: Anvia v1.0.0 synchronized package train, official tag commit `59e2889f7ecf637bad1f24d6cd2aa5080467b8e9`
+Target: Anvia v1.0.1 synchronized stable package train
 
 ## 1. Goal
 
-Migrate `chat-with-document` from its mixed Anvia v0 package line to Anvia v1.0.0 without dropping current product behavior: durable sessions, app-owned compaction, document/image context, web and image approvals with editable settings/session grants, custom clarification wizard, queued follow-ups with steering, tabular analysis, bounded one-level Deep Research, citations, Langfuse, Context7 MCP, Qdrant retrieval, resumable streams, and real-browser evidence.
+Migrate `chat-with-document` from its mixed Anvia v0 package line to Anvia v1.0.1 with a full cutover to native v1 semantics: durable sessions, app-owned compaction, document/image context, native approval and question interactions, queued follow-ups with steering, tabular analysis, bounded one-level Deep Research, citations, Langfuse, Context7 MCP, Qdrant retrieval, resumable streams, and real-browser evidence.
 
 This is an architectural migration, not a dependency-only bump. Anvia v1 removes the builders and ambiguous streaming/human-input surfaces on which the current app depends, introduces a canonical client protocol and serializable interaction continuations, and moves MCP/client responsibilities into dedicated packages.
 
@@ -30,7 +30,7 @@ No dedicated end-to-end v0-to-v1 migration guide was present in the tagged repos
 | `apps/api` | Core 0.26, memory-prisma 0.3, server 0.7 | Core/client/memory-prisma/server 1.0.0 |
 | `apps/platform` | React 0.11, React UI 0.7 | client/react/react-ui 1.0.0 |
 
-The repository currently patches built `@anvia/react-ui` files so users can compose and submit queued follow-ups during streaming. Upstream v1 still disables composer editing/submission while submitted or streaming, so the behavior must be deliberately rebased and tested; deleting the patch silently would be a regression.
+The repository currently patches built `@anvia/react-ui` files so users can compose and submit queued follow-ups during streaming. The v1 cutover removes that package patch and moves composer ownership into application code, where idle submit and active-run steering/queueing can be selected explicitly and tested end to end.
 
 ### 3.2 Runtime ownership
 
@@ -50,7 +50,7 @@ The application—not Anvia—continues to own authentication, session/document 
 - Follow-up queue editing, ordering, steering, acknowledgements, and fallback to a fresh run.
 - Web search, image generation, and Deep Research approval policies; allow-once, allow-for-session, reject.
 - Image approval parameter edits before execution.
-- Custom clarification wizard with single choice, multi-choice, free text, recommended answers, optional skip, and timeout fallback.
+- Native clarification questions with required single-choice or custom-text answers and durable resume.
 - One-level Deep Research only; no recursive agent delegation.
 - Existing citation markers/trailer and UI source chips.
 - Durable Prisma memory plus app-owned compaction/profiling behavior.
@@ -152,11 +152,11 @@ platform respondToInteraction
 
 No BullMQ worker remains blocked for native approvals.
 
-### 6.5 Clarification compatibility decision
+### 6.5 Native clarification decision
 
-Do not force the existing clarification wizard onto v1 `createQuestionTool` in this migration. The v1 question contract supports one required nonblank string per question and optional single-choice/custom text, but cannot faithfully represent current multi-select arrays, optional skip, recommendation flags, title, placeholder, or timeout fallback.
+Replace the custom Promise/Redis clarification waiter with v1 `createQuestionTool`. The stable native contract supports one required nonblank answer per question, with optional bounded choices and custom text. The cutover intentionally removes application-only multi-select arrays, optional skip, recommendation flags, placeholder metadata, and timeout answers instead of maintaining a parallel human-input protocol.
 
-The custom `request_clarification` tool therefore remains an explicitly documented compatibility island: migrate its tool schema/output to v1 but retain its current app-owned Redis wait/response path and UI. Add focused tests that distinguish it from native approval interactions. A future product decision may simplify the wizard and migrate to native questions; that is out of this cutover.
+The application may preserve visual presentation around native question interactions, but it must render from `tool-question` requests and respond through the canonical interaction endpoint. No compatibility route, legacy clarification event, or deterministic timeout answer remains after cutover.
 
 ### 6.6 Canonical queue-backed streaming
 
@@ -173,8 +173,8 @@ Steering keeps the current Redis queue but targets the live v1 `AgentStream.stee
 - Replace hook `humanInput` with `chat.interactions.pending`, `respondingInteractions`, and `respondToInteraction`.
 - Move UI/protocol types to `@anvia/client`.
 - Replace removed React UI aliases with v1 primitives.
-- Recreate the React UI pnpm patch against v1 only for the minimal editor/submit active-state behavior required by queued follow-ups. Record why it exists and pin it with browser tests.
-- Keep custom clarification UI on its existing context until the compatibility island is retired.
+- Remove the React UI pnpm patch and implement an application-owned composer that stays editable while active, sends normally while ready, and queues/steers while streaming.
+- Render clarification from native `tool-question` interactions and respond through `respondToInteraction`.
 
 ### 6.8 Memory and compaction
 
@@ -231,7 +231,7 @@ Both carry stream/session/user identity and use the same worker execution pipeli
 
 ### 9.1 Contract/unit tests
 
-- Dependency graph contains only Anvia 1.0.0 and required direct peers.
+- Dependency graph contains only Anvia 1.0.1 and required direct peers.
 - Removed symbols/options/imports are absent.
 - Providers use object-only factories and correct strict provider options.
 - Every tool parses strict input and serializes output; approvals and overrides execute exactly once.
@@ -247,7 +247,7 @@ Both carry stream/session/user identity and use the same worker execution pipeli
 - Resume from event N has no gap or duplication; stale/wrong-user cursor rejected.
 - Approval continuation persisted before suspended terminal exposure.
 - Allow once, allow for session, reject, edited image args, expired continuation, wrong response type, double submit, replay, worker restart, enqueue failure rollback.
-- Custom clarification single/multiple/free/skip/timeout remains operational and is not mistaken for native approval state.
+- Native clarification single-choice/custom-text interactions suspend, authorize, resume, and reject replay correctly.
 - Stop, transient model retry, queued steering acknowledgements, and leftovers behave as before.
 
 ### 9.3 Package and behavior suites
@@ -264,7 +264,7 @@ Automated Playwright plus hands-on headed browser checks must cover:
 4. image approval with edited settings;
 5. Deep Research direct and approval-gated paths with visible progress/citations;
 6. queue multiple follow-ups while streaming, edit/reorder, steer, and observe acknowledgements;
-7. clarification single/multiple/free/skip;
+7. native clarification single-choice/custom-text and reload resume;
 8. stop/regenerate/resubmit and error recovery;
 9. session switching/deletion without cross-session stream or interaction access;
 10. console/network checks for protocol errors, duplicate events, and server-only bundle leakage.
@@ -285,22 +285,22 @@ The cutover is one merge/deploy because package/protocol majors must stay synchr
 - startup/shutdown lifecycle smoke passes;
 - rollback note identifies the last v0 commit and confirms no irreversible data migration.
 
-Observe error rate, stream resume failures, interaction suspension/resume counts, replay/expiry conflicts, tool approval outcomes, worker duration, model/tool latency, memory compaction, Qdrant errors, and Langfuse delivery. Because no data rewrite is expected, rollback is application/lockfile rollback; any unexpectedly required schema migration must be additive and backwards compatible before merge.
+Observe error rate, stream resume failures, interaction suspension/resume counts, replay/expiry conflicts, tool approval outcomes, worker duration, model/tool latency, memory compaction, Qdrant errors, and Langfuse delivery. Because no data rewrite is expected, rollback is application/lockfile rollback; any unexpectedly required schema migration must be additive, explicitly justified, and rollback-safe before merge.
 
 ## 11. Explicit non-goals
 
 - No visual redesign.
 - No replacement of BullMQ, Redis, Prisma, R2, Hono, TanStack Router, or current auth.
-- No simplification/removal of current queue, clarification, approvals, Deep Research, data analysis, or citation behavior.
+- No simplification/removal of current queue, approvals, Deep Research, data analysis, or citation behavior. Clarification intentionally adopts the narrower native v1 question contract.
 - No adoption of native Anvia memory compaction until parity is separately proven.
 - No development or branch creation in this planning session.
 
 ## 12. Design acceptance criteria
 
 - One coherent v1 package train and import boundary.
-- All v0 removed APIs have an explicit v1 replacement or documented compatibility decision.
+- All v0 removed APIs have an explicit v1 replacement; no runtime compatibility path remains.
 - Native approval suspension is durable across request/worker lifetime and authorized/replay-safe.
-- Custom clarification semantics remain intact.
+- Clarification uses native question interactions end to end.
 - Protocol-v3 framing, resume, queue steering, and custom progress coexist without raw undocumented events.
 - Memory data remains readable without unnecessary migration.
 - Resources have explicit process lifecycle ownership.

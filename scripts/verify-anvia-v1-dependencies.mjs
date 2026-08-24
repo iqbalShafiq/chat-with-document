@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const TARGET_VERSION = "1.0.0";
+const TARGET_VERSION = "1.0.1";
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCKFILE_PATH = join(REPOSITORY_ROOT, "pnpm-lock.yaml");
 const DEPENDENCY_FIELDS = [
@@ -34,8 +34,6 @@ const REQUIRED_DIRECT_DEPENDENCIES = {
     "@anvia/react-ui",
   ],
 };
-const PATCH_KEY = `@anvia/react-ui@${TARGET_VERSION}`;
-const PATCH_PATH = "patches/@anvia__react-ui.patch";
 
 function normalizePath(path) {
   return path.split("\\").join("/");
@@ -199,12 +197,12 @@ for (const [manifestName, packageNames] of Object.entries(
 
 const rootManifest = manifests.get("package.json");
 const patchedDependencies = rootManifest?.pnpm?.patchedDependencies ?? {};
-if (patchedDependencies[PATCH_KEY] !== PATCH_PATH) {
-  const configuredAnviaPatchKeys = Object.keys(patchedDependencies).filter(
-    (key) => key.startsWith("@anvia/react-ui"),
-  );
+const configuredAnviaPatchKeys = Object.keys(patchedDependencies).filter(
+  (key) => key.startsWith("@anvia/"),
+);
+if (configuredAnviaPatchKeys.length > 0) {
   errors.push(
-    `package.json: pnpm.patchedDependencies must map ${PATCH_KEY} to ${PATCH_PATH}; found ${configuredAnviaPatchKeys.join(", ") || "none"}`,
+    `package.json: Anvia packages must not be patched after the v1 cutover; found ${configuredAnviaPatchKeys.join(", ")}`,
   );
 }
 
@@ -275,27 +273,9 @@ for (const packageName of referencedAnviaPackages) {
   }
 }
 
-const patchedDependenciesEnd = lockfile.indexOf("\nimporters:");
-const patchedDependenciesBlock =
-  patchedDependenciesEnd === -1
-    ? ""
-    : lockfile.slice(0, patchedDependenciesEnd);
-const escapedPatchKey = PATCH_KEY.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-const lockfilePatchKeyPattern = new RegExp(
-  `^\\s{2}['\"]?${escapedPatchKey}['\"]?:\\s*$`,
-  "mu",
-);
-
-if (!lockfilePatchKeyPattern.test(patchedDependenciesBlock)) {
+if (/^patchedDependencies:\s*$/mu.test(lockfile)) {
   errors.push(
-    `pnpm-lock.yaml: patchedDependencies must target ${PATCH_KEY}`,
-  );
-}
-if (!/^\s{4}path:\s+patches\/@anvia__react-ui\.patch\s*$/mu.test(
-  patchedDependenciesBlock,
-)) {
-  errors.push(
-    `pnpm-lock.yaml: ${PATCH_KEY} patch path must be ${PATCH_PATH}`,
+    "pnpm-lock.yaml: Anvia v1 cutover must not retain patchedDependencies",
   );
 }
 

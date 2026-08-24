@@ -14,9 +14,9 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@anvia/client": "1.0.0",
-    "@anvia/react": "1.0.0",
-    "@anvia/react-ui": "1.0.0",
+    "@anvia/client": "1.0.1",
+    "@anvia/react": "1.0.1",
+    "@anvia/react-ui": "1.0.1",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@tailwindcss/vite": "^4.1.18",

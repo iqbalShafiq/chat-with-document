@@ -17,10 +17,7 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "lightningcss"
-    ],
-    "patchedDependencies": {
-      "@anvia/react-ui@1.0.0": "patches/@anvia__react-ui.patch"
-    }
+    ]
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0"
