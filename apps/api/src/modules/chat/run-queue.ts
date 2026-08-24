@@ -1,4 +1,5 @@
 import { Queue } from "bullmq";
+import { createHash } from "node:crypto";
 import {
   parseMessage,
   type Message,
@@ -19,6 +20,10 @@ import {
   releaseChatAgentRecipeClaim,
   type ChatAgentRecipe,
 } from "./run-recipe.js";
+import type {
+  InteractionOwnership,
+  InteractionStore,
+} from "./interaction-store.js";
 
 export const CHAT_RUN_QUEUE = "chat-run";
 
@@ -154,6 +159,12 @@ export type StartRunJob = z.infer<typeof startRunJobSchema>;
 export type ResumeRunJob = z.infer<typeof resumeRunJobSchema>;
 export type ChatRunJobData = z.infer<typeof chatRunJobSchema>;
 
+/** Stable BullMQ id for one interaction response; claim tokens stay out of jobs. */
+export function interactionResumeJobId(interactionId: string): string {
+  const id = queueIdentity.parse(interactionId);
+  return `chat-resume:${createHash("sha256").update(id).digest("hex")}`;
+}
+
 /** Validate a job before it is allowed to enter Redis/BullMQ. */
 export function parseChatRunJobData(value: unknown): ChatRunJobData {
   return chatRunJobSchema.parse(value);
@@ -200,6 +211,124 @@ export async function enqueueChatRun(
       throw new AggregateError(
         [error, releaseError],
         "chat run enqueue failed and context rollback failed",
+      );
+    }
+    throw error;
+  }
+}
+
+export type ChatResumeEnqueueOptions = {
+  interactionStore: Pick<InteractionStore, "get" | "claim" | "release" | "consume">;
+  ownership: InteractionOwnership;
+  queueOverride?: Pick<Queue<ChatRunJobData>, "add">;
+  token?: string;
+};
+
+export type ChatResumeEnqueueResult = {
+  jobId: string;
+  record: Awaited<ReturnType<InteractionStore["consume"]>>;
+  reconciled: boolean;
+};
+
+/** Stable, prompt-free diagnostic for an accepted job awaiting reconciliation. */
+export class ChatResumeReconciliationError extends Error {
+  readonly code = "resume_reconciliation_pending" as const;
+  constructor(readonly jobId: string, cause?: unknown) {
+    super(`resume job ${jobId} was accepted but its durable consume marker needs reconciliation`);
+    this.name = "ChatResumeReconciliationError";
+    if (cause instanceof Error) this.cause = cause;
+  }
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Claim, enqueue, and consume one interaction as a single ownership
+ * protocol. A queue add failure releases the claim; after BullMQ accepts the
+ * job the claim is intentionally retained until consume succeeds or the
+ * lease reaper recovers it. The claim token never enters the job payload.
+ */
+export async function enqueueChatResume(
+  interactionId: string,
+  data: ResumeRunJob,
+  options: ChatResumeEnqueueOptions,
+): Promise<ChatResumeEnqueueResult> {
+  const parsed = parseChatRunJobData(data);
+  if (parsed.kind !== "resume" || parsed.sourceInteractionId !== interactionId) {
+    throw new Error("resume interaction id does not match the queue payload");
+  }
+  const jobId = interactionResumeJobId(interactionId);
+  const current = await options.interactionStore.get(interactionId, options.ownership);
+  if (!current) throw new Error(`interaction ${interactionId} was not found`);
+  if (
+    current.id !== parsed.sourceInteractionId ||
+    current.userId !== parsed.userId ||
+    current.sessionId !== parsed.sessionId ||
+    canonicalJson(current.continuation) !== canonicalJson(parsed.continuation) ||
+    canonicalJson(current.recipe) !== canonicalJson(parsed.recipe)
+  ) {
+    throw new Error("resume payload does not match the immutable interaction record");
+  }
+
+  // A process that crashed after queue acceptance can reconcile without the
+  // old in-memory claim token. The store's Lua consume script validates the
+  // deterministic job id, immutable fingerprint, and exact response.
+  if (current.state === "consumed") {
+    const reconciled = await options.interactionStore.consume({
+      id: interactionId,
+      userId: options.ownership.userId,
+      sessionId: options.ownership.sessionId,
+      jobId,
+      resumeStreamId: parsed.streamId,
+      response: parsed.response,
+    });
+    return { jobId, record: reconciled, reconciled: true };
+  }
+
+  const claim = await options.interactionStore.claim(interactionId, {
+    userId: options.ownership.userId,
+    sessionId: options.ownership.sessionId,
+    token: options.token,
+    fingerprint: current.fingerprint,
+    resumeStreamId: parsed.streamId,
+    response: parsed.response,
+  });
+  let accepted = false;
+  try {
+    await (options.queueOverride ?? getChatRunQueue()).add(jobId, parsed);
+    accepted = true;
+    const consumed = await options.interactionStore.consume({
+      id: interactionId,
+      userId: options.ownership.userId,
+      sessionId: options.ownership.sessionId,
+      token: claim.token,
+      jobId,
+      resumeStreamId: parsed.streamId,
+      response: parsed.response,
+    });
+    return { jobId, record: consumed, reconciled: false };
+  } catch (error) {
+    if (accepted) throw new ChatResumeReconciliationError(jobId, error);
+    try {
+      await options.interactionStore.release({
+        id: interactionId,
+        userId: options.ownership.userId,
+        sessionId: options.ownership.sessionId,
+        token: claim.token,
+      });
+    } catch (releaseError) {
+      throw new AggregateError(
+        [error, releaseError],
+        "interaction enqueue failed and claim release failed",
       );
     }
     throw error;
