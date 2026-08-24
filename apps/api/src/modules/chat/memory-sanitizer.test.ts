@@ -27,7 +27,10 @@ vi.mock("@anvia/memory-prisma", () => ({
   PrismaMemoryStore: class {
     readonly kind = "prisma";
     readonly inspector = {};
-    readonly compaction = {};
+    readonly compaction = {
+      snapshot: vi.fn(async () => ({ revision: "r1", messages: [] as Message[] })),
+      replacePrefix: vi.fn(async () => ({ status: "committed" as const })),
+    };
     readonly append = vi.fn(async () => undefined);
     readonly validate = vi.fn(async () => undefined);
     readonly load = vi.fn(async () => [] as Message[]);
@@ -335,7 +338,12 @@ describe("createSanitizedMemoryStore", () => {
     expect(
       options.scopeKey({ scope: { sessionId: "session-1", userId: "user-1" } }),
     ).toBe(JSON.stringify(["session-1", "user-1"]));
-    expect(store.compaction).toBeUndefined();
+    expect(store.compaction).toEqual(
+      expect.objectContaining({
+        snapshot: expect.any(Function),
+        replacePrefix: expect.any(Function),
+      }),
+    );
   });
 
   it("exposes strict PrismaMemoryStore validation", async () => {
@@ -730,30 +738,4 @@ describe("persisted message compatibility", () => {
     }
   });
 
-  it("does not bypass strict parsing in the app-owned load view", async () => {
-    const legacyMessage = {
-      role: "assistant",
-      content: [
-        {
-          type: "tool_call",
-          id: "call-1",
-          function: { name: "search_docs", arguments: "{}" },
-        },
-      ],
-    };
-    const store = createSanitizedMemoryStore({
-      agentMemorySession: {
-        findUnique: vi.fn(async () => ({ id: "memory-session-1" })),
-      },
-      agentMemoryMessage: {
-        findMany: vi.fn(async () => [
-          { position: 0, message: legacyMessage },
-        ]),
-      },
-    } as never);
-
-    await expect(
-      store.load({ scope: { sessionId: "session-1", userId: "user-1" } }),
-    ).rejects.toThrow();
-  });
 });

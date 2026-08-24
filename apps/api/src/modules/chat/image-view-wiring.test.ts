@@ -16,14 +16,17 @@ describe("image-view wiring", () => {
     expect(content).toContain('makeCompletionModel(model)');
   });
 
-  it("ensures VISION_HELPER_INSTRUCTION added once via guard", () => {
+  it("freezes the vision-helper instruction in the recipe", () => {
     const currentDir = dirname(fileURLToPath(import.meta.url));
     const content = readFileSync(resolve(currentDir, "./build-run-input.ts"), "utf8");
-    // Guard ensures instruction not duplicated
-    expect(content).toContain('if (!universalViewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION)');
-    // or at least two pushes with guard
-    const pushes = (content.match(/VISION_HELPER_INSTRUCTION/g) || []).length;
-    expect(pushes).toBeGreaterThanOrEqual(2);
+    // The resolver owns the frozen instruction surface; reconstruction reuses
+    // the recipe and only guards duplicate tool registration.
+    expect(content).toContain('if (!modelAcceptsImage || webSearchAvailable) {');
+    expect(content).toContain('instructions.push(VISION_HELPER_INSTRUCTION);');
+    expect(content).toContain('const instructions = [...recipe.instructionFragments];');
+    expect(content).not.toContain(
+      'if (!universalViewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION)',
+    );
   });
 
   it("reconstructs image settings and capabilities from the frozen recipe", () => {

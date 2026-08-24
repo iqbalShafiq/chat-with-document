@@ -1,64 +1,49 @@
 import { prisma } from "../../utils/prisma.js";
-import { estimateMessagesTokens, estimateTextTokens } from "../../lib/token-estimate.js";
+import { estimateMemoryTokens } from "@anvia/core/memory";
+import type { ToolDefinition } from "@anvia/core";
 import { findActiveModel } from "../models/service.js";
 import { resolveChatAgentRecipe } from "./build-run-input.js";
 import { createSanitizedMemoryStore } from "./memory-sanitizer.js";
+import {
+  estimateNativeStaticContextTokens,
+  resolveModelTokenBudget,
+} from "./memory-policy.js";
 import type { ChatAgentRecipe } from "./run-recipe.js";
-
-function envRatio(name: string, fallback: number): number {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 && value < 1 ? value : fallback;
-}
-
-export const compactionConfig = {
-  triggerRatio: envRatio("COMPACTION_TRIGGER_RATIO", 0.7),
-  targetRatio: envRatio("COMPACTION_TARGET_RATIO", 0.3),
-  keepTurns: Number(process.env.COMPACTION_KEEP_TURNS ?? 8) || 8,
-  summaryBudgetRatio: envRatio("COMPACTION_SUMMARY_BUDGET_RATIO", 0.08),
-};
 
 /**
  * Static context cost shared by the usage endpoint and the chat-run worker:
  * instructions + context blocks + tools (same math both places must use).
  */
 export function estimateStaticContextTokens(input: {
+  baseInstructions?: string;
   instructions: readonly string[];
   contextBlocks: readonly { text: string }[];
   tools?: readonly unknown[];
 }): number {
-  let instructionsTokens = 0;
-  for (const instruction of input.instructions) {
-    instructionsTokens += estimateTextTokens(instruction);
-  }
-  let contextTokens = 0;
-  for (const block of input.contextBlocks) {
-    contextTokens += estimateTextTokens(block.text);
-  }
-  let toolsTokens = 0;
-  for (const tool of input.tools ?? []) {
-    try {
-      toolsTokens += estimateTextTokens(JSON.stringify(tool));
-    } catch {
-      toolsTokens += 0;
-    }
-  }
-  return instructionsTokens + contextTokens + toolsTokens;
+  return estimateNativeStaticContextTokens({
+    baseInstructions: input.baseInstructions,
+    instructions: input.instructions,
+    contextTexts: input.contextBlocks.map((block) => block.text),
+    toolDefinitions: (input.tools ?? []).filter(
+      (tool): tool is ToolDefinition =>
+        typeof tool === "object" &&
+        tool !== null &&
+        typeof (tool as { name?: unknown }).name === "string" &&
+        typeof (tool as { description?: unknown }).description === "string" &&
+        typeof (tool as { parameters?: unknown }).parameters === "object",
+    ),
+  });
 }
 
-/** Estimate the persisted recipe's static cost without live reconstruction. */
+/** Return the frozen recipe cost; never rediscover tools on a usage request. */
 export function estimateRecipeStaticContextTokens(recipe: ChatAgentRecipe): number {
-  return estimateStaticContextTokens({
-    instructions: recipe.instructionFragments,
-    contextBlocks: [
-      ...recipe.contextDescriptors,
-      ...recipe.activeContext.images.map((image) => ({
-        text: `${image.prompt} (${image.mediaType})`,
-      })),
-      ...(recipe.activeContext.snippet
-        ? [{ text: recipe.activeContext.snippet.text }]
-        : []),
-    ],
-  });
+  if (
+    recipe.staticContext.staticContextTokens !==
+    recipe.memoryPolicy.staticContextTokens
+  ) {
+    throw new Error("native memory static context policy is inconsistent");
+  }
+  return recipe.memoryPolicy.staticContextTokens;
 }
 
 export type ContextUsageInfo = {
@@ -85,6 +70,10 @@ export async function computeContextUsage(input: {
   reasoningEffort: string | null;
 }): Promise<ContextUsageInfo> {
   const modelInfo = await findActiveModel(input.model);
+  if (!modelInfo) {
+    throw new Error("model catalog entry is unavailable");
+  }
+  const modelBudget = resolveModelTokenBudget(modelInfo);
   const recipe = await resolveChatAgentRecipe({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -102,7 +91,7 @@ export async function computeContextUsage(input: {
   });
 
   const estimatedTokens =
-    estimateMessagesTokens(memoryMessages) + estimateRecipeStaticContextTokens(recipe);
+    estimateMemoryTokens(memoryMessages) + estimateRecipeStaticContextTokens(recipe);
 
   const lastRun = await prisma.agentUsageEvent.findFirst({
     where: { userId: input.userId, sessionId: input.sessionId },
@@ -110,19 +99,19 @@ export async function computeContextUsage(input: {
     select: { inputTokens: true },
   });
 
-  const window = modelInfo?.contextWindowTokens ?? 1_050_000;
+  const window = modelBudget.contextWindowTokens;
   return {
     modelId: input.model,
-    modelLabel: modelInfo?.label ?? input.model,
+    modelLabel: modelInfo.label,
     contextWindowTokens: window,
-    maxInputTokens: modelInfo?.maxInputTokens ?? null,
-    maxOutputTokens: modelInfo?.maxOutputTokens ?? null,
+    maxInputTokens: modelBudget.maxInputTokens,
+    maxOutputTokens: modelBudget.maxOutputTokens,
     estimatedTokens,
     ratio: window > 0 ? Math.min(1, estimatedTokens / window) : 0,
-    thresholdRatio: compactionConfig.triggerRatio,
-    targetRatio: compactionConfig.targetRatio,
-    thresholdTokens: Math.floor(window * compactionConfig.triggerRatio),
-    targetTokens: Math.floor(window * compactionConfig.targetRatio),
+    thresholdRatio: window > 0 ? recipe.memoryPolicy.triggerAfterTokens / window : 0,
+    targetRatio: window > 0 ? recipe.memoryPolicy.retentionRecentTokens / window : 0,
+    thresholdTokens: recipe.memoryPolicy.triggerAfterTokens,
+    targetTokens: recipe.memoryPolicy.retentionRecentTokens,
     lastRunInputTokens: lastRun?.inputTokens ?? null,
     reasoningEffort: input.reasoningEffort,
     estimatedAt: new Date().toISOString(),

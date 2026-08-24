@@ -4,13 +4,48 @@ import {
   resolveChatAgentRecipe,
 } from "./build-run-input.js";
 import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
+import {
+  BASE_INSTRUCTIONS,
+  CLARIFICATION_TOOL_DEFINITIONS,
+  DATA_ANALYSIS_TOOL_DEFINITIONS,
+  DEEP_RESEARCH_TOOL_DEFINITIONS,
+  DOCUMENT_TOOL_DEFINITIONS,
+  IMAGE_GENERATION_TOOL_DEFINITIONS,
+  PROFILE_TOOL_DEFINITIONS,
+  TABULAR_TOOL_DEFINITIONS,
+  WEB_SEARCH_TOOL_DEFINITIONS,
+} from "@assingment/agent";
+import { createNativeStaticContext } from "./memory-policy.js";
+import { formatContextSnippetBlock } from "./context-snippets.js";
+import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
-  return parseChatAgentRecipe({
-    version: 1,
+  const value = {
+    version: 2,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
     model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
+    memoryPolicy: {
+      version: 1,
+      savePolicy: "turn",
+      staticContextTokens: 0,
+      triggerAfterTokens: 700_000,
+      retentionRecentTokens: 300_000,
+      compactorMaxTokens: 4096,
+      conflictRetries: 3,
+    },
+    staticContext: {
+      version: 1,
+      instructions: { base: "Base", additional: [] },
+      context: [],
+      tools: [],
+      model: {
+        contextWindowTokens: 1_050_000,
+        maxInputTokens: null,
+        maxOutputTokens: null,
+      },
+      staticContextTokens: 0,
+    },
     features: {
       webSearchEnabled: false,
       imageGenerationEnabled: false,
@@ -34,7 +69,63 @@ function recipe(overrides: Record<string, unknown> = {}) {
     promptClientMessageId: null,
     trace: { traceId: "trace-1" },
     ...overrides,
+  } as any;
+  const capabilities = value.capabilities;
+  const contextBlocks = [
+    ...value.contextDescriptors,
+    ...(value.activeContext.images.length > 0
+      ? [{
+          id: "active_image_context",
+          text:
+            "Active image context\n" +
+            "The user pinned the following images as context for this conversation. " +
+            "They take priority over any other images mentioned in the session:\n" +
+            value.activeContext.images
+              .map((image: any, index: number) =>
+                `${index + 1}. ${image.prompt || image.id} (${image.mediaType}) — imageId: ${image.id}`,
+              )
+              .join("\n"),
+        }]
+      : []),
+    ...(value.activeContext.snippet
+      ? [{
+          id: "session_context_snippet",
+          text: formatContextSnippetBlock(value.activeContext.snippet),
+        }]
+      : []),
+  ];
+  const toolDefinitions = [
+    ...DATA_ANALYSIS_TOOL_DEFINITIONS,
+    ...TABULAR_TOOL_DEFINITIONS,
+    ...(value.documents.ids.length > 0 ? DOCUMENT_TOOL_DEFINITIONS : []),
+    ...(capabilities.profilingEnabled ? PROFILE_TOOL_DEFINITIONS : []),
+    ...(capabilities.webSearchAvailable ? WEB_SEARCH_TOOL_DEFINITIONS : []),
+    ...(capabilities.deepResearchAvailable ? DEEP_RESEARCH_TOOL_DEFINITIONS : []),
+    ...(capabilities.imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
+    ...CLARIFICATION_TOOL_DEFINITIONS,
+    ...(!capabilities.modelAcceptsImage
+      ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
+      : capabilities.webSearchAvailable
+        ? [VIEW_IMAGE_TOOL_DEFINITIONS.vision]
+        : []),
+  ];
+  const staticContext = createNativeStaticContext({
+    baseInstructions: BASE_INSTRUCTIONS,
+    instructions: value.instructionFragments,
+    contextBlocks,
+    toolDefinitions,
+    model: {
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+    },
   });
+  value.staticContext = staticContext;
+  value.memoryPolicy = {
+    ...value.memoryPolicy,
+    staticContextTokens: staticContext.staticContextTokens,
+  };
+  return parseChatAgentRecipe(value);
 }
 
 describe("run recipe reconstruction capability boundary", () => {
@@ -175,6 +266,17 @@ describe("run recipe reconstruction capability boundary", () => {
       expect.objectContaining({ id: "active_image_context" }),
       expect.objectContaining({ id: "session_context_snippet" }),
     ]);
+    expect(capturedOptions?.memory).toEqual(
+      expect.objectContaining({
+        savePolicy: "turn",
+        compaction: expect.objectContaining({
+          trigger: { afterTokens: frozen.memoryPolicy.triggerAfterTokens },
+          retention: { recentTokens: frozen.memoryPolicy.retentionRecentTokens },
+          conflictRetries: { maxAttempts: frozen.memoryPolicy.conflictRetries },
+          compactor: expect.any(Function),
+        }),
+      }),
+    );
     expect(reconstructed.activeContextImages[0]?.id).toBe("image-frozen");
     expect(reconstructed.activeContextSnippet?.id).toBe("snippet-frozen");
   });
@@ -183,6 +285,9 @@ describe("run recipe reconstruction capability boundary", () => {
     const model = {
       reasoningEfforts: ["medium"],
       inputModalities: ["text", "image"],
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
     };
     const documents = [
       { id: "doc-frozen", filename: "brief.pdf", firstPageSummary: "Frozen brief" },
@@ -204,6 +309,7 @@ describe("run recipe reconstruction capability boundary", () => {
       text: "Frozen excerpt",
       sourceRole: "user" as const,
     };
+    let context7Reads = 0;
     const fakePrisma = {
       chatSession: {
         findFirst: vi.fn().mockResolvedValue({ projectId: "project-1" }),
@@ -232,7 +338,10 @@ describe("run recipe reconstruction capability boundary", () => {
         imageGenerationConfig: () => null,
         profilingEnabled: () => false,
         deepResearchLimits: () => ({ maxTurns: 8, maxSearches: 12 }),
-        context7Requested: () => false,
+        context7Requested: () => {
+          context7Reads += 1;
+          return false;
+        },
       },
     });
 
@@ -252,6 +361,7 @@ describe("run recipe reconstruction capability boundary", () => {
     });
     expect(resolved.activeContext.images[0]?.prompt).toBe("Frozen image");
     expect(resolved.activeContext.snippet?.text).toBe("Frozen excerpt");
+    expect(context7Reads).toBe(1);
     expect(JSON.parse(JSON.stringify(resolved))).toEqual(resolved);
   });
 });

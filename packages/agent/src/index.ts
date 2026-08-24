@@ -10,6 +10,7 @@ export * from "./document/chunking.js";
 export * from "./document/types.js";
 export * from "./prompts/build-document-catalog.js";
 export * from "./prompts/citation-instructions.js";
+export * from "./prompts/base-instructions.js";
 export * from "./prompts/document-image-instructions.js";
 export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";
@@ -26,8 +27,10 @@ export * from "./tools/tabular/sql.js";
 export * from "./tools/tabular/tools.js";
 export * from "./tools/image-generation.js";
 export * from "./tools/clarification.js";
+export * from "./tools/static-definition.js";
 export {
   CONTEXT7_INSTRUCTION,
+  CONTEXT7_TOOL_DEFINITIONS,
   DEFAULT_CONTEXT7_URL,
   closeContext7Mcp,
   createContext7McpServer,

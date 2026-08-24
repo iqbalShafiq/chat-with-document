@@ -70,31 +70,6 @@ describe("browser v1 stream data schemas", () => {
     ).toMatchObject({ success: false });
   });
 
-  it("accepts compaction phases and rejects invalid bounded fields", () => {
-    expect(
-      ChatDataSchemas.compactionStatus.safeParse({
-        phase: "complete",
-        reason: "threshold",
-        model: "deepseek/deepseek-v4-flash-0731",
-        estimated: 100,
-        threshold: 80,
-        stats: {
-          beforeTokens: 100,
-          afterTokens: 60,
-          summarizedMessages: 4,
-          truncatedGroups: 1,
-          summaryTokens: 20,
-        },
-      }),
-    ).toMatchObject({ success: true });
-    expect(
-      ChatDataSchemas.compactionStatus.safeParse({ phase: "unknown" }),
-    ).toMatchObject({ success: false });
-    expect(
-      ChatDataSchemas.compactionStatus.safeParse({ phase: "start", estimated: -1 }),
-    ).toMatchObject({ success: false });
-  });
-
   it("does not echo sensitive rejected payloads through safe parse errors", () => {
     const secret = "TOP_SECRET_REASONING_9d7e";
     const result = ChatDataSchemas.deepResearchProgress.safeParse({
@@ -108,7 +83,6 @@ describe("browser v1 stream data schemas", () => {
 
   it("exposes exactly the canonical data names", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
-      "compactionStatus",
       "deepResearchProgress",
       "queuedMessageApplied",
     ]);

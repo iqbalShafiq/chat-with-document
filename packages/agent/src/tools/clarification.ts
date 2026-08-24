@@ -1,11 +1,18 @@
 import { createQuestionTool } from "@anvia/core/tool";
+import type { ToolDefinition } from "@anvia/core";
+
+const clarificationSpec = {
+  name: "request_clarification",
+  description:
+    "Ask the user for required information before acting. Ask only questions whose answers materially change the result. Each question must accept one required answer, optionally constrained to choices with custom text allowed when appropriate.",
+} as const;
+
+export const CLARIFICATION_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createQuestionTool(clarificationSpec).definition("") as ToolDefinition,
+];
 
 export function createClarificationTool() {
-  return createQuestionTool({
-    name: "request_clarification",
-    description:
-      "Ask the user for required information before acting. Ask only questions whose answers materially change the result. Each question must accept one required answer, optionally constrained to choices with custom text allowed when appropriate.",
-  });
+  return createQuestionTool(clarificationSpec);
 }
 
 export const CLARIFICATION_INSTRUCTION = [

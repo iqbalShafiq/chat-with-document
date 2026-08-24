@@ -12,6 +12,10 @@ import {
 } from "@anvia/core/image-generation";
 import z from "zod";
 import { mapOpenRouterImageError } from "../providers/image-generation.js";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
 
 /**
  * generate_image + edit_image agent tools backed by the session's image model.
@@ -22,8 +26,6 @@ import { mapOpenRouterImageError } from "../providers/image-generation.js";
  */
 
 const MAX_PROMPT_LENGTH = 4000;
-/** Hard cap on images per call when the model capability is unknown. */
-const MAX_IMAGES = 4;
 /** Upper bound the model may request directly (the execution cap is capability-aware). */
 const MAX_MODEL_IMAGES = 10;
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
@@ -74,7 +76,7 @@ const generateImageInput = z.object({
     .describe(
       `How many images to generate (default 1, max ${MAX_MODEL_IMAGES})`,
     ),
-});
+}).strict();
 
 const editImageInput = z.object({
   prompt: z
@@ -114,17 +116,44 @@ const editImageInput = z.object({
     .describe(
       "Background for the edited image (e.g. transparent). Leave unset for a model-chosen background.",
     ),
-});
+}).strict();
+
+const generateImageSpec = {
+  name: "generate_image",
+  description:
+    "Generate an image from a text prompt using the configured image model. " +
+    "Use when the user asks to create, draw, or imagine an image; to edit an " +
+    "existing generated image, use edit_image instead. Only set modelId, " +
+    "aspectRatio, quality, background, or n when the user explicitly asks — " +
+    "otherwise leave them unset to use session defaults. Generation may " +
+    "require user approval, and the tool returns image ids, not image data.",
+  inputSchema: generateImageInput,
+} as const;
+const editImageSpec = {
+  name: "edit_image",
+  description:
+    "Edit or transform an existing generated image, referenced by the image id " +
+    "returned from a previous generate_image call. Describe the edit precisely " +
+    "and only set modelId, aspectRatio, quality, or background when the user " +
+    "explicitly asks — otherwise leave them unset to use session defaults. " +
+    "Generation may require user approval, and the tool returns image ids, " +
+    "not image data.",
+  inputSchema: editImageInput,
+} as const;
+
+export const IMAGE_GENERATION_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(generateImageSpec),
+  createStaticToolDefinition(editImageSpec),
+];
 
 /**
  * Re-validation schema for args AFTER the override merge. Overrides are
  * user-supplied and bypass the framework's validation of the model's args, so
- * the merged object is re-parsed here. `n` is unbounded above because the
- * effective cap (capability nMax, else MAX_IMAGES) is enforced at execution;
- * an upper bound here would reject hostile values instead of capping them.
+ * the merged object is re-parsed here. Invalid or out-of-range values are
+ * rejected; execution then enforces the stricter authoritative model cap.
  */
 const generateImageMergedInput = generateImageInput.extend({
-  n: z.coerce.number().int().min(1).optional(),
+  n: z.number().int().min(1).max(MAX_MODEL_IMAGES).optional(),
 });
 
 export type ImageGenSettings = {
@@ -157,6 +186,15 @@ export type ImageCapabilitySet = {
    */
   sizes?: string[];
 };
+
+export class ImageCapabilityConfigurationError extends Error {
+  readonly code = "IMAGE_CAPABILITY_CONFIGURATION_INVALID" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ImageCapabilityConfigurationError";
+  }
+}
 
 export type ImageGenerationToolScope = {
   model: ImageGenerationModel<unknown>;
@@ -237,7 +275,16 @@ const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
 export function aspectRatioToSize(
   aspectRatio?: string,
 ): { width: number; height: number } {
-  return ASPECT_SIZES[aspectRatio ?? "auto"] ?? ASPECT_SIZES.auto!;
+  if (aspectRatio === undefined) {
+    throw new ImageCapabilityConfigurationError("Image aspect ratio is required");
+  }
+  const dimensions = ASPECT_SIZES[aspectRatio];
+  if (!dimensions) {
+    throw new ImageCapabilityConfigurationError(
+      "Image aspect ratio is not supported",
+    );
+  }
+  return dimensions;
 }
 
 /**
@@ -254,8 +301,8 @@ function savedHeight(_image: GeneratedImage, fallback: number): number {
 
 /**
  * Resolve the wire parameters for the generation request:
- * - OpenAI-style models (`sizes` capability): pick the closest accepted
- *   `size` for the requested aspect ratio, falling back to "auto".
+ * - OpenAI-style models (`sizes` capability): pick the exact accepted
+ *   `size` for the requested aspect ratio.
  * - Gemini/Grok-style models: no `size` — send `aspect_ratio` +
  *   `resolution` instead (verified against OpenRouter discovery 2026-08-09).
  */
@@ -263,26 +310,36 @@ export function resolveImageRequestParams(
   aspectRatio: string | undefined,
   capability: ImageCapabilitySet | null,
 ): { size?: string; aspectRatio?: string; resolution?: string } {
-  const ratio = aspectRatio ?? "auto";
-
-  if (capability?.sizes && capability.sizes.length > 0) {
-    const { width, height } = aspectRatioToSize(ratio);
-    const exact = `${width}x${height}`;
-    if (capability.sizes.includes(exact)) return { size: exact };
-    if (capability.sizes.includes("auto")) return { size: "auto" };
-    return { size: capability.sizes[0]! };
+  const validCapability = validateImageCapability(capability);
+  if (aspectRatio === undefined) {
+    throw new ImageCapabilityConfigurationError("Image aspect ratio is required");
+  }
+  const ratio = aspectRatio;
+  if (!validCapability.aspectRatios!.includes(ratio)) {
+    throw new ImageCapabilityConfigurationError(
+      "Image aspect ratio is not supported",
+    );
   }
 
-  if (capability?.resolutions && capability.resolutions.length > 0) {
+  if (validCapability.sizes) {
+    const { width, height } = aspectRatioToSize(ratio);
+    const exact = `${width}x${height}`;
+    if (validCapability.sizes.includes(exact)) return { size: exact };
+    throw new ImageCapabilityConfigurationError(
+      "Image model does not support the requested aspect ratio",
+    );
+  }
+
+  if (validCapability.resolutions) {
     return {
       aspectRatio: ratio,
-      resolution: capability.resolutions[0]!,
+      resolution: validCapability.resolutions[0]!,
     };
   }
 
-  // Unknown capability set — fall back to the explicit size path.
-  const { width, height } = aspectRatioToSize(ratio);
-  return { size: `${width}x${height}` };
+  throw new ImageCapabilityConfigurationError(
+    "Image model capabilities are unavailable",
+  );
 }
 
 const OVERRIDE_KEYS = [
@@ -311,9 +368,13 @@ type InputReference = {
 function applyOverride(
   args: GenerationArgs,
   override: Record<string, unknown> | null,
-): Record<string, unknown> {
+): { ok: true; value: Record<string, unknown> } | { ok: false } {
   if (!override || typeof override !== "object" || Array.isArray(override)) {
-    return { ...args };
+    return { ok: true, value: { ...args } };
+  }
+  const keys = Object.keys(override);
+  if (keys.some((key) => !(OVERRIDE_KEYS as readonly string[]).includes(key))) {
+    return { ok: false };
   }
   const merged: Record<string, unknown> = { ...args };
   for (const key of OVERRIDE_KEYS) {
@@ -321,19 +382,66 @@ function applyOverride(
       merged[key] = override[key];
     }
   }
-  return merged;
+  return { ok: true, value: merged };
 }
 
-/** Keep a value only when the capability set allows it; unknown set = allow. */
-function allowedValue(
+function validateImageCapability(
+  capability: ImageCapabilitySet | null,
+): ImageCapabilitySet {
+  if (!capability || typeof capability !== "object" || Array.isArray(capability)) {
+    throw new ImageCapabilityConfigurationError(
+      "Image model capabilities are unavailable",
+    );
+  }
+  if (
+    !Number.isSafeInteger(capability.nMax) ||
+    capability.nMax < 1 ||
+    capability.nMax > MAX_MODEL_IMAGES ||
+    !Array.isArray(capability.aspectRatios) ||
+    capability.aspectRatios.length === 0
+  ) {
+    throw new ImageCapabilityConfigurationError(
+      "Image model capabilities are unavailable",
+    );
+  }
+  const arrays = [
+    capability.aspectRatios,
+    capability.sizes,
+    capability.resolutions,
+    capability.quality,
+    capability.background,
+  ];
+  if (
+    arrays.some(
+      (values) =>
+        values !== undefined &&
+        (!Array.isArray(values) ||
+          values.length === 0 ||
+          values.some(
+            (value) => typeof value !== "string" || value.trim().length === 0,
+          )),
+    ) ||
+    (Boolean(capability.sizes) === Boolean(capability.resolutions))
+  ) {
+    throw new ImageCapabilityConfigurationError(
+      "Image model capabilities are unavailable",
+    );
+  }
+  return capability;
+}
+
+function supportedValue(
+  label: string,
   requested: string | undefined,
   allowed: string[] | undefined,
-  hasCapability: boolean,
 ): string | undefined {
-  if (!requested) return undefined;
-  if (!hasCapability) return requested;
-  if (!allowed) return undefined;
-  return allowed.includes(requested) ? requested : undefined;
+  if (requested === undefined) return undefined;
+  if (!allowed || !allowed.includes(requested)) {
+    throw new ImageCapabilityConfigurationError(
+      `Image ${label} is not supported`,
+    );
+  }
+  return requested;
 }
 
 /** Bounded error message: pass through our own errors, map status objects. */
@@ -362,21 +470,22 @@ async function safeHasGrant(
 }
 
 /**
- * Fail-safe override read: a registry blip must not fail the run — the call
- * proceeds with the model-supplied args.
+ * Registry override reads are part of the authoritative approval protocol. A
+ * read failure must stop this call; proceeding with stale/model args could
+ * bypass the user's edited approval policy.
  */
 async function safeTakeToolOverride(
   scope: ImageGenerationToolScope,
   toolName: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<{ ok: true; value: Record<string, unknown> | null } | { ok: false }> {
   try {
-    return await scope.takeToolOverride(toolName);
+    return { ok: true, value: await scope.takeToolOverride(toolName) };
   } catch (error) {
-    console.error("[image-tools] takeToolOverride failed, ignoring override", {
+    console.error("[image-tools] takeToolOverride unavailable", {
       toolName,
       error,
     });
-    return null;
+    return { ok: false };
   }
 }
 
@@ -388,60 +497,100 @@ async function runGeneration(
   context?: ToolCallContext,
 ): Promise<GenerateImageResult> {
   const toolName = isEdit ? "edit_image" : "generate_image";
-  const mergedInput = applyOverride(
-    args,
-    await safeTakeToolOverride(scope, toolName),
-  );
+  const overrideResult = await safeTakeToolOverride(scope, toolName);
+  if (!overrideResult.ok) {
+    return {
+      images: [],
+      error: "Image generation settings are unavailable",
+    };
+  }
+  const mergedResult = applyOverride(args, overrideResult.value);
+  if (!mergedResult.ok) {
+    return { images: [], error: "Image generation settings are invalid" };
+  }
+  const mergedInput = mergedResult.value;
   // Overrides bypass the framework's validation of the model's args, so the
-  // merged args are re-validated against the tool schema. When an override is
-  // invalid (e.g. a prompt beyond the bound), it is dropped in favor of the
-  // pre-override args, which were already validated — never forwarded raw.
+  // merged args are re-validated against the tool schema. Invalid registry
+  // data is surfaced instead of silently falling back to the original args.
   const schema = isEdit ? editImageInput : generateImageMergedInput;
   const parsed = schema.safeParse(mergedInput);
-  const merged: GenerationArgs = parsed.success
-    ? (parsed.data as GenerationArgs)
-    : args;
+  if (!parsed.success) {
+    return { images: [], error: "Image generation settings are invalid" };
+  }
+  const merged = parsed.data as GenerationArgs;
 
   const resolvedModelId: string | undefined =
-    merged.modelId ?? scope.defaultSettings?.modelId ?? scope.model.modelId;
-  const capability = resolvedModelId ? scope.capabilities(resolvedModelId) : null;
-  const hasCapability = capability !== null;
+    merged.modelId ?? scope.defaultSettings?.modelId;
+  if (!resolvedModelId) {
+    return { images: [], error: "Image model is not configured" };
+  }
 
-  const quality = allowedValue(
-    merged.quality ?? scope.defaultSettings?.quality,
-    capability?.quality,
-    hasCapability,
-  );
-  const background = allowedValue(
-    merged.background ?? scope.defaultSettings?.background,
-    capability?.background,
-    hasCapability,
-  );
-  const requestedN = merged.n ?? scope.defaultSettings?.n;
-  const n =
-    requestedN !== undefined
-      ? Math.max(1, Math.min(requestedN, capability?.nMax ?? MAX_IMAGES))
-      : undefined;
+  let capability: ImageCapabilitySet;
+  try {
+    capability = validateImageCapability(scope.capabilities(resolvedModelId));
+  } catch (error) {
+    return {
+      images: [],
+      error:
+        error instanceof ImageCapabilityConfigurationError
+          ? error.message
+          : "Image model capabilities are unavailable",
+    };
+  }
 
-  // Size semantics depend on the model family: OpenAI models take an exact
-  // `size`; Gemini/Grok take `aspect_ratio` + `resolution`. The request params
-  // are resolved per model capability so the wire payload is never rejected
-  // with an unsupported size.
-  const { size, aspectRatio: wireAspectRatio, resolution } =
-    resolveImageRequestParams(
-      merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
-      capability,
+  let quality: string | undefined;
+  let background: string | undefined;
+  let n: number | undefined;
+  let size: string | undefined;
+  let wireAspectRatio: string | undefined;
+  let resolution: string | undefined;
+  let width: number;
+  let height: number;
+  try {
+    quality = supportedValue(
+      "quality",
+      merged.quality ?? scope.defaultSettings?.quality,
+      capability.quality,
     );
-  // Metadata dimensions: aspect-ratio models still report the requested
-  // ratio's canonical pixels (best effort for the DB row / gallery).
-  const { width, height } = aspectRatioToSize(
-    merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
-  );
+    background = supportedValue(
+      "background",
+      merged.background ?? scope.defaultSettings?.background,
+      capability.background,
+    );
+    const requestedN = merged.n ?? scope.defaultSettings?.n;
+    if (requestedN !== undefined) {
+      if (
+        !Number.isSafeInteger(requestedN) ||
+        requestedN < 1 ||
+        requestedN > capability.nMax
+      ) {
+        throw new ImageCapabilityConfigurationError(
+          "Image count exceeds model capability",
+        );
+      }
+      n = requestedN;
+    }
+
+    ({ size, aspectRatio: wireAspectRatio, resolution } =
+      resolveImageRequestParams(
+        merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
+        capability,
+      ));
+    ({ width, height } = aspectRatioToSize(
+      merged.aspectRatio ?? scope.defaultSettings?.aspectRatio,
+    ));
+  } catch (error) {
+    return {
+      images: [],
+      error:
+        error instanceof ImageCapabilityConfigurationError
+          ? error.message
+          : "Image model capabilities are unavailable",
+    };
+  }
 
   const additionalParams = {
-    // Only send a model id we actually resolved; otherwise the provider uses
-    // its own default model.
-    ...(resolvedModelId ? { model: resolvedModelId } : {}),
+    model: resolvedModelId,
     ...(size ? { size } : {}),
     ...(wireAspectRatio ? { aspect_ratio: wireAspectRatio } : {}),
     ...(resolution ? { resolution } : {}),
@@ -484,7 +633,7 @@ async function runGeneration(
         projectId: scope.projectId,
         buffer: image.data,
         mediaType: image.mediaType,
-        modelId: resolvedModelId ?? "",
+        modelId: resolvedModelId,
         prompt: merged.prompt,
         width: savedWidth(image, width),
         height: savedHeight(image, height),
@@ -530,30 +679,14 @@ export function createImageGenerationTools(
 
   return [
     createTool({
-      name: "generate_image",
-      description:
-        "Generate an image from a text prompt using the configured image model. " +
-        "Use when the user asks to create, draw, or imagine an image; to edit an " +
-        "existing generated image, use edit_image instead. Only set modelId, " +
-        "aspectRatio, quality, background, or n when the user explicitly asks — " +
-        "otherwise leave them unset to use session defaults. Generation may " +
-        "require user approval, and the tool returns image ids, not image data.",
-      inputSchema: generateImageInput,
+      ...generateImageSpec,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("generate_image"),
       execute: async (args: GenerationArgs, context) =>
         runGeneration(scope, args, false, {}, context),
     }),
     createTool({
-      name: "edit_image",
-      description:
-        "Edit or transform an existing generated image, referenced by the image id " +
-        "returned from a previous generate_image call. Describe the edit precisely " +
-        "and only set modelId, aspectRatio, quality, or background when the user " +
-        "explicitly asks — otherwise leave them unset to use session defaults. " +
-        "Generation may require user approval, and the tool returns image ids, " +
-        "not image data.",
-      inputSchema: editImageInput,
+      ...editImageSpec,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("edit_image"),
       execute: async (args, context) => {

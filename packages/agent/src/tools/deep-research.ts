@@ -6,6 +6,10 @@ import {
   type ToolCallContext,
 } from "@anvia/core";
 import { z } from "zod";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
 
 export type DeepResearchProgressPhase =
   | "planning"
@@ -113,6 +117,17 @@ const deepResearchInput = z.object({
     .describe("Why this question needs multi-source research"),
 });
 
+const deepResearchSpec = {
+  name: "deep_research",
+  description:
+    "Run a bounded multi-source research workflow over the active documents and available web sources. Returns a cited report and should be used for comparisons, investigations, and current evidence synthesis.",
+  inputSchema: deepResearchInput,
+} as const;
+
+export const DEEP_RESEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(deepResearchSpec),
+];
+
 function boundedInteger(value: number | undefined, fallback: number, max: number) {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(max, Math.floor(value as number)));
@@ -197,10 +212,7 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
   );
 
   const tool = createTool({
-    name: "deep_research",
-    description:
-      "Run a bounded multi-source research workflow over the active documents and available web sources. Returns a cited report and should be used for comparisons, investigations, and current evidence synthesis.",
-    inputSchema: deepResearchInput,
+    ...deepResearchSpec,
     outputSchema: z.string(),
     requiresApproval: async (args, _context) =>
       scope.enabled || (await hasSessionGrant(scope))

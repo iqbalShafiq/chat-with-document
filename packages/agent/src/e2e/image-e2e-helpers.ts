@@ -99,28 +99,6 @@ export function approvalContext<Args extends Record<string, unknown>>(
   };
 }
 
-type RegistryApprovalRequestFixture = {
-  toolName: string;
-  args: Record<string, unknown>;
-  rawArgs: string;
-  internalCallId: string;
-  run: { runId: string; agentId: string; sessionId: string };
-};
-
-/** Temporary registry-test input; deleted with the v0 registry in Task 10. */
-export function approvalRequest(
-  overrides: Partial<RegistryApprovalRequestFixture> = {},
-): RegistryApprovalRequestFixture {
-  return {
-    toolName: "generate_image",
-    args: { prompt: "a red panda" },
-    rawArgs: JSON.stringify({ prompt: "a red panda" }),
-    internalCallId: "internal-call-1",
-    run: { runId: "run-1", agentId: "agent-1", sessionId: "session-1" },
-    ...overrides,
-  };
-}
-
 /**
  * The fake store's callable surface (also typed as a Mock for .mock access).
  * Mirrors the store input contract in tools/image-generation.ts exactly

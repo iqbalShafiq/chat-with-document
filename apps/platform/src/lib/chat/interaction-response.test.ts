@@ -481,10 +481,10 @@ describe("native interaction panels", () => {
     });
     if (imageRequest.type !== "tool-approval") throw new Error("bad fixture");
     const harness = createNativeHarness(imageRequest);
-    const stageRequests: RequestInfo[] = [];
+    const stageRequests: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/api/models?outputType=image")) {
           return new Response(
@@ -498,7 +498,7 @@ describe("native interaction panels", () => {
           );
         }
         if (url.includes("/api/chat/interactions/") && url.endsWith("/stage")) {
-          stageRequests.push(input);
+          stageRequests.push(url);
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
         throw new Error(`Unexpected fetch in image rejection test: ${url}`);

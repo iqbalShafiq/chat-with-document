@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { normalizeToolResultOutput } from "@anvia/core/tool";
 import {
   createViewImageTool,
   loadRemoteImage,
   type ViewImageToolOptions,
 } from "./vision-helper.js";
 import type { CompletionModel } from "@anvia/core/completion";
-import type { ToolResultContent } from "@anvia/core";
+import type { ToolResultContentPart } from "@anvia/core";
 import type { ImageStore } from "../images/service.js";
 
 vi.mock("node:dns/promises", () => ({
@@ -94,7 +95,7 @@ describe("view_image document image resolution", () => {
 });
 
 describe("view_image universal", () => {
-  it("vision mode returns image ToolResultContent for a public URL", async () => {
+  it("vision mode returns native Anvia content parts for a public URL", async () => {
     const fakeFetch = vi.fn(
       async () =>
         new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), {
@@ -105,12 +106,14 @@ describe("view_image universal", () => {
     const tool = createViewImageTool(
       makeOptions({ mode: "vision", fetchFn: fakeFetch as unknown as typeof fetch }),
     );
-    const result = (await tool.call({
+    const normalized = normalizeToolResultOutput(await tool.call({
       url: "https://example.com/photo.jpg",
-    })) as ToolResultContent[];
-    expect(Array.isArray(result)).toBe(true);
+    }));
+    expect(normalized.type).toBe("content");
+    if (normalized.type !== "content") throw new Error("expected content output");
+    const result: readonly ToolResultContentPart[] = normalized.value;
     expect(result[0]).toMatchObject({ type: "text" });
-    expect(result[1]).toMatchObject({ type: "image", mediaType: "image/jpeg" });
+    expect(result[1]).toMatchObject({ type: "file", mediaType: "image/jpeg" });
   });
 
   it("description mode (non-vision) still returns text description", async () => {
@@ -137,8 +140,10 @@ describe("view_image universal", () => {
       getObjectBuffer: vi.fn(async () => new Uint8Array([1, 2, 3])),
     } as unknown as ImageStore;
     const tool = createViewImageTool(makeOptions({ mode: "vision", store }));
-    const result = (await tool.call({ imageId: "img-1" })) as ToolResultContent[];
-    expect(result.some((p) => p.type === "image")).toBe(true);
+    const normalized = normalizeToolResultOutput(await tool.call({ imageId: "img-1" }));
+    expect(normalized.type).toBe("content");
+    if (normalized.type !== "content") throw new Error("expected content output");
+    expect(normalized.value.some((p) => p.type === "file")).toBe(true);
   });
 
   it("persists a web URL photo (vision mode) and returns imageId in the text JSON", async () => {
@@ -151,7 +156,10 @@ describe("view_image universal", () => {
       findSessionImageBySourceUrl: ReturnType<typeof vi.fn>;
     };
     const tool = createViewImageTool(options);
-    const result = (await tool.call({ url: "https://example.com/photo.jpg" })) as ToolResultContent[];
+    const normalized = normalizeToolResultOutput(await tool.call({ url: "https://example.com/photo.jpg" }));
+    expect(normalized.type).toBe("content");
+    if (normalized.type !== "content") throw new Error("expected content output");
+    const result = normalized.value;
     expect(store.saveGeneratedImage).toHaveBeenCalledWith(expect.objectContaining({
       source: "web", sourceUrl: "https://example.com/photo.jpg", modelId: "web",
     }));

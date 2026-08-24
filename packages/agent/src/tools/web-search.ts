@@ -1,6 +1,10 @@
 import { createTool, type AnyTool, type ToolCallContext } from "@anvia/core";
 import { tavily, type TavilyClient } from "@tavily/core";
-import z from "zod";
+import z, { type JSONType } from "zod";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
 
 /** Create a Tavily client from a server-side API key (never ship this to the browser). */
 export function createTavilyClient(apiKey: string): TavilyClient {
@@ -66,6 +70,24 @@ const webFetchInput = z.object({
         "Shown to the user when approval is required.",
     ),
 });
+
+const webSearchSpec = {
+  name: "web_search",
+  description:
+    "Search the live web for up-to-date information using Tavily. Use when the answer needs current, factual, or out-of-scope information not present in the session documents — news, prices, dates, specs, events. Always provide a precise query and a clear reason.",
+  inputSchema: webSearchInput,
+} as const;
+const webFetchSpec = {
+  name: "web_fetch",
+  description:
+    "Fetch and read the full content of a specific web page (http/https) using Tavily Extract. Use when you already know the exact URL to consult — follow up on a search result, verify a claim, or read a page the user linked.",
+  inputSchema: webFetchInput,
+} as const;
+
+export const WEB_SEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(webSearchSpec),
+  createStaticToolDefinition(webFetchSpec),
+];
 
 export type WebSearchToolScope = {
   tavilyClient: TavilyClient;
@@ -153,13 +175,10 @@ export function createWebSearchTools(
 
   return [
     createTool({
-      name: "web_search",
-      description:
-        "Search the live web for up-to-date information using Tavily. Use when the answer needs current, factual, or out-of-scope information not present in the session documents — news, prices, dates, specs, events. Always provide a precise query and a clear reason.",
-      inputSchema: webSearchInput,
+      ...webSearchSpec,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("web_search"),
-      execute: async ({ query, maxResults: requestedMax, timeRange }, context) => {
+      execute: async ({ query, maxResults: requestedMax, timeRange }, context): Promise<JSONType> => {
         try {
           throwIfAborted(context);
           const response = await scope.tavilyClient.search(query, {
@@ -204,13 +223,10 @@ export function createWebSearchTools(
       },
     }),
     createTool({
-      name: "web_fetch",
-      description:
-        "Fetch and read the full content of a specific web page (http/https) using Tavily Extract. Use when you already know the exact URL to consult — follow up on a search result, verify a claim, or read a page the user linked.",
-      inputSchema: webFetchInput,
+      ...webFetchSpec,
       outputSchema: z.json(),
       requiresApproval: requiresApproval("web_fetch"),
-      execute: async ({ url }, context) => {
+      execute: async ({ url }, context): Promise<JSONType> => {
         try {
           throwIfAborted(context);
           const response = await scope.tavilyClient.extract([url], {

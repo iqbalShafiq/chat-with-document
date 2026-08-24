@@ -58,7 +58,17 @@ function makeScope(
     sessionId: "session-1",
     projectId: null,
     resolveReference: async () => null,
-    capabilities: () => null,
+    capabilities: () => ({
+      nMax: 10,
+      aspectRatios: ["1:1", "2:3", "3:2", "auto"],
+      sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+      quality: ["auto", "low", "medium", "high"],
+      background: ["auto", "transparent", "opaque"],
+    }),
+    defaultSettings: {
+      modelId: "openai/gpt-5-image-mini",
+      aspectRatio: "1:1",
+    },
     ...overrides,
   };
   return { scope, saveGeneratedImage };

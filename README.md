@@ -41,7 +41,7 @@ Alur singkat:
 
 | Area | Detail |
 | --- | --- |
-| Chat streaming | `@anvia/react` + `@anvia/server` (`createEventStream`, format `jsonl`) |
+| Chat streaming | Anvia v1 client protocol v3 via `@anvia/client` + `@anvia/react` and `@anvia/react-ui` primitives |
 | Queued follow-ups | Kirim pesan saat streaming — antrean per session (localStorage), `PromptRequest.steer()` ke run aktif (1 pesan/turn FIFO), auto-flush saat idle, hold setelah stop/error, edit + drag reorder, persist lintas reload |
 | Multi-session | Session ID di `localStorage`; daftar session dari DB |
 | Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
@@ -56,9 +56,9 @@ Alur singkat:
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/react` ^0.11.6 + `@anvia/react-ui` ^0.7.1, KaTeX |
-| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/server` ^0.7.6, `@anvia/memory-prisma` ^0.3.1 |
-| Agent | `@anvia/core` ^0.26.0 (v0 line), `@anvia/openai` ^0.5.1, `@anvia/mistral` ^0.4.1, `@anvia/qdrant` ^0.4.0, Langfuse, Zod |
+| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/client`/`@anvia/react`/`@anvia/react-ui` `1.0.1`, KaTeX |
+| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/client`/`@anvia/core`/`@anvia/memory-prisma`/`@anvia/server` `1.0.1` |
+| Agent | `@anvia/core`, `@anvia/langfuse`, `@anvia/mcp`, `@anvia/mistral`, `@anvia/openai`, `@anvia/qdrant` `1.0.1`, Zod |
 | Tooling | pnpm workspaces, Docker Compose (Postgres 16) |
 
 ## Struktur monorepo
@@ -276,7 +276,7 @@ Body `POST` (ringkas):
 ```json
 {
   "sessionId": "<uuid>",
-  "messages": [ /* core messages dari @anvia/react */ ],
+  "messages": [ /* canonical messages dari @anvia/client */ ],
   "stream": true
 }
 ```
@@ -392,9 +392,9 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 - CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
-- Anvia tetap di kereta **v0** (`@anvia/core@0.26.x` + adapter yang matching). Dokumentasi resmi sudah menunjuk v1 (`1.0.0-rc.x`, `new Agent` tanpa `AgentBuilder`); rewrite itu belum diterapkan di app ini.
-- Compaction resmi `@anvia/memory-prisma` (hapus prefix baris) **tidak** dinyalakan. Compaction session tetap app-layer di `AgentMemorySession.metadata.compaction`.
-- **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK 0.7.1 masih mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.
+- Semua package Anvia pada monorepo ini dikunci ke release train **v1.0.1**; browser memakai `@anvia/client` untuk UI/protocol types dan exact `*Primitive` exports dari `@anvia/react-ui`.
+- Memory memakai token-aware compaction native Anvia v1 dengan atomic prefix replacement dari `@anvia/memory-prisma`; aplikasi tidak memiliki engine, metadata log, event status, atau fallback summary sendiri.
+- Composer editor adalah native textarea yang dimiliki aplikasi: tetap editable saat status `submitted`/`streaming`, mengirim saat `ready`, dan queue/steer atau stop saat run aktif. Tidak ada patch `node_modules`, package patch, alias kompatibilitas, atau fallback v0.
 - Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
 
 ## Troubleshooting singkat

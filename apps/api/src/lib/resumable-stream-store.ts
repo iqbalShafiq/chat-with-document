@@ -189,18 +189,6 @@ function validDefaultData(name: string, value: unknown): boolean {
     return true;
   }
   if (name === "queuedMessageApplied") return exactKeys(value, ["clientMessageId", "attachmentCount"]) && boundedText(value.clientMessageId, 200) && boundedInteger(value.attachmentCount, 100);
-  if (name === "compactionStatus") {
-    if (!exactKeys(value, ["phase"], ["reason", "model", "estimated", "threshold", "stats"]) || !["start", "complete", "error"].includes(String(value.phase))) return false;
-    if (value.reason !== undefined && !["threshold", "summarize-failed"].includes(String(value.reason))) return false;
-    if (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 200)) return false;
-    if (value.estimated !== undefined && !boundedInteger(value.estimated, 10_000_000)) return false;
-    if (value.threshold !== undefined && !boundedInteger(value.threshold, 10_000_000)) return false;
-    if (value.stats !== undefined) {
-      const stats = value.stats;
-      if (!isRecord(stats) || !exactKeys(stats, ["beforeTokens", "afterTokens", "summarizedMessages", "truncatedGroups", "summaryTokens"]) || !boundedInteger(stats.beforeTokens, 10_000_000) || !boundedInteger(stats.afterTokens, 10_000_000) || !boundedInteger(stats.summarizedMessages, 100_000) || !boundedInteger(stats.truncatedGroups, 100_000) || !boundedInteger(stats.summaryTokens, 10_000_000)) return false;
-    }
-    return true;
-  }
   return false;
 }
 
@@ -208,7 +196,6 @@ const DEFAULT_METADATA_SCHEMA = schema(validDefaultMetadata) as ClientMetadataSc
 const DEFAULT_DATA_SCHEMAS = {
   deepResearchProgress: schema((value) => validDefaultData("deepResearchProgress", value)),
   queuedMessageApplied: schema((value) => validDefaultData("queuedMessageApplied", value)),
-  compactionStatus: schema((value) => validDefaultData("compactionStatus", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {

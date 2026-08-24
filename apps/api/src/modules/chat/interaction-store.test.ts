@@ -26,10 +26,31 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = parseChatAgentRecipe({
-  version: 1,
+  version: 2,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: "openai/gpt-5.6-luna", reasoningEffort: "medium" },
+  memoryPolicy: {
+    version: 1,
+    savePolicy: "turn",
+    staticContextTokens: 0,
+    triggerAfterTokens: 700_000,
+    retentionRecentTokens: 300_000,
+    compactorMaxTokens: 4096,
+    conflictRetries: 3,
+  },
+  staticContext: {
+    version: 1,
+    instructions: { base: "Base", additional: [] },
+    context: [],
+    tools: [],
+    model: {
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+    },
+    staticContextTokens: 0,
+  },
   features: {
     webSearchEnabled: false,
     imageGenerationEnabled: false,

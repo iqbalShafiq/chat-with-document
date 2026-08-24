@@ -3,6 +3,7 @@ import {
   type AnyTool,
   type CompletionModel,
   type GuardrailPolicyInput,
+  type MemoryOptions,
   type MemoryStore,
 } from "@anvia/core";
 import type { AgentObservabilityOptions } from "@anvia/core/observability";
@@ -24,6 +25,15 @@ export type AgentContextBlock = {
 };
 export type AgentContextInput = NativeAgentContextInput;
 
+/**
+ * Declarative memory policy passed to Anvia v1. The store and every native
+ * compaction option stay process-local; only the policy values are resolved
+ * by the caller and may be reconstructed from a durable run recipe.
+ */
+export type CreateAgentMemoryOptions = MemoryOptions & {
+  store: MemoryStore;
+};
+
 export interface CreateAgentOptions {
   agentId: string;
   model?: CompletionModel;
@@ -35,7 +45,7 @@ export interface CreateAgentOptions {
   context?: readonly AgentContextInput[];
   observability?: AgentObservabilityOptions;
   guardrails?: GuardrailPolicyInput;
-  memory?: MemoryStore;
+  memory?: MemoryStore | CreateAgentMemoryOptions;
   mcpServers?: McpServer[];
 }
 
@@ -59,6 +69,12 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     ];
   });
 
+  const memory = opts.memory === undefined
+    ? undefined
+    : isMemoryOptions(opts.memory)
+      ? opts.memory
+      : { store: opts.memory, savePolicy: "turn" as const };
+
   return new Agent({
     id: opts.agentId,
     model: opts.model ?? defaultModel(),
@@ -67,11 +83,15 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     tools: [...(opts.additionalTools ?? [])],
     providerOptions: providerOptionsForReasoning(reasoningEffort),
     maxTurns: opts.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
-    ...(opts.memory
-      ? { memory: { store: opts.memory, savePolicy: "turn" as const } }
-      : {}),
+    ...(memory ? { memory } : {}),
     ...(opts.mcpServers?.length ? { mcpServers: [...opts.mcpServers] } : {}),
     ...(opts.observability ? { observability: opts.observability } : {}),
     ...(opts.guardrails !== undefined ? { guardrails: opts.guardrails } : {}),
   });
+}
+
+function isMemoryOptions(
+  value: MemoryStore | CreateAgentMemoryOptions,
+): value is CreateAgentMemoryOptions {
+  return typeof value === "object" && value !== null && "store" in value;
 }

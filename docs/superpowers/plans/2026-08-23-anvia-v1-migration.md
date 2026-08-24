@@ -351,8 +351,8 @@ git commit -m "refactor(agent): adopt Anvia v1 agents and messages"
 - Modify: `apps/api/src/modules/chat/build-run-input.ts`
 - Modify: `apps/api/src/modules/chat/memory-sanitizer.ts`
 - Modify: `apps/api/src/modules/chat/memory-sanitizer.test.ts`
-- Modify: `apps/api/src/modules/chat/compaction.ts`
-- Modify: `apps/api/src/modules/chat/compaction.test.ts`
+- Delete: `apps/api/src/modules/chat/compaction.ts`
+- Delete: `apps/api/src/modules/chat/compaction.test.ts`
 - Modify: `apps/api/src/modules/chat/enrich-memory-messages.ts`
 - Modify: `apps/api/src/modules/chat/strip-user-attachments.ts`
 - Modify: `apps/api/src/modules/chat/session-snapshot.ts`
@@ -361,7 +361,7 @@ git commit -m "refactor(agent): adopt Anvia v1 agents and messages"
 
 **Interfaces:**
 - Consumes: existing `AgentMemory*` rows and session/user identity.
-- Produces: v1 `PrismaMemoryStore`, `MemoryScope` calls, strict-message compaction/snapshots, and an audited one-time v0-message normalization with no data loss or permanent compatibility parser.
+- Produces: v1 `PrismaMemoryStore`, `MemoryScope` calls, native token-aware compaction/snapshots, and an audited one-time v0-message normalization with no data loss or permanent compatibility parser.
 
 - [ ] **Step 1: Add RED memory compatibility and normalization tests**
 
@@ -371,9 +371,9 @@ Seed representative existing user, assistant, tool, reasoning, image/document at
 
 Replace removed factory with `new PrismaMemoryStore({ client: prisma, ... })`, expose one startup validation, use `{ scope: { sessionId, userId } }`, and keep the existing custom scope-key behavior only if byte-for-byte compatible.
 
-- [ ] **Step 3: Reconcile compaction deliberately**
+- [ ] **Step 3: Adopt native compaction as the sole owner**
 
-Keep application compaction enabled and Anvia automatic compaction disabled. Update all message parsing/building to strict v1 structures. Prove tool-call/result adjacency, citations, client message ids, attachment stripping, and summary divider behavior.
+Expose the sanitized store's atomic compaction capability, configure Anvia's token-aware real-LLM compactor, and delete the application trigger, segment metadata, synthetic divider, custom status event, and deterministic summary fallback. Update all message parsing/building to strict v1 structures. Prove tool-call/result adjacency, citations, client message ids, attachment stripping, native summary persistence, and conflict safety.
 
 - [ ] **Step 4: Implement the one-time message normalization command**
 
@@ -713,7 +713,15 @@ git add apps/platform/src/components/chat apps/platform/src/hooks/use-clarificat
 git commit -m "feat(platform): resume Anvia v1 approval interactions"
 ```
 
-### Task 16: Update behavior evals and add migration-wide regression contracts
+### Task 16: Adopt native token-aware memory compaction and add migration-wide regression contracts
+
+**Accepted amendment (2026-08-25):** Full semantic migration makes Anvia v1
+the sole compaction owner. In addition to the regression files below, Task 16
+may modify the native-memory prerequisite allowlist recorded in
+`.superpowers/sdd/2026-08-23-anvia-v1-migration/task-16-analysis.md`. It must
+remove the application compaction trigger/segment format and deterministic
+summary fallback, expose atomic sanitized memory compaction to Agent, and
+prove strict scope-key parity, conflict handling, and real-LLM compaction.
 
 **Files:**
 - Modify: `packages/agent/src/evals/run-agent.ts`
@@ -724,8 +732,16 @@ git commit -m "feat(platform): resume Anvia v1 approval interactions"
 - Create: `apps/platform/src/lib/chat/anvia-v1-regression.test.ts`
 
 **Interfaces:**
-- Consumes: final v1 agent/API/platform contracts.
-- Produces: deterministic regression gates for every migration invariant before external E2E.
+- Consumes: final v1 agent/API/platform contracts and Prisma memory.
+- Produces: one native Anvia compaction path plus deterministic/integration regression gates before external E2E.
+
+- [ ] **Step 0: Cut memory ownership over to Anvia v1**
+
+Use the official memory-scope key helper, retain strict sanitization while
+preserving the compaction capability, configure Agent's token-aware compactor,
+and delete the duplicate application trigger/segment summary path. Missing,
+ambiguous, conflict, or model failures fail visibly; no earlier summary or
+deterministic text may be substituted.
 
 - [ ] **Step 1: Write RED eval outcome tests**
 

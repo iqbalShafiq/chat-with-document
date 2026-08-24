@@ -46,23 +46,6 @@ const queuedMessageAppliedSchema = z.object({
   attachmentCount: boundedCount(100),
 }).strict();
 
-const compactionStatsSchema = z.object({
-  beforeTokens: boundedCount(10_000_000),
-  afterTokens: boundedCount(10_000_000),
-  summarizedMessages: boundedCount(100_000),
-  truncatedGroups: boundedCount(100_000),
-  summaryTokens: boundedCount(10_000_000),
-}).strict();
-
-const compactionStatusSchema = z.object({
-  phase: z.enum(["start", "complete", "error"]),
-  reason: z.enum(["threshold", "summarize-failed"]).optional(),
-  model: z.string().max(200).optional(),
-  estimated: boundedCount(10_000_000).optional(),
-  threshold: boundedCount(10_000_000).optional(),
-  stats: compactionStatsSchema.optional(),
-}).strict();
-
 const deepResearchAppEventSchema = z.object({
   type: z.literal("deep_research_progress"),
   phase: deepResearchProgressSchema.shape.phase,
@@ -76,31 +59,18 @@ const queuedMessageAppEventSchema = z.object({
   text: z.string().max(8_000).optional(),
   attachmentCount: queuedMessageAppliedSchema.shape.attachmentCount,
 }).strict();
-const compactionAppEventSchema = z.object({
-  type: z.literal("compaction"),
-  phase: compactionStatusSchema.shape.phase,
-  reason: compactionStatusSchema.shape.reason,
-  model: compactionStatusSchema.shape.model,
-  estimated: compactionStatusSchema.shape.estimated,
-  threshold: compactionStatusSchema.shape.threshold,
-  stats: compactionStatusSchema.shape.stats,
-}).strict();
-
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
-export type CompactionStatus = z.infer<typeof compactionStatusSchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
-  compactionStatus: CompactionStatus;
 };
 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
-  compactionStatus: compactionStatusSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -121,15 +91,7 @@ export type ChatAppEvent =
       text?: string;
       attachmentCount: number;
     }
-  | {
-      type: "compaction";
-      phase: CompactionStatus["phase"];
-      reason?: CompactionStatus["reason"];
-      model?: string;
-      estimated?: number;
-      threshold?: number;
-      stats?: CompactionStatus["stats"];
-    };
+  ;
 
 export type ChatStreamEvent = ChatAgentEvent | ChatAppEvent;
 
@@ -165,18 +127,6 @@ export function mapChatAppEvent(
         attachmentCount: event.attachmentCount,
       });
       return withContext(context, { type: "data", name: "queuedMessageApplied", data }) as ChatClientEvent;
-    }
-    case "compaction": {
-      compactionAppEventSchema.parse(event);
-      const data = compactionStatusSchema.parse({
-        phase: event.phase,
-        reason: event.reason,
-        model: event.model,
-        estimated: event.estimated,
-        threshold: event.threshold,
-        stats: event.stats,
-      });
-      return withContext(context, { type: "data", name: "compactionStatus", data }) as ChatClientEvent;
     }
   }
 }

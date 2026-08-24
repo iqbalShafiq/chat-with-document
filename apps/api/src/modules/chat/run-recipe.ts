@@ -2,7 +2,7 @@ import z from "zod";
 import { imageGenSettingsSchema } from "./image-gen-settings.js";
 
 export const CHAT_AGENT_ID = "chat-agent" as const;
-export const CHAT_AGENT_RECIPE_VERSION = 1 as const;
+export const CHAT_AGENT_RECIPE_VERSION = 2 as const;
 
 /**
  * Recipes cross the BullMQ/Redis boundary. Keep every string bounded and
@@ -73,6 +73,79 @@ const imageModelCapabilitySchema = z
   })
   .strict();
 
+function isJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (!isPlainObject(value)) return false;
+  return Object.values(value).every(isJsonValue);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const jsonObjectSchema = z
+  .custom<Record<string, unknown>>(
+    (value) => isPlainObject(value) && isJsonValue(value),
+    "must be a JSON object",
+  );
+
+const staticToolDefinitionSchema = z
+  .object({
+    name: bounded(ID_MAX),
+    description: bounded(INSTRUCTION_TEXT_MAX),
+    parameters: jsonObjectSchema,
+  })
+  .strict();
+
+const nativeStaticContextSchema = z
+  .object({
+    version: z.literal(1),
+    instructions: z
+      .object({
+        base: instructionText,
+        additional: z.array(instructionText).max(ARRAY_MAX),
+      })
+      .strict(),
+    context: z
+      .array(z.object({ id, text: contextText }).strict())
+      .max(ARRAY_MAX),
+    tools: z.array(staticToolDefinitionSchema).max(ARRAY_MAX),
+    model: z
+      .object({
+        contextWindowTokens: z.number().int().positive().max(100_000_000),
+        maxInputTokens: z.number().int().positive().max(100_000_000).nullable(),
+        maxOutputTokens: z.number().int().positive().max(100_000_000).nullable(),
+      })
+      .strict(),
+    staticContextTokens: z.number().int().nonnegative().max(100_000_000),
+  })
+  .strict();
+
+const memoryPolicySchema = z
+  .object({
+    version: z.literal(1),
+    savePolicy: z.literal("turn"),
+    staticContextTokens: z.number().int().nonnegative().max(100_000_000),
+    triggerAfterTokens: z.number().int().positive().max(100_000_000),
+    retentionRecentTokens: z.number().int().positive().max(100_000_000),
+    compactorMaxTokens: z.number().int().positive().max(16_384),
+    conflictRetries: z.number().int().positive().max(20),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.retentionRecentTokens >= value.triggerAfterTokens) {
+      context.addIssue({
+        code: "custom",
+        path: ["retentionRecentTokens"],
+        message: "retentionRecentTokens must be less than triggerAfterTokens",
+      });
+    }
+  });
+
 export const chatAgentRecipeSchema = z
   .object({
     version: z.literal(CHAT_AGENT_RECIPE_VERSION),
@@ -90,6 +163,8 @@ export const chatAgentRecipeSchema = z
         reasoningEffort: z.enum(["low", "medium", "high", "max"]).nullable(),
       })
       .strict(),
+    memoryPolicy: memoryPolicySchema,
+    staticContext: nativeStaticContextSchema,
     features: z
       .object({
         webSearchEnabled: z.boolean(),
@@ -199,10 +274,6 @@ export function parseChatAgentRecipe(value: unknown): ChatAgentRecipe {
 export function createChatAgentRecipe(value: unknown): ChatAgentRecipe {
   return parseChatAgentRecipe(value);
 }
-
-/** Stable aliases used by route/worker adapters while the boundary migrates. */
-export const parseRunRecipe = parseChatAgentRecipe;
-export const createRunRecipe = createChatAgentRecipe;
 
 export function assertRecipeIdentity(
   recipe: ChatAgentRecipe,

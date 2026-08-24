@@ -1,45 +1,104 @@
 import type { ImageCapabilitySet } from "@assingment/agent";
 
-/** Capability set for a model with unknown capabilities (tool-side default). */
-const DEFAULT_IMAGE_CAPABILITY: ImageCapabilitySet = { nMax: 4 };
+const CAPABILITY_KEYS = new Set([
+  "n",
+  "background",
+  "aspectRatios",
+  "quality",
+  "resolutions",
+  "sizes",
+]);
 
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const strings = value.filter(
-    (item): item is string => typeof item === "string",
-  );
-  return strings.length > 0 ? strings : undefined;
+export class ImageCapabilityCatalogError extends Error {
+  readonly code = "IMAGE_CAPABILITY_CATALOG_INVALID" as const;
+
+  constructor() {
+    super("image capability catalog is invalid");
+    this.name = "ImageCapabilityCatalogError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiredStringArray(
+  record: Record<string, unknown>,
+  key: "aspectRatios" | "sizes" | "resolutions",
+): string[] | null {
+  const value = record[key];
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (
+    value.some(
+      (item) => typeof item !== "string" || item.trim().length === 0,
+    )
+  ) {
+    throw new ImageCapabilityCatalogError();
+  }
+  return value as string[];
+}
+
+function optionalStringArray(
+  record: Record<string, unknown>,
+  key: "background" | "quality",
+): string[] | undefined {
+  if (!(key in record)) return undefined;
+  const value = record[key];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ImageCapabilityCatalogError();
+  }
+  if (
+    value.some(
+      (item) => typeof item !== "string" || item.trim().length === 0,
+    )
+  ) {
+    throw new ImageCapabilityCatalogError();
+  }
+  return value as string[];
 }
 
 /**
- * Parse a ChatModel.imageCapabilities Json row into the image-tool capability
- * shape: { aspectRatios, quality?, n: {min,max}, background?, resolutions?, sizes? }.
- * Unknown/malformed rows fall back to the tool's default (nMax 4).
+ * Parse the authoritative ChatModel.imageCapabilities JSON row.
+ *
+ * Image generation has no safe provider/default fallback: a missing or
+ * malformed catalog is a configuration error and stops recipe construction.
  */
 export function parseImageCapabilities(raw: unknown): ImageCapabilitySet {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return DEFAULT_IMAGE_CAPABILITY;
+  if (!isRecord(raw)) throw new ImageCapabilityCatalogError();
+  if (Object.keys(raw).some((key) => !CAPABILITY_KEYS.has(key))) {
+    throw new ImageCapabilityCatalogError();
   }
-  const record = raw as Record<string, unknown>;
-  const n =
-    record.n && typeof record.n === "object" && !Array.isArray(record.n)
-      ? (record.n as Record<string, unknown>)
-      : null;
-  const nMax =
-    n && typeof n.max === "number" && Number.isFinite(n.max)
-      ? Math.max(1, Math.floor(n.max))
-      : DEFAULT_IMAGE_CAPABILITY.nMax;
 
-  const background = stringArray(record.background);
-  const aspectRatios = stringArray(record.aspectRatios);
-  const quality = stringArray(record.quality);
-  const resolutions = stringArray(record.resolutions);
-  const sizes = stringArray(record.sizes);
+  const n = raw.n;
+  if (!isRecord(n)) throw new ImageCapabilityCatalogError();
+  const min = n.min;
+  const max = n.max;
+  if (
+    typeof min !== "number" ||
+    !Number.isSafeInteger(min) ||
+    min !== 1 ||
+    typeof max !== "number" ||
+    !Number.isSafeInteger(max) ||
+    max < min ||
+    max > 100
+  ) {
+    throw new ImageCapabilityCatalogError();
+  }
+
+  const aspectRatios = requiredStringArray(raw, "aspectRatios");
+  const sizes = requiredStringArray(raw, "sizes");
+  const resolutions = requiredStringArray(raw, "resolutions");
+  if (!aspectRatios || (sizes && resolutions) || (!sizes && !resolutions)) {
+    throw new ImageCapabilityCatalogError();
+  }
+
+  const background = optionalStringArray(raw, "background");
+  const quality = optionalStringArray(raw, "quality");
 
   return {
-    nMax,
+    nMax: max,
+    aspectRatios,
     ...(background ? { background } : {}),
-    ...(aspectRatios ? { aspectRatios } : {}),
     ...(quality ? { quality } : {}),
     ...(resolutions ? { resolutions } : {}),
     ...(sizes ? { sizes } : {}),

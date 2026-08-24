@@ -9,8 +9,6 @@ const MAX_ACTIVITY_LABEL = 240;
 const MAX_RESEARCH_MESSAGE = 4_000;
 const MAX_ACTIVITIES = 50;
 const MAX_RETRIEVAL_COUNT = 100_000;
-const MAX_COMPACTION_COUNT = 10_000_000;
-const MAX_COMPACTION_MESSAGES = 100_000;
 
 export type ChatStreamMetadata = {
   sessionId: string;
@@ -38,25 +36,9 @@ export type QueuedMessageApplied = {
   attachmentCount: number;
 };
 
-export type CompactionStatus = {
-  phase: "start" | "complete" | "error";
-  reason?: "threshold" | "summarize-failed";
-  model?: string;
-  estimated?: number;
-  threshold?: number;
-  stats?: {
-    beforeTokens: number;
-    afterTokens: number;
-    summarizedMessages: number;
-    truncatedGroups: number;
-    summaryTokens: number;
-  };
-};
-
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
-  compactionStatus: CompactionStatus;
 };
 
 type ParseResult<T> =
@@ -208,103 +190,11 @@ function parseQueuedMessageApplied(value: unknown): ParseResult<QueuedMessageApp
   });
 }
 
-function parseCompactionStatus(value: unknown): ParseResult<CompactionStatus> {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, [
-      "phase",
-      "reason",
-      "model",
-      "estimated",
-      "threshold",
-      "stats",
-    ]) ||
-    !["start", "complete", "error"].includes(value.phase as string)
-  ) {
-    return failure("invalid compaction status");
-  }
-
-  let reason: CompactionStatus["reason"];
-  if (
-    has(value, "reason") &&
-    !["threshold", "summarize-failed"].includes(value.reason as string)
-  ) {
-    return failure("invalid compaction status");
-  }
-  if (has(value, "reason")) {
-    reason = value.reason as CompactionStatus["reason"];
-  }
-
-  let model: string | undefined;
-  if (has(value, "model")) {
-    if (!boundedString(value.model, MAX_METADATA_STRING)) {
-      return failure("invalid compaction status");
-    }
-    model = value.model;
-  }
-
-  let estimated: number | undefined;
-  if (has(value, "estimated")) {
-    if (!boundedCount(value.estimated, MAX_COMPACTION_COUNT)) {
-      return failure("invalid compaction status");
-    }
-    estimated = value.estimated;
-  }
-
-  let threshold: number | undefined;
-  if (has(value, "threshold")) {
-    if (!boundedCount(value.threshold, MAX_COMPACTION_COUNT)) {
-      return failure("invalid compaction status");
-    }
-    threshold = value.threshold;
-  }
-
-  let stats: CompactionStatus["stats"];
-  if (has(value, "stats")) {
-    if (
-      !isRecord(value.stats) ||
-      !exactKeys(value.stats, [
-        "beforeTokens",
-        "afterTokens",
-        "summarizedMessages",
-        "truncatedGroups",
-        "summaryTokens",
-      ]) ||
-      !boundedCount(value.stats.beforeTokens, MAX_COMPACTION_COUNT) ||
-      !boundedCount(value.stats.afterTokens, MAX_COMPACTION_COUNT) ||
-      !boundedCount(value.stats.summarizedMessages, MAX_COMPACTION_MESSAGES) ||
-      !boundedCount(value.stats.truncatedGroups, MAX_COMPACTION_MESSAGES) ||
-      !boundedCount(value.stats.summaryTokens, MAX_COMPACTION_COUNT)
-    ) {
-      return failure("invalid compaction status");
-    }
-    stats = {
-      beforeTokens: value.stats.beforeTokens,
-      afterTokens: value.stats.afterTokens,
-      summarizedMessages: value.stats.summarizedMessages,
-      truncatedGroups: value.stats.truncatedGroups,
-      summaryTokens: value.stats.summaryTokens,
-    };
-  }
-
-  return success({
-    phase: value.phase as CompactionStatus["phase"],
-    ...(reason === undefined ? {} : { reason }),
-    ...(model === undefined ? {} : { model }),
-    ...(estimated === undefined ? {} : { estimated }),
-    ...(threshold === undefined ? {} : { threshold }),
-    ...(stats === undefined ? {} : { stats }),
-  });
-}
-
 const deepResearchProgressSchema: Schema<DeepResearchProgress> = {
   safeParse: parseDeepResearchProgress,
 };
 const queuedMessageAppliedSchema: Schema<QueuedMessageApplied> = {
   safeParse: parseQueuedMessageApplied,
-};
-const compactionStatusSchema: Schema<CompactionStatus> = {
-  safeParse: parseCompactionStatus,
 };
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
@@ -313,5 +203,4 @@ export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
-  compactionStatus: compactionStatusSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;

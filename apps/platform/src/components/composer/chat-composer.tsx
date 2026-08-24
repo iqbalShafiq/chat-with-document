@@ -68,7 +68,6 @@ export function ChatComposer({
   modelsStatus = "loading",
   modelsError = null,
   onRetryModels = () => {},
-  compaction = { phase: "idle" },
   contextUsage = null,
   contextUsageError = false,
   webSearchEnabled = false,
@@ -124,8 +123,6 @@ export function ChatComposer({
   modelsStatus?: "loading" | "success" | "error";
   modelsError?: string | null;
   onRetryModels?: () => void;
-  /** Wired in Task 14 — declared now so `routes/index.tsx` can pass them. */
-  compaction?: { phase: "idle" | "start" | "complete" | "error" };
   contextUsage?: ContextUsageInfo | null;
   /** Latest context-usage refresh failed (ring shows a transient hint). */
   contextUsageError?: boolean;
@@ -468,7 +465,6 @@ export function ChatComposer({
             <ContextUsageIndicator
               models={models}
               contextUsage={contextUsage ?? null}
-              compaction={compaction ?? { phase: "idle" }}
             />
 
             <ComposerAttachControl

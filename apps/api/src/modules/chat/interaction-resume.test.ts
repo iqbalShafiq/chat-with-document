@@ -49,10 +49,31 @@ const questionBody = () => ({
 });
 
 const fullRecipe = {
-  version: 1 as const,
+  version: 2 as const,
   agentId: "chat-agent" as const,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: metadata.modelId, reasoningEffort: metadata.reasoningEffort },
+  memoryPolicy: {
+    version: 1 as const,
+    savePolicy: "turn" as const,
+    staticContextTokens: 0,
+    triggerAfterTokens: 700_000,
+    retentionRecentTokens: 300_000,
+    compactorMaxTokens: 4096,
+    conflictRetries: 3,
+  },
+  staticContext: {
+    version: 1 as const,
+    instructions: { base: "Base", additional: [] },
+    context: [],
+    tools: [],
+    model: {
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+    },
+    staticContextTokens: 0,
+  },
   features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false },
   imageGenSettings: null,
   budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12 },

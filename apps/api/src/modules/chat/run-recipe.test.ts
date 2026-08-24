@@ -8,7 +8,7 @@ import {
 } from "./run-recipe.js";
 
 const fixture = {
-  version: 1 as const,
+  version: 2 as const,
   agentId: CHAT_AGENT_ID,
   identity: {
     sessionId: "session-1",
@@ -16,6 +16,27 @@ const fixture = {
     projectId: "project-1",
   },
   model: { id: "openai/gpt-5.6-luna", reasoningEffort: "high" as const },
+  memoryPolicy: {
+    version: 1 as const,
+    savePolicy: "turn" as const,
+    staticContextTokens: 0,
+    triggerAfterTokens: 700_000,
+    retentionRecentTokens: 300_000,
+    compactorMaxTokens: 4096,
+    conflictRetries: 3,
+  },
+  staticContext: {
+    version: 1 as const,
+    instructions: { base: "Base", additional: [] },
+    context: [],
+    tools: [],
+    model: {
+      contextWindowTokens: 1_050_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+    },
+    staticContextTokens: 0,
+  },
   features: {
     webSearchEnabled: true,
     imageGenerationEnabled: false,
@@ -86,7 +107,7 @@ describe("ChatAgentRecipe", () => {
   });
 
   it("rejects invalid identity, version, agent id, unknown fields, and secrets", () => {
-    expect(() => parseChatAgentRecipe({ ...fixture, version: 2 })).toThrow();
+    expect(() => parseChatAgentRecipe({ ...fixture, version: 3 })).toThrow();
     expect(() => parseChatAgentRecipe({ ...fixture, agentId: "my-agent" })).toThrow();
     expect(() =>
       parseChatAgentRecipe({ ...fixture, apiKey: "secret" }),

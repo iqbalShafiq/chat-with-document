@@ -5,8 +5,12 @@ import type {
 } from "@anvia/core";
 import { createTool } from "@anvia/core";
 import { ToolOutput } from "@anvia/core/tool";
-import z from "zod";
+import z, { type JSONType } from "zod";
 import { normalizePageImages } from "../document/types.js";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
 
 function throwIfAborted(context: ToolCallContext): void {
   context.abortSignal?.throwIfAborted();
@@ -134,6 +138,67 @@ export interface DocumentToolsDeps {
   includeImageBytes?: boolean;
 }
 
+const findDocumentsInput = z.object({
+  query: z.string().min(1).describe("Search query for document discovery"),
+  limit: z.number().int().min(1).max(20).optional().default(5),
+});
+const searchDocumentPagesInput = z.object({
+  query: z.string().min(1).describe("Semantic search query"),
+  documentIds: z
+    .array(z.string())
+    .optional()
+    .describe("Optional document ids to narrow search"),
+  limit: z.number().int().min(1).max(10).optional().default(5),
+});
+const getDocumentNextPageInput = z.object({
+  documentId: z.string().min(1),
+  pageIndex: z.number().int().min(0),
+});
+const getDocumentPageImagesInput = z.object({
+  documentId: z.string().min(1).describe("Document id from the session catalog"),
+  pageIndex: z.number().int().min(0).describe("0-based page index"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(8)
+    .optional()
+    .default(5)
+    .describe("Max images to return"),
+});
+
+const findDocumentsSpec = {
+  name: "find_documents",
+  description:
+    "Search documents in the current chat session by filename or summary text. Use when the relevant document id is not clear from the session catalog.",
+  inputSchema: findDocumentsInput,
+} as const;
+const searchDocumentPagesSpec = {
+  name: "search_document_pages",
+  description:
+    "Semantic search over document page chunks in the current session. Returns top matching chunks grouped by relevance.",
+  inputSchema: searchDocumentPagesInput,
+} as const;
+const getDocumentNextPageSpec = {
+  name: "get_document_next_page",
+  description:
+    "Fetch the next page of a document as raw markdown. Use when vector search results seem incomplete and you need sequential continuation.",
+  inputSchema: getDocumentNextPageInput,
+} as const;
+const getDocumentPageImagesSpec = {
+  name: "get_document_page_images",
+  description:
+    "Fetch images extracted from a document page (charts, photos, diagrams). Use when the answer depends on visual content in the document. Returns the images together with markdown references you can embed inline in your answer at the most relevant position.",
+  inputSchema: getDocumentPageImagesInput,
+} as const;
+
+export const DOCUMENT_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(findDocumentsSpec),
+  createStaticToolDefinition(searchDocumentPagesSpec),
+  createStaticToolDefinition(getDocumentNextPageSpec),
+  createStaticToolDefinition(getDocumentPageImagesSpec),
+];
+
 export function createFindDocumentsTool(deps: {
   userId: string;
   sessionId: string;
@@ -142,13 +207,7 @@ export function createFindDocumentsTool(deps: {
   prisma: FindDocumentsPrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
-    name: "find_documents",
-    description:
-      "Search documents in the current chat session by filename or summary text. Use when the relevant document id is not clear from the session catalog.",
-    inputSchema: z.object({
-      query: z.string().min(1).describe("Search query for document discovery"),
-      limit: z.number().int().min(1).max(20).optional().default(5),
-    }),
+    ...findDocumentsSpec,
     outputSchema: z.json(),
     execute: async ({ query, limit }, context) => {
       throwIfAborted(context);
@@ -236,17 +295,7 @@ export function createSearchDocumentPagesTool(deps: {
   searchService: ChunkSearchService;
 }) {
   return createTool({
-    name: "search_document_pages",
-    description:
-      "Semantic search over document page chunks in the current session. Returns top matching chunks grouped by relevance.",
-    inputSchema: z.object({
-      query: z.string().min(1).describe("Semantic search query"),
-      documentIds: z
-        .array(z.string())
-        .optional()
-        .describe("Optional document ids to narrow search"),
-      limit: z.number().int().min(1).max(10).optional().default(5),
-    }),
+    ...searchDocumentPagesSpec,
     outputSchema: z.json(),
     execute: async ({ query, documentIds, limit }, context) => {
       throwIfAborted(context);
@@ -320,15 +369,9 @@ export function createGetDocumentNextPageTool(deps: {
   prisma: NextPagePrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
-    name: "get_document_next_page",
-    description:
-      "Fetch the next page of a document as raw markdown. Use when vector search results seem incomplete and you need sequential continuation.",
-    inputSchema: z.object({
-      documentId: z.string().min(1),
-      pageIndex: z.number().int().min(0),
-    }),
+    ...getDocumentNextPageSpec,
     outputSchema: z.json(),
-    execute: async ({ documentId, pageIndex }, context) => {
+    execute: async ({ documentId, pageIndex }, context): Promise<JSONType> => {
       throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
@@ -440,21 +483,7 @@ export function createGetDocumentPageImagesTool(deps: {
   includeImageBytes?: boolean;
 }): AnyTool {
   return createTool({
-    name: "get_document_page_images",
-    description:
-      "Fetch images extracted from a document page (charts, photos, diagrams). Use when the answer depends on visual content in the document. Returns the images together with markdown references you can embed inline in your answer at the most relevant position.",
-    inputSchema: z.object({
-      documentId: z.string().min(1).describe("Document id from the session catalog"),
-      pageIndex: z.number().int().min(0).describe("0-based page index"),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(8)
-        .optional()
-        .default(5)
-        .describe("Max images to return"),
-    }),
+    ...getDocumentPageImagesSpec,
     execute: async ({ documentId, pageIndex, limit }, context) => {
       throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(

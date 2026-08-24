@@ -1,11 +1,9 @@
-import { createTool } from "@anvia/core";
-import type { ToolResultContent } from "@anvia/core";
+import { createTool, type ToolDefinition, type ToolResultContentPart } from "@anvia/core";
 import {
-  createCompletion,
-  Message,
-  UserContent,
+  generateCompletion,
   type CompletionModel,
 } from "@anvia/core/completion";
+import { ToolOutput } from "@anvia/core/tool";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
@@ -13,6 +11,7 @@ import {
   getImageStore,
   type ImageStore,
 } from "../images/service.js";
+import { createStaticToolDefinition } from "@assingment/agent";
 import { findActiveModel, listModels } from "../models/service.js";
 
 /** Max bytes we'll download for an external image (8 MiB). */
@@ -75,6 +74,25 @@ const viewImageInput = z
     }
   });
 
+const viewImageDescriptionSpec = {
+  name: "view_image",
+  description: VISION_HELPER_INSTRUCTION,
+  inputSchema: viewImageInput,
+} as const;
+const viewImageVisionSpec = {
+  name: "view_image",
+  description: VISION_HELPER_INSTRUCTION + " Returns the image bytes for vision models.",
+  inputSchema: viewImageInput,
+} as const;
+
+export const VIEW_IMAGE_TOOL_DEFINITIONS: Record<
+  "description" | "vision",
+  ToolDefinition
+> = {
+  description: createStaticToolDefinition(viewImageDescriptionSpec),
+  vision: createStaticToolDefinition(viewImageVisionSpec),
+};
+
 export type ViewImageToolOptions = {
   userId: string;
   sessionId: string;
@@ -89,7 +107,7 @@ export type ViewImageToolOptions = {
     userId: string,
     sessionId: string,
   ) => Promise<{ mediaType: string; buffer: Uint8Array } | null>;
-  /** Vision mode returns ToolResultContent image bytes; description mode returns text via helper model. Defaults to description. */
+  /** Vision mode returns native Anvia file content parts; description mode returns text via helper model. Defaults to description. */
   mode?: "vision" | "description";
 };
 
@@ -140,7 +158,10 @@ export function createViewImageTool(options: ViewImageToolOptions) {
     description:
       VISION_HELPER_INSTRUCTION +
       (mode === "vision" ? " Returns the image bytes for vision models." : ""),
-    input: viewImageInput,
+    inputSchema:
+      mode === "vision"
+        ? viewImageVisionSpec.inputSchema
+        : viewImageDescriptionSpec.inputSchema,
     execute: async ({ imageId, url, question }) => {
       try {
         const loaded = imageId
@@ -154,7 +175,9 @@ export function createViewImageTool(options: ViewImageToolOptions) {
           : await loadRemoteImage({ url: url!, fetchFn });
         if ("error" in loaded) {
           return mode === "vision"
-            ? ([{ type: "text", text: loaded.error }] satisfies ToolResultContent[])
+            ? ToolOutput.content([
+                { type: "text", text: loaded.error },
+              ] satisfies ToolResultContentPart[])
             : loaded.error;
         }
         let persistedImageId: string | undefined;
@@ -205,28 +228,40 @@ export function createViewImageTool(options: ViewImageToolOptions) {
           : undefined;
 
         if (mode === "vision") {
-          const content: ToolResultContent[] = images
+          const content: ToolResultContentPart[] = images
             ? [{ type: "text", text: JSON.stringify({ images, sourceUrl: persistedSourceUrl }) }]
             : [];
           content.push({
-            type: "image",
-            data: loaded.buffer.toString("base64"),
+            type: "file",
+            data: {
+              type: "data",
+              data: loaded.buffer.toString("base64"),
+            },
             mediaType: loaded.mediaType,
           });
-          return content;
+          return ToolOutput.content(content);
         }
-        const result = await createCompletion(model, {
+        const result = await generateCompletion({
+          model,
           messages: [
-            Message.user([
-              UserContent.imageBase64(
-                loaded.buffer.toString("base64"),
-                loaded.mediaType,
-                { detail: "auto" },
-              ),
-              UserContent.text(
-                question ?? "Describe this image accurately and concisely.",
-              ),
-            ]),
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  image: {
+                    type: "data",
+                    data: loaded.buffer.toString("base64"),
+                  },
+                  mediaType: loaded.mediaType,
+                  detail: "auto",
+                },
+                {
+                  type: "text",
+                  text: question ?? "Describe this image accurately and concisely.",
+                },
+              ],
+            },
           ],
           instructions: VIEW_IMAGE_INSTRUCTIONS,
         });
@@ -241,7 +276,7 @@ export function createViewImageTool(options: ViewImageToolOptions) {
         });
         const msg = "Failed to view the image. Try again or skip it.";
         return mode === "vision"
-          ? ([{ type: "text", text: msg }] satisfies ToolResultContent[])
+          ? ToolOutput.content([{ type: "text", text: msg }])
           : msg;
       }
     },

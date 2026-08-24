@@ -528,9 +528,7 @@ function ChatMessageParts({
                   ? "Research progress updated"
                   : part.name === "queuedMessageApplied"
                     ? "Queued message applied"
-                    : part.name === "compactionStatus"
-                      ? "Conversation context updated"
-                      : "Chat state updated"}
+                    : "Chat state updated"}
               </div>
             </MessagePrimitive.Part>
           );

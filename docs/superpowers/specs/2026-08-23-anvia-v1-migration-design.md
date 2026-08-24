@@ -1,12 +1,12 @@
 # Anvia v1 Stable Migration — Design Specification
 
 Date: 2026-08-23
-Status: design complete; implementation intentionally not started
+Status: implementation in progress; native-compaction amendment accepted 2026-08-25
 Target: Anvia v1.0.1 synchronized stable package train
 
 ## 1. Goal
 
-Migrate `chat-with-document` from its mixed Anvia v0 package line to Anvia v1.0.1 with a full cutover to native v1 semantics: durable sessions, app-owned compaction, document/image context, native approval and question interactions, queued follow-ups with steering, tabular analysis, bounded one-level Deep Research, citations, Langfuse, Context7 MCP, Qdrant retrieval, resumable streams, and real-browser evidence.
+Migrate `chat-with-document` from its mixed Anvia v0 package line to Anvia v1.0.1 with a full cutover to native v1 semantics: durable sessions, native token-aware compaction, document/image context, native approval and question interactions, queued follow-ups with steering, tabular analysis, bounded one-level Deep Research, citations, Langfuse, Context7 MCP, Qdrant retrieval, resumable streams, and real-browser evidence.
 
 This is an architectural migration, not a dependency-only bump. Anvia v1 removes the builders and ambiguous streaming/human-input surfaces on which the current app depends, introduces a canonical client protocol and serializable interaction continuations, and moves MCP/client responsibilities into dedicated packages.
 
@@ -53,7 +53,7 @@ The application—not Anvia—continues to own authentication, session/document 
 - Native clarification questions with required single-choice or custom-text answers and durable resume.
 - One-level Deep Research only; no recursive agent delegation.
 - Existing citation markers/trailer and UI source chips.
-- Durable Prisma memory plus app-owned compaction/profiling behavior.
+- Durable Prisma memory plus native token-aware compaction and application-owned profiling behavior.
 - Document retrieval ownership filters and replacement ingestion.
 
 ## 4. Major v1 changes and concrete impact
@@ -180,7 +180,7 @@ Steering keeps the current Redis queue but targets the live v1 `AgentStream.stee
 
 Use `new PrismaMemoryStore({ client: prisma, ... })`, call `validate()` at worker startup, and use `{ scope: { sessionId, userId } }` for load/clear. The current Prisma models match v1 exactly except for an additive application index, so no schema migration is expected. However, direct verification against the published 0.26.0 and 1.0.1 message parsers proves that persisted v0 message JSON (`tool_call`, `tool_result`, legacy image/document sources, and reasoning content) is not accepted by v1 strict parsing. The cutover therefore includes an explicit one-time, idempotent data normalization command: dry-run/audit every `AgentMemoryMessage.message` and `AgentMemoryError.messages`, reject ambiguous or unconvertible rows without writing, then rewrite convertible rows in per-session transactions while chat workers are quiesced. Already-v1 rows are skipped, making interrupted execution safely resumable. The v1 runtime keeps strict validation and contains no legacy dual parser.
 
-Keep app-owned compaction for the first cutover because it also drives product context-usage behavior and has existing evidence. Do not enable Anvia automatic compaction simultaneously. Update compaction, sanitizer, profile, retry-cleanup, and session snapshot logic to strict structural messages and test tool/result/citation preservation. Native `memory_compaction` events may be adopted later after parity is demonstrated.
+Use Anvia v1's native token-aware compaction as the sole compaction owner. Expose the sanitized Prisma store's atomic `snapshot`/`replacePrefix` capability to Agent, configure a real-LLM `MemoryCompactor`, and consume the native post-commit `memory_compaction` event. Remove the application trigger, segment-log summary format, duplicate token-boundary calculation, and deterministic “keep the old summary” failure path. Product context-usage UI derives its state from strict memory snapshots and native events; it does not run a second compactor. Preserve tool/result/citation structure and prove conflict retry plus atomic replacement with integration tests.
 
 ### 6.9 Providers, retrieval, and lifecycle owners
 
@@ -202,9 +202,8 @@ Define one shared documented mapping, mirrored with runtime schemas:
 
 - `deepResearchProgress`
 - `queuedMessageApplied`
-- `compactionStatus` only if app compaction remains outside official events
 
-Usage, context usage, tool state, messages, errors, interaction, and run terminal status use standard client events.
+Usage, context usage, tool state, messages, errors, native `memory_compaction`, interaction, and run terminal status use standard client events. There is no application-specific compaction protocol.
 
 ### 7.3 Queue job union
 
@@ -292,7 +291,7 @@ Observe error rate, stream resume failures, interaction suspension/resume counts
 - No visual redesign.
 - No replacement of BullMQ, Redis, Prisma, R2, Hono, TanStack Router, or current auth.
 - No simplification/removal of current queue, approvals, Deep Research, data analysis, or citation behavior. Clarification intentionally adopts the narrower native v1 question contract.
-- No adoption of native Anvia memory compaction until parity is separately proven.
+- No second application-owned compaction path or deterministic summary fallback alongside native Anvia compaction.
 - No development or branch creation in this planning session.
 
 ## 12. Design acceptance criteria

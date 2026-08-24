@@ -91,7 +91,6 @@ describe("createChatClientStream", () => {
         stats: { retrievalCalls: 1, retrievalLimit: 8 },
       },
       { type: "queued_message_applied", clientMessageId: "client-1", text: "do not forward", attachmentCount: 1 },
-      { type: "compaction", phase: "complete", stats: { beforeTokens: 20, afterTokens: 10, summarizedMessages: 2, truncatedGroups: 0, summaryTokens: 5 } },
       outcome("response"),
     ];
 
@@ -100,10 +99,42 @@ describe("createChatClientStream", () => {
     expect(data).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "deepResearchProgress" }),
       expect.objectContaining({ name: "queuedMessageApplied", data: { clientMessageId: "client-1", attachmentCount: 1 } }),
-      expect.objectContaining({ name: "compactionStatus" }),
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();
+  });
+
+  it("passes the native memory_compaction event through the v1 client adapter", async () => {
+    const nativeCompaction = {
+      type: "memory_compaction",
+      runId: "run-1",
+      originalMessageCount: 4,
+      compactedMessageCount: 2,
+      retainedMessageCount: 2,
+      originalTokenCount: 100,
+      compactedTokenCount: 50,
+      retainedTokenCount: 50,
+      resultTokenCount: 70,
+      attempts: 1,
+      usage: { inputTokens: 80, outputTokens: 10, totalTokens: 90 },
+    } as unknown as AgentStreamEvent;
+    const events = await collect(createChatClientStream({
+      runId: "run-1",
+      metadata,
+      events: toAsync([nativeCompaction, outcome("response")]),
+    }));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "memory_compaction",
+        originalMessageCount: 4,
+        compactedMessageCount: 2,
+        retainedMessageCount: 2,
+        attempts: 1,
+      }),
+    ]));
+    expect(events.some((event) =>
+      event.type === "data" && String(event.name) === "compactionStatus",
+    )).toBe(false);
   });
 
   it("waits for interaction persistence before yielding interaction and suspended terminal", async () => {

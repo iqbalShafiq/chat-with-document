@@ -9,12 +9,7 @@ const db = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
 }));
-const compaction = vi.hoisted(() => ({
-  loadCompactionSegments: vi.fn(),
-}));
-
 vi.mock("../../utils/prisma.js", () => ({ prisma: db }));
-vi.mock("./compaction.js", () => compaction);
 vi.mock("@assingment/agent", () => ({
   extractTextFromMessageJson: (message: { content?: unknown }) => {
     if (typeof message.content === "string") return message.content;
@@ -42,7 +37,6 @@ describe("loadEnrichedMemoryMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.agentMemorySession.findUnique.mockResolvedValue({ id: "memory-1" });
-    compaction.loadCompactionSegments.mockResolvedValue([]);
   });
 
   it("enriches strict v1 assistant messages with row metadata and citations", async () => {
@@ -116,15 +110,21 @@ describe("loadEnrichedMemoryMessages", () => {
     expect(result[0]).not.toHaveProperty("metadata");
   });
 
-  it("inserts a summary divider after the covered strict-message row", async () => {
-    const user = { role: "user", content: "first" } as Message;
+  it("preserves native compaction summary rows without synthetic dividers", async () => {
+    const summary = {
+      role: "system",
+      content: "Earlier context",
+      metadata: {
+        anvia: { memoryCompaction: { version: 1, compactedMessageCount: 1 } },
+      },
+    } as Message;
     const assistant = { role: "assistant", content: "latest" } as Message;
     db.agentMemoryMessage.findMany.mockResolvedValue([
       {
         position: 1,
         createdAt: new Date("2026-08-24T00:00:00.000Z"),
-        message: user,
-        role: "user",
+        message: summary,
+        role: "system",
       },
       {
         position: 2,
@@ -133,24 +133,11 @@ describe("loadEnrichedMemoryMessages", () => {
         role: "assistant",
       },
     ]);
-    compaction.loadCompactionSegments.mockResolvedValue([
-      {
-        kind: "summarized",
-        upToPosition: 1,
-        summary: "Earlier context",
-        createdAt: "2026-08-24T00:02:00.000Z",
-      },
-    ]);
 
     const result = await loadEnrichedMemoryMessages("session-1", "user-1");
 
     expect(result).toEqual([
-      expect.objectContaining({ role: "user", content: "first" }),
-      {
-        role: "system",
-        content: "Earlier context",
-        metadata: { kind: "summary" },
-      },
+      summary,
       expect.objectContaining({ role: "assistant", content: "latest" }),
     ]);
   });

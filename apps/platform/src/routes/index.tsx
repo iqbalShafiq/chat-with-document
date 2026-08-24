@@ -1142,9 +1142,6 @@ function ChatSession({
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
-  const [compaction, setCompaction] = useState<{
-    phase: "idle" | "start" | "complete" | "error";
-  }>({ phase: "idle" });
   const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
     initialDeepResearchActivityState,
   );
@@ -1369,9 +1366,6 @@ function ChatSession({
     (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
       if (event.type === "data") {
         switch (event.name) {
-          case "compactionStatus":
-            setCompaction({ phase: event.data.phase });
-            return;
           case "deepResearchProgress":
             setDeepResearch((state) =>
               reduceDeepResearchProgress(state, event.data),
@@ -1709,7 +1703,6 @@ function ChatSession({
     setIsIngesting(false);
     setContextUsage(null);
     setContextUsageError(false);
-    setCompaction({ phase: "idle" });
     setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
     void refreshSessionDocuments();
@@ -3122,7 +3115,6 @@ function ChatSession({
                     modelsStatus={modelsStatus}
                     modelsError={modelsError}
                     onRetryModels={modelsRetry}
-                    compaction={compaction}
                     contextUsage={contextUsage}
                     contextUsageError={contextUsageError}
                     deepResearchEnabled={deepResearchEnabled}

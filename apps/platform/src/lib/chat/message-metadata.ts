@@ -13,8 +13,20 @@ export type ChatMessageMeta = {
   contextSnippet?: { text: string; sourceRole: ContextSnippetSourceRole };
   /** Dual-written structured citations (server and/or client). */
   citations?: MessageCitation[];
-  /** UI-only classification: failed run (error) or compaction boundary (summary). */
+  /** UI classification: failed run, or summary derived only from the native marker. */
   kind?: "summary" | "error";
+  /** Canonical Anvia v1 memory-summary marker; never synthesized by the UI. */
+  anvia?: {
+    memoryCompaction: {
+      version: 1;
+      compactedMessageCount: number;
+    };
+  };
+};
+
+/** Fields that callers may write. A summary is derived from Anvia's native marker. */
+export type ChatMessageMetaPatch = Omit<ChatMessageMeta, "kind"> & {
+  kind?: "error";
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -67,8 +79,26 @@ export function readChatMessageMeta(
     };
   }
 
-  if (metadata.kind === "summary" || metadata.kind === "error") {
-    meta.kind = metadata.kind;
+  const anvia = metadata.anvia;
+  const memoryCompaction =
+    isPlainObject(anvia) && isPlainObject(anvia.memoryCompaction)
+      ? anvia.memoryCompaction
+      : null;
+  if (
+    memoryCompaction?.version === 1 &&
+    typeof memoryCompaction.compactedMessageCount === "number" &&
+    Number.isSafeInteger(memoryCompaction.compactedMessageCount) &&
+    memoryCompaction.compactedMessageCount > 0
+  ) {
+    meta.anvia = {
+      memoryCompaction: {
+        version: 1,
+        compactedMessageCount: memoryCompaction.compactedMessageCount,
+      },
+    };
+    meta.kind = "summary";
+  } else if (metadata.kind === "error") {
+    meta.kind = "error";
   }
 
   const citations = parseCitationsFromMetadata(metadata);
@@ -81,7 +111,7 @@ export function readChatMessageMeta(
 
 export function withChatMessageMeta(
   base: UIMessage["metadata"],
-  patch: ChatMessageMeta,
+  patch: ChatMessageMetaPatch,
 ): ChatMessageMeta {
   const current: Record<string, unknown> = isPlainObject(base)
     ? { ...base }
@@ -122,7 +152,17 @@ export function withChatMessageMeta(
       return row;
     });
   }
-  if (patch.kind !== undefined) current.kind = patch.kind;
+  if (patch.anvia !== undefined) {
+    current.anvia = {
+      memoryCompaction: { ...patch.anvia.memoryCompaction },
+    };
+  }
+  if (patch.kind === "error") current.kind = patch.kind;
+  // Never carry a legacy summary classification across a write. Native
+  // compaction metadata is the sole source of truth for summary messages.
+  if (current.kind === "summary" && !isPlainObject(current.anvia)) {
+    delete current.kind;
+  }
 
   return current as ChatMessageMeta;
 }
