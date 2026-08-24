@@ -1,4 +1,10 @@
-import { createTool, type AnyTool, type ToolCallContext } from "@anvia/core";
+import {
+  createTool,
+  type AgentToolOptions,
+  type AnyTool,
+  type Tool,
+  type ToolCallContext,
+} from "@anvia/core";
 import { z } from "zod";
 
 export type DeepResearchProgressPhase =
@@ -41,12 +47,7 @@ export type DeepResearchProgressReporter = (
 ) => Promise<void> | void;
 
 export type DeepResearchResearcher = {
-  asTool(options: {
-    name: string;
-    description: string;
-    maxTurns: number;
-    stream: boolean;
-  }): AnyTool;
+  asTool(options: AgentToolOptions): Tool<{ prompt: string }, string>;
 };
 
 export type DeepResearchToolScope = {
@@ -137,6 +138,7 @@ export const DEEP_RESEARCH_INSTRUCTION = `
 Deep Research is available as a bounded, source-grounded workflow. Use it when the user needs a multi-source investigation, comparison, or current web-and-document synthesis rather than a short direct answer. The tool owns the approval boundary for the entire research run.
 When the user explicitly requests Deep Research and provides a concrete question, call deep_research directly; do not ask a clarification question merely to restate the research scope.
 Call deep_research before ordinary retrieval when the request explicitly asks for Deep Research; do not pre-empt it with document or web tools.
+If deep_research is denied, do not call web_search, web_fetch, document search, or another retrieval tool for that request; answer only from the existing conversation and state when evidence is insufficient.
 After deep_research returns, preserve any [[cite:N]] markers and the citations JSON trailer; never emit citation markers without that trailer.
 `.trim();
 
@@ -198,14 +200,14 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
     name: "deep_research",
     description:
       "Run a bounded multi-source research workflow over the active documents and available web sources. Returns a cited report and should be used for comparisons, investigations, and current evidence synthesis.",
-    input: deepResearchInput,
-    approval: {
-      when: async () => !scope.enabled && !(await hasSessionGrant(scope)),
-      reason: ({ args }) =>
-        `${args.reason} Estimated cost/latency: bounded to up to ${maxTurns} agent turns and ${maxSearches} retrieval calls; provider-dependent latency is typically tens of seconds to a few minutes.`,
-      rejectMessage:
-        "Deep Research was declined by the user. Do not call web_search, web_fetch, document search, or any other retrieval/research tool for this request. Answer only from the existing conversation; if evidence is insufficient, say so.",
-    },
+    inputSchema: deepResearchInput,
+    outputSchema: z.string(),
+    requiresApproval: async (args, _context) =>
+      scope.enabled || (await hasSessionGrant(scope))
+        ? false
+        : {
+            reason: `${args.reason} Estimated cost/latency: bounded to up to ${maxTurns} agent turns and ${maxSearches} retrieval calls; provider-dependent latency is typically tens of seconds to a few minutes.`,
+          },
     execute: async ({ prompt }, context: ToolCallContext) => {
       await emit(scope, {
         phase: "planning",
@@ -226,6 +228,7 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
           "Delegate one bounded research run to the specialist researcher. The specialist must use the provided document, web, and dataset tools and return a source-grounded report.",
         maxTurns,
         stream: true,
+        suspension: "reject",
       });
 
       try {
@@ -329,8 +332,8 @@ export function boundDeepResearchTools(
 
     return {
       name: tool.name,
-      approval: tool.approval,
-      parseApprovalArgs: tool.parseApprovalArgs,
+      requiresApproval: tool.requiresApproval,
+      parseInput: tool.parseInput,
       definition: (prompt: string) => tool.definition(prompt),
       call: async (args: unknown, context?: ToolCallContext) => {
         const countsTowardBudget = SEARCH_TOOL_NAMES.has(tool.name);

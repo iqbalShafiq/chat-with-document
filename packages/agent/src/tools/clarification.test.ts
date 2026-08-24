@@ -1,193 +1,99 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { isQuestionTool } from "@anvia/core/tool";
+import { parseAgentInteractionRequest } from "@anvia/core/agent/interactions";
 import {
   CLARIFICATION_INSTRUCTION,
   createClarificationTool,
-  type ClarificationResponse,
 } from "./clarification.js";
 
-function requester(responses: ClarificationResponse) {
-  return vi.fn().mockResolvedValue(responses);
-}
-
 describe("createClarificationTool", () => {
-  it("exposes the request_clarification tool name", () => {
-    const tool = createClarificationTool({ requester: vi.fn() });
+  it("creates Anvia's native request_clarification question tool", () => {
+    const tool = createClarificationTool();
+
     expect(tool.name).toBe("request_clarification");
+    expect(isQuestionTool(tool)).toBe(true);
   });
 
-  it("forwards a valid request to the requester and maps an answered response", async () => {
-    const req = requester({
-      answers: { style: "flat", tags: ["minimal", "warm"] },
-      skipped: ["subject"],
-      timedOut: false,
-    });
-    const tool = createClarificationTool({ requester: req });
+  it("accepts bounded single-choice and custom-text questions", () => {
+    const tool = createClarificationTool();
 
-    const result = await tool.call({
-      title: "Logo direction",
+    expect(
+      tool.parseInput({
+        questions: [
+          {
+            id: "scope",
+            text: "Which document scope should I use?",
+            choices: [
+              { label: "All documents", value: "all" },
+              { label: "Active document", value: "active" },
+            ],
+            allowCustom: true,
+          },
+          {
+            id: "notes",
+            text: "What constraints should I follow?",
+          },
+        ],
+      }),
+    ).toEqual({
       questions: [
         {
-          id: "style",
-          question: "Which visual style?",
-          type: "single_choice",
-          options: [
-            { id: "flat", label: "Flat" },
-            { id: "3d", label: "3D", recommended: true },
+          id: "scope",
+          text: "Which document scope should I use?",
+          choices: [
+            { label: "All documents", value: "all" },
+            { label: "Active document", value: "active" },
           ],
+          allowCustom: true,
         },
         {
-          id: "tags",
-          question: "Pick any tags",
-          type: "multiple_choice",
-          optional: true,
-          options: [
-            { id: "minimal", label: "Minimal" },
-            { id: "warm", label: "Warm" },
-          ],
+          id: "notes",
+          text: "What constraints should I follow?",
         },
       ],
     });
-
-    expect(req).toHaveBeenCalledWith({
-      title: "Logo direction",
-      questions: [
-        {
-          id: "style",
-          question: "Which visual style?",
-          type: "single_choice",
-          options: [
-            { id: "flat", label: "Flat" },
-            { id: "3d", label: "3D", recommended: true },
-          ],
-        },
-        {
-          id: "tags",
-          question: "Pick any tags",
-          type: "multiple_choice",
-          optional: true,
-          options: [
-            { id: "minimal", label: "Minimal" },
-            { id: "warm", label: "Warm" },
-          ],
-        },
-      ],
-    });
-    expect(result).toEqual({
-      status: "answered",
-      answers: { style: "flat", tags: ["minimal", "warm"] },
-      skipped: ["subject"],
-      note: expect.stringContaining("recommended"),
-    });
   });
 
-  it("maps a timed-out response to status timed_out with an explanatory note", async () => {
-    const req = requester({
-      answers: {},
-      skipped: ["style"],
-      timedOut: true,
-    });
-    const tool = createClarificationTool({ requester: req });
+  it("rejects duplicate question ids", () => {
+    const tool = createClarificationTool();
 
-    const result = await tool.call({
-      questions: [
-        {
-          id: "style",
-          question: "Which style?",
-          type: "free_text",
-          placeholder: "Describe it",
-        },
-      ],
-    });
+    const input = tool.parseInput({
+        questions: [
+          { id: "scope", text: "First?" },
+          { id: "scope", text: "Second?" },
+        ],
+      });
 
-    expect(result.status).toBe("timed_out");
-    expect(result.note).toMatch(/did not respond in time/i);
-    expect(result.note).toMatch(/recommended/i);
+    expect(() =>
+      parseAgentInteractionRequest({
+        type: "tool-question",
+        id: "interaction-1",
+        toolName: tool.name,
+        toolCallId: "call-1",
+        internalCallId: "internal-1",
+        questions: input.questions,
+      }),
+    ).toThrow(/unique/i);
   });
 
-  describe("input validation", () => {
-    const tool = createClarificationTool({ requester: vi.fn() });
+  it("cannot execute as an ordinary tool call", async () => {
+    const tool = createClarificationTool();
 
-    it("rejects more than 5 questions", async () => {
-      const questions = Array.from({ length: 6 }, (_, index) => ({
-        id: `q${index}`,
-        question: `Question ${index}`,
-        type: "free_text" as const,
-      }));
-      await expect(tool.call({ questions })).rejects.toThrow();
-    });
-
-    it("rejects a choice question without options", async () => {
-      await expect(
-        tool.call({
-          questions: [
-            {
-              id: "style",
-              question: "Which style?",
-              type: "single_choice",
-            },
-          ],
-        }),
-      ).rejects.toThrow();
-    });
-
-    it("rejects free_text questions that carry options", async () => {
-      await expect(
-        tool.call({
-          questions: [
-            {
-              id: "style",
-              question: "Which style?",
-              type: "free_text",
-              options: [
-                { id: "flat", label: "Flat" },
-                { id: "3d", label: "3D" },
-              ],
-            },
-          ],
-        }),
-      ).rejects.toThrow();
-    });
-
-    it("rejects an empty question id", async () => {
-      await expect(
-        tool.call({
-          questions: [{ id: "", question: "What?", type: "free_text" }],
-        }),
-      ).rejects.toThrow();
-    });
-
-    it("rejects options with fewer than 2 entries", async () => {
-      await expect(
-        tool.call({
-          questions: [
-            {
-              id: "style",
-              question: "Which style?",
-              type: "multiple_choice",
-              options: [{ id: "flat", label: "Flat" }],
-            },
-          ],
-        }),
-      ).rejects.toThrow();
-    });
-
-    it("rejects question text longer than 2000 characters", async () => {
-      await expect(
-        tool.call({
-          questions: [
-            { id: "q", question: "x".repeat(2001), type: "free_text" },
-          ],
-        }),
-      ).rejects.toThrow();
-    });
+    await expect(
+      tool.call({ questions: [{ id: "scope", text: "Which scope?" }] }),
+    ).rejects.toThrow(/interaction/i);
   });
 });
 
 describe("CLARIFICATION_INSTRUCTION", () => {
-  it("guides the model on recommended choices and optional questions", () => {
+  it("guides the model to required native question semantics", () => {
     expect(CLARIFICATION_INSTRUCTION).toMatch(/request_clarification/);
-    expect(CLARIFICATION_INSTRUCTION).toMatch(/recommended/i);
-    expect(CLARIFICATION_INSTRUCTION).toMatch(/optional/i);
-    expect(CLARIFICATION_INSTRUCTION).toMatch(/not use request_clarification for permission/i);
+    expect(CLARIFICATION_INSTRUCTION).toMatch(/every question/i);
+    expect(CLARIFICATION_INSTRUCTION).toMatch(
+      /not use request_clarification for permission/i,
+    );
+    expect(CLARIFICATION_INSTRUCTION).not.toMatch(
+      /optional|recommended|timeout/i,
+    );
   });
 });

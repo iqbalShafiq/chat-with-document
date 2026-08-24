@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ToolApprovalContext, ToolApprovalRequirement } from "@anvia/core";
+import { normalizeToolResultOutput } from "@anvia/core/tool";
 import type {
   TavilyClient,
   TavilyExtractResponse,
@@ -18,11 +20,13 @@ type SearchResult = {
   publishedDate: string;
 };
 
-/** Minimal shape of the approval policy returned on an AnyTool (approval is `unknown`). */
-type ApprovalPolicy = {
-  when(ctx: { args: { reason: string } }): boolean | Promise<boolean>;
-  reason(ctx: { args: { reason: string } }): string | Promise<string>;
-};
+type WebApproval = (
+  args: { reason: string },
+  context: ToolApprovalContext<{ reason: string }>,
+) =>
+  | boolean
+  | ToolApprovalRequirement
+  | Promise<boolean | ToolApprovalRequirement>;
 
 type SearchOutput = {
   query: string;
@@ -81,6 +85,17 @@ function extractResponse(
 const QUERY = "gold price today";
 const REASON = "The answer needs current data";
 
+function approvalContext(args: { reason: string }): ToolApprovalContext<typeof args> {
+  return {
+    toolName: "web_search",
+    args,
+    rawArgs: JSON.stringify(args),
+    toolCallId: "tool-call-1",
+    internalCallId: "internal-call-1",
+    run: { agentId: "agent-1", runId: "run-1", sessionId: "session-1" },
+  };
+}
+
 describe("createWebSearchTools", () => {
   it("returns web_search and web_fetch in order", () => {
     const { client } = fakeClient();
@@ -89,25 +104,62 @@ describe("createWebSearchTools", () => {
   });
 
   describe("approval policy", () => {
-    it("requires approval when the web-search toggle is disabled", () => {
+    it("requires approval when the web-search toggle is disabled", async () => {
       const { client } = fakeClient();
       const tools = createWebSearchTools({ tavilyClient: client, enabled: false });
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.when({ args: { reason: REASON } })).toBe(true);
+      const requiresApproval = tools[0]!.requiresApproval as WebApproval;
+      const input = { reason: REASON };
+      expect(await requiresApproval(input, approvalContext(input))).toEqual({
+        reason: REASON,
+      });
     });
 
-    it("does not require approval when the toggle is enabled", () => {
+    it("does not require approval when the toggle is enabled", async () => {
       const { client } = fakeClient();
       const tools = createWebSearchTools({ tavilyClient: client, enabled: true });
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.when({ args: { reason: REASON } })).toBe(false);
+      const requiresApproval = tools[0]!.requiresApproval as WebApproval;
+      const input = { reason: REASON };
+      expect(await requiresApproval(input, approvalContext(input))).toBe(false);
     });
 
-    it("uses the model-supplied reason dynamically", () => {
+    it("uses the model-supplied reason dynamically", async () => {
       const { client } = fakeClient();
       const tools = createWebSearchTools({ tavilyClient: client, enabled: false });
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.reason({ args: { reason: REASON } })).toBe(REASON);
+      const requiresApproval = tools[0]!.requiresApproval as WebApproval;
+      const input = { reason: REASON };
+      expect(await requiresApproval(input, approvalContext(input))).toEqual({
+        reason: REASON,
+      });
+    });
+
+    it("skips approval when a session grant already exists", async () => {
+      const { client } = fakeClient();
+      const tools = createWebSearchTools({
+        tavilyClient: client,
+        enabled: false,
+        hasGrant: (toolName) => toolName === "web_search",
+      });
+      const requiresApproval = tools[0]!.requiresApproval as WebApproval;
+      const input = { reason: REASON };
+
+      expect(await requiresApproval(input, approvalContext(input))).toBe(false);
+    });
+
+    it("fails closed when the session grant lookup fails", async () => {
+      const { client } = fakeClient();
+      const tools = createWebSearchTools({
+        tavilyClient: client,
+        enabled: false,
+        hasGrant: async () => {
+          throw new Error("grant registry unavailable");
+        },
+      });
+      const requiresApproval = tools[0]!.requiresApproval as WebApproval;
+      const input = { reason: REASON };
+
+      expect(await requiresApproval(input, approvalContext(input))).toEqual({
+        reason: REASON,
+      });
     });
   });
 
@@ -227,8 +279,9 @@ describe("createWebSearchTools", () => {
       expect(search).toHaveBeenCalledWith(QUERY, expect.objectContaining({ includeImages: true, includeImageDescriptions: true }));
       expect(output.images).toEqual([
         { url: "https://example.com/a.jpg", description: "A logo" },
-        { url: "https://example.com/b.jpg", description: undefined },
+        { url: "https://example.com/b.jpg" },
       ]);
+      expect(normalizeToolResultOutput(output).type).toBe("json");
     });
 
     it("caps images to 5 and truncates descriptions to 300 chars", async () => {

@@ -106,9 +106,10 @@ export function createDescriptiveStatsTool() {
     name: "descriptive_stats",
     description:
       "Compute descriptive statistics for a numeric series: count, mean, median, mode, min/max, range, quartiles, IQR, variance, standard deviation, and skewness.",
-    input: z.object({
+    inputSchema: z.object({
       values: nonEmptyNumbers.describe("Numeric values to summarize"),
     }),
+    outputSchema: z.json(),
     execute: async ({ values }) => {
       const sorted = sortedCopy(values);
       const avg = mean(values);
@@ -153,10 +154,11 @@ export function createPearsonCorrelationTool() {
     name: "pearson_correlation",
     description:
       "Calculate the Pearson correlation coefficient between two paired numeric series, including covariance and a qualitative strength label.",
-    input: z.object({
+    inputSchema: z.object({
       x: nonEmptyNumbers.describe("First numeric series"),
       y: nonEmptyNumbers.describe("Second numeric series (same length as x)"),
     }),
+    outputSchema: z.json(),
     execute: async ({ x, y }) => {
       assertSameLength(x, y);
       const n = x.length;
@@ -193,7 +195,7 @@ export function createLinearRegressionTool() {
     name: "linear_regression",
     description:
       "Fit a simple linear regression (y = slope * x + intercept). Returns slope, intercept, R², residual stats, and optional predictions for new x values.",
-    input: z.object({
+    inputSchema: z.object({
       x: nonEmptyNumbers.describe("Independent variable values"),
       y: nonEmptyNumbers.describe(
         "Dependent variable values (same length as x)",
@@ -203,6 +205,7 @@ export function createLinearRegressionTool() {
         .optional()
         .describe("Optional x values to generate predictions for"),
     }),
+    outputSchema: z.json(),
     execute: async ({ x, y, predictFor }) => {
       assertSameLength(x, y);
       if (x.length < 2) {

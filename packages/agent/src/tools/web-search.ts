@@ -71,6 +71,10 @@ export type WebSearchToolScope = {
   tavilyClient: TavilyClient;
   /** Per-session toggle: false → the model must ask the user before searching. */
   enabled: boolean;
+  /** Session-scoped native approval grant, checked immediately before each call. */
+  hasGrant?: (toolName: "web_search" | "web_fetch") =>
+    | Promise<boolean>
+    | boolean;
   maxResults?: number;
   /** Truncate result content to this many characters (default 400). */
   contentLimitChars?: number;
@@ -93,6 +97,22 @@ function truncate(text: string, limit: number): string {
 function truncateDesc(text: string, limit: number): string {
   const t = text.trim();
   return t.length <= limit ? t : `${t.slice(0, limit).replace(/\s+\S*$/, "")}…`;
+}
+
+async function safeHasGrant(
+  scope: WebSearchToolScope,
+  toolName: "web_search" | "web_fetch",
+): Promise<boolean> {
+  if (!scope.hasGrant) return false;
+  try {
+    return await scope.hasGrant(toolName);
+  } catch (error) {
+    console.warn("[web-tools] grant lookup failed, requiring approval", {
+      toolName,
+      error,
+    });
+    return false;
+  }
 }
 
 /** Map Tavily failures to bounded, non-sensitive messages. */
@@ -121,20 +141,20 @@ export function createWebSearchTools(
   const maxResults = scope.maxResults ?? MAX_RESULTS;
   const contentLimitChars = scope.contentLimitChars ?? 400;
 
-  const approval = {
-    when: () => !scope.enabled,
-    reason: (ctx: { args: { reason: string } }) => ctx.args.reason,
-    rejectMessage:
-      "Web access was declined by the user; answer from available knowledge without the web.",
-  };
+  const requiresApproval = (toolName: "web_search" | "web_fetch") =>
+    async (args: { reason: string }, _context: unknown) =>
+      scope.enabled || (await safeHasGrant(scope, toolName))
+        ? false
+        : { reason: args.reason };
 
   return [
     createTool({
       name: "web_search",
       description:
         "Search the live web for up-to-date information using Tavily. Use when the answer needs current, factual, or out-of-scope information not present in the session documents — news, prices, dates, specs, events. Always provide a precise query and a clear reason.",
-      input: webSearchInput,
-      approval,
+      inputSchema: webSearchInput,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("web_search"),
       execute: async ({ query, maxResults: requestedMax, timeRange }) => {
         try {
           const response = await scope.tavilyClient.search(query, {
@@ -161,7 +181,14 @@ export function createWebSearchTools(
             })),
             images: (response.images ?? []).slice(0, MAX_IMAGES).map((img) => ({
               url: img.url,
-              description: img.description ? truncateDesc(img.description, IMAGE_DESC_LIMIT) : undefined,
+              ...(img.description
+                ? {
+                    description: truncateDesc(
+                      img.description,
+                      IMAGE_DESC_LIMIT,
+                    ),
+                  }
+                : {}),
             })),
           };
         } catch (error) {
@@ -173,8 +200,9 @@ export function createWebSearchTools(
       name: "web_fetch",
       description:
         "Fetch and read the full content of a specific web page (http/https) using Tavily Extract. Use when you already know the exact URL to consult — follow up on a search result, verify a claim, or read a page the user linked.",
-      input: webFetchInput,
-      approval,
+      inputSchema: webFetchInput,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("web_fetch"),
       execute: async ({ url }) => {
         try {
           const response = await scope.tavilyClient.extract([url], {
@@ -194,7 +222,7 @@ export function createWebSearchTools(
           }
           return {
             url: result.url,
-            title: result.title,
+            title: result.title ?? null,
             content: truncate(result.rawContent, contentLimitChars * 3),
             images: (result.images ?? []).slice(0, MAX_IMAGES),
           };

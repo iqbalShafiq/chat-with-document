@@ -29,10 +29,11 @@ export function createRememberUserProfileTool(
       "Save an explicit fact about the user into their durable profile, immediately. " +
       "Call this ONLY when the user explicitly asks you to remember something about them " +
       "(for example 'remember that I prefer X' or 'remember my name is X'). One fact per call.",
-    input: z.object({
+    inputSchema: z.object({
       fact: z.string().min(1).max(500),
       section: z.enum(PROFILE_SECTION_KEYS).optional(),
     }),
+    outputSchema: z.json(),
     execute: async ({ fact, section }) => {
       try {
         await deps.waitForActiveJob();

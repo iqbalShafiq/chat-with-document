@@ -1,10 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolResultContent } from "@anvia/core";
+import type { ToolResultContentPart } from "@anvia/core";
+import { normalizeToolResultOutput } from "@anvia/core/tool";
 import {
+  createFindDocumentsTool,
   createGetDocumentPageImagesTool,
   type PageImagesPrisma,
   type SessionDocumentIdsPrisma,
 } from "./documents.js";
+
+describe("document lookup v1 output contract", () => {
+  it("rejects non-JSON lookup data through its output schema", async () => {
+    const tool = createFindDocumentsTool({
+      userId: "u-1",
+      sessionId: "s-1",
+      prisma: {
+        documentSession: {
+          findMany: async () => [{ documentId: "doc-1" }],
+        },
+        document: {
+          findMany: async () => [
+            {
+              id: "doc-1",
+              filename: "report.pdf",
+              firstPageSummary: undefined as never,
+              summary: "Quarterly report",
+              pageCount: 3,
+            },
+          ],
+        },
+      },
+    });
+
+    await expect(tool.call({ query: "report", limit: 5 })).rejects.toThrow();
+  });
+});
 
 const SESSION_IDS: SessionDocumentIdsPrisma = {
   documentSession: {
@@ -20,8 +49,18 @@ function pageImagesPrisma(images: unknown): PageImagesPrisma {
   };
 }
 
-function toolResultText(result: ToolResultContent[]): Record<string, unknown> {
-  const text = result.find((part) => part.type === "text");
+function toolResultContent(result: unknown): readonly ToolResultContentPart[] {
+  const normalized = normalizeToolResultOutput(result);
+  expect(normalized.type).toBe("content");
+  if (normalized.type !== "content") {
+    throw new Error(`Expected rich content, received ${normalized.type}`);
+  }
+  return normalized.value;
+}
+
+function toolResultText(result: unknown): Record<string, unknown> {
+  const content = toolResultContent(result);
+  const text = content.find((part) => part.type === "text");
   return JSON.parse(text && text.type === "text" ? text.text : "{}") as Record<
     string,
     unknown
@@ -57,6 +96,7 @@ describe("get_document_page_images includeImageBytes", () => {
       limit: 5,
     });
 
+    const content = toolResultContent(result);
     const text = toolResultText(result);
     expect(text).toMatchObject({ found: true, pageIndex: 0 });
     expect(text.images).toEqual([
@@ -68,7 +108,7 @@ describe("get_document_page_images includeImageBytes", () => {
         annotation: "Chart: revenue by quarter",
       },
     ]);
-    expect(result.some((part) => part.type === "image")).toBe(false);
+    expect(content.some((part) => part.type === "file")).toBe(false);
     expect(fetchPageImage).not.toHaveBeenCalled();
   });
 
@@ -91,8 +131,12 @@ describe("get_document_page_images includeImageBytes", () => {
     });
 
     expect(fetchPageImage).toHaveBeenCalledWith("key-1");
-    const imageParts = result.filter((part) => part.type === "image");
-    expect(imageParts).toHaveLength(1);
-    expect(imageParts[0]).toMatchObject({ mediaType: "image/png" });
+    const content = toolResultContent(result);
+    const fileParts = content.filter((part) => part.type === "file");
+    expect(fileParts).toHaveLength(1);
+    expect(fileParts[0]).toMatchObject({
+      mediaType: "image/png",
+      data: { type: "data", data: "CQgH" },
+    });
   });
 });

@@ -61,18 +61,16 @@ export function createStubTavilyClient(): TavilyClient {
   } as unknown as TavilyClient;
 }
 
-export function createStubImageModel(): ImageGenerationModel<unknown, string> {
+export function createStubImageModel(): ImageGenerationModel<unknown> {
   return {
     provider: "fixture",
-    defaultModel: "fixture/image",
+    modelId: "fixture/image",
     imageGeneration: async () => {
       const data = Uint8Array.from(
         Buffer.from(TRANSPARENT_1X1_PNG_BASE64, "base64"),
       );
       return {
-        image: data,
         images: [{ data, mediaType: "image/png" }],
-        mediaType: "image/png",
         rawResponse: {},
       };
     },
@@ -265,7 +263,8 @@ export function createStubViewImageTool(options: { model: CompletionModel }) {
       "URLs found on the web (logo, product photo, screenshot, etc.). Required " +
       "when your model cannot receive image input and the answer depends on " +
       "visual content.",
-    input: stubViewImageInput,
+    inputSchema: stubViewImageInput,
+    outputSchema: z.string(),
     execute: async ({ question }) => {
       const result = await createCompletion(model, {
         messages: [

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ToolApprovalContext, ToolApprovalRequirement } from "@anvia/core";
 import type {
   GeneratedImage,
   ImageGenerationModel,
@@ -16,10 +17,30 @@ import {
 
 const DEFAULT_MODEL = "test-model";
 
-type ApprovalPolicy = {
-  when(ctx: { args: Record<string, unknown> }): boolean | Promise<boolean>;
-  reason(ctx: { args: Record<string, unknown> }): string | Promise<string>;
-};
+type ImageApproval = (
+  args: { prompt: string; referenceImageId?: string },
+  context: ToolApprovalContext<{
+    prompt: string;
+    referenceImageId?: string;
+  }>,
+) =>
+  | boolean
+  | ToolApprovalRequirement
+  | Promise<boolean | ToolApprovalRequirement>;
+
+function approvalContext<T extends { prompt: string }>(
+  toolName: string,
+  args: T,
+): ToolApprovalContext<T> {
+  return {
+    toolName,
+    args,
+    rawArgs: JSON.stringify(args),
+    toolCallId: "tool-call-1",
+    internalCallId: "internal-call-1",
+    run: { agentId: "agent-1", runId: "run-1", sessionId: "session-1" },
+  };
+}
 
 function image(byte: number, mediaType = "image/png"): GeneratedImage {
   return { data: new Uint8Array([byte]), mediaType };
@@ -63,8 +84,9 @@ function makeScope(
     overrides.model ??
     ({
       imageGeneration,
-      defaultModel: DEFAULT_MODEL,
-    } as unknown as ImageGenerationModel<unknown, string>);
+      provider: "fixture",
+      modelId: DEFAULT_MODEL,
+    } as unknown as ImageGenerationModel<unknown>);
   const scope: ImageGenerationToolScope = {
     model,
     store: { saveGeneratedImage },
@@ -79,7 +101,7 @@ function makeScope(
     ...overrides,
   };
   const usedImageGeneration = (
-    model as { imageGeneration: ReturnType<typeof vi.fn> }
+    model as unknown as { imageGeneration: ReturnType<typeof vi.fn> }
   ).imageGeneration;
   return { scope, imageGeneration: usedImageGeneration, saveGeneratedImage };
 }
@@ -98,15 +120,23 @@ describe("createImageGenerationTools", () => {
     it("requires approval when generation is disabled and no grant exists", async () => {
       const { scope } = makeScope({ enabled: false });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(true);
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toEqual({
+        reason: 'The agent wants to generate an image: "a red fox"',
+      });
     });
 
     it("does not require approval when generation is enabled", async () => {
       const { scope } = makeScope({ enabled: true });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toBe(false);
     });
 
     it("does not require approval when a grant exists for the tool", async () => {
@@ -115,8 +145,11 @@ describe("createImageGenerationTools", () => {
         hasGrant: (name) => name === "generate_image",
       });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toBe(false);
     });
 
     it("requires approval for edit_image even when only generate_image is granted", async () => {
@@ -125,10 +158,13 @@ describe("createImageGenerationTools", () => {
         hasGrant: (name) => name === "generate_image",
       });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[1]!.approval as ApprovalPolicy;
+      const requiresApproval = tools[1]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox", referenceImageId: "img-1" };
       expect(
-        await approval.when({ args: { prompt: "a red fox", referenceImageId: "img-1" } }),
-      ).toBe(true);
+        await requiresApproval(args, approvalContext("edit_image", args)),
+      ).toEqual({
+        reason: 'The agent wants to generate an image: "a red fox"',
+      });
     });
 
     it("fails safe to approval when hasGrant rejects", async () => {
@@ -137,8 +173,13 @@ describe("createImageGenerationTools", () => {
         hasGrant: () => Promise.reject(new Error("redis down")),
       });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(true);
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toEqual({
+        reason: 'The agent wants to generate an image: "a red fox"',
+      });
     });
 
     it("does not require approval when hasGrant resolves true", async () => {
@@ -147,21 +188,75 @@ describe("createImageGenerationTools", () => {
         hasGrant: async (name) => name === "generate_image",
       });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(await approval.when({ args: { prompt: "a red fox" } })).toBe(false);
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toBe(false);
     });
 
-    it("justifies approval with the prompt", () => {
+    it("justifies approval with the prompt", async () => {
       const { scope } = makeScope({ enabled: false });
       const tools = createImageGenerationTools(scope);
-      const approval = tools[0]!.approval as ApprovalPolicy;
-      expect(approval.reason({ args: { prompt: "a red fox" } })).toBe(
-        'The agent wants to generate an image: "a red fox"',
-      );
+      const requiresApproval = tools[0]!.requiresApproval as ImageApproval;
+      const args = { prompt: "a red fox" };
+      expect(
+        await requiresApproval(args, approvalContext("generate_image", args)),
+      ).toEqual({
+        reason: 'The agent wants to generate an image: "a red fox"',
+      });
+    });
+
+    it("does not consume an editable override while deciding approval", async () => {
+      const takeToolOverride = vi.fn(() => ({ prompt: "approved edit" }));
+      const { scope } = makeScope({
+        enabled: false,
+        takeToolOverride,
+      });
+      const tool = createImageGenerationTools(scope)[0]!;
+      const requiresApproval = tool.requiresApproval as ImageApproval;
+      const args = { prompt: "original prompt" };
+
+      await requiresApproval(args, approvalContext("generate_image", args));
+
+      expect(takeToolOverride).not.toHaveBeenCalled();
     });
   });
 
   describe("generate_image", () => {
+    it("forwards and propagates cancellation through the v1 tool context", async () => {
+      const controller = new AbortController();
+      const abortError = new DOMException("The operation was aborted", "AbortError");
+      const { scope, imageGeneration } = makeScope();
+      imageGeneration.mockImplementation(
+        async (_request: unknown, options: { abortSignal?: AbortSignal }) => {
+          expect(options.abortSignal).toBe(controller.signal);
+          controller.abort(abortError);
+          throw abortError;
+        },
+      );
+      const tool = createImageGenerationTools(scope)[0]!;
+
+      await expect(
+        tool.call(
+          { prompt: "a red fox" },
+          { abortSignal: controller.signal },
+        ),
+      ).rejects.toBe(abortError);
+    });
+
+    it("rejects a non-JSON generation record through its output schema", async () => {
+      const { scope, imageGeneration, saveGeneratedImage } = makeScope();
+      imageGeneration.mockResolvedValue(response(image(1)));
+      saveGeneratedImage.mockResolvedValue({
+        ...record("rec-1"),
+        id: undefined,
+      });
+      const tool = createImageGenerationTools(scope)[0]!;
+
+      await expect(tool.call({ prompt: "a red fox" })).rejects.toThrow();
+    });
+
     it("applies a tool override over the args", async () => {
       const { scope, imageGeneration, saveGeneratedImage } = makeScope({
         takeToolOverride: () => ({ prompt: "override prompt" }),
@@ -174,6 +269,7 @@ describe("createImageGenerationTools", () => {
 
       expect(imageGeneration).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override prompt" }),
+        undefined,
       );
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override prompt" }),
@@ -192,6 +288,7 @@ describe("createImageGenerationTools", () => {
 
       expect(imageGeneration).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "a red fox" }),
+        undefined,
       );
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "a red fox" }),
@@ -207,7 +304,7 @@ describe("createImageGenerationTools", () => {
 
       await tools[0]!.call({ prompt: "a red fox" });
 
-      expect(imageGeneration.mock.calls[0]![0].additionalParams.n).toBe(4);
+      expect(imageGeneration.mock.calls[0]![0].providerOptions.n).toBe(4);
     });
 
     it("caps an oversized override n to the capability nMax", async () => {
@@ -220,7 +317,7 @@ describe("createImageGenerationTools", () => {
 
       await tools[0]!.call({ prompt: "a red fox" });
 
-      expect(imageGeneration.mock.calls[0]![0].additionalParams.n).toBe(1);
+      expect(imageGeneration.mock.calls[0]![0].providerOptions.n).toBe(1);
     });
 
     it("coerces a string override n safely", async () => {
@@ -233,8 +330,8 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams.n).toBe(4);
-      expect(Number.isInteger(request.additionalParams.n)).toBe(true);
+      expect(request.providerOptions.n).toBe(4);
+      expect(Number.isInteger(request.providerOptions.n)).toBe(true);
     });
 
     it("drops unknown override keys before they reach the wire", async () => {
@@ -247,7 +344,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         n: 2,
         size: "1024x1024",
@@ -265,6 +362,7 @@ describe("createImageGenerationTools", () => {
 
       expect(imageGeneration).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "a red fox" }),
+        undefined,
       );
     });
 
@@ -272,8 +370,9 @@ describe("createImageGenerationTools", () => {
       const { scope, imageGeneration, saveGeneratedImage } = makeScope({
         model: {
           imageGeneration: vi.fn(),
-          defaultModel: undefined,
-        } as unknown as ImageGenerationModel<unknown, string>,
+          provider: "fixture",
+          modelId: undefined,
+        } as unknown as ImageGenerationModel<unknown>,
       });
       imageGeneration.mockResolvedValue(response(image(1)));
       saveGeneratedImage.mockResolvedValue(record("rec-1"));
@@ -282,7 +381,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({ size: "1024x1024" });
+      expect(request.providerOptions).toEqual({ size: "1024x1024" });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ modelId: "" }),
       );
@@ -296,7 +395,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         size: "1024x1024",
       });
@@ -310,7 +409,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", modelId: "explicit-model" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: "explicit-model",
         size: "1024x1024",
       });
@@ -326,7 +425,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", n: 5 });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         n: 1,
         size: "1024x1024",
@@ -343,7 +442,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", background: "transparent" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         size: "1024x1024",
       });
@@ -359,7 +458,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", quality: "high" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         size: "1024x1024",
       });
@@ -375,7 +474,7 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox", background: "transparent" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         background: "transparent",
         output_format: "png",
@@ -492,7 +591,7 @@ describe("createImageGenerationTools", () => {
       const request = imageGeneration.mock.calls[0]![0];
       expect(request.width).toBe(1344);
       expect(request.height).toBe(768);
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: "default-model",
         size: "1344x768",
       });
@@ -535,7 +634,7 @@ describe("createImageGenerationTools", () => {
       await tools[1]!.call({ prompt: "make it red", referenceImageId: "img-1" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).toEqual({
+      expect(request.providerOptions).toEqual({
         model: DEFAULT_MODEL,
         input_references: [
           {
@@ -604,6 +703,7 @@ describe("createImageGenerationTools", () => {
 
       expect(imageGeneration).toHaveBeenCalledWith(
         expect.objectContaining({ prompt: "override edit" }),
+        undefined,
       );
     });
 
@@ -624,7 +724,7 @@ describe("createImageGenerationTools", () => {
       });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.additionalParams).not.toHaveProperty("n");
+      expect(request.providerOptions).not.toHaveProperty("n");
     });
   });
 });

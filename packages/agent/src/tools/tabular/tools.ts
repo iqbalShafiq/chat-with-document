@@ -54,6 +54,7 @@ const operationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("correlation"), x: z.string(), y: z.string() }),
   z.object({ op: z.literal("trend"), x: z.string(), y: z.string() }),
 ]) as z.ZodType<AnalysisOperation>;
+const jsonOutputSchema = z.json();
 
 export type TabularToolDeps = {
   resolver: DatasetResolver;
@@ -69,7 +70,8 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     name: "read_dataset",
     description:
       "Inspect a tabular dataset (CSV/XLSX upload or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing.",
-    input: z.object({ source: sourceSchema.describe("Which dataset to inspect") }),
+    inputSchema: z.object({ source: sourceSchema.describe("Which dataset to inspect") }),
+    outputSchema: jsonOutputSchema,
     execute: async ({ source }) => {
       const sheet = await resolver.resolveSheet(source);
       return {
@@ -85,13 +87,16 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     name: "analyze_dataset",
     description:
       "Run a deterministic data-analysis operation on a dataset: profile (per-column stats + histogram), aggregate (groupBy + sum/mean/count/min/max/median + bar chart), filter, sort, top_n, correlation between two numeric columns (scatter), or trend (line). Returns structured results and a chart spec the UI renders.",
-    input: z.object({
+    inputSchema: z.object({
       source: sourceSchema,
       operation: operationSchema,
     }),
+    outputSchema: jsonOutputSchema,
     execute: async ({ source, operation }) => {
       const sheet = await resolver.resolveSheet(source);
-      return runAnalysis(sheet, operation, resolvedLimits);
+      return jsonOutputSchema.parse(
+        runAnalysis(sheet, operation, resolvedLimits),
+      );
     },
   });
 
@@ -99,10 +104,11 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     name: "query_dataset_sql",
     description:
       "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
-    input: z.object({
+    inputSchema: z.object({
       source: sourceSchema,
       query: z.string().min(1).describe("Read-only SQL SELECT query"),
     }),
+    outputSchema: jsonOutputSchema,
     execute: async ({ source, query }) => {
       const sheet = await resolver.resolveSheet(source);
       return sqlRunner(sheet, query, limits);
@@ -113,7 +119,8 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     name: "extract_document_tables",
     description:
       "Discover GFM markdown tables inside the linked ready documents (e.g. tables OCR'd from PDFs). Returns each table's location (documentId, pageIndex, tableIndex), columns and row count so you can feed it back as a source to read_dataset / analyze_dataset / query_dataset_sql.",
-    input: z.object({}),
+    inputSchema: z.object({}),
+    outputSchema: jsonOutputSchema,
     execute: async () => {
       return { tables: await resolver.listDocumentTables() };
     },

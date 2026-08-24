@@ -1,9 +1,14 @@
-import { createTool, type AnyTool } from "@anvia/core";
 import {
-  imageGenerationRequest,
+  createTool,
+  type AnyTool,
+  type JsonObject,
+  type ToolCallContext,
+} from "@anvia/core";
+import {
+  generateImage,
   type GeneratedImage,
   type ImageGenerationModel,
-  type ImageGenerationResponse,
+  type ImageGenerationResult,
 } from "@anvia/core/image-generation";
 import z from "zod";
 import { mapOpenRouterImageError } from "../providers/image-generation.js";
@@ -154,7 +159,7 @@ export type ImageCapabilitySet = {
 };
 
 export type ImageGenerationToolScope = {
-  model: ImageGenerationModel<unknown, string>;
+  model: ImageGenerationModel<unknown>;
   store: {
     saveGeneratedImage(input: {
       userId: string;
@@ -379,7 +384,8 @@ async function runGeneration(
   scope: ImageGenerationToolScope,
   args: GenerationArgs,
   isEdit: boolean,
-  extraParams: Record<string, unknown> = {},
+  extraParams: JsonObject = {},
+  context?: ToolCallContext,
 ): Promise<GenerateImageResult> {
   const toolName = isEdit ? "edit_image" : "generate_image";
   const mergedInput = applyOverride(
@@ -397,7 +403,7 @@ async function runGeneration(
     : args;
 
   const resolvedModelId: string | undefined =
-    merged.modelId ?? scope.defaultSettings?.modelId ?? scope.model.defaultModel;
+    merged.modelId ?? scope.defaultSettings?.modelId ?? scope.model.modelId;
   const capability = resolvedModelId ? scope.capabilities(resolvedModelId) : null;
   const hasCapability = capability !== null;
 
@@ -445,15 +451,23 @@ async function runGeneration(
     ...extraParams,
   };
 
-  let response: ImageGenerationResponse<unknown>;
+  let response: ImageGenerationResult<unknown>;
   try {
-    response = await imageGenerationRequest(scope.model)
-      .prompt(merged.prompt)
-      .width(width)
-      .height(height)
-      .additionalParams(additionalParams)
-      .send();
+    response = await generateImage({
+      model: scope.model,
+      prompt: merged.prompt,
+      width,
+      height,
+      providerOptions: additionalParams,
+      ...(context?.abortSignal ? { abortSignal: context.abortSignal } : {}),
+    });
   } catch (error) {
+    if (
+      context?.abortSignal?.aborted === true ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      throw error;
+    }
     return { images: [], error: boundedImageError(error) };
   }
 
@@ -502,16 +516,17 @@ async function runGeneration(
 export function createImageGenerationTools(
   scope: ImageGenerationToolScope,
 ): AnyTool[] {
-  const approval = (toolName: "generate_image" | "edit_image") => ({
-    when: async () => !scope.enabled && !(await safeHasGrant(scope, toolName)),
+  const requiresApproval = (toolName: "generate_image" | "edit_image") =>
+    async (args: { prompt: string }, _context: unknown) => {
+      if (scope.enabled || (await safeHasGrant(scope, toolName))) return false;
     // The reason shows the model's pre-execution intent. An override replacing
     // the prompt comes from the user's own approval card, so it is not shown
     // here; override prompts are still bounded by schema re-validation in
     // runGeneration, so the mismatch cannot grow unbounded.
-    reason: (ctx: { args: { prompt: string } }) =>
-      `The agent wants to generate an image: "${ctx.args.prompt.slice(0, 200)}"`,
-    rejectMessage: "Image generation was declined by the user.",
-  });
+      return {
+        reason: `The agent wants to generate an image: "${args.prompt.slice(0, 200)}"`,
+      };
+    };
 
   return [
     createTool({
@@ -523,9 +538,11 @@ export function createImageGenerationTools(
         "aspectRatio, quality, background, or n when the user explicitly asks — " +
         "otherwise leave them unset to use session defaults. Generation may " +
         "require user approval, and the tool returns image ids, not image data.",
-      input: generateImageInput,
-      approval: approval("generate_image"),
-      execute: async (args: GenerationArgs) => runGeneration(scope, args, false),
+      inputSchema: generateImageInput,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("generate_image"),
+      execute: async (args: GenerationArgs, context) =>
+        runGeneration(scope, args, false, {}, context),
     }),
     createTool({
       name: "edit_image",
@@ -536,9 +553,10 @@ export function createImageGenerationTools(
         "explicitly asks — otherwise leave them unset to use session defaults. " +
         "Generation may require user approval, and the tool returns image ids, " +
         "not image data.",
-      input: editImageInput,
-      approval: approval("edit_image"),
-      execute: async (args) => {
+      inputSchema: editImageInput,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("edit_image"),
+      execute: async (args, context) => {
         const reference = await scope.resolveReference(args.referenceImageId);
         if (!reference) {
           return { images: [], error: "Reference image not found" };
@@ -552,7 +570,7 @@ export function createImageGenerationTools(
         ];
         return runGeneration(scope, args, true, {
           input_references: inputReferences,
-        });
+        }, context);
       },
     }),
   ];
