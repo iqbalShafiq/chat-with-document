@@ -1,4 +1,4 @@
-import type { UIAttachment } from "@anvia/react";
+import type { UIAttachment } from "@anvia/client";
 import { useComposer } from "@anvia/react-ui";
 import { FileText, X } from "lucide-react";
 import { useRef, useState } from "react";

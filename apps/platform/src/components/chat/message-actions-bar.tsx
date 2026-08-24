@@ -1,5 +1,6 @@
-import type { UIMessage, UseChatStatus } from "@anvia/react";
-import { Message, useMessage } from "@anvia/react-ui";
+import type { UIMessage } from "@anvia/client";
+import type { UseChatStatus } from "@anvia/react";
+import { MessagePrimitive, useMessage } from "@anvia/react-ui";
 import { Pencil, RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { CitationsInfoButton } from "#/components/chat/citations-info-button";
@@ -70,7 +71,7 @@ export function MessageActionsBar({
   const messageCitations = useMessageCitations();
   const meta = readChatMessageMeta(message.metadata);
   const isUser = message.role === "user";
-  const busy = chatStatus === "streaming";
+  const busy = chatStatus === "submitted" || chatStatus === "streaming";
   const canTruncate = canTargetMessageForTruncate(meta);
   const rawText = getMessageRawText(message);
   const hasText = rawText.trim().length > 0;
@@ -99,7 +100,7 @@ export function MessageActionsBar({
 
   return (
     <>
-      <Message.Actions
+      <MessagePrimitive.Actions
         className={[
           "mt-0.5 flex items-center gap-3",
           // Always readable on touch; dim until hover/focus on fine pointers.
@@ -185,7 +186,7 @@ export function MessageActionsBar({
             {timeLabel}
           </time>
         ) : null}
-      </Message.Actions>
+      </MessagePrimitive.Actions>
 
       <ConfirmDialog
         open={confirmOpen}

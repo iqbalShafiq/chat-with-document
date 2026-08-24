@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 
 /** Raw text/markdown from message text parts (matches Anvia Message.Copy source). */
 export function getMessageRawText(message: UIMessage): string {
@@ -33,7 +33,7 @@ export type GenerationActionInfo = {
  * whole generation's text when clicked.
  */
 export function computeGenerationActionInfo(
-  messages: UIMessage[],
+  messages: readonly UIMessage[],
 ): Map<string, GenerationActionInfo> {
   const info = new Map<string, GenerationActionInfo>();
 

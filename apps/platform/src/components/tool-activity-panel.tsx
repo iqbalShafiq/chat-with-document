@@ -1,4 +1,4 @@
-import type { UIMessagePart } from "@anvia/react";
+import type { UIMessagePart } from "@anvia/client";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DataChart } from "#/components/data/data-chart";
@@ -242,13 +242,13 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
   }, [part.toolName, part.input]);
 
   const resultSection = useMemo(() => {
-    if (isError) {
+    if (part.state === "error") {
       return {
         title: "Error",
         fields: [
           {
             label: "Message",
-            value: part.error?.message ?? "Tool failed",
+            value: part.error.message || "Tool failed",
           },
         ],
       } satisfies FormattedSection;
@@ -267,8 +267,14 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         emptyText: "Working…",
       } satisfies FormattedSection;
     }
+    if (part.state !== "output-available") {
+      return {
+        title: "Result",
+        emptyText: "Working…",
+      } satisfies FormattedSection;
+    }
     return formatToolOutput(part.toolName, parseToolValue(part.output));
-  }, [isError, isRunning, part.error?.message, part.output, part.toolName]);
+  }, [isRunning, part]);
 
   const labelTone = isError
     ? "text-danger"

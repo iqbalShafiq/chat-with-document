@@ -1,5 +1,5 @@
-import type { UIAttachment } from "@anvia/react";
-import { Composer, useComposer } from "@anvia/react-ui";
+import type { UIAttachment } from "@anvia/client";
+import { ComposerPrimitive, useComposer } from "@anvia/react-ui";
 import type { IngestionItem } from "#/components/chat/session-documents-panel";
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { ComposerAttachmentChip } from "#/components/composer-attachment";
@@ -30,11 +30,11 @@ export function UploadingDocumentsSection({
             ))
           : null}
         {hasAttachments ? (
-          <Composer.Attachments keepMounted className="contents">
+          <ComposerPrimitive.Attachments keepMounted className="contents">
             {(attachment: UIAttachment) => (
               <ComposerAttachmentChip attachment={attachment} />
             )}
-          </Composer.Attachments>
+          </ComposerPrimitive.Attachments>
         ) : null}
       </div>
     </CollapsibleDocumentSection>

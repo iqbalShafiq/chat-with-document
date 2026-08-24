@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 import { computeGenerationActionInfo } from "./message-text";
 
 function textMessage(

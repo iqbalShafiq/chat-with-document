@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { ClientDataMap, ClientMetadata, UIMessage } from "@anvia/client";
 
 const STOPPED_TOOL_MESSAGE = "Stopped before this tool finished.";
 
@@ -10,10 +10,13 @@ const STOPPED_TOOL_MESSAGE = "Stopped before this tool finished.";
  * `input-streaming` / `input-available` → `error`. Done / already-error parts
  * are left alone.
  */
-export function finalizeInterruptedTools(
-  messages: UIMessage[],
+export function finalizeInterruptedTools<
+  Metadata extends ClientMetadata = ClientMetadata,
+  Data extends ClientDataMap = ClientDataMap,
+>(
+  messages: UIMessage<Metadata, Data>[],
   reason: string = STOPPED_TOOL_MESSAGE,
-): UIMessage[] {
+): UIMessage<Metadata, Data>[] {
   let anyChanged = false;
   const next = messages.map((message) => {
     if (message.role !== "assistant") return message;

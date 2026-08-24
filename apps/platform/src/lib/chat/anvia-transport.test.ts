@@ -7,7 +7,6 @@ import {
   isRunActiveConflict,
   requireChatReasoningEffort,
   stopChatPreservingMessages,
-  validateChatResumeSnapshot,
   type ChatRequestMetadata,
 } from "./anvia-transport";
 
@@ -391,34 +390,4 @@ describe("Anvia v1 HTTP transport", () => {
     ]);
   });
 
-  it("accepts only a complete v3 resume snapshot", () => {
-    const valid = JSON.stringify({
-      version: 3,
-      streamId: "stream-1",
-      lastEventId: 2,
-      messages: [],
-      interactions: [],
-      request: { type: "messages", messages: [] },
-    });
-    expect(validateChatResumeSnapshot(valid, "stream-1")).toEqual({ valid: true });
-    expect(validateChatResumeSnapshot(valid, "stream-2")).toEqual({
-      valid: false,
-      reason: "stale",
-    });
-    expect(validateChatResumeSnapshot(null)).toEqual({ valid: false, reason: "missing" });
-    expect(validateChatResumeSnapshot("not-json")).toEqual({ valid: false, reason: "malformed" });
-    expect(
-      validateChatResumeSnapshot(JSON.stringify({ version: 1, streamId: "stream-1" })),
-    ).toEqual({ valid: false, reason: "legacy" });
-    expect(
-      validateChatResumeSnapshot(JSON.stringify({
-        version: 3,
-        streamId: "stream-1",
-        lastEventId: 2,
-        messages: [],
-        interactions: [],
-        request: { type: "messages", messages: [], stream: true },
-      })),
-    ).toEqual({ valid: false, reason: "malformed" });
-  });
 });

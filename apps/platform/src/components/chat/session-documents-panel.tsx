@@ -1,4 +1,4 @@
-import type { UIAttachment } from "@anvia/react";
+import type { UIAttachment } from "@anvia/client";
 import { useComposer } from "@anvia/react-ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCitationSessionOptional } from "#/components/chat/citation-session-context";

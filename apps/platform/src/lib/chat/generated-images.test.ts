@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UIMessage, UIMessagePart } from "@anvia/react";
+import { parseUIMessage, type UIMessage, type UIMessagePart } from "@anvia/client";
 import {
   collectGeneratedImages,
   collectGeneratedImagesFromMessages,
@@ -20,14 +20,26 @@ function toolPart(
   output: unknown,
   state: ToolPart["state"] = "output-available",
 ): ToolPart {
-  return {
+  const raw = {
     id: `part-${toolName}-${Math.random()}`,
     type: "tool",
     toolName,
     toolCallId: `call-${toolName}-${Math.random()}`,
     state,
-    output: output as ToolPart["output"],
+    ...(state === "input-streaming"
+      ? { input: "" }
+      : state === "input-available"
+        ? { input: {} }
+        : state === "output-available"
+          ? { input: {}, output: output ?? null }
+          : { input: {}, error: { message: "tool failed" } }),
   };
+  const parsed = parseUIMessage({ id: "message-1", role: "assistant", parts: [raw] });
+  const part = parsed.parts[0];
+  if (!part || part.type !== "tool") {
+    throw new Error("Expected Anvia client parser to return a tool part");
+  }
+  return part;
 }
 
 function message(parts: UIMessagePart[]): UIMessage {

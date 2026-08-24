@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import type { MessageCitation } from "#/lib/chat/citations";
 
@@ -15,7 +15,7 @@ export type CitedDocumentSummary = {
  * Prefers dual-written `metadata.citations` over re-parsing message bodies.
  */
 export function collectCitedDocuments(
-  messages: UIMessage[],
+  messages: readonly UIMessage[],
 ): CitedDocumentSummary[] {
   const byId = new Map<string, CitedDocumentSummary>();
 

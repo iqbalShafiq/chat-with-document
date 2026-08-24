@@ -4,11 +4,18 @@ import {
 } from "@anvia/react";
 import type {
   ClientStreamEvent,
+  ClientMetadataSchema,
   UIAttachment,
   UIMessage,
   UIMessagePart,
 } from "@anvia/client";
-import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
+import { parseUIMessages } from "@anvia/client";
+import type { UseChatResult } from "@anvia/react";
+import {
+  ChatProvider,
+  ComposerPrimitive,
+  ThreadPrimitive,
+} from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { AnimatedStatusText } from "#/components/chat/animated-status-text";
@@ -102,11 +109,12 @@ import {
   isRunActiveConflict,
   requireChatReasoningEffort,
   stopChatPreservingMessages,
-  validateChatResumeSnapshot,
   type ChatClientMetadata,
   type ChatRequestMetadata,
 } from "#/lib/chat/anvia-transport";
 import {
+  ChatDataSchemas,
+  ChatStreamMetadataSchema,
   type ChatDataMap,
 } from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
@@ -173,6 +181,36 @@ import {
 
 const SESSIONS_PAGE_SIZE = 30;
 
+type ChatUIMessage = UIMessage<ChatClientMetadata, ChatDataMap>;
+type ChatTransport = ReturnType<typeof createAnviaChatTransport>;
+type ChatController = UseChatResult<ChatTransport>;
+type MemoryMessages = Parameters<typeof initialMessagesFromMemory>[0];
+
+const ChatClientMetadataSchema: ClientMetadataSchema<ChatClientMetadata> = {
+  safeParse(value) {
+    const streamMetadata = ChatStreamMetadataSchema.safeParse(value);
+    if (streamMetadata.success) return streamMetadata;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return { success: false, error: { message: "Invalid chat metadata" } };
+    }
+    return {
+      success: true,
+      data: readChatMessageMeta(value),
+    };
+  },
+};
+
+function parseMemoryMessages(value: unknown): ChatUIMessage[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Chat history must be an array of Anvia messages");
+  }
+  const memoryMessages = value as MemoryMessages;
+  return parseUIMessages(initialMessagesFromMemory(memoryMessages), {
+    metadataSchema: ChatClientMetadataSchema,
+    dataSchemas: ChatDataSchemas,
+  });
+}
+
 export const Route = createFileRoute("/")({
   component: Home,
   beforeLoad: async () => {
@@ -210,7 +248,7 @@ function metadataKind(metadata: UIMessage["metadata"]): string | undefined {
 }
 
 /** Raw text of the most recent user message, for prefill after a failed run. */
-function failedUserMessageText(messages: UIMessage[]): string | null {
+function failedUserMessageText(messages: readonly UIMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role === "user") return getMessageRawText(message);
@@ -278,7 +316,7 @@ function Home() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(
+  const [initialMessages, setInitialMessages] = useState<ChatUIMessage[] | null>(
     null,
   );
   const [viewMode, setViewMode] = useState<WorkspaceViewMode>(
@@ -600,7 +638,7 @@ function Home() {
         if (!cancelled) {
           setInitialMessages(
             finalizeInterruptedTools(
-              initialMessagesFromMemory(data as never),
+              parseMemoryMessages(data),
             ),
           );
         }
@@ -1054,7 +1092,7 @@ function ChatSession({
 }: {
   sessionId: string;
   projectId?: string | null;
-  initialMessages: UIMessage[];
+  initialMessages: ChatUIMessage[];
   models: ModelInfo[];
   reasoningEfforts: ReasoningEffortInfo[];
   modelsStatus: "loading" | "success" | "error";
@@ -1066,12 +1104,12 @@ function ChatSession({
     actions: ImagePreviewContextActions | null,
   ) => void;
   /** Replaces the loaded conversation (fresh history after a stale dialog). */
-  onReloadMessages?: (messages: UIMessage[]) => void;
+  onReloadMessages?: (messages: ChatUIMessage[]) => void;
 }) {
-  const composerInputRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
-  const wasStreamingRef = useRef(false);
+  const wasActiveRunRef = useRef(false);
   const [ingestionItems, setIngestionItems] = useState<IngestionItem[]>([]);
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
@@ -1141,9 +1179,9 @@ function ChatSession({
     })(),
   );
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
-  const messagesRef = useRef<UIMessage[]>([]);
+  const messagesRef = useRef<readonly ChatUIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
-  const chatRef = useRef<ReturnType<typeof useChat> | null>(null);
+  const chatRef = useRef<ChatController | null>(null);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
@@ -1165,7 +1203,7 @@ function ChatSession({
   const pendingManualSubmitRef = useRef<{
     input: string;
     attachments: UIAttachment[];
-    chatController: ReturnType<typeof useChat>;
+    chatController: ChatController;
     clear: () => void;
   } | null>(null);
   const [editHydration, setEditHydration] = useState<{
@@ -1293,31 +1331,18 @@ function ChatSession({
     [sessionId],
   );
 
-  /** Writes failed-run text into the composer editor (same selector as focusComposer). */
+  /** Writes failed-run text through the public v1 textarea composer contract. */
   const setComposerInputText = useCallback((text: string) => {
-    let attempts = 0;
-
-    const trySet = () => {
-      const editor = composerInputRef.current?.querySelector<HTMLElement>(
-        "[data-anvia-composer-editor]",
-      );
-      if (editor) {
-        editor.textContent = text;
-        editor.dispatchEvent(
-          new InputEvent("input", {
-            bubbles: true,
-            inputType: "insertText",
-            data: text,
-          }),
-        );
-        return;
-      }
-      if (attempts++ < 20) {
-        requestAnimationFrame(trySet);
-      }
-    };
-
-    trySet();
+    const textarea = composerInputRef.current;
+    if (!textarea) return;
+    textarea.value = text;
+    textarea.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text,
+      }),
+    );
   }, []);
 
   /** Fetch context usage once; shared by the polling effect and message_end. */
@@ -1472,11 +1497,20 @@ function ChatSession({
 
   const resumeChatRef = useRef(chat.resume);
   resumeChatRef.current = chat.resume;
+  const stopInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (chat.status !== "submitted" && chat.status !== "streaming") {
+      stopInFlightRef.current = false;
+    }
+  }, [chat.status]);
 
   /** Stop the server run, abort the v1 stream, and finalize visible tool cards. */
   const handleStopRun = useCallback(() => {
+    if (stopInFlightRef.current) return;
     const current = chatRef.current;
     if (!current) return;
+    stopInFlightRef.current = true;
     const streamId = current.streamId;
     if (streamId) {
       void stopChatRun(streamId).catch(() => {
@@ -1593,26 +1627,13 @@ function ChatSession({
   );
 
   const focusComposer = useCallback(() => {
-    let attempts = 0;
-
-    const tryFocus = () => {
-      const editor = composerInputRef.current?.querySelector<HTMLElement>(
-        "[data-anvia-composer-editor]",
-      );
-      if (editor) {
-        editor.focus();
-        return;
-      }
-      if (attempts++ < 20) {
-        requestAnimationFrame(tryFocus);
-      }
-    };
-
-    tryFocus();
+    composerInputRef.current?.focus();
   }, []);
 
   useEffect(() => {
-    if (wasStreamingRef.current && chat.status !== "streaming") {
+    const activeRun =
+      chat.status === "submitted" || chat.status === "streaming";
+    if (wasActiveRunRef.current && !activeRun) {
       // Stamp createdAt + dual-write citations on the latest assistant turn.
       const sessionDocIds = new Set(sessionDocuments.map((d) => d.id));
       chat.setMessages((messages) => {
@@ -1662,7 +1683,7 @@ function ChatSession({
       }
       focusComposer();
     }
-    wasStreamingRef.current = chat.status === "streaming";
+    wasActiveRunRef.current = activeRun;
   }, [
     chat.setMessages,
     chat.status,
@@ -1779,27 +1800,16 @@ function ChatSession({
         if (status.status === "error") {
           setPreviousRunError(true);
         }
-        const key = `anvia:chat-resume:${sessionId}`;
         if (status.status === "running" && status.streamId) {
-          const stored = sessionStorage.getItem(key);
-          const validation = validateChatResumeSnapshot(stored, status.streamId);
-          if (!validation.valid) {
-            if (stored !== null) sessionStorage.removeItem(key);
+          try {
+            // The v1 controller is the sole owner and validator of its
+            // canonical request, interaction state, stream id, and cursor.
+            await resumeChatRef.current();
+          } catch {
             setComposerError(
-              validation.reason === "stale"
-                ? "This browser resume state belongs to a previous run. Reload the session to recover it."
-                : validation.reason === "legacy"
-                ? "This session has an old browser resume state. Reload the session to recover it."
-                : "This active run has no valid browser resume state. Reload the session to recover it.",
+              "This active run could not be resumed in this browser. Reload the session to recover it.",
             );
-            return;
           }
-          // The v1 controller validates the version-3 snapshot and preserves
-          // its canonical request and cursor; this route never reconstructs it.
-          void resumeChatRef.current();
-        } else {
-          // The v1 controller owns snapshot cleanup after a terminal stream;
-          // this route never mutates the canonical resume record.
         }
       } catch {
         // ignore — resume state (if any) still handles rejoin
@@ -1843,7 +1853,7 @@ function ChatSession({
     (
       input: string,
       attachments: UIAttachment[],
-      chat: ReturnType<typeof useChat>,
+      chat: ChatController,
       clear: () => void,
     ) => Promise<void>
   >(async () => {});
@@ -2118,6 +2128,21 @@ function ChatSession({
       refreshActiveContext,
       uploadComposerDocuments,
     ],
+  );
+
+  /** Application-owned submit boundary for an already running v1 chat. */
+  const handleActiveComposerSubmit = useCallback(
+    async (input: string, attachments: UIAttachment[]) => {
+      const editing = queuedItemsRef.current.find(
+        (item) => item.status === "editing",
+      );
+      if (editing) {
+        await handleSubmitQueueEdit(input, attachments);
+        return;
+      }
+      await queueComposerDraft({ input, attachments });
+    },
+    [handleSubmitQueueEdit, queueComposerDraft],
   );
 
   /** Abort a queue edit: back to pending, composer cleared, context restored. */
@@ -2499,7 +2524,7 @@ function ChatSession({
     try {
       const data = await loadChatMessages(sessionId);
       const fresh = finalizeInterruptedTools(
-        initialMessagesFromMemory(data as never),
+        parseMemoryMessages(data),
       );
       onReloadMessages?.(fresh);
       chatRef.current?.setMessages(fresh);
@@ -2534,7 +2559,10 @@ function ChatSession({
       if (!currentChat) {
         throw new Error("Chat is not ready");
       }
-      if (currentChat.status === "streaming") {
+      if (
+        currentChat.status === "submitted" ||
+        currentChat.status === "streaming"
+      ) {
         throw new Error("Wait for the current reply to finish");
       }
 
@@ -2717,7 +2745,7 @@ function ChatSession({
 
   const handleStartEdit = useCallback(
     (message: UIMessage) => {
-      if (chat.status === "streaming") return;
+      if (chat.status === "submitted" || chat.status === "streaming") return;
       setEditingMessageId(message.id);
       setEditContextImages([]);
       void resolveEditContextImages(message).then(setEditContextImages);
@@ -2770,6 +2798,7 @@ function ChatSession({
     // user whether this draft joins the queue or sends immediately.
     if (
       !submitBypassRef.current &&
+      chatRef.current?.status !== "submitted" &&
       chatRef.current?.status !== "streaming" &&
       queuedItemsRef.current.length > 0
     ) {
@@ -2877,30 +2906,28 @@ function ChatSession({
   }, []);
 
   return (
-    <ChatProvider controller={chat}>
+    <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
       {/*
-        Composer.Root wraps chat + right doc rail so attachments share context.
+        ComposerPrimitive.Root wraps chat + right doc rail so attachments share context.
         When docs exist, rail opens (272px = left sidebar) and pushes chat left.
       */}
-      <Composer.Root
+      <ComposerPrimitive.Root
         className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
         submitMessage={async ({
           input,
           attachments,
-          chat: chatController,
           clear,
         }) => {
           if (modelsStatus !== "success") return;
           const editing = queuedItemsRef.current.find(
             (item) => item.status === "editing",
           );
-          if (chatRef.current?.status === "streaming") {
-            if (editing) {
-              await handleSubmitQueueEdit(input, attachments);
-            } else {
-              await queueComposerDraft({ input, attachments });
-            }
+          if (
+            chatRef.current?.status === "submitted" ||
+            chatRef.current?.status === "streaming"
+          ) {
+            await handleActiveComposerSubmit(input, attachments);
             return;
           }
           // Idle + editing: the composer holds the recalled draft — commit it
@@ -2910,12 +2937,9 @@ function ChatSession({
             await handleSubmitQueueEdit(input, attachments);
             return;
           }
-          await submitComposerRef.current(
-            input,
-            attachments,
-            chatController,
-            clear,
-          );
+          const currentChat = chatRef.current;
+          if (!currentChat) return;
+          await submitComposerRef.current(input, attachments, currentChat, clear);
         }}
       >
         <div
@@ -2930,13 +2954,13 @@ function ChatSession({
         >
           {/* Center chat column — shrinks when right rail opens */}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Thread.Root className="absolute inset-0 overflow-hidden">
+            <ThreadPrimitive.Root className="absolute inset-0 overflow-hidden">
               {/*
                 Full-bleed scroll: content passes under top bar + textfield.
                 Native scrollbar hidden; InsetScrollbar insets from top bar
                 and above the textfield (see --chat-composer-gap).
               */}
-              <Thread.Viewport
+              <ThreadPrimitive.Viewport
                 ref={chatViewportRef}
                 className="chat-scroll-bleed absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain"
                 autoScroll
@@ -2949,11 +2973,11 @@ function ChatSession({
                       "calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))",
                   }}
                 >
-                  <Thread.Empty className="flex min-h-0 flex-1 flex-col">
+                  <ThreadPrimitive.Empty className="flex min-h-0 flex-1 flex-col">
                     <EmptyState />
-                  </Thread.Empty>
+                  </ThreadPrimitive.Empty>
 
-                  <Thread.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
+                  <ThreadPrimitive.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
 
                   {/*
                     Same-thread vs cross-message spacing:
@@ -2961,7 +2985,7 @@ function ChatSession({
                     - only jump to a message that *starts with answer text*: mt-4
                     - around user turns: mt-4
                   */}
-                  <Thread.Messages
+                  <ThreadPrimitive.Messages
                     className={[
                       "flex w-full min-w-0 flex-col",
                       "[&>*]:min-w-0",
@@ -2990,9 +3014,9 @@ function ChatSession({
                         onAddContext={handleAddContext}
                       />
                     )}
-                  </Thread.Messages>
+                  </ThreadPrimitive.Messages>
 
-                  <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
+                  <ThreadPrimitive.Loading className="mt-4 w-full text-sm text-text-muted">
                     <AnimatedStatusText
                       label={
                         chat.status === "streaming"
@@ -3000,11 +3024,11 @@ function ChatSession({
                           : "Writing"
                       }
                     />
-                  </Thread.Loading>
+                  </ThreadPrimitive.Loading>
 
-                  <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
+                  <ThreadPrimitive.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
                 </div>
-              </Thread.Viewport>
+              </ThreadPrimitive.Viewport>
 
               <InsetScrollbar
                 scrollRef={chatViewportRef}
@@ -3024,11 +3048,11 @@ function ChatSession({
                 className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-3"
               >
                 <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
-                  <Thread.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
-                    <Thread.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                  <ThreadPrimitive.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
+                    <ThreadPrimitive.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
                       Latest
-                    </Thread.ScrollToBottom>
-                  </Thread.ViewportFooter>
+                    </ThreadPrimitive.ScrollToBottom>
+                  </ThreadPrimitive.ViewportFooter>
 
                   {previousRunError ? (
                     <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
@@ -3089,6 +3113,7 @@ function ChatSession({
                     onModelChange={handleModelChange}
                     onReasoningChange={handleReasoningChange}
                     onStopRun={handleStopRun}
+                    onQueueSubmit={handleActiveComposerSubmit}
                     onLinkedDocuments={handleLinkedDocuments}
                     onAttachmentRejected={handleAttachmentRejected}
                     onDismissAttachmentError={handleDismissAttachmentError}
@@ -3136,7 +3161,7 @@ function ChatSession({
                   />
                 </div>
               </div>
-            </Thread.Root>
+            </ThreadPrimitive.Root>
           </div>
 
           {/* Right doc rail — same 272px + full height as left sidebar */}
@@ -3155,7 +3180,7 @@ function ChatSession({
             }}
           />
         </div>
-      </Composer.Root>
+      </ComposerPrimitive.Root>
       </CitationSessionProvider>
     </ChatProvider>
   );

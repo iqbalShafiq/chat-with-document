@@ -22,7 +22,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function readChatMessageMeta(
-  metadata: UIMessage["metadata"],
+  metadata: unknown,
 ): ChatMessageMeta {
   if (!isPlainObject(metadata)) return {};
 

@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 
 export type WebSourceSummary = {
   url: string;
@@ -33,7 +33,9 @@ function parseToolOutput(value: unknown): unknown {
  * Collect unique web sources from completed web tool parts in the session's
  * messages. First appearance wins (a repeated search keeps its first spot).
  */
-export function collectWebSources(messages: UIMessage[]): WebSourceSummary[] {
+export function collectWebSources(
+  messages: readonly UIMessage[],
+): WebSourceSummary[] {
   const byUrl = new Map<string, WebSourceSummary>();
 
   for (const message of messages) {
