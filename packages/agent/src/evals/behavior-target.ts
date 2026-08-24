@@ -1,4 +1,8 @@
-import type { AnyTool, CompletionModel, ToolApprovalsOptions } from "@anvia/core";
+import type { AnyTool, CompletionModel } from "@anvia/core";
+import type {
+  AgentInteractionRequest,
+  AgentInteractionResponse,
+} from "@anvia/core/agent/interactions";
 import type { EvalCase, EvalTarget } from "@anvia/core/evals";
 import { TRANSPARENT_1X1_PNG_BASE64 } from "../e2e/image-e2e-helpers.js";
 import { tracing } from "../tracing.js";
@@ -30,6 +34,7 @@ import { evalConfig } from "./config.js";
 import {
   createCancellableCompletionModel,
   runAgentAndCollect,
+  type EvalInteractionResponder,
 } from "./run-agent.js";
 import {
   createAutoClarificationResponder,
@@ -203,7 +208,7 @@ export function buildEvalTools(
 ): {
   tools: AnyTool[];
   instructions: string[];
-  approvals: ToolApprovalsOptions | undefined;
+  interactionResponder: EvalInteractionResponder;
   deepResearchProgress: string[];
 } {
   const tools: AnyTool[] = [];
@@ -304,7 +309,7 @@ export function buildEvalTools(
   }));
   instructions.push(buildImageGenerationInstruction({ webSearchAvailable: true }));
 
-  tools.push(createClarificationTool({ requester: createAutoClarificationResponder() }));
+  tools.push(createClarificationTool());
   instructions.push(CLARIFICATION_INSTRUCTION);
 
   // Universal view_image: non-vision always gets description mode; vision gets vision mode when web search is available.
@@ -321,19 +326,20 @@ export function buildEvalTools(
     viewImageRegistered = true;
   }
 
-  const needsApprovals =
-    !sessionConfig.webSearchEnabled ||
-    !sessionConfig.imageGenEnabled ||
-    (sessionConfig.deepResearchEnabled !== undefined &&
-      sessionConfig.deepResearchEnabled !== true);
-  const approvals: ToolApprovalsOptions | undefined = needsApprovals
-    ? { handler: async (request) => {
-        const mode = sessionConfig.approvalMode ?? "auto-approve";
-        return { approved: mode === "auto-approve" };
-      } }
-    : undefined;
+  const clarificationResponder = createAutoClarificationResponder();
+  const interactionResponder: EvalInteractionResponder = async (
+    request: AgentInteractionRequest,
+  ): Promise<AgentInteractionResponse> => {
+    if (request.type === "tool-question") return clarificationResponder(request);
+    const approved = (sessionConfig.approvalMode ?? "auto-approve") !== "auto-reject";
+    return {
+      type: "tool-approval",
+      approved,
+      ...(approved ? {} : { reason: "Eval approval policy rejected the request." }),
+    };
+  };
 
-  return { tools, instructions, approvals, deepResearchProgress };
+  return { tools, instructions, interactionResponder, deepResearchProgress };
 }
 
 export function createBehaviorTarget(
@@ -344,7 +350,7 @@ export function createBehaviorTarget(
       input.sessionConfig.models?.[0] ?? evalConfig.model,
     );
     const cancellableModel = createCancellableCompletionModel(model);
-    const { tools, instructions, approvals, deepResearchProgress } =
+    const { tools, instructions, interactionResponder, deepResearchProgress } =
       buildEvalTools(input.sessionConfig, cancellableModel.model);
     const langfuseConfigured = Boolean(
       process.env.LANGFUSE_BASE_URL &&
@@ -358,8 +364,8 @@ export function createBehaviorTarget(
       reasoningEffort: parseReasoningEffort(evalConfig.modelEffort) ?? "max",
       tools,
       instructions,
-      ...(approvals ? { approvals } : {}),
-      ...(langfuseConfigured ? { tracing } : {}),
+      interactionResponder,
+      ...(langfuseConfigured ? { tracing: tracing.observer() } : {}),
       ...(suiteName ? { suiteName } : {}),
       caseId: testCase.id,
       deepResearchProgress,

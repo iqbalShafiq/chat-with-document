@@ -9,6 +9,7 @@ import type {
 
 function trace(overrides: Partial<BehaviorTrace> = {}): BehaviorTrace {
   return {
+    outcome: { type: "response" },
     output: "answer text",
     toolCalls: [],
     approvals: [],

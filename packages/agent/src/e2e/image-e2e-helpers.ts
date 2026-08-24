@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ToolApprovalRequest } from "@anvia/core";
+import type { ToolApprovalContext } from "@anvia/core/tool";
 import { vi, type Mock } from "vitest";
 import { OpenRouterImageGenerationModel } from "../providers/image-generation.js";
 import type { GeneratedImageRecord } from "../tools/image-generation.js";
@@ -85,27 +85,32 @@ export function createStubOpenRouterModel(port: number) {
   });
 }
 
-export type ApprovalPolicy = {
-  when(context: unknown): boolean | Promise<boolean>;
-  reason(context: { args: { prompt: string } }): string;
-  rejectMessage?: string;
-};
-
 /** Minimal approval context Anvia hands a gated tool call. */
-export function approvalContext(args: Record<string, unknown>) {
+export function approvalContext<Args extends Record<string, unknown>>(
+  args: Args,
+): ToolApprovalContext<Args> {
   return {
     toolName: "generate_image",
     args,
     rawArgs: JSON.stringify(args),
+    toolCallId: "tool-call-1",
     internalCallId: "internal-call-1",
     run: { runId: "run-1", agentId: "agent-1", sessionId: "session-1" },
   };
 }
 
-/** ToolApprovalRequest fed to the registry handler, mirroring Anvia's loop. */
+type RegistryApprovalRequestFixture = {
+  toolName: string;
+  args: Record<string, unknown>;
+  rawArgs: string;
+  internalCallId: string;
+  run: { runId: string; agentId: string; sessionId: string };
+};
+
+/** Temporary registry-test input; deleted with the v0 registry in Task 10. */
 export function approvalRequest(
-  overrides: Partial<ToolApprovalRequest> = {},
-): ToolApprovalRequest {
+  overrides: Partial<RegistryApprovalRequestFixture> = {},
+): RegistryApprovalRequestFixture {
   return {
     toolName: "generate_image",
     args: { prompt: "a red panda" },

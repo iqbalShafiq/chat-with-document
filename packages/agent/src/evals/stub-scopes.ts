@@ -1,20 +1,19 @@
 import type { TavilyClient } from "@tavily/core";
 import { createTool } from "@anvia/core";
+import type {
+  AgentInteractionRequest,
+  AgentInteractionResponse,
+} from "@anvia/core/agent/interactions";
 import {
-  AssistantContent,
   type CompletionModel,
   type CompletionResponse,
-  createCompletion,
+  generateCompletion,
   type JsonObject,
-  Message,
   type StreamingCompletionModel,
   Usage,
-  UserContent,
 } from "@anvia/core/completion";
 import z from "zod";
 import type { ImageGenerationModel } from "@anvia/core/image-generation";
-import type { ClarificationRequest } from "../tools/clarification.js";
-import type { ClarificationResponse } from "../tools/clarification.js";
 import type {
   ChunkSearchService,
   FindDocumentsPrisma,
@@ -29,9 +28,23 @@ import {
   stubSearchResults,
 } from "./fixtures.js";
 
+type ScriptedUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+};
+
 export type ScriptedStep =
-  | { kind: "tool_call"; name: string; args?: Record<string, unknown> }
-  | { kind: "text"; text: string };
+  | {
+      kind: "tool_call";
+      name: string;
+      args?: Record<string, unknown>;
+      toolCallId?: string;
+      usage?: ScriptedUsage;
+    }
+  | { kind: "text"; text: string; usage?: ScriptedUsage };
 
 export type FakePrisma = FindDocumentsPrisma &
   NextPagePrisma &
@@ -184,20 +197,25 @@ export function createAutoClarificationResponder(
   answers: Record<string, string> = FIXTURE_CLARIFICATION_ANSWERS,
 ) {
   return async (
-    request: ClarificationRequest,
-  ): Promise<ClarificationResponse> => ({
-    answers: Object.fromEntries(
-      request.questions.map((q) => [q.id, answers[q.id] ?? "default"]),
-    ),
-    skipped: [],
-    timedOut: false,
-  });
+    request: AgentInteractionRequest,
+  ): Promise<AgentInteractionResponse> => {
+    if (request.type === "tool-approval") {
+      return { type: "tool-approval", approved: true };
+    }
+    return {
+      type: "tool-question",
+      answers: request.questions.map((question) => ({
+        questionId: question.id,
+        value: answers[question.id] ?? "default",
+      })),
+    };
+  };
 }
 
 export function createStubViewImageModel(): CompletionModel {
   return {
     provider: "fixture",
-    defaultModel: "fixture-vision",
+    modelId: "fixture-vision",
     capabilities: {
       streaming: false,
       tools: false,
@@ -209,7 +227,7 @@ export function createStubViewImageModel(): CompletionModel {
     },
     async completion() {
       return {
-        choice: [AssistantContent.text("A fixture description of the image.")],
+        choice: [{ type: "text", text: "A fixture description of the image." }],
         usage: Usage.empty(),
         rawResponse: {},
       };
@@ -266,13 +284,13 @@ export function createStubViewImageTool(options: { model: CompletionModel }) {
     inputSchema: stubViewImageInput,
     outputSchema: z.string(),
     execute: async ({ question }) => {
-      const result = await createCompletion(model, {
+      const result = await generateCompletion({
+        model,
         messages: [
-          Message.user([
-            UserContent.text(
-              question ?? "Describe this image accurately and concisely.",
-            ),
-          ]),
+          {
+            role: "user",
+            content: question ?? "Describe this image accurately and concisely.",
+          },
         ],
       });
       return result.text;
@@ -287,26 +305,25 @@ export function createScriptedCompletionModel(
   const responseFor = (step: ScriptedStep, n: number): CompletionResponse => {
     if (step.kind === "tool_call") {
       return {
-        choice: [
-          AssistantContent.toolCall(
-            `scripted-${n}`,
-            step.name,
-            (step.args ?? {}) as JsonObject,
-          ),
-        ],
-        usage: Usage.empty(),
+        choice: [{
+          type: "tool-call",
+          toolCallId: step.toolCallId ?? `scripted-${n}`,
+          toolName: step.name,
+          input: (step.args ?? {}) as JsonObject,
+        }],
+        usage: step.usage ?? Usage.empty(),
         rawResponse: {},
       };
     }
     return {
-      choice: [AssistantContent.text(step.text)],
-      usage: Usage.empty(),
+      choice: [{ type: "text", text: step.text }],
+      usage: step.usage ?? Usage.empty(),
       rawResponse: {},
     };
   };
   return {
     provider: "scripted",
-    defaultModel: "scripted",
+    modelId: "scripted",
     capabilities: {
       streaming: true,
       tools: true,
@@ -329,7 +346,7 @@ export function createScriptedCompletionModel(
       for (const item of response.choice) {
         if (item.type === "text") {
           yield { type: "text_delta", delta: item.text };
-        } else if (item.type === "tool_call") {
+        } else if (item.type === "tool-call") {
           yield { type: "tool_call", toolCall: item };
         }
       }

@@ -3,7 +3,6 @@ import {
   type EvalSuiteResult,
   type RunEvalSuiteOptions,
 } from "@anvia/core/evals";
-import { createLangfuseEvalReporter } from "@anvia/langfuse";
 import { tracing } from "../tracing.js";
 import { evalConfig } from "./config.js";
 
@@ -43,7 +42,7 @@ async function main(): Promise<void> {
       process.env.LANGFUSE_SECRET_KEY,
   );
   const reporters = langfuseConfigured
-    ? [createLangfuseEvalReporter(tracing, { onMissingTrace: "warn" })]
+    ? [tracing.evalReporter({ onMissingTrace: "warn" })]
     : [];
 
   function computeExitCode(

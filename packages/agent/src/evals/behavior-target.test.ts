@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { ToolApprovalRequest } from "@anvia/core";
+import type { AgentInteractionRequest } from "@anvia/core/agent/interactions";
 import { buildEvalTools } from "./behavior-target.js";
 import type { SessionConfig } from "./types.js";
 
-function fakeApprovalRequest(toolName: string): ToolApprovalRequest {
+function fakeApprovalRequest(toolName: string): AgentInteractionRequest {
   return {
+    type: "tool-approval",
+    id: "interaction-1",
     toolName,
-    args: {},
-    rawArgs: "{}",
-    internalCallId: "call-1",
-    run: { agentId: "eval-agent", runId: "run-1", sessionId: "eval-session" },
+    toolCallId: "call-1",
+    internalCallId: "internal-call-1",
+    input: {},
   };
 }
 
@@ -23,36 +24,52 @@ describe("buildEvalTools", () => {
     expect(tools.map((tool) => tool.name)).toContain("search_document_pages");
   });
 
-  it("auto-rejects approval-gated tools when approvalMode is auto-reject", async () => {
-    const { approvals } = buildEvalTools({
+  it("auto-rejects native approval interactions when approvalMode is auto-reject", async () => {
+    const { interactionResponder } = buildEvalTools({
       webSearchEnabled: false,
       imageGenEnabled: true,
       hasDocuments: false,
       approvalMode: "auto-reject",
     });
-    expect(approvals).toBeDefined();
-    const decision = await approvals!.handler(fakeApprovalRequest("web_search"));
-    expect(decision).toEqual({ approved: false });
+    expect(interactionResponder).toBeDefined();
+    const decision = await interactionResponder!(fakeApprovalRequest("web_search"));
+    expect(decision).toEqual({
+      type: "tool-approval",
+      approved: false,
+      reason: "Eval approval policy rejected the request.",
+    });
   });
 
-  it("auto-approves approval-gated tools when approvalMode is unset", async () => {
-    const { approvals } = buildEvalTools({
+  it("auto-approves native approval interactions when approvalMode is unset", async () => {
+    const { interactionResponder } = buildEvalTools({
       webSearchEnabled: false,
       imageGenEnabled: true,
       hasDocuments: false,
     });
-    expect(approvals).toBeDefined();
-    const decision = await approvals!.handler(fakeApprovalRequest("web_search"));
-    expect(decision).toEqual({ approved: true });
+    expect(interactionResponder).toBeDefined();
+    const decision = await interactionResponder!(fakeApprovalRequest("web_search"));
+    expect(decision).toEqual({ type: "tool-approval", approved: true });
   });
 
-  it("wires no approval handler when no approval gate is active", () => {
-    const { approvals } = buildEvalTools({
+  it("keeps an interaction responder for native clarification even without approval gates", async () => {
+    const { interactionResponder } = buildEvalTools({
       webSearchEnabled: true,
       imageGenEnabled: true,
       hasDocuments: false,
     });
-    expect(approvals).toBeUndefined();
+    expect(interactionResponder).toBeDefined();
+    const decision = await interactionResponder!({
+      type: "tool-question",
+      id: "interaction-2",
+      toolName: "request_clarification",
+      toolCallId: "call-2",
+      internalCallId: "internal-call-2",
+      questions: [{ id: "style", text: "Which style?" }],
+    });
+    expect(decision).toEqual({
+      type: "tool-question",
+      answers: [{ questionId: "style", value: "watercolor" }],
+    });
   });
 
   it("registers view_image and its instruction when visionModelAvailable is false", () => {
