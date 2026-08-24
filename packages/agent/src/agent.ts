@@ -6,6 +6,7 @@ import {
   type MemoryStore,
 } from "@anvia/core";
 import type { AgentObservabilityOptions } from "@anvia/core/observability";
+import type { AgentContextInput as NativeAgentContextInput } from "@anvia/core/agent";
 import type { McpServer } from "@anvia/core/mcp";
 import {
   DEFAULT_REASONING_EFFORT,
@@ -21,6 +22,7 @@ export type AgentContextBlock = {
   text: string;
   id?: string;
 };
+export type AgentContextInput = NativeAgentContextInput;
 
 export interface CreateAgentOptions {
   agentId: string;
@@ -30,6 +32,7 @@ export interface CreateAgentOptions {
   additionalTools?: AnyTool[];
   additionalInstructions?: string[];
   additionalContext?: AgentContextBlock[];
+  context?: readonly AgentContextInput[];
   observability?: AgentObservabilityOptions;
   guardrails?: GuardrailPolicyInput;
   memory?: MemoryStore;
@@ -45,7 +48,7 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     .map((instruction) => instruction.trim())
     .filter(Boolean)
     .join("\n\n");
-  const context = (opts.additionalContext ?? []).flatMap((block, index) => {
+  const convenienceContext = (opts.additionalContext ?? []).flatMap((block, index) => {
     const text = block.text.trim();
     if (!text) return [];
     return [
@@ -60,7 +63,7 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     id: opts.agentId,
     model: opts.model ?? defaultModel(),
     instructions,
-    context,
+    context: [...(opts.context ?? []), ...convenienceContext],
     tools: [...(opts.additionalTools ?? [])],
     providerOptions: providerOptionsForReasoning(reasoningEffort),
     maxTurns: opts.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,

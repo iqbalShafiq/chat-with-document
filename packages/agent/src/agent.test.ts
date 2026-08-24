@@ -104,4 +104,23 @@ describe("createAgent", () => {
     expect(agent.guardrails).toHaveLength(1);
     expect(agent.guardrails[0]?.id).toBe("test-policy");
   });
+
+  it("forwards native Document context alongside convenience text blocks", () => {
+    const nativeDocument = {
+      id: "native-document",
+      text: "Native document context",
+      additionalProps: { source: "fixture" },
+    };
+    const agent = createAgent({
+      agentId: "chat-agent",
+      model,
+      context: [nativeDocument],
+      additionalContext: [{ id: "fixture", text: "Convenience context" }],
+    });
+
+    expect(agent.context).toEqual([
+      nativeDocument,
+      { id: "fixture", text: "Convenience context" },
+    ]);
+  });
 });

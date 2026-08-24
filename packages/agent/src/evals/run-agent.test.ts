@@ -10,7 +10,10 @@ import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
-import type { StreamingCompletionModel } from "@anvia/core/completion";
+import type {
+  CompletionResponse,
+  StreamingCompletionModel,
+} from "@anvia/core/completion";
 import type {
   AgentObserver,
   AgentRunObserver,
@@ -42,6 +45,23 @@ function fakeTracing(traceId: string, observationId?: string): AgentObserver {
       trace: { traceId, ...(observationId ? { observationId } : {}) },
       end: async () => {},
     }),
+  };
+}
+
+function traceContinuityObserver(traceIds: Array<string | undefined>): AgentObserver {
+  let observation = 0;
+  return {
+    startRun: (args) => {
+      traceIds.push(args.trace?.traceId);
+      observation += 1;
+      return {
+        trace: {
+          traceId: args.trace?.traceId ?? "trace-root",
+          observationId: `observation-${observation}`,
+        },
+        end: async () => {},
+      };
+    },
   };
 }
 
@@ -192,6 +212,49 @@ describe("runAgentAndCollect", () => {
     expect(trace.outcome).toEqual({ type: "response" });
   });
 
+  it("marks an approved tool as error when execution fails after approval", async () => {
+    const model = createScriptedCompletionModel([
+      { kind: "tool_call", name: "web_search", args: { query: "latest gpt-5" } },
+      { kind: "text", text: "search failed" },
+    ]);
+    const trace = await runAgentAndCollect({
+      prompt: "search the web for gpt-5",
+      sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+      model,
+      tools: [
+        webSearchFixture({
+          requiresApproval: () => ({ reason: "fixture approval" }),
+          execute: async () => {
+            throw new Error("approved fixture tool failure");
+          },
+        }),
+      ],
+      interactionResponder: approvalResponder(true),
+    });
+    const record = trace.toolCalls.find((toolCall) => toolCall.name === "web_search");
+    expect(record?.status).toBe("error");
+    expect(record?.error).toContain("approved fixture tool failure");
+  });
+
+  it("keeps one canonical trace root across native resume", async () => {
+    const traceIds: Array<string | undefined> = [];
+    const model = createScriptedCompletionModel([
+      { kind: "tool_call", name: "web_search", args: { query: "latest gpt-5" } },
+      { kind: "text", text: "approved result" },
+    ]);
+    const trace = await runAgentAndCollect({
+      prompt: "search the web for gpt-5",
+      sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+      model,
+      tools: [webSearchFixture({ requiresApproval: () => ({ reason: "fixture approval" }) })],
+      tracing: traceContinuityObserver(traceIds),
+      interactionResponder: approvalResponder(true),
+    });
+
+    expect(traceIds).toEqual([undefined, "trace-root"]);
+    expect(trace.trace?.traceId).toBe("trace-root");
+  });
+
   it("records a rejected approval and still returns a response outcome", async () => {
     const model = createScriptedCompletionModel([
       { kind: "tool_call", name: "web_search", args: { query: "latest gpt-5" } },
@@ -305,6 +368,67 @@ describe("runAgentAndCollect", () => {
       stage: "input",
       reason: "fixture blocked",
     });
+  });
+
+  it("aborts an active resumed generation when the eval times out", async () => {
+    let resumedAbort = false;
+    const initialToolCall = {
+      type: "tool-call" as const,
+      toolCallId: "timeout-tool-call",
+      toolName: "web_search",
+      input: { query: "latest gpt-5" },
+    };
+    const initialResponse: CompletionResponse = {
+      choice: [initialToolCall],
+      usage: usage(1, 1),
+      rawResponse: {},
+    };
+    const hangingResumeModel: StreamingCompletionModel = {
+      provider: "hanging-resume",
+      modelId: "hanging-resume",
+      capabilities: {
+        streaming: true,
+        tools: true,
+        toolChoice: false,
+        imageInput: false,
+        documentInput: false,
+        outputSchema: false,
+        reasoning: false,
+      },
+      completion: (_request, options) =>
+        new Promise<CompletionResponse>((_resolve, reject) => {
+          const signal = options?.abortSignal;
+          if (!signal) return;
+          signal.addEventListener(
+            "abort",
+            () => {
+              resumedAbort = true;
+              reject(signal.reason ?? new Error("resumed generation aborted"));
+            },
+            { once: true },
+          );
+        }),
+      async *streamCompletion() {
+        yield { type: "tool_call", toolCall: initialToolCall };
+        yield { type: "final", response: initialResponse };
+      },
+    };
+
+    process.env.EVAL_TIMEOUT_MS = "50";
+    try {
+      await expect(
+        runAgentAndCollect({
+          prompt: "search the web for gpt-5",
+          sessionConfig: { webSearchEnabled: false, imageGenEnabled: false, hasDocuments: false },
+          model: hangingResumeModel,
+          tools: [webSearchFixture({ requiresApproval: () => ({ reason: "fixture approval" }) })],
+          interactionResponder: approvalResponder(true),
+        }),
+      ).rejects.toThrow(/Eval case timed out after 50ms/);
+      expect(resumedAbort).toBe(true);
+    } finally {
+      delete process.env.EVAL_TIMEOUT_MS;
+    }
   });
 
   it("rejects with a timeout error when the agent exceeds EVAL_TIMEOUT_MS", async () => {

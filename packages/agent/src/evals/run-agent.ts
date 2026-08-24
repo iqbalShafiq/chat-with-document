@@ -18,7 +18,7 @@ import type {
   AgentRunObserver,
 } from "@anvia/core/observability";
 import type { MemoryScope } from "@anvia/core/memory";
-import type { AgentContextBlock } from "../agent.js";
+import type { AgentContextBlock, AgentContextInput } from "../agent.js";
 import { createAgent } from "../agent.js";
 import { parseCitationsFromText } from "../citations/parse-citations.js";
 import type { ReasoningEffort } from "../providers/openai.js";
@@ -56,6 +56,7 @@ export async function runAgentAndCollect(input: {
   tools: AnyTool[];
   instructions?: string[];
   contextBlocks?: AgentContextBlock[];
+  context?: readonly AgentContextInput[];
   tracing?: AgentObserver;
   suiteName?: string;
   caseId?: string;
@@ -77,6 +78,7 @@ export async function runAgentAndCollect(input: {
   };
   let closeProviderStream: (() => void) | undefined;
   let cancelActiveRun: (() => void) | undefined;
+  const abortController = new AbortController();
   const model = input.model
     ? wrapStreamingModel(input.model, (close) => {
         closeProviderStream = close;
@@ -91,6 +93,7 @@ export async function runAgentAndCollect(input: {
     ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
     additionalInstructions: input.instructions ?? [],
     additionalContext: input.contextBlocks ?? [],
+    ...(input.context ? { context: input.context } : {}),
     additionalTools: input.tools,
     memory: createInMemoryMemoryStore(),
     observability,
@@ -98,25 +101,26 @@ export async function runAgentAndCollect(input: {
   });
 
   const collect = (async () => {
+    const trace = input.tracing
+      ? {
+          ...(input.suiteName ? { name: input.suiteName } : {}),
+          userId: "eval-user",
+          sessionId: "eval-session",
+          metadata: {
+            ...(input.caseId ? { caseId: input.caseId } : {}),
+            ...(input.suiteName ? { suiteName: input.suiteName } : {}),
+          },
+        }
+      : undefined;
     const stream = agent.stream({
       prompt: input.prompt,
       session: { sessionId: "eval-session", userId: "eval-user" },
-      ...(input.tracing
-        ? {
-            trace: {
-              ...(input.suiteName ? { name: input.suiteName } : {}),
-              userId: "eval-user",
-              sessionId: "eval-session",
-              metadata: {
-                ...(input.caseId ? { caseId: input.caseId } : {}),
-                ...(input.suiteName ? { suiteName: input.suiteName } : {}),
-              },
-            },
-          }
-        : {}),
+      abortSignal: abortController.signal,
+      ...(trace ? { trace } : {}),
     });
     const iterator = stream[Symbol.asyncIterator]();
     cancelActiveRun = () => {
+      abortController.abort("eval timeout");
       stream.cancel("eval timeout");
       closeAsyncIterator(iterator);
     };
@@ -131,7 +135,16 @@ export async function runAgentAndCollect(input: {
       responseCount += 1;
       const response = await input.interactionResponder(outcome.interaction);
       recordInteractionResponse(outcome.interaction, response, state);
-      outcome = await agent.resume(outcome.continuation, response);
+      const resumeTrace = trace
+        ? {
+            ...trace,
+            ...(state.trace?.traceId ? { traceId: state.trace.traceId } : {}),
+          }
+        : undefined;
+      outcome = await agent.resume(outcome.continuation, response, {
+        abortSignal: abortController.signal,
+        ...(resumeTrace ? { trace: resumeTrace } : {}),
+      });
       collectResumedOutcome(outcome, state);
     }
 
@@ -228,11 +241,10 @@ function recordTerminalOutcome(
     outputTokens: (state.usage.outputTokens ?? 0) + outcome.usage.outputTokens,
   };
   if (outcome.trace?.traceId) {
+    const observationId = outcome.trace.observationId ?? state.trace?.observationId;
     state.trace = {
-      traceId: outcome.trace.traceId,
-      ...(outcome.trace.observationId
-        ? { observationId: outcome.trace.observationId }
-        : {}),
+      traceId: state.trace?.traceId ?? outcome.trace.traceId,
+      ...(observationId ? { observationId } : {}),
     };
   }
   if (includeText && outcome.text && state.textParts.length === 0) {
@@ -387,7 +399,7 @@ function createToolErrorObserver(
           end: async () => {},
           error: async ({ error }) => {
             const record = erroredToolCalls.get(key);
-            if (record && record.status === "called") {
+            if (record && record.status !== "rejected" && record.status !== "error") {
               record.status = "error";
               record.error = error instanceof Error ? error.message : String(error);
             }
