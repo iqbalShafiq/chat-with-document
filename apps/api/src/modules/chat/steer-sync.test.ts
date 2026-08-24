@@ -71,4 +71,27 @@ describe("createSteerSyncService.findAppliedClientMessageIds", () => {
     });
     expect(result).toEqual([]);
   });
+
+  it("deduplicates applied ids and ignores stale non-v1 rows", async () => {
+    const service = createSteerSyncService({
+      prisma: createFakePrisma([
+        userRow("a"),
+        userRow("a"),
+        { message: { role: "user", content: [{ type: "legacy", value: "a" }], metadata: { clientMessageId: "b" } } },
+      ]),
+    });
+    const result = await service.findAppliedClientMessageIds({
+      sessionId: "s",
+      userId: "u",
+      ids: ["a", "a", "b"],
+    });
+    expect(result).toEqual(["a"]);
+  });
+
+  it("rejects unbounded or empty sync requests before reading memory", async () => {
+    const prisma = createFakePrisma([userRow("a")]);
+    const service = createSteerSyncService({ prisma });
+    await expect(service.findAppliedClientMessageIds({ sessionId: "s", userId: "u", ids: [] })).rejects.toThrow();
+    await expect(service.findAppliedClientMessageIds({ sessionId: "s", userId: "u", ids: ["x".repeat(257)] })).rejects.toThrow();
+  });
 });

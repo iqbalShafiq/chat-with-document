@@ -9,10 +9,6 @@ vi.mock("../../lib/resumable-stream-store.js", () => ({
   getStreamStore: vi.fn(),
 }));
 
-vi.mock("./approval-registry.js", () => ({
-  getApprovalRegistry: vi.fn(),
-}));
-
 vi.mock("./run-queue.js", () => ({
   ACTIVE_RUN_KEY: (sessionId: string) => `rs-active:${sessionId}`,
   getChatRunQueue: vi.fn(),
@@ -53,7 +49,6 @@ import { prisma } from "../../utils/prisma.js";
 import { enqueueProfileReconsideration } from "../profiling/queue.js";
 import { profileConfig } from "../profiling/service.js";
 import type { ProfileConfig } from "../profiling/service.js";
-import { getApprovalRegistry } from "./approval-registry.js";
 import {
   ChatSessionNotFoundError,
   deleteChatSessionsHard,
@@ -107,21 +102,12 @@ function createFakes() {
     getJob: queueGetJob,
   } as unknown as ReturnType<typeof getChatRunQueue>);
 
-  const cancelPendingForStream = vi.fn(async () => ({
-    approvals: 0,
-    clarifications: 0,
-  }));
-  vi.mocked(getApprovalRegistry).mockReturnValue({
-    cancelPendingForStream,
-  } as unknown as ReturnType<typeof getApprovalRegistry>);
-
   return {
     redisGet,
     redisDel,
     storeStatus,
     setStopFlag,
     queueGetJob,
-    cancelPendingForStream,
   };
 }
 
@@ -182,7 +168,7 @@ describe("stopActiveRunForSession", () => {
     expect(fakes.setStopFlag).not.toHaveBeenCalled();
   });
 
-  it("sets the stop flag, cancels approvals, and waits for the lock to clear", async () => {
+  it("sets the stop flag and waits for the native worker to clear the lock", async () => {
     fakes.redisGet.mockResolvedValueOnce(STREAM_ID).mockResolvedValue(null);
     fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
     fakes.queueGetJob.mockResolvedValue({ getState: async () => "active" });
@@ -192,7 +178,6 @@ describe("stopActiveRunForSession", () => {
     ).resolves.toBe(true);
 
     expect(fakes.setStopFlag).toHaveBeenCalledWith(STREAM_ID);
-    expect(fakes.cancelPendingForStream).toHaveBeenCalledWith(STREAM_ID);
     expect(fakes.redisDel).not.toHaveBeenCalled();
   });
 

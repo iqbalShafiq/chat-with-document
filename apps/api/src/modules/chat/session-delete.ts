@@ -4,7 +4,6 @@ import { getStreamStore } from "../../lib/resumable-stream-store.js";
 import { prisma } from "../../utils/prisma.js";
 import { enqueueProfileReconsideration } from "../profiling/queue.js";
 import { profileConfig } from "../profiling/service.js";
-import { getApprovalRegistry } from "./approval-registry.js";
 import {
   deleteChatSessionsHard,
   getChatSession,
@@ -30,7 +29,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Ask the worker to end the run (stop flag + unblock human-input waiters),
+ * Ask the worker to end the run (stop flag + native stream cancellation),
  * then wait for the active-run lock to be released by the worker. Returns
  * true when a running stream was stopped. Throws SessionRunActiveError when
  * the run cannot settle within the timeout — delete must NOT race the
@@ -72,9 +71,6 @@ export async function stopActiveRunForSession(
   // Waiting/delayed/active/absent → the run may still execute; stop it and wait.
 
   await store.setStopFlag(streamId);
-  await getApprovalRegistry()
-    .cancelPendingForStream(streamId)
-    .catch(() => ({ approvals: 0, clarifications: 0 }));
 
   const deadline = Date.now() + RUN_SETTLE_TIMEOUT_MS;
   while (Date.now() < deadline) {

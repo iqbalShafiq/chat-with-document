@@ -32,7 +32,7 @@ const STREAM_TAG = (streamId: string) => `{${streamId}}`;
 const STATUS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}`;
 const EVENTS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:events`;
 const COUNTER_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:counter`;
-const STOP_KEY = (streamId: string) => `rs-stop:${STREAM_TAG(streamId)}`;
+export const streamStopKey = (streamId: string) => `rs-stop:${STREAM_TAG(streamId)}`;
 
 const OPEN_TTL_SECONDS = 6 * 60 * 60;
 const CLOSE_TTL_SECONDS = 24 * 60 * 60;
@@ -245,6 +245,8 @@ export function createRedisResumableStreamStore<TEvent = ClientResumableEvent>(
   openWithMeta(input: ResumableStreamOpenInput, meta: StreamMeta): Promise<ResumableStreamState>;
   getMeta(streamId: string): Promise<StreamMeta | null>;
   setStopFlag(streamId: string): Promise<void>;
+  hasStopFlag(streamId: string): Promise<boolean>;
+  clearStopFlag(streamId: string): Promise<void>;
 } {
   const stateFromHash = async (streamId: string): Promise<ResumableStreamState> => {
     const status = await redis.hget(STATUS_KEY(streamId), "status");
@@ -408,7 +410,13 @@ export function createRedisResumableStreamStore<TEvent = ClientResumableEvent>(
       };
     },
     async setStopFlag(streamId: string): Promise<void> {
-      await redis.set(STOP_KEY(streamId), "1", "EX", 600);
+      await redis.set(streamStopKey(streamId), "1", "EX", 600);
+    },
+    async hasStopFlag(streamId: string): Promise<boolean> {
+      return (await redis.exists(streamStopKey(streamId))) > 0;
+    },
+    async clearStopFlag(streamId: string): Promise<void> {
+      await redis.del(streamStopKey(streamId));
     },
   };
 }

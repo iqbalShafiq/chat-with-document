@@ -51,6 +51,9 @@ import {
   validateSanitizedMemoryStore,
 } from "./modules/chat/memory-sanitizer.js";
 import { closeContext7Mcp } from "./lib/context7-server.js";
+import { closeRedis } from "./lib/redis.js";
+import { getActiveRunRegistry } from "./modules/chat/run-worker.js";
+import { createWorkerShutdownCoordinator } from "./worker-lifecycle.js";
 
 let processEmbeddingModel: ReturnType<typeof createEmbeddingModel> | null = null;
 
@@ -417,7 +420,6 @@ chatRunWorker.on("failed", async (job, error) => {
     await failChatRun(job.data.streamId, error, {
       sessionId: job.data.sessionId,
       userId: job.data.userId,
-      promptMessage: job.data.promptMessage,
     });
   }
 });
@@ -426,54 +428,22 @@ chatRunWorker.on("error", (error) =>
   console.error("[chat-run] worker error", error),
 );
 
-let shutdownPromise: Promise<void> | null = null;
-
-async function closeOwnedResource(
-  name: string,
-  resource: { close(): Promise<void> },
-): Promise<void> {
-  try {
-    await resource.close();
-  } catch (error) {
-    console.error(`[worker] ${name} shutdown failed`, error);
-    throw error;
-  }
-}
-
-async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  console.log(`[worker] received ${signal}; shutting down`);
-  try {
-    const workerResults = await Promise.allSettled([
-      closeOwnedResource("document ingest", worker),
-      closeOwnedResource("chat run", chatRunWorker),
-      ...(profileWorker
-        ? [closeOwnedResource("profile", profileWorker)]
-        : []),
-    ]);
-    const clientResults = await Promise.allSettled([
-      closeOwnedResource("Qdrant", { close: closeQdrant }),
-      closeOwnedResource("Context7 MCP", { close: closeContext7Mcp }),
-    ]);
-    const results = [...workerResults, ...clientResults];
-    const failures = results.flatMap((result) =>
-      result.status === "rejected" ? [result.reason] : [],
-    );
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Worker resource shutdown failed");
-    }
-  } finally {
-    try {
-      await closeTracing();
-    } catch (error) {
-      console.error("[worker] tracing shutdown failed", error);
-      throw error;
-    }
-  }
-}
+const shutdownCoordinator = createWorkerShutdownCoordinator({
+  activeRuns: getActiveRunRegistry(),
+  chatWorker: chatRunWorker,
+  documentWorker: worker,
+  profileWorker,
+  closeQdrant,
+  closeContext7: closeContext7Mcp,
+  closeTracing,
+  disconnectPrisma: () => prisma.$disconnect(),
+  closeRedis,
+  onFailure: (name, error) => console.error(`[worker] ${name} shutdown failed`, error),
+});
 
 function requestShutdown(signal: NodeJS.Signals): void {
-  shutdownPromise ??= shutdown(signal);
-  void shutdownPromise.then(
+  console.log(`[worker] received ${signal}; shutting down`);
+  void shutdownCoordinator.request(signal).then(
     () => process.exit(0),
     (error) => {
       console.error(`[worker] shutdown failed after ${signal}`, error);
