@@ -84,7 +84,7 @@ docker-compose.yml     # Postgres lokal di port 15433
 
 Factory agent yang dipakai API:
 
-- `createAgent()` — `AgentBuilder` + base instructions + optional tools/memory/tracing
+- `createAgent()` — native Anvia v1 agent with base instructions and optional tools/memory/tracing
 - `createDataAnalysisTool()` — tiga tool statistik numerik
 - `tracing` — instance Langfuse dari env
 - Default model: OpenAI via OpenRouter Responses API (`openai/gpt-5.6-luna`), konfigurasi via `OPENAI_*`

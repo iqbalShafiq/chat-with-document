@@ -11,6 +11,7 @@ import {
   API_ORIGIN,
   openFreshChat,
   sendMessage,
+  waitForIdleComposer,
   waitForRunDone,
   waitForStreaming,
 } from "./helpers";
@@ -147,12 +148,12 @@ test("v3 stream exposes its protocol and resumes exactly once after reload", asy
   const protocols: Array<string | undefined> = [];
   const streams = captureCompletedChatStreams(page);
   const resumeCursors = captureChatResumeCursors(page);
-  let originalRequest: JsonRecord | null = null;
+  const capturedRequest: { current: JsonRecord | null } = { current: null };
   page.on("request", (request: Request) => {
     if (request.method() !== "POST" || request.url() !== CHAT_ENDPOINT) return;
     const body: unknown = request.postDataJSON();
     if (isRecord(body) && body.type === "messages" && !isRecord(body.resume)) {
-      originalRequest = body;
+      capturedRequest.current = body;
     }
   });
   page.on("response", async (response) => {
@@ -225,12 +226,18 @@ test("v3 stream exposes its protocol and resumes exactly once after reload", asy
   );
   expect(firstResumedEvent).toBeTruthy();
   expect(firstResumedEvent!.eventId as number).toBeGreaterThan(reloadCursor!.after);
-  expect(originalRequest).toBeTruthy();
+  const requestBody = capturedRequest.current;
+  if (requestBody === null || reloadCursor === undefined) {
+    throw new Error("missing original chat request or resume cursor");
+  }
+  const replayPayload: JsonRecord = {
+    type: requestBody.type,
+    messages: requestBody.messages,
+    metadata: requestBody.metadata,
+    resume: { streamId: reloadCursor.streamId, after: 0 },
+  };
   const replay = await page.request.post(CHAT_ENDPOINT, {
-    data: {
-      ...originalRequest,
-      resume: { streamId: reloadCursor!.streamId, after: 0 },
-    },
+    data: replayPayload,
   });
   expect(replay.ok()).toBe(true);
   const stored = parseNdjson(await replay.text());
@@ -358,7 +365,7 @@ test("multiple follow-ups remain editable and are acknowledged through the nativ
   const reorderedItems = queue.getByRole("listitem");
   await reorderedItems.nth(1).dragTo(reorderedItems.nth(0));
   await expect(reorderedItems.first()).toContainText("SECOND_QUEUE_OK");
-  await waitForRunDone(page, 300_000);
+  await waitForIdleComposer(page, 300_000);
   await expect(page.getByText("Then reply with exactly SECOND_QUEUE_OK.")).toBeVisible();
   await expect(page.getByText(/FIRST_QUEUE_OK\. EDITED/)).toBeVisible();
   const order = await page.evaluate(() => {

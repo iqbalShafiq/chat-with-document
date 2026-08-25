@@ -28,7 +28,9 @@ type DeepResearchApproval = (
   | Promise<boolean | ToolApprovalRequirement>;
 
 function makeResearcher(output = "[[cite:1]] Grounded findings") {
-  const call = vi.fn(async () => output);
+  const call = vi.fn(
+    async (_input?: unknown, _context?: { abortSignal?: AbortSignal }) => output,
+  );
   const researcherTool = {
     name: "deep_research_researcher",
     definition: vi.fn(),
@@ -46,6 +48,18 @@ const args = {
   prompt: "Compare the attached quarterly report with current market data.",
   reason: "This needs multi-source research and source citations.",
 };
+
+async function invokeRequiresApproval(
+  tool: AnyTool,
+  input: typeof args,
+  context: ToolApprovalContext<typeof args>,
+): Promise<unknown> {
+  const requirement = tool.requiresApproval;
+  if (typeof requirement !== "function") {
+    throw new Error("expected a requiresApproval function");
+  }
+  return requirement(input as never, context as never);
+}
 
 function approvalContext(): ToolApprovalContext<typeof args> {
   return {
@@ -210,9 +224,9 @@ describe("createDeepResearchTools", () => {
   it("seals parent retrieval after a hung researcher times out", async () => {
     const { researcher, call } = makeResearcher();
     call.mockImplementationOnce(
-      async (_input, context: { abortSignal?: AbortSignal }) =>
+      async (_input?: unknown, context?: { abortSignal?: AbortSignal }) =>
         await new Promise<string>((_resolve, reject) => {
-          const signal = context.abortSignal;
+          const signal = context?.abortSignal;
           expect(signal).toBeDefined();
           signal!.addEventListener(
             "abort",
@@ -244,7 +258,7 @@ describe("createDeepResearchTools", () => {
     await expect(tool.call(args)).rejects.toThrow(
       "Deep Research exceeded its wall-clock budget",
     );
-    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toBe(
+    expect(await invokeRequiresApproval(webSearch!, args, approvalContext())).toBe(
       false,
     );
     await expect(webSearch!.call({ query: "independent check" })).resolves.toEqual({
@@ -256,9 +270,9 @@ describe("createDeepResearchTools", () => {
   it("aborts a hung nested researcher at the wall-clock budget", async () => {
     const { researcher, call } = makeResearcher();
     call.mockImplementationOnce(
-      async (_input, context: { abortSignal?: AbortSignal }) =>
+      async (_input?: unknown, context?: { abortSignal?: AbortSignal }) =>
         await new Promise<string>((_resolve, reject) => {
-          const signal = context.abortSignal;
+          const signal = context?.abortSignal;
           expect(signal).toBeDefined();
           signal!.addEventListener(
             "abort",
@@ -272,7 +286,9 @@ describe("createDeepResearchTools", () => {
       enabled: true,
       researcher,
       maxDurationMs: 20,
-      onProgress: (event) => progress.push(event),
+      onProgress: (event) => {
+        progress.push(event);
+      },
     })[0]!;
 
     await expect(tool.call(args)).rejects.toThrow(
@@ -348,7 +364,7 @@ describe("sealRetrievalAfterDeepResearch", () => {
       guard,
     );
 
-    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toEqual({
+    expect(await invokeRequiresApproval(webSearch!, args, approvalContext())).toEqual({
       reason: "needs approval",
     });
     await expect(webSearch!.call({ query: "live" })).resolves.toEqual({
@@ -381,7 +397,7 @@ describe("sealRetrievalAfterDeepResearch", () => {
 
     await tool.call(args);
 
-    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toBe(
+    expect(await invokeRequiresApproval(webSearch!, args, approvalContext())).toBe(
       false,
     );
     expect(requiresApproval).not.toHaveBeenCalled();

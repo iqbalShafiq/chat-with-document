@@ -79,6 +79,26 @@ export async function waitForRunDone(page: Page, timeout = 150_000): Promise<voi
   });
 }
 
+/** Wait until the composer is idle and no queued follow-up remains. */
+export async function waitForIdleComposer(page: Page, timeout = 300_000): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const sendVisible = await page
+          .getByRole("button", { name: "Send", exact: true })
+          .isVisible()
+          .catch(() => false);
+        const queueVisible = await page
+          .getByRole("list", { name: "Queued messages" })
+          .isVisible()
+          .catch(() => false);
+        return sendVisible && !queueVisible;
+      },
+      { timeout },
+    )
+    .toBe(true);
+}
+
 export async function openFeaturesPopover(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Additional features" }).click();
   await expect(page.getByRole("dialog", { name: "Additional features" })).toBeVisible();

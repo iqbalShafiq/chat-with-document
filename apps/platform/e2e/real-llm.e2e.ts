@@ -8,6 +8,7 @@ import {
   openFreshChat,
   sendMessage,
   setSwitch,
+  waitForIdleComposer,
   waitForRunDone,
   waitForStreaming,
 } from "./helpers";
@@ -28,6 +29,7 @@ test("stream a short reply from the real model", async ({ page }) => {
 test("composer stays editable and queues a follow-up while streaming", async ({
   page,
 }) => {
+  test.setTimeout(360_000);
   await openFreshChat(page);
   await sendMessage(
     page,
@@ -48,9 +50,9 @@ test("composer stays editable and queues a follow-up while streaming", async ({
   if (await queuedDock.isVisible().catch(() => false)) {
     await expect(queuedDock).toContainText("QUEUE_OK");
   }
-  await waitForRunDone(page);
+  await waitForIdleComposer(page, 300_000);
   await expect(page.getByText("QUEUE_OK").last()).toBeVisible({
-    timeout: 150_000,
+    timeout: 30_000,
   });
 });
 

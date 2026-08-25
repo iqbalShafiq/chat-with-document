@@ -120,6 +120,12 @@ import {
 } from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { failedTailTruncate } from "#/lib/chat/failed-tail";
+import {
+  blocksDestructiveSessionAction,
+  sessionFreshnessFromCount,
+  type SessionFreshness,
+} from "#/lib/chat/session-freshness";
 import {
   nextFlushableItem,
   pendingBeforeEditing,
@@ -1881,7 +1887,9 @@ function ChatSession({
   // ─── Stale-session guard (freshness check before send) ───────────────────
   // The server memory is the source of truth; another window/device may have
   // appended messages. Compare persisted counts: stale ⟺ server has MORE
-  // messages than this view knows. Fail-open when the fetch fails.
+  // messages than this view knows. Destructive truncate/resubmit fails closed
+  // when freshness cannot be proven. Ordinary sends still notice stale views
+  // after the non-destructive append.
   const [staleDialog, setStaleDialog] = useState<{
     kind: "send" | "resubmit";
   } | null>(null);
@@ -2550,16 +2558,15 @@ function ChatSession({
     sessionId,
   ]);
 
-  const isSessionStale = useCallback(async (): Promise<boolean> => {
+  const checkSessionFreshness = useCallback(async (): Promise<SessionFreshness> => {
     try {
       const state = await fetchSessionState(sessionId);
       const localCount = messagesRef.current.filter(
         (message) => message.role === "user" || message.role === "assistant",
       ).length;
-      return state.messageCount > localCount;
+      return sessionFreshnessFromCount(state.messageCount, localCount);
     } catch {
-      // Fail-open: an unreachable server must never block sending.
-      return false;
+      return "unknown";
     }
   }, [sessionId]);
 
@@ -2662,9 +2669,16 @@ function ChatSession({
         throw new Error("Message cannot be empty");
       }
 
-      // Freshness guard: resubmitting from a stale view would truncate the
-      // newer messages added by another window/device — block until reload.
-      if (await isSessionStale()) {
+      // Freshness guard: resubmitting from a stale or unverified view would
+      // truncate newer messages added by another window/device.
+      const freshness = await checkSessionFreshness();
+      if (blocksDestructiveSessionAction(freshness)) {
+        if (freshness === "unknown") {
+          setComposerError(
+            "Could not verify this conversation is current. Reload and try again.",
+          );
+          return;
+        }
         setStaleDialog({ kind: "resubmit" });
         return;
       }
@@ -2725,7 +2739,7 @@ function ChatSession({
         attachments: editAttachments,
       });
     },
-    [sessionId, refreshSessionImages, editContextImages, isSessionStale],
+    [sessionId, refreshSessionImages, editContextImages, checkSessionFreshness],
   );
 
   const handleRevert = useCallback(
@@ -2896,33 +2910,44 @@ function ChatSession({
       return;
     }
 
-    // Optimistic send: the user bubble appears the moment sendMessage is
-    // called below. The stale check runs in parallel and only surfaces a
-    // non-blocking notice afterwards (normal sends are non-destructive).
-    const stalePromise = isSessionStale();
-
     // Truncate-before-send: a persisted failed tail [user, assistant
-    // kind:"error"] would re-enter memory — drop it first.
+    // kind:"error"] would re-enter memory — drop it first. This delete is
+    // destructive, so freshness must be proven and truncate must commit
+    // before the retry prompt is sent.
     const messages = chatController.messages;
-    const last = messages.at(-1);
-    const secondLast = messages.at(-2);
-    if (
-      last?.role === "assistant" &&
-      metadataKind(last.metadata) === "error" &&
-      secondLast?.role === "user"
-    ) {
-      const userMeta = readChatMessageMeta(secondLast.metadata);
-      if (userMeta.clientMessageId) {
-        void truncateSessionMemory({
+    const failedTail = failedTailTruncate(messages);
+    if (failedTail) {
+      const freshness = await checkSessionFreshness();
+      if (blocksDestructiveSessionAction(freshness)) {
+        if (freshness === "unknown") {
+          setComposerError(
+            "Could not verify this conversation is current. Reload and try again.",
+          );
+          return;
+        }
+        setStaleDialog({ kind: "resubmit" });
+        return;
+      }
+      try {
+        await truncateSessionMemory({
           sessionId,
           mode: "exclude",
-          clientMessageId: userMeta.clientMessageId,
-        }).catch(() => {});
+          clientMessageId: failedTail.clientMessageId,
+          expectedPrefixMessageCount: failedTail.expectedPrefixMessageCount,
+        });
+      } catch (error) {
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not clear the failed message",
+        );
+        return;
       }
       chatController.setMessages(messages.slice(0, -2));
-      // The failed tail is gone from live parts — resync image history.
       void refreshSessionImages();
     }
+
+    const stalePromise = checkSessionFreshness();
 
     // Upload steps set composerError themselves before throwing; the catch
     // keeps the submit promise from rejecting (the composer awaits it).
@@ -2952,7 +2977,7 @@ function ChatSession({
     // Non-blocking freshness notice: the message was already sent (normal
     // sends are non-destructive); offer a reload so the view catches up
     // with the other window/device.
-    if (await stalePromise) {
+    if ((await stalePromise) === "stale") {
       setStaleDialog({ kind: "send" });
     }
   };

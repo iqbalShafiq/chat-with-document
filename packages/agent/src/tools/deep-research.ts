@@ -498,9 +498,19 @@ export function sealRetrievalAfterDeepResearch(
         if (guard.hasCompleted()) return false;
         const requirement = tool.requiresApproval;
         if (typeof requirement === "function") {
-          return requirement(args, context);
+          const result: unknown = await requirement(args, context);
+          if (result === true || result === false) return result;
+          if (
+            result !== null &&
+            typeof result === "object" &&
+            "reason" in result &&
+            typeof result.reason === "string"
+          ) {
+            return { reason: result.reason };
+          }
+          return true;
         }
-        return requirement ?? false;
+        return requirement === true;
       },
       parseInput: tool.parseInput,
       definition: (prompt: string) => tool.definition(prompt),
