@@ -35,7 +35,7 @@ test("composer stays editable and queues a follow-up while streaming", async ({
   );
   await waitForStreaming(page);
   const editor = page.locator("[data-anvia-composer-editor]");
-  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await expect(editor).toBeEditable();
   await editor.click();
   await editor.pressSequentially("After you finish, reply QUEUE_OK on its own line.", {
     delay: 8,
@@ -69,7 +69,7 @@ test("web search with the toggle on uses live Tavily", async ({ page, request })
   const caps = await request.get(`${API_ORIGIN}/api/chat/capabilities`);
   expect(caps.ok()).toBe(true);
   const body = (await caps.json()) as { webSearchAvailable?: boolean };
-  test.skip(!body.webSearchAvailable, "TAVILY_API_KEY not available");
+  expect(body.webSearchAvailable, "real web-search capability is required").toBe(true);
 
   await openFreshChat(page);
   await setSwitch(page, "Web search", true);
@@ -89,7 +89,10 @@ test("image generation with the toggle on uses the live image API", async ({
   const caps = await request.get(`${API_ORIGIN}/api/chat/capabilities`);
   expect(caps.ok()).toBe(true);
   const body = (await caps.json()) as { imageGenerationAvailable?: boolean };
-  test.skip(!body.imageGenerationAvailable, "image generation not available");
+  expect(
+    body.imageGenerationAvailable,
+    "real image-generation capability is required",
+  ).toBe(true);
 
   await openFreshChat(page);
   await setSwitch(page, "Image generator", true);

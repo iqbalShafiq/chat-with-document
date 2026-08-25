@@ -8,8 +8,11 @@ import type {
 import {
   boundDeepResearchTools,
   buildDeepResearchPrompt,
+  createDeepResearchCompletionGuard,
   createDeepResearchTools,
   DEEP_RESEARCH_INSTRUCTION,
+  DEEP_RESEARCH_PARENT_SEAL_MESSAGE,
+  sealRetrievalAfterDeepResearch,
   type DeepResearchProgress,
   type DeepResearchResearcher,
 } from "./deep-research.js";
@@ -108,6 +111,15 @@ describe("createDeepResearchTools", () => {
     );
   });
 
+  it("stops the parent from starting another retrieval flow after deep_research returns", () => {
+    expect(DEEP_RESEARCH_INSTRUCTION).toMatch(
+      /After deep_research returns[\s\S]*do not call[\s\S]*web_search/i,
+    );
+    expect(DEEP_RESEARCH_INSTRUCTION).toMatch(
+      /do not call deep_research again/i,
+    );
+  });
+
   it("bypasses approval when enabled or granted for the session", async () => {
     const { researcher } = makeResearcher();
     const enabledTool = createDeepResearchTools({
@@ -181,6 +193,94 @@ describe("createDeepResearchTools", () => {
     expect(progress.at(-1)).toMatchObject({ phase: "failed" });
   });
 
+  it("returns a bounded seal instead of starting a second research run", async () => {
+    const { researcher, call } = makeResearcher("report");
+    const completionGuard = createDeepResearchCompletionGuard();
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      completionGuard,
+    })[0]!;
+
+    await expect(tool.call(args)).resolves.toBe("report");
+    await expect(tool.call(args)).resolves.toBe(DEEP_RESEARCH_PARENT_SEAL_MESSAGE);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("seals parent retrieval after a hung researcher times out", async () => {
+    const { researcher, call } = makeResearcher();
+    call.mockImplementationOnce(
+      async (_input, context: { abortSignal?: AbortSignal }) =>
+        await new Promise<string>((_resolve, reject) => {
+          const signal = context.abortSignal;
+          expect(signal).toBeDefined();
+          signal!.addEventListener(
+            "abort",
+            () => reject(signal!.reason),
+            { once: true },
+          );
+        }),
+    );
+    const completionGuard = createDeepResearchCompletionGuard();
+    const originalSearch = vi.fn(async () => ({ results: ["should not run"] }));
+    const [webSearch] = sealRetrievalAfterDeepResearch(
+      [
+        {
+          name: "web_search",
+          definition: vi.fn(),
+          requiresApproval: vi.fn(async () => ({ reason: "needs approval" })),
+          call: originalSearch,
+        } as unknown as AnyTool,
+      ],
+      completionGuard,
+    );
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      maxDurationMs: 20,
+      completionGuard,
+    })[0]!;
+
+    await expect(tool.call(args)).rejects.toThrow(
+      "Deep Research exceeded its wall-clock budget",
+    );
+    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toBe(
+      false,
+    );
+    await expect(webSearch!.call({ query: "independent check" })).resolves.toEqual({
+      error: DEEP_RESEARCH_PARENT_SEAL_MESSAGE,
+    });
+    expect(originalSearch).not.toHaveBeenCalled();
+  });
+
+  it("aborts a hung nested researcher at the wall-clock budget", async () => {
+    const { researcher, call } = makeResearcher();
+    call.mockImplementationOnce(
+      async (_input, context: { abortSignal?: AbortSignal }) =>
+        await new Promise<string>((_resolve, reject) => {
+          const signal = context.abortSignal;
+          expect(signal).toBeDefined();
+          signal!.addEventListener(
+            "abort",
+            () => reject(signal!.reason),
+            { once: true },
+          );
+        }),
+    );
+    const progress: DeepResearchProgress[] = [];
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      maxDurationMs: 20,
+      onProgress: (event) => progress.push(event),
+    })[0]!;
+
+    await expect(tool.call(args)).rejects.toThrow(
+      "Deep Research exceeded its wall-clock budget",
+    );
+    expect(progress.at(-1)).toMatchObject({ phase: "failed" });
+  });
+
   it("rejects a leaked child interaction through the outer output schema", async () => {
     const { researcher, call } = makeResearcher();
     call.mockResolvedValueOnce({
@@ -228,6 +328,97 @@ describe("buildDeepResearchPrompt", () => {
     expect(DEEP_RESEARCH_INSTRUCTION).toContain("before ordinary retrieval");
     expect(DEEP_RESEARCH_INSTRUCTION).toContain("preserve any [[cite:N]] markers");
     expect(DEEP_RESEARCH_INSTRUCTION).toContain("citations JSON trailer");
+  });
+});
+
+describe("sealRetrievalAfterDeepResearch", () => {
+  it("leaves parent retrieval unchanged until Deep Research starts", async () => {
+    const guard = createDeepResearchCompletionGuard();
+    const originalCall = vi.fn(async () => ({ results: ["live"] }));
+    const requiresApproval = vi.fn(async () => ({ reason: "needs approval" }));
+    const [webSearch] = sealRetrievalAfterDeepResearch(
+      [
+        {
+          name: "web_search",
+          definition: vi.fn(),
+          requiresApproval,
+          call: originalCall,
+        } as unknown as AnyTool,
+      ],
+      guard,
+    );
+
+    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toEqual({
+      reason: "needs approval",
+    });
+    await expect(webSearch!.call({ query: "live" })).resolves.toEqual({
+      results: ["live"],
+    });
+    expect(originalCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips parent approval and refuses retrieval after Deep Research starts", async () => {
+    const { researcher } = makeResearcher("report");
+    const guard = createDeepResearchCompletionGuard();
+    const originalCall = vi.fn(async () => ({ results: ["should not run"] }));
+    const requiresApproval = vi.fn(async () => ({ reason: "needs approval" }));
+    const [webSearch] = sealRetrievalAfterDeepResearch(
+      [
+        {
+          name: "web_search",
+          definition: vi.fn(),
+          requiresApproval,
+          call: originalCall,
+        } as unknown as AnyTool,
+      ],
+      guard,
+    );
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      completionGuard: guard,
+    })[0]!;
+
+    await tool.call(args);
+
+    expect(await webSearch!.requiresApproval?.(args, approvalContext())).toBe(
+      false,
+    );
+    expect(requiresApproval).not.toHaveBeenCalled();
+    await expect(webSearch!.call({ query: "independent check" })).resolves.toEqual({
+      error: DEEP_RESEARCH_PARENT_SEAL_MESSAGE,
+    });
+    expect(originalCall).not.toHaveBeenCalled();
+  });
+
+  it("does not seal nested researcher tool instances", async () => {
+    const guard = createDeepResearchCompletionGuard();
+    const nestedCall = vi.fn(async () => ({ results: ["nested"] }));
+    const parentCall = vi.fn(async () => ({ results: ["parent"] }));
+    const nested = {
+      name: "web_search",
+      definition: vi.fn(),
+      call: nestedCall,
+    } as unknown as AnyTool;
+    const [parent] = sealRetrievalAfterDeepResearch(
+      [
+        {
+          name: "web_search",
+          definition: vi.fn(),
+          call: parentCall,
+        } as unknown as AnyTool,
+      ],
+      guard,
+    );
+
+    guard.markCompleted();
+    await expect(nested.call({ query: "nested" })).resolves.toEqual({
+      results: ["nested"],
+    });
+    await expect(parent!.call({ query: "parent" })).resolves.toEqual({
+      error: DEEP_RESEARCH_PARENT_SEAL_MESSAGE,
+    });
+    expect(parentCall).not.toHaveBeenCalled();
   });
 });
 

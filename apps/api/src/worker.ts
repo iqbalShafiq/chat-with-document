@@ -54,6 +54,22 @@ import { closeContext7Mcp } from "./lib/context7-server.js";
 import { closeRedis } from "./lib/redis.js";
 import { getActiveRunRegistry } from "./modules/chat/run-worker.js";
 import { createWorkerShutdownCoordinator } from "./worker-lifecycle.js";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+function chatWorkerPidFile(): string {
+  return (
+    process.env.CHAT_WORKER_PID_FILE ??
+    join(tmpdir(), "chat-with-document-worker.pid")
+  );
+}
+
+function publishWorkerPid(): void {
+  const file = chatWorkerPidFile();
+  writeFileSync(file, `${process.pid}\n`);
+  console.log(`[worker] pid ${process.pid} written to ${file}`);
+}
 
 let processEmbeddingModel: ReturnType<typeof createEmbeddingModel> | null = null;
 
@@ -411,9 +427,10 @@ const chatRunWorker = new Worker<ChatRunJobData>(
   },
 );
 
-chatRunWorker.on("ready", () =>
-  console.log(`[chat-run] ready on queue ${CHAT_RUN_QUEUE}`),
-);
+chatRunWorker.on("ready", () => {
+  console.log(`[chat-run] ready on queue ${CHAT_RUN_QUEUE}`);
+  publishWorkerPid();
+});
 
 chatRunWorker.on("failed", async (job, error) => {
   if (job?.data) {

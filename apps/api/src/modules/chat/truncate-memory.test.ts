@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   agentMemoryMessage: {
     findFirst: vi.fn(),
     findMany: vi.fn(),
+    count: vi.fn(),
     deleteMany: vi.fn(),
   },
   $transaction: vi.fn(),
@@ -61,6 +62,7 @@ describe("truncateSessionMemory", () => {
       message: userMessage(),
     });
     db.agentMemoryMessage.findMany.mockResolvedValue([]);
+    db.agentMemoryMessage.count.mockResolvedValue(0);
     db.agentMemoryMessage.deleteMany.mockResolvedValue({ count: 2 });
     db.agentMemorySession.update.mockResolvedValue({});
   });
@@ -119,5 +121,40 @@ describe("truncateSessionMemory", () => {
       truncateSessionMemory({ ...input, clientMessageId: "prompt-1" }),
     ).resolves.toMatchObject({ resolvedPosition: 3 });
     expect(db.agentMemoryMessage.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("allows a cancelled non-persisted prompt only when the native prefix count matches", async () => {
+    db.agentMemoryMessage.findMany.mockResolvedValueOnce([]);
+    db.agentMemoryMessage.count.mockResolvedValueOnce(2);
+
+    await expect(
+      truncateSessionMemory({
+        ...input,
+        mode: "exclude",
+        clientMessageId: "cancelled-prompt",
+        expectedPrefixMessageCount: 2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      deleted: 0,
+      keptThrough: -1,
+      resolvedPosition: null,
+    });
+    expect(db.agentMemoryMessage.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a missing prompt's native prefix changed", async () => {
+    db.agentMemoryMessage.findMany.mockResolvedValueOnce([]);
+    db.agentMemoryMessage.count.mockResolvedValueOnce(3);
+
+    await expect(
+      truncateSessionMemory({
+        ...input,
+        mode: "exclude",
+        clientMessageId: "cancelled-prompt",
+        expectedPrefixMessageCount: 2,
+      }),
+    ).rejects.toBeInstanceOf(TruncateTargetNotFoundError);
+    expect(db.agentMemoryMessage.deleteMany).not.toHaveBeenCalled();
   });
 });

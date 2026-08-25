@@ -52,7 +52,7 @@ function recipe(overrides: Record<string, unknown> = {}) {
       deepResearchEnabled: false,
     },
     imageGenSettings: null,
-    budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12 },
+  budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
     documents: { ids: [], catalog: [] },
     instructionFragments: ["Frozen instruction"],
     contextDescriptors: [{ id: "frozen", text: "Frozen context" }],
@@ -337,7 +337,7 @@ describe("run recipe reconstruction capability boundary", () => {
         webSearchConfig: () => null,
         imageGenerationConfig: () => null,
         profilingEnabled: () => false,
-        deepResearchLimits: () => ({ maxTurns: 8, maxSearches: 12 }),
+        deepResearchLimits: () => ({ maxTurns: 8, maxSearches: 12, maxDurationMs: 360_000 }),
         context7Requested: () => {
           context7Reads += 1;
           return false;

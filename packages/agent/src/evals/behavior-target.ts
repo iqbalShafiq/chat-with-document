@@ -21,9 +21,11 @@ import {
 } from "../tools/web-search.js";
 import {
   boundDeepResearchTools,
+  createDeepResearchCompletionGuard,
   createDeepResearchTools,
   DEEP_RESEARCH_INSTRUCTION,
   deepResearchLimits,
+  sealRetrievalAfterDeepResearch,
 } from "../tools/deep-research.js";
 import { createAgent } from "../agent.js";
 import {
@@ -252,6 +254,7 @@ export function buildEvalTools(
   // direct web tools inside the nested researcher so one parent approval does
   // not produce a second web approval.
   if (sessionConfig.deepResearchEnabled !== undefined) {
+    const completionGuard = createDeepResearchCompletionGuard();
     const researchTools = boundDeepResearchTools(
       [
         ...documentTools,
@@ -274,6 +277,11 @@ export function buildEvalTools(
       ],
       additionalTools: researchTools,
     });
+    const sealedParentTools = sealRetrievalAfterDeepResearch(
+      tools,
+      completionGuard,
+    );
+    tools.splice(0, tools.length, ...sealedParentTools);
     tools.push(
       ...createDeepResearchTools({
         enabled: sessionConfig.deepResearchEnabled === true,
@@ -283,6 +291,7 @@ export function buildEvalTools(
         onProgress: (event) => {
           deepResearchProgress.push(event.phase);
         },
+        completionGuard,
       }),
     );
     instructions.push(DEEP_RESEARCH_INSTRUCTION);

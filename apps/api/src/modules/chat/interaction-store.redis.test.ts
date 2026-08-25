@@ -44,7 +44,7 @@ const recipe = parseChatAgentRecipe({
   },
   features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false },
   imageGenSettings: null,
-  budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12 },
+  budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
   documents: { ids: [], catalog: [] },
   instructionFragments: [],
   contextDescriptors: [],

@@ -178,6 +178,7 @@ export const chatAgentRecipeSchema = z
         maxTurns: z.number().int().min(1).max(1_000),
         deepResearchMaxTurns: z.number().int().min(1).max(1_000),
         deepResearchMaxSearches: z.number().int().min(1).max(10_000),
+        deepResearchMaxDurationMs: z.number().int().min(1).max(30 * 60_000),
       })
       .strict(),
     documents: z

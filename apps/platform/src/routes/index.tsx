@@ -112,6 +112,7 @@ import {
   type ChatClientMetadata,
   type ChatRequestMetadata,
 } from "#/lib/chat/anvia-transport";
+import { createInteractionResumeStorage } from "#/lib/chat/interaction-resume-storage";
 import {
   ChatDataSchemas,
   ChatStreamMetadataSchema,
@@ -1116,6 +1117,8 @@ function ChatSession({
   );
   const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
   const [sessionImagesError, setSessionImagesError] = useState(false);
+  const [interactionReconcileVersion, setInteractionReconcileVersion] =
+    useState(0);
   const [activeContextImages, setActiveContextImages] = useState<
     GeneratedImageMeta[]
   >([]);
@@ -1142,6 +1145,10 @@ function ChatSession({
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
+  const [hydratedResumePolicy, setHydratedResumePolicy] = useState<{
+    modelId: string;
+    reasoningEffort: string | null;
+  } | null>(null);
   const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
     initialDeepResearchActivityState,
   );
@@ -1179,9 +1186,12 @@ function ChatSession({
   const messagesRef = useRef<readonly ChatUIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
   const chatRef = useRef<ChatController | null>(null);
+  /** useChat reports transport failures through onError instead of rejecting sendMessage. */
+  const chatRequestFailedRef = useRef(false);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
+  const resumedSessionRef = useRef<string | null>(null);
   const contextUsageVersionRef = useRef(0);
   /** Deferred composer prefill after a streamed run failure (editor is read-only while streaming). */
   const pendingFailedTextRef = useRef<string | null>(null);
@@ -1448,14 +1458,20 @@ function ChatSession({
     [queueActions, refreshContextUsage, refreshSessionImages],
   );
 
+  const interactionResumeStorage = useMemo(
+    () => createInteractionResumeStorage(window.sessionStorage),
+    [],
+  );
+
   const chat = useChat({
     transport: chatTransport,
     initialMessages,
     // Resume is driven explicitly by the run-status join effect; the v1
     // controller owns the version-3 snapshot and canonical request.
-    resume: { key: sessionId, storage: "sessionStorage", auto: false },
+    resume: { key: sessionId, storage: interactionResumeStorage, auto: false },
     onEvent: handleChatEvent,
     onError: (error) => {
+      chatRequestFailedRef.current = true;
       if (error instanceof ApiAuthError) {
         onAuthFailure();
         return;
@@ -1506,21 +1522,26 @@ function ChatSession({
     if (!current) return;
     stopInFlightRef.current = true;
     const streamId = current.streamId;
-    if (streamId) {
-      void stopChatRun(streamId).catch(() => {
-        // best-effort: local reset still stops the client stream
-      });
-    }
-    stopChatPreservingMessages(
-      {
-        messages: current.messages,
-        stop: () => current.stop(),
-        setMessages: (messages) => current.setMessages([...messages]),
-      },
-      (messages) => finalizeInterruptedTools([...messages]),
-    );
-    setQueueHold(true);
-  }, []);
+    void (async () => {
+      try {
+        if (streamId) await stopChatRun(streamId, sessionId);
+      } catch (error) {
+        setComposerError(
+          error instanceof Error ? error.message : "The chat run could not be stopped.",
+        );
+      } finally {
+        stopChatPreservingMessages(
+          {
+            messages: current.messages,
+            stop: () => current.stop(),
+            setMessages: (messages) => current.setMessages([...messages]),
+          },
+          (messages) => finalizeInterruptedTools([...messages]),
+        );
+        setQueueHold(true);
+      }
+    })();
+  }, [sessionId]);
 
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
@@ -1750,6 +1771,11 @@ function ChatSession({
   // change, resolve a supported fallback for the new model and persist both.
   useEffect(() => {
     if (!activeModel) return;
+    // Model and effort form one policy tuple in persisted interaction recipes.
+    // On reload React applies the stored model asynchronously; do not map the
+    // stored effort through the temporary default model in the intervening
+    // render or a pending interaction will resume with mismatched metadata.
+    if (activeModel.modelId !== readSelectedModel(models)) return;
     const base = reasoningInitializedRef.current
       ? selectedReasoningEffortRef.current
       : readSelectedReasoningEffort(activeModel.reasoningEfforts);
@@ -1763,7 +1789,19 @@ function ChatSession({
       setSelectedReasoningEffort(next);
       persistSelectedReasoningEffort(next);
     }
-  }, [activeModel, reasoningEfforts]);
+    setHydratedResumePolicy((current) =>
+      current?.modelId === activeModel.modelId &&
+      current.reasoningEffort === next
+        ? current
+        : { modelId: activeModel.modelId, reasoningEffort: next },
+    );
+  }, [activeModel, models, reasoningEfforts]);
+
+  const resumePolicyReady =
+    modelsStatus === "success" &&
+    activeModel !== null &&
+    hydratedResumePolicy?.modelId === selectedModel &&
+    hydratedResumePolicy.reasoningEffort === selectedReasoningEffort;
 
   // Poll context usage every 30s while the catalog is available.
   useEffect(() => {
@@ -1783,36 +1821,45 @@ function ChatSession({
   }, [selectedModel, selectedReasoningEffort, modelsStatus, refreshContextUsage]);
 
   // Rejoin a still-running run on load (closed-tab recovery) and surface a
-  // banner for a run that failed server-side. "missing" behaves as idle.
+  // banner for a run that failed server-side. The v1 continuation recipe
+  // includes the exact model/reasoning tuple, so never resume until the stored
+  // policy has been hydrated through the live catalog. "missing" is idle.
   useEffect(() => {
+    if (!resumePolicyReady || resumedSessionRef.current === sessionId) return;
     let cancelled = false;
     void (async () => {
+      let status: Awaited<ReturnType<typeof fetchRunStatus>> | null = null;
       try {
-        const status = await fetchRunStatus(sessionId);
-        if (cancelled) return;
-        if (status.status === "error") {
-          setPreviousRunError(true);
-        }
-        if (status.status === "running" && status.streamId) {
-          try {
-            // The v1 controller is the sole owner and validator of its
-            // canonical request, interaction state, stream id, and cursor.
-            await resumeChatRef.current();
-          } catch {
-            setComposerError(
-              "This active run could not be resumed in this browser. Reload the session to recover it.",
-            );
-          }
-        }
+        status = await fetchRunStatus(sessionId);
       } catch {
-        // ignore — resume state (if any) still handles rejoin
+        // Run status is advisory; the persisted v3 snapshot remains the
+        // authoritative browser-side input for controller restoration.
+      }
+      if (cancelled) return;
+      if (status?.status === "error") {
+        setPreviousRunError(true);
+      }
+      try {
+        // A native suspended interaction is terminal from the worker's
+        // perspective but still resumable by the user. The custom storage
+        // retains that v3 snapshot, so always let the controller restore it.
+        await resumeChatRef.current();
+      } catch {
+        if (!cancelled) {
+          setComposerError(
+            status?.status === "running" && status.streamId
+              ? "This active run could not be resumed in this browser. Reload the session to recover it."
+              : "Saved run state could not be restored. Reload the session to retry.",
+          );
+        }
+      } finally {
+        if (!cancelled) resumedSessionRef.current = sessionId;
       }
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once per sessionId
-  }, [sessionId]);
+  }, [resumePolicyReady, sessionId]);
 
   // Prefill the composer from a persisted failed [user, assistant error] tail.
   useEffect(() => {
@@ -2365,6 +2412,7 @@ function ChatSession({
 
       const contextSnippet = contextSnippetState.snippet;
 
+      chatRequestFailedRef.current = false;
       const sendPromise = chatRef.current!.sendMessage({
         text: input.text,
         metadata: withChatMessageMeta(undefined, {
@@ -2396,6 +2444,9 @@ function ChatSession({
         contextSnippetState.reset();
       }
       await sendPromise;
+      if (chatRequestFailedRef.current) {
+        throw new Error("The chat request could not be completed.");
+      }
 
       if (input.pinnedImageIds.length > 0) {
         await refreshActiveContext();
@@ -2514,23 +2565,58 @@ function ChatSession({
 
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
-    try {
-      const data = await loadChatMessages(sessionId);
-      const fresh = finalizeInterruptedTools(
-        parseMemoryMessages(data),
-      );
-      onReloadMessages?.(fresh);
-      chatRef.current?.setMessages(fresh);
-    } catch {
-      // keep the current view on failure
-    }
+    const data = await loadChatMessages(sessionId);
+    const fresh = finalizeInterruptedTools(parseMemoryMessages(data));
+    onReloadMessages?.(fresh);
+    chatRef.current?.setMessages(fresh);
   }, [sessionId, onReloadMessages]);
+
+  /**
+   * A resumed interaction is a separate v3 stream. Once it settles, replace
+   * the optimistic suspended snapshot with authoritative native memory and
+   * refresh persisted image metadata. This keeps tool output/state attached
+   * to its original message without prompt/time-based reconciliation.
+   */
+  const requestSettledInteractionReconcile = useCallback(async () => {
+    setInteractionReconcileVersion((version) => version + 1);
+  }, []);
+
+  const reconciledInteractionVersionRef = useRef(0);
+  useEffect(() => {
+    if (chat.status !== "ready") return;
+    if (
+      interactionReconcileVersion <= reconciledInteractionVersionRef.current
+    ) {
+      return;
+    }
+    const version = interactionReconcileVersion;
+    reconciledInteractionVersionRef.current = version;
+    void (async () => {
+      try {
+        await reloadChatFromServer();
+        await refreshSessionImages();
+      } catch {
+        if (reconciledInteractionVersionRef.current === version) {
+          setComposerError(
+            "The completed interaction could not be synchronized. Reload the conversation.",
+          );
+        }
+      }
+    })();
+  }, [
+    chat.status,
+    interactionReconcileVersion,
+    refreshSessionImages,
+    reloadChatFromServer,
+  ]);
 
   const handleStaleReload = useCallback(() => {
     setStaleDialog(null);
     setEditingMessageId(null);
     setEditContextImages([]);
-    void reloadChatFromServer();
+    void reloadChatFromServer().catch(() => {
+      setComposerError("The conversation could not be reloaded.");
+    });
   }, [reloadChatFromServer]);
 
   /**
@@ -2588,6 +2674,11 @@ function ChatSession({
         mode: "exclude",
         memoryPosition: meta.memoryPosition,
         clientMessageId: meta.clientMessageId,
+        expectedPrefixMessageCount: currentChat.messages
+          .slice(0, index)
+          .filter(
+            (item) => item.role === "user" || item.role === "assistant",
+          ).length,
       });
 
       // The dropped run's tool parts leave chat.messages, so live image
@@ -3064,9 +3155,13 @@ function ChatSession({
                     </div>
                   ) : null}
 
-                  <ApprovalPanel />
+                  <ApprovalPanel
+                    onInteractionSettled={requestSettledInteractionReconcile}
+                  />
 
-                  <ClarificationPanel />
+                  <ClarificationPanel
+                    onInteractionSettled={requestSettledInteractionReconcile}
+                  />
 
                   <StaleSessionDialog
                     open={staleDialog !== null}

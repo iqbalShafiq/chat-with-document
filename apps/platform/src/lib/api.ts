@@ -749,6 +749,7 @@ export type TruncateSessionMemoryInput = {
   mode: "include" | "exclude";
   memoryPosition?: number;
   clientMessageId?: string;
+  expectedPrefixMessageCount?: number;
 };
 
 export type TruncateSessionMemoryResult = {
@@ -769,6 +770,7 @@ export async function truncateSessionMemory(
       mode: input.mode,
       memoryPosition: input.memoryPosition,
       clientMessageId: input.clientMessageId,
+      expectedPrefixMessageCount: input.expectedPrefixMessageCount,
     }),
   });
 
@@ -1053,7 +1055,10 @@ export async function fetchSessionState(
   return data as SessionStateInfo;
 }
 
-export async function stopChatRun(streamId: string): Promise<void> {
+export async function stopChatRun(
+  streamId: string,
+  sessionId: string,
+): Promise<void> {
   const response = await apiFetch(`${API_BASE}/api/chat/stop`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1065,6 +1070,18 @@ export async function stopChatRun(streamId: string): Promise<void> {
     } | null;
     throw new Error(body?.error ?? "Failed to stop chat run");
   }
+
+  // The stop endpoint records an authoritative cancellation request. Do not
+  // expose the composer as idle until the worker has closed the stream and
+  // released this exact session lease; otherwise an immediate regenerate can
+  // race the previous run and receive RUN_ACTIVE.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const status = await fetchRunStatus(sessionId);
+    if (status.streamId !== streamId || status.status !== "running") return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for the chat run to stop");
 }
 
 export type SteerMessageInput = {

@@ -30,7 +30,10 @@ export function createOcrModel() {
 export function createEmbeddingModel(): EmbeddingModel {
   return getMistralClient().embeddingModel({
     modelId: "mistral-embed",
-    dimensions: 1024,
+    // mistral-embed has a fixed 1024-dimensional output. Anvia v1 forwards
+    // `dimensions` as Mistral's output_dimension request parameter, which
+    // this model rejects; the matching Qdrant collection dimension remains
+    // explicitly configured by the vector store.
     maxBatchSize: 32,
   });
 }

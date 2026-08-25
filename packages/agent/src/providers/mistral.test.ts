@@ -56,7 +56,6 @@ describe("Mistral provider", () => {
     expect(mocks.embeddingModel).toHaveBeenCalledOnce();
     expect(mocks.embeddingModel).toHaveBeenCalledWith({
       modelId: "mistral-embed",
-      dimensions: 1024,
       maxBatchSize: 32,
     });
     expect(mocks.ocrModel).toHaveBeenCalledOnce();

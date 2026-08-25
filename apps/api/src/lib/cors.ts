@@ -10,8 +10,9 @@ export function createAppCors() {
     },
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization", "Cookie"],
-    // Better Auth bearer plugin returns the session token here on sign-in.
-    exposeHeaders: ["set-auth-token"],
+    // Better Auth returns the session token here on sign-in. Anvia's browser
+    // client must also be able to verify the negotiated v3 stream protocol.
+    exposeHeaders: ["set-auth-token", "x-anvia-stream-protocol"],
     // DELETE is used by document session unlink (POST /links, DELETE /links);
     // PATCH by session rename (PATCH /sessions/:id); PUT by context snippet
     // upsert (PUT /chat/:sessionId/context-snippet).

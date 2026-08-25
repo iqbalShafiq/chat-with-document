@@ -7,6 +7,7 @@ import {
   isRunActiveConflict,
   requireChatReasoningEffort,
   stopChatPreservingMessages,
+  withCurrentRequestMetadata,
   type ChatRequestMetadata,
 } from "./anvia-transport";
 
@@ -14,7 +15,7 @@ type TestRequest = ClientStreamRequest<ChatRequestMetadata>;
 
 const metadata: ChatRequestMetadata = {
   sessionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  documentIds: ["550e8400-e29b-41d4-a716-446655440000"],
+  documentIds: ["cmt7z5x3800009ir7lz1ocf96"],
   modelId: "deepseek/deepseek-v4-flash-0731",
   reasoningEffort: "max",
   webSearchEnabled: true,
@@ -160,6 +161,55 @@ describe("Anvia v1 HTTP transport", () => {
     const body = JSON.parse(String(getCaptured()?.init?.body)) as Record<string, unknown>;
     expect(body.metadata).toEqual(current);
     expect(JSON.stringify(body)).not.toContain("sk-old");
+  });
+
+  it("sends only the latest user prompt because server memory owns chat history", async () => {
+    const { transport, getCaptured } = transportWithCapture(() => metadata);
+    const latest = {
+      role: "user" as const,
+      content: [{ type: "text" as const, text: "Apply the queued follow-up." }],
+    };
+    await collect(
+      transport.send({
+        request: {
+          type: "messages",
+          messages: [
+            message,
+            {
+              role: "assistant" as const,
+              content: [
+                { type: "text" as const, text: "x".repeat(40_000) },
+              ],
+            },
+            latest,
+          ],
+        },
+      }),
+    );
+
+    const body = JSON.parse(String(getCaptured()?.init?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body.messages).toEqual([latest]);
+    expect(JSON.stringify(body)).not.toContain("x".repeat(1_000));
+  });
+
+  it("fails closed when a messages request has no final user prompt", () => {
+    expect(() =>
+      withCurrentRequestMetadata(
+        {
+          type: "messages",
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "No prompt follows." }],
+            },
+          ],
+        },
+        metadata,
+      ),
+    ).toThrow("latest user prompt");
   });
 
   it("fails instead of defaulting when current policy metadata is impossible", async () => {

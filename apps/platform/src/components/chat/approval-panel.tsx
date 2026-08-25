@@ -51,7 +51,11 @@ function isApprovalInteraction(
 }
 
 /** Native v1 approval cards driven solely by the chat interaction controller. */
-export function ApprovalPanel() {
+export function ApprovalPanel({
+  onInteractionSettled,
+}: {
+  onInteractionSettled?: () => Promise<void>;
+}) {
   const chat = useChatContext();
   const pending = chat.interactions.pending.filter(isApprovalInteraction);
   const [models, setModels] = useState<ImageModelsState>({
@@ -91,6 +95,7 @@ export function ApprovalPanel() {
           onRetryModels={loadImageModels}
           respondingInteractions={chat.respondingInteractions}
           respond={chat.respondToInteraction}
+          onInteractionSettled={onInteractionSettled}
         />
       ))}
     </div>
@@ -105,6 +110,7 @@ function ApprovalCard({
   onRetryModels,
   respondingInteractions,
   respond,
+  onInteractionSettled,
 }: {
   interaction: ApprovalInteraction;
   models: ImageModelCatalogItem[];
@@ -116,6 +122,7 @@ function ApprovalCard({
     interactionId: string;
     response: AgentInteractionResponse;
   }) => Promise<void>;
+  onInteractionSettled?: () => Promise<void>;
 }) {
   const approval = interaction.request;
   const isImageTool = isImageToolName(approval.toolName);
@@ -178,6 +185,7 @@ function ApprovalCard({
         respondingInteractions,
         inFlight: inFlight.current,
       });
+      await onInteractionSettled?.();
       setRejectOpen(false);
       setRejectReason("");
     } catch (error) {

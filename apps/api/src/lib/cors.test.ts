@@ -30,6 +30,8 @@ describe("createAppCors", () => {
       "http://localhost:3000",
     );
     expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(res.headers.get("access-control-expose-headers"))
+      .toContain("x-anvia-stream-protocol");
   });
 
   it("allows extra TRUSTED_ORIGINS (mobile webview / Expo)", async () => {

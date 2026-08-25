@@ -7,7 +7,7 @@ import {
 
 const USER_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const SESSION_ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
-const DOCUMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
+const DOCUMENT_ID = "cmt7z5x3800009ir7lz1ocf96";
 const STREAM_ID = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
 
 const metadata: ChatRequestMetadata = {
@@ -129,7 +129,8 @@ describe("parseChatClientRequest", () => {
         value: { ...metadata, documentIds: Array.from({ length: 101 }, (_, index) => `${DOCUMENT_ID}-${index}`) },
         code: "INVALID_REQUEST_METADATA",
       },
-      { value: { ...metadata, documentIds: ["not-a-uuid"] }, code: "INVALID_REQUEST_METADATA" },
+      { value: { ...metadata, documentIds: [" "] }, code: "INVALID_REQUEST_METADATA" },
+      { value: { ...metadata, documentIds: ["x".repeat(257)] }, code: "INVALID_REQUEST_METADATA" },
       { value: { ...metadata, modelId: " " }, code: "INVALID_REQUEST_METADATA" },
       { value: { ...metadata, reasoningEffort: 4 }, code: "INVALID_REQUEST_METADATA" },
       { value: { ...metadata, webSearchEnabled: "true" }, code: "INVALID_REQUEST_METADATA" },

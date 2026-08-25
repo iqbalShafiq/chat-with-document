@@ -9,6 +9,7 @@ import {
   ChatDataSchemas,
   createChatClientStream,
   mapChatAppEvent,
+  toChatResumableEvent,
   type ChatAppEvent,
   type ChatClientEvent,
   type ChatStreamEvent,
@@ -102,6 +103,28 @@ describe("createChatClientStream", () => {
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();
+  });
+
+  it("omits absent optional progress fields from strict protocol-v3 JSON", async () => {
+    const events = await collect(createChatClientStream({
+      runId: "run-1",
+      metadata,
+      events: toAsync([
+        {
+          type: "deep_research_progress",
+          phase: "planning",
+          message: "Planning research",
+        },
+        outcome("response"),
+      ] as ChatStreamEvent[]),
+    }));
+    const progress = events.find(
+      (event) => event.type === "data" && event.name === "deepResearchProgress",
+    );
+    expect(progress).toBeDefined();
+    expect(progress).not.toHaveProperty("data.activities");
+    expect(progress).not.toHaveProperty("data.stats");
+    expect(() => toChatResumableEvent(progress!)).not.toThrow();
   });
 
   it("passes the native memory_compaction event through the v1 client adapter", async () => {

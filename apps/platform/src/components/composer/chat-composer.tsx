@@ -37,7 +37,7 @@ export function composerActionForStatus(
   hasContent: boolean,
 ): ComposerAction {
   if (isActiveComposerStatus(status)) return hasContent ? "queue" : "stop";
-  if (status === "ready" && hasContent) return "send";
+  if ((status === "ready" || status === "error") && hasContent) return "send";
   return "inactive";
 }
 
@@ -408,8 +408,7 @@ export function ChatComposer({
           disabled={
             isIngesting ||
             modelsUnavailable ||
-            chatStatus === "waiting" ||
-            chatStatus === "error"
+            chatStatus === "waiting"
           }
           onKeyDown={(event) => {
             if (
@@ -524,16 +523,12 @@ export function ChatComposer({
                 aria-label={
                   chatStatus === "waiting"
                     ? "Waiting for agent"
-                    : chatStatus === "error"
-                      ? "Send unavailable"
-                      : "Send"
+                    : "Send"
                 }
                 title={
                   chatStatus === "waiting"
                     ? "Waiting for agent"
-                    : chatStatus === "error"
-                      ? "Send unavailable"
-                      : "Send"
+                    : "Send"
                 }
                 disabled
                 className="inline-flex size-9 shrink-0 cursor-not-allowed items-center justify-center rounded-xl bg-accent text-canvas opacity-40"

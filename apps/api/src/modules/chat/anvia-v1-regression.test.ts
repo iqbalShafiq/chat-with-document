@@ -88,7 +88,7 @@ function recipeWithContext(context = staticContext()) {
     staticContext: context,
     features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false },
     imageGenSettings: null,
-    budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12 },
+    budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
     documents: { ids: [], catalog: [] },
     instructionFragments: ["Keep answers concise."],
     contextDescriptors: [{ id: "project", text: "A frozen project context." }],

@@ -115,8 +115,10 @@ export function mapChatAppEvent(
       const data = deepResearchProgressSchema.parse({
         phase: event.phase,
         message: event.message,
-        activities: event.activities,
-        stats: event.stats,
+        ...(event.activities === undefined
+          ? {}
+          : { activities: event.activities }),
+        ...(event.stats === undefined ? {} : { stats: event.stats }),
       });
       return withContext(context, { type: "data", name: "deepResearchProgress", data }) as ChatClientEvent;
     }

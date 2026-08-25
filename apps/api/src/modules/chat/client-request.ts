@@ -32,7 +32,7 @@ export const ChatRequestMetadataSchema = z
   .object({
     sessionId: uuidIdentifier,
     documentIds: z
-      .array(uuidIdentifier)
+      .array(boundedIdentifier)
       .max(MAX_CHAT_DOCUMENTS)
       .refine((ids) => new Set(ids).size === ids.length, "document ids must be unique"),
     modelId: boundedIdentifier,

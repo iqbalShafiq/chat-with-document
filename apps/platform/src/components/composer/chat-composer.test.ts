@@ -17,7 +17,8 @@ describe("Anvia v1 composer status contract", () => {
     ["submitted", false, "stop"],
     ["streaming", false, "stop"],
     ["waiting", true, "inactive"],
-    ["error", true, "inactive"],
+    ["error", true, "send"],
+    ["error", false, "inactive"],
     ["ready", false, "inactive"],
   ] as const)("maps %s with content=%s to %s", (status, hasContent, action) => {
     expect(composerActionForStatus(status, hasContent)).toBe(action);

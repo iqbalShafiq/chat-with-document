@@ -12,8 +12,10 @@ import {
   createCompletionModel,
   createDataAnalysisTools,
   boundDeepResearchTools,
+  createDeepResearchCompletionGuard,
   createDocumentTools,
   createDeepResearchTools,
+  sealRetrievalAfterDeepResearch,
   createImageGenerationTools,
   createRememberUserProfileTool,
   createSqlJsRunner,
@@ -912,6 +914,7 @@ export async function resolveChatAgentRecipe(
       maxTurns: 20,
       deepResearchMaxTurns: limits.maxTurns,
       deepResearchMaxSearches: limits.maxSearches,
+      deepResearchMaxDurationMs: limits.maxDurationMs,
     },
     documents: { ids: catalog.map((document) => document.id), catalog },
     instructionFragments: instructions,
@@ -1164,6 +1167,7 @@ export async function reconstructChatRunInput(input: {
   // tool, so this remains a one-level workflow.
   const deepResearchAvailable = recipe.capabilities.deepResearchAvailable;
   if (deepResearchAvailable) {
+    const completionGuard = createDeepResearchCompletionGuard();
     const researchWebTools = tavilyConfig
       ? createWebSearchTools({
           tavilyClient: createTavilyClient(tavilyConfig.apiKey),
@@ -1197,15 +1201,24 @@ export async function reconstructChatRunInput(input: {
       additionalTools: researchTools,
       memory: undefined,
     });
+    // Seal parent copies only. Nested researcher tools stay unsealed so the
+    // single Deep Research approval still covers its internal retrieval.
+    const sealedParentTools = sealRetrievalAfterDeepResearch(
+      tools,
+      completionGuard,
+    );
+    tools.splice(0, tools.length, ...sealedParentTools);
     tools.push(
       ...createDeepResearchTools({
         enabled: deepResearchEnabled,
         researcher,
         maxTurns: recipe.budgets.deepResearchMaxTurns,
         maxSearches: recipe.budgets.deepResearchMaxSearches,
+        maxDurationMs: recipe.budgets.deepResearchMaxDurationMs,
         hasGrant: (name) =>
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         onProgress: onDeepResearchProgress,
+        completionGuard,
       }),
     );
   }

@@ -381,6 +381,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       const session = await getOrCreateEmptyChatSession({
         userId: user.id,
         projectId,
+        isReusable: async (sessionId) =>
+          (await getRedis().exists(ACTIVE_RUN_KEY(sessionId))) === 0,
       });
       return c.json({
         sessionId: session.id,
@@ -612,6 +614,12 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       body.clientMessageId.trim().length > 0
         ? body.clientMessageId.trim()
         : undefined;
+    const expectedPrefixMessageCount =
+      typeof body.expectedPrefixMessageCount === "number" &&
+      Number.isSafeInteger(body.expectedPrefixMessageCount) &&
+      body.expectedPrefixMessageCount >= 0
+        ? body.expectedPrefixMessageCount
+        : undefined;
 
     if (memoryPosition === undefined && clientMessageId === undefined) {
       return c.json(
@@ -629,6 +637,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         mode,
         memoryPosition,
         clientMessageId,
+        expectedPrefixMessageCount,
       });
       return c.json(result);
     } catch (error) {

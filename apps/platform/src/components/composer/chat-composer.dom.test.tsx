@@ -154,9 +154,14 @@ describe("Anvia v1 composer DOM contract", () => {
     expect(primitiveStop).not.toHaveBeenCalled();
   });
 
-  it.each(["waiting", "error"] as const)("disables the editor while %s", (status) => {
-    renderComposer({ status });
+  it("disables the editor while waiting", () => {
+    renderComposer({ status: "waiting" });
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true);
+  });
+
+  it("keeps the editor enabled after an error so the user can recover", () => {
+    renderComposer({ status: "error" });
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(false);
   });
 
   it("associates immediate composer errors with an alert", () => {

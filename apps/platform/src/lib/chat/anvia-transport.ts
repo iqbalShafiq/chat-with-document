@@ -114,7 +114,7 @@ export function assertChatRequestMetadata(
     value.documentIds.length > MAX_DOCUMENTS ||
     new Set(value.documentIds).size !== value.documentIds.length ||
     value.documentIds.some(
-      (id) => !nonBlankString(id, MAX_IDENTIFIER_LENGTH) || !UUID_PATTERN.test(id),
+      (id) => !nonBlankString(id, MAX_IDENTIFIER_LENGTH),
     ) ||
     (value.reasoningEffort !== null &&
       !["low", "medium", "high", "max"].includes(value.reasoningEffort as string)) ||
@@ -134,9 +134,17 @@ export function withCurrentRequestMetadata(
   metadata: ChatRequestMetadata,
 ): ChatRequest {
   if (request.type === "messages") {
+    const latestPrompt = request.messages.at(-1);
+    if (!latestPrompt || latestPrompt.role !== "user") {
+      throw new Error("Chat request has no latest user prompt.");
+    }
     return {
       type: "messages",
-      messages: request.messages,
+      // This product uses Anvia memory on the server as conversation truth.
+      // Keep the full UI history in useChat/resume storage, but send only the
+      // new prompt across the trust boundary so generated reasoning and stale
+      // client history are never replayed as authoritative input.
+      messages: [latestPrompt],
       metadata,
       ...(request.resume === undefined ? {} : { resume: request.resume }),
     };

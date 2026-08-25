@@ -54,19 +54,28 @@ export type DeepResearchResearcher = {
   asTool(options: AgentToolOptions): Tool<{ prompt: string }, string>;
 };
 
+export type DeepResearchCompletionGuard = {
+  markCompleted(): void;
+  hasCompleted(): boolean;
+};
+
 export type DeepResearchToolScope = {
   enabled: boolean;
   researcher: DeepResearchResearcher;
   maxTurns?: number;
   maxSearches?: number;
+  maxDurationMs?: number;
   hasGrant?: (toolName: string) => Promise<boolean> | boolean;
   onProgress?: DeepResearchProgressReporter | undefined;
+  completionGuard?: DeepResearchCompletionGuard;
 };
 
 const DEFAULT_MAX_TURNS = 12;
 const DEFAULT_MAX_SEARCHES = 8;
+const DEFAULT_MAX_DURATION_MS = 6 * 60_000;
 const MAX_TURNS = 30;
 const MAX_SEARCHES = 20;
+const MAX_DURATION_MS = 30 * 60_000;
 
 const ACTIVITY_METADATA: Record<
   string,
@@ -138,7 +147,11 @@ function envInteger(name: string, fallback: number, max: number): number {
   return boundedInteger(Number.isFinite(value) ? value : undefined, fallback, max);
 }
 
-export function deepResearchLimits(): { maxTurns: number; maxSearches: number } {
+export function deepResearchLimits(): {
+  maxTurns: number;
+  maxSearches: number;
+  maxDurationMs: number;
+} {
   return {
     maxTurns: envInteger("DEEP_RESEARCH_MAX_TURNS", DEFAULT_MAX_TURNS, MAX_TURNS),
     maxSearches: envInteger(
@@ -146,6 +159,49 @@ export function deepResearchLimits(): { maxTurns: number; maxSearches: number } 
       DEFAULT_MAX_SEARCHES,
       MAX_SEARCHES,
     ),
+    maxDurationMs: envInteger(
+      "DEEP_RESEARCH_MAX_DURATION_MS",
+      DEFAULT_MAX_DURATION_MS,
+      MAX_DURATION_MS,
+    ),
+  };
+}
+
+function timedToolContext(
+  context: ToolCallContext,
+  durationMs: number,
+): { context: ToolCallContext; dispose: () => void } {
+  const controller = new AbortController();
+  const parent = context.abortSignal;
+  const abortFromParent = () => controller.abort(parent?.reason);
+  if (parent?.aborted) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+  const timer = setTimeout(() => {
+    const error = new Error("Deep Research exceeded its wall-clock budget.");
+    error.name = "TimeoutError";
+    controller.abort(error);
+  }, durationMs);
+  return {
+    context: { ...context, abortSignal: controller.signal },
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
+
+export const DEEP_RESEARCH_PARENT_SEAL_MESSAGE =
+  "Deep Research already completed for this request. Synthesize from that report; do not start another retrieval, analysis, or research run.";
+
+export function createDeepResearchCompletionGuard(): DeepResearchCompletionGuard {
+  let completed = false;
+  return {
+    markCompleted() {
+      completed = true;
+    },
+    hasCompleted() {
+      return completed;
+    },
   };
 }
 
@@ -154,7 +210,7 @@ Deep Research is available as a bounded, source-grounded workflow. Use it when t
 When the user explicitly requests Deep Research and provides a concrete question, call deep_research directly; do not ask a clarification question merely to restate the research scope.
 Call deep_research before ordinary retrieval when the request explicitly asks for Deep Research; do not pre-empt it with document or web tools.
 If deep_research is denied, do not call web_search, web_fetch, document search, or another retrieval tool for that request; answer only from the existing conversation and state when evidence is insufficient.
-After deep_research returns, preserve any [[cite:N]] markers and the citations JSON trailer; never emit citation markers without that trailer.
+After deep_research returns — whether it succeeded or failed — do not call web_search, web_fetch, document search, dataset analysis, or another retrieval tool, and do not call deep_research again for that request. Synthesize the user-facing answer from the research report only; preserve any [[cite:N]] markers and the citations JSON trailer; never emit citation markers without that trailer.
 `.trim();
 
 export function buildDeepResearchPrompt(prompt: string, maxSearches: number): string {
@@ -210,17 +266,29 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
     configured.maxSearches,
     MAX_SEARCHES,
   );
+  const maxDurationMs = boundedInteger(
+    scope.maxDurationMs,
+    configured.maxDurationMs,
+    MAX_DURATION_MS,
+  );
 
   const tool = createTool({
     ...deepResearchSpec,
     outputSchema: z.string(),
     requiresApproval: async (args, _context) =>
-      scope.enabled || (await hasSessionGrant(scope))
+      scope.completionGuard?.hasCompleted() ||
+      scope.enabled ||
+      (await hasSessionGrant(scope))
         ? false
         : {
-            reason: `${args.reason} Estimated cost/latency: bounded to up to ${maxTurns} agent turns and ${maxSearches} retrieval calls; provider-dependent latency is typically tens of seconds to a few minutes.`,
+            reason: `${args.reason} Estimated cost/latency: bounded to up to ${maxTurns} agent turns, ${maxSearches} retrieval calls, and ${Math.ceil(maxDurationMs / 60_000)} minutes wall clock.`,
           },
     execute: async ({ prompt }, context: ToolCallContext) => {
+      if (scope.completionGuard?.hasCompleted()) {
+        return DEEP_RESEARCH_PARENT_SEAL_MESSAGE;
+      }
+      scope.completionGuard?.markCompleted();
+
       await emit(scope, {
         phase: "planning",
         message: "Planning a bounded multi-source research run",
@@ -260,10 +328,16 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
             retrievalLimit: maxSearches,
           },
         });
-        const result = await researcherTool.call(
-          { prompt: buildDeepResearchPrompt(prompt, maxSearches) },
-          context,
-        );
+        const timed = timedToolContext(context, maxDurationMs);
+        let result: string;
+        try {
+          result = await researcherTool.call(
+            { prompt: buildDeepResearchPrompt(prompt, maxSearches) },
+            timed.context,
+          );
+        } finally {
+          timed.dispose();
+        }
         await emit(scope, {
           phase: "synthesizing",
           message: "Synthesizing findings and checking citations",
@@ -399,6 +473,42 @@ export function boundDeepResearchTools(
           });
           throw error;
         }
+      },
+    } as AnyTool;
+  });
+}
+
+/**
+ * After Deep Research starts in a parent run, evidence tools on that parent
+ * must not open a second retrieval/approval loop. Wrap parent copies only;
+ * the nested researcher keeps its own unsealed tool instances.
+ */
+export function sealRetrievalAfterDeepResearch(
+  tools: AnyTool[],
+  guard: DeepResearchCompletionGuard,
+): AnyTool[] {
+  return tools.map((tool) => {
+    if (!(tool.name in ACTIVITY_METADATA)) return tool;
+    return {
+      name: tool.name,
+      requiresApproval: async (
+        args: never,
+        context: never,
+      ): Promise<boolean | { reason: string }> => {
+        if (guard.hasCompleted()) return false;
+        const requirement = tool.requiresApproval;
+        if (typeof requirement === "function") {
+          return requirement(args, context);
+        }
+        return requirement ?? false;
+      },
+      parseInput: tool.parseInput,
+      definition: (prompt: string) => tool.definition(prompt),
+      call: async (args: unknown, context?: ToolCallContext) => {
+        if (guard.hasCompleted()) {
+          return { error: DEEP_RESEARCH_PARENT_SEAL_MESSAGE };
+        }
+        return tool.call(args, context);
       },
     } as AnyTool;
   });

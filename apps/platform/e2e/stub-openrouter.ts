@@ -264,23 +264,18 @@ function sse(event: string, data: unknown): string {
 
 function clarifyQuestions(): Record<string, unknown> {
   return {
-    title: "Klarifikasi gambar",
     questions: [
       {
         id: "q1",
-        question: "Gaya visual apa yang kamu inginkan?",
-        type: "single_choice",
-        options: [
-          { id: "minimalis", label: "A minimalis", recommended: true },
-          { id: "neon", label: "B neon" },
+        text: "Gaya visual apa yang kamu inginkan?",
+        choices: [
+          { value: "minimalis", label: "A minimalis" },
+          { value: "neon", label: "B neon" },
         ],
       },
       {
         id: "q2",
-        question: "Mau tambah detail lain?",
-        type: "free_text",
-        optional: true,
-        placeholder: "Ceritakan detailnya…",
+        text: "Detail tambahan apa yang harus digunakan?",
       },
     ],
   };
@@ -358,7 +353,7 @@ function handleResponses(
     );
   } else if (turn === 2 && scenario === "clarify") {
     events = toolCallStream(
-      { prompt: text, modelId: "openai/gpt-5-image-mini", aspectRatio: "16:9" },
+      { prompt: text, modelId: "openai/gpt-5-image-mini", aspectRatio: "3:2" },
       "generate_image",
     );
   } else if (turn === 2 && scenario === "websearch") {

@@ -13,6 +13,12 @@ export type TruncateMemoryInput = {
   memoryPosition?: number;
   /** Prefer for live messages stamped on send. */
   clientMessageId?: string;
+  /**
+   * Native user+assistant row count strictly before an optimistic prompt.
+   * Permits a no-op only when cancellation happened before Anvia persisted
+   * that prompt and the authoritative prefix is otherwise unchanged.
+   */
+  expectedPrefixMessageCount?: number;
 };
 
 export type TruncateMemoryResult = {
@@ -79,6 +85,12 @@ export async function truncateSessionMemory(
         input.clientMessageId.trim().length > 0
           ? input.clientMessageId.trim()
           : undefined;
+      const expectedPrefixMessageCount =
+        typeof input.expectedPrefixMessageCount === "number" &&
+        Number.isSafeInteger(input.expectedPrefixMessageCount) &&
+        input.expectedPrefixMessageCount >= 0
+          ? input.expectedPrefixMessageCount
+          : undefined;
 
       let target: { position: number; message: unknown } | undefined;
 
@@ -127,6 +139,28 @@ export async function truncateSessionMemory(
           take: 2,
           select: { position: true, message: true },
         });
+
+        if (
+          rows.length === 0 &&
+          input.mode === "exclude" &&
+          expectedPrefixMessageCount !== undefined
+        ) {
+          const currentPrefixMessageCount =
+            await tx.agentMemoryMessage.count({
+              where: {
+                memorySessionId: session.id,
+                role: { in: ["user", "assistant"] },
+              },
+            });
+          if (currentPrefixMessageCount === expectedPrefixMessageCount) {
+            return {
+              ok: true,
+              deleted: 0,
+              keptThrough: -1,
+              resolvedPosition: null,
+            };
+          }
+        }
 
         if (rows.length !== 1) {
           throw new TruncateTargetNotFoundError(staleTargetMessage);

@@ -53,6 +53,7 @@ const fixture = {
     maxTurns: 20,
     deepResearchMaxTurns: 8,
     deepResearchMaxSearches: 12,
+    deepResearchMaxDurationMs: 360_000,
   },
   documents: {
     ids: ["doc-1"],

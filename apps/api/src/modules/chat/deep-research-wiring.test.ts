@@ -70,4 +70,18 @@ describe("Deep Research server wiring", () => {
       /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.createDataAnalysisTools\(\),\s*\.\.\.tabularTools,/s,
     );
   });
+
+  it("seals parent retrieval after Deep Research starts without wrapping nested tools", () => {
+    const input = source("./build-run-input.ts");
+
+    expect(input).toContain("createDeepResearchCompletionGuard");
+    expect(input).toContain("sealRetrievalAfterDeepResearch");
+    expect(input).toContain("completionGuard");
+    expect(input).toMatch(
+      /boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools/,
+    );
+    expect(input).toMatch(
+      /sealRetrievalAfterDeepResearch\(\s*tools,\s*completionGuard/,
+    );
+  });
 });

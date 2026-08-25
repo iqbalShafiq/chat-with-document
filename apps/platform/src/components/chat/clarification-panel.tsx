@@ -22,7 +22,11 @@ function isQuestionInteraction(
 }
 
 /** Native v1 question cards; one submission answers every required prompt. */
-export function ClarificationPanel() {
+export function ClarificationPanel({
+  onInteractionSettled,
+}: {
+  onInteractionSettled?: () => Promise<void>;
+}) {
   const chat = useChatContext();
   const pending = chat.interactions.pending.filter(isQuestionInteraction);
   if (pending.length === 0) return null;
@@ -35,6 +39,7 @@ export function ClarificationPanel() {
           interaction={interaction}
           respondingInteractions={chat.respondingInteractions}
           respond={chat.respondToInteraction}
+          onInteractionSettled={onInteractionSettled}
         />
       ))}
     </div>
@@ -45,6 +50,7 @@ function QuestionCard({
   interaction,
   respondingInteractions,
   respond,
+  onInteractionSettled,
 }: {
   interaction: QuestionInteraction;
   respondingInteractions: ReadonlySet<string>;
@@ -52,6 +58,7 @@ function QuestionCard({
     interactionId: string;
     response: AgentInteractionResponse;
   }) => Promise<void>;
+  onInteractionSettled?: () => Promise<void>;
 }) {
   const request = interaction.request;
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -101,6 +108,7 @@ function QuestionCard({
         respondingInteractions,
         inFlight: inFlight.current,
       });
+      await onInteractionSettled?.();
     } catch (error) {
       setSubmitError(
         error instanceof Error
