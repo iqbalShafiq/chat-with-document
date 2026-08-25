@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const TARGET_VERSION = "1.0.1";
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCKFILE_PATH = join(REPOSITORY_ROOT, "pnpm-lock.yaml");
+const COMPOSE_PATH = join(REPOSITORY_ROOT, "docker-compose.yml");
 const DEPENDENCY_FIELDS = [
   "dependencies",
   "devDependencies",
@@ -207,6 +208,7 @@ if (configuredAnviaPatchKeys.length > 0) {
 }
 
 const lockfile = await readFile(LOCKFILE_PATH, "utf8");
+const compose = await readFile(COMPOSE_PATH, "utf8");
 const importerDependencies = parseImporterAnviaDependencies(lockfile);
 
 for (const [manifestName, manifest] of manifests) {
@@ -276,6 +278,25 @@ for (const packageName of referencedAnviaPackages) {
 if (/^patchedDependencies:\s*$/mu.test(lockfile)) {
   errors.push(
     "pnpm-lock.yaml: Anvia v1 cutover must not retain patchedDependencies",
+  );
+}
+
+const qdrantClientVersion = lockfile.match(
+  /'@qdrant\/js-client-rest@(\d+)\.(\d+)\.\d+'/u,
+);
+const qdrantServerVersion = compose.match(
+  /image:\s*qdrant\/qdrant:v(\d+)\.(\d+)\.\d+/u,
+);
+if (!qdrantClientVersion || !qdrantServerVersion) {
+  errors.push(
+    "Qdrant compatibility guard requires pinned client and docker server versions",
+  );
+} else if (
+  qdrantClientVersion[1] !== qdrantServerVersion[1] ||
+  Math.abs(Number(qdrantClientVersion[2]) - Number(qdrantServerVersion[2])) > 1
+) {
+  errors.push(
+    `docker-compose.yml: Qdrant server ${qdrantServerVersion[1]}.${qdrantServerVersion[2]} is incompatible with client ${qdrantClientVersion[1]}.${qdrantClientVersion[2]}`,
   );
 }
 

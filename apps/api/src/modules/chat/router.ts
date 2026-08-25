@@ -51,7 +51,7 @@ import {
 } from "./interaction-policy-store.js";
 import { resolveChatAgentRecipe } from "./build-run-input.js";
 import { releaseChatAgentRecipeClaim } from "./run-recipe.js";
-import { getContext7McpServer, isContext7Configured } from "../../lib/context7-server.js";
+import { isContext7Configured } from "../../lib/context7-server.js";
 import { resolveActiveDocuments } from "../documents/service.js";
 import {
   imageGenerationConfig,
@@ -915,7 +915,6 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     return c.json({ appliedIds });
   })
   .get("/capabilities", async (c) => {
-    const context7Server = await getContext7McpServer();
     const sessionId = c.req.query("sessionId");
     let hasActiveDocuments = false;
     if (sessionId) {
@@ -933,7 +932,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       webSearchAvailable: webSearchConfig() !== null,
       deepResearchAvailable: webSearchConfig() !== null || hasActiveDocuments,
       imageGenerationAvailable: imageGenerationConfig() !== null,
-      context7Available: isContext7Configured() && context7Server !== null,
+      context7Configured: isContext7Configured(),
     });
   })
   .post("/interactions/:interactionId/stage", async (c) => {

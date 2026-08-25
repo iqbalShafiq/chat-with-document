@@ -1057,7 +1057,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Feature flags for this deployment",
       description:
-        "Tells the client whether web search, Deep Research, image generation, and Context7 MCP are available. Pass sessionId to include document-only Deep Research availability.",
+        "Tells the client whether web search, Deep Research, and image generation are available, and whether Context7 MCP is configured. Pass sessionId to include document-only Deep Research availability.",
       security: bearerOrCookie,
       responses: {
         "200": jsonResponse(
@@ -1068,13 +1068,17 @@ export const chatPaths = {
               "webSearchAvailable",
               "deepResearchAvailable",
               "imageGenerationAvailable",
-              "context7Available",
+              "context7Configured",
             ],
             properties: {
               webSearchAvailable: { type: "boolean" },
               deepResearchAvailable: { type: "boolean" },
               imageGenerationAvailable: { type: "boolean" },
-              context7Available: { type: "boolean" },
+              context7Configured: {
+                type: "boolean",
+                description:
+                  "True when Context7 MCP is configured. Live connectivity is validated fail-closed by the chat worker when a run requests Context7.",
+              },
             },
           },
           {
@@ -1084,7 +1088,7 @@ export const chatPaths = {
                 webSearchAvailable: true,
                 deepResearchAvailable: true,
                 imageGenerationAvailable: true,
-                context7Available: false,
+                context7Configured: false,
               },
             },
           },

@@ -1126,7 +1126,7 @@ export type WebCapabilities = {
   webSearchAvailable: boolean;
   deepResearchAvailable: boolean;
   imageGenerationAvailable: boolean;
-  context7Available: boolean;
+  context7Configured: boolean;
 };
 
 const capabilitiesPromises = new Map<string, Promise<WebCapabilities>>();
@@ -1161,7 +1161,7 @@ async function fetchChatCapabilitiesRemote(
     typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).deepResearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).imageGenerationAvailable !== "boolean" ||
-    typeof (data as WebCapabilities).context7Available !== "boolean"
+    typeof (data as WebCapabilities).context7Configured !== "boolean"
   ) {
     throw new Error("Unexpected capabilities response shape");
   }

@@ -46,6 +46,23 @@ describe("Deep Research server wiring", () => {
     expect(openapi).toContain("deepResearchAvailable");
   });
 
+  it("reports Context7 configuration without opening an MCP transport in the API process", () => {
+    const router = source("./router.ts");
+    const openapi = source("../../openapi/paths/chat.ts");
+    const capabilitiesRoute = router.slice(
+      router.indexOf('.get("/capabilities"'),
+      router.indexOf('.post("/interactions/:interactionId/stage"'),
+    );
+
+    expect(capabilitiesRoute).toContain(
+      "context7Configured: isContext7Configured()",
+    );
+    expect(capabilitiesRoute).not.toContain("context7Available");
+    expect(capabilitiesRoute).not.toContain("getContext7McpServer");
+    expect(openapi).toContain('"context7Configured"');
+    expect(openapi).not.toContain('"context7Available"');
+  });
+
   it("gives the nested researcher the default data-analysis tools", () => {
     const input = source("./build-run-input.ts");
 
