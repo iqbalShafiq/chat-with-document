@@ -1,6 +1,15 @@
-import { Outlet, useRouterState } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
+import { Check, Loader2 } from "lucide-react";
+import { useEffect, type ReactNode } from "react";
 import { AuthChatDemo } from "#/components/auth/auth-chat-demo";
+import {
+  authHandoffCopy,
+  authHandoffKind,
+  authPaintedPathname,
+  isAuthHandoffPending,
+} from "#/components/auth/auth-handoff";
+import { preloadWorkspaceRoute } from "#/components/auth/preload-workspace";
+import { AnimatedStatusText } from "#/components/chat/animated-status-text";
 import { DocChatMark } from "#/components/layout/doc-chat-mark";
 
 /**
@@ -10,8 +19,27 @@ import { DocChatMark } from "#/components/layout/doc-chat-mark";
  * not a static marketing grid. Shared view-transition names morph into AppShell.
  */
 export function AuthShell() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isRegister = pathname.startsWith("/register");
+  const router = useRouter();
+  const { locationPathname, resolvedPathname } = useRouterState({
+    select: (s) => ({
+      locationPathname: s.location.pathname,
+      resolvedPathname: s.resolvedLocation?.pathname ?? s.location.pathname,
+    }),
+  });
+
+  useEffect(() => {
+    void preloadWorkspaceRoute(router);
+  }, [router]);
+
+  const paintedPathname = authPaintedPathname(
+    locationPathname,
+    resolvedPathname,
+  );
+  const isRegister = paintedPathname.startsWith("/register");
+  const leavingAuth = isAuthHandoffPending(
+    locationPathname,
+    resolvedPathname,
+  );
 
   return (
     <div className="relative flex h-[100dvh] max-h-[100dvh] overflow-hidden text-text">
@@ -40,10 +68,17 @@ export function AuthShell() {
 
             <div className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 pb-12 pt-[calc(3.5rem+32px)] md:px-10 lg:px-12">
               <div
-                key={pathname}
+                // Key login vs register only. location.pathname becomes "/"
+                // as soon as navigate() runs, which used to remount the form
+                // empty before the view transition could start.
+                key={isRegister ? "register" : "login"}
                 className="mx-auto flex w-full max-w-[22rem] flex-1 flex-col justify-center animate-fade-up sm:max-w-[24rem]"
               >
-                <Outlet />
+                {leavingAuth ? (
+                  <AuthHandoff kind={authHandoffKind(paintedPathname)} />
+                ) : (
+                  <Outlet />
+                )}
               </div>
             </div>
           </main>
@@ -82,12 +117,14 @@ function AuthSidebar({ isRegister }: { isRegister: boolean }) {
 export function AuthFormPanel({
   title,
   subtitle,
+  leading,
   children,
   footer,
 }: {
   title: string;
-  subtitle: string;
-  children: ReactNode;
+  subtitle: ReactNode;
+  leading?: ReactNode;
+  children?: ReactNode;
   footer?: ReactNode;
 }) {
   return (
@@ -107,13 +144,17 @@ export function AuthFormPanel({
         </span>
       </div>
 
+      {leading}
+
       <header className="mb-8">
         <h2 className="text-balance text-[1.65rem] font-semibold leading-[1.15] tracking-tight text-text md:text-[1.85rem]">
           {title}
         </h2>
-        <p className="mt-2.5 text-pretty text-sm leading-relaxed text-text-muted">
-          {subtitle}
-        </p>
+        {subtitle ? (
+          <p className="mt-2.5 text-pretty text-sm leading-relaxed text-text-muted">
+            {subtitle}
+          </p>
+        ) : null}
       </header>
 
       {children}
@@ -121,6 +162,36 @@ export function AuthFormPanel({
       {footer ? (
         <p className="mt-8 text-center text-sm text-text-muted">{footer}</p>
       ) : null}
+    </div>
+  );
+}
+
+function AuthHandoff({ kind }: { kind: "login" | "register" }) {
+  const copy = authHandoffCopy(kind);
+
+  return (
+    <div className="animate-fade-in" role="status" aria-busy="true">
+      <AuthFormPanel
+        leading={
+          <div
+            className="mb-6 inline-flex size-10 items-center justify-center rounded-2xl bg-success-soft text-success"
+            aria-hidden
+          >
+            <Check className="size-5" strokeWidth={2.25} />
+          </div>
+        }
+        title={copy.title}
+        subtitle={
+          <span className="inline-flex items-center gap-2">
+            <Loader2
+              className="size-4 shrink-0 animate-spin text-accent motion-reduce:animate-none"
+              strokeWidth={1.75}
+              aria-hidden
+            />
+            <AnimatedStatusText label={copy.detail} />
+          </span>
+        }
+      />
     </div>
   );
 }

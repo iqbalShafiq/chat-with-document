@@ -94,7 +94,7 @@ import {
   type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
-import { authClient, type SessionUser } from "#/lib/auth-client";
+import { consumeWorkspaceUser, getSessionUser } from "#/lib/auth-session";
 import {
   parseMessageCitations,
   validateCitationsAgainstSession,
@@ -226,22 +226,15 @@ function parseMemoryMessages(value: unknown): ChatUIMessage[] {
 export const Route = createFileRoute("/")({
   component: Home,
   beforeLoad: async () => {
-    const session = await authClient.getSession();
-    if (!session.data?.user) {
+    const user = consumeWorkspaceUser() ?? (await getSessionUser());
+    if (!user) {
       throw redirect({
         to: "/login",
         search: { redirect: "/" },
         viewTransition: true,
       });
     }
-    return {
-      user: {
-        id: session.data.user.id,
-        email: session.data.user.email,
-        name: session.data.user.name,
-        image: session.data.user.image ?? null,
-      } satisfies SessionUser,
-    };
+    return { user };
   },
 });
 

@@ -6,19 +6,24 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import {
-  AUTH_SUBMIT_CLASS,
   AuthPasswordField,
+  AuthSubmitButton,
   AuthTextField,
 } from "#/components/auth/auth-form-fields";
 import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
+import {
+  beginWorkspaceHandoff,
+  getSessionUser,
+  toSessionUser,
+} from "#/lib/auth-session";
 import { clearSessionOnAuth } from "#/lib/session-storage";
 
 export const Route = createFileRoute("/_auth/register")({
   component: RegisterPage,
   beforeLoad: async () => {
-    const session = await authClient.getSession();
-    if (session.data?.user) {
+    const user = await getSessionUser();
+    if (user) {
       throw redirect({ to: "/", viewTransition: true });
     }
   },
@@ -82,15 +87,20 @@ function RegisterPage() {
         setFormError(
           result.error.message || "Could not create account. Try another email.",
         );
+        setBusy(false);
         return;
       }
 
-      clearSessionOnAuth();
-      // View transition: shared sidebar/topbar morph into the chat shell.
+      const signedUp = result.data?.user;
+      if (signedUp) {
+        beginWorkspaceHandoff(toSessionUser(signedUp));
+      } else {
+        clearSessionOnAuth();
+      }
+      // Stay busy until AuthShell swaps in the handoff / view transition.
       await navigate({ to: "/", viewTransition: true });
     } catch {
       setFormError("Could not register. Check your connection and try again.");
-    } finally {
       setBusy(false);
     }
   };
@@ -112,7 +122,12 @@ function RegisterPage() {
         </>
       }
     >
-      <form className="flex flex-col gap-5" onSubmit={onSubmit} noValidate>
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={onSubmit}
+        noValidate
+        aria-busy={busy || undefined}
+      >
         <AuthTextField
           label="Name"
           type="text"
@@ -167,13 +182,9 @@ function RegisterPage() {
           </div>
         ) : null}
 
-        <button
-          type="submit"
-          className={`${AUTH_SUBMIT_CLASS} mt-1`}
-          disabled={busy}
-        >
-          {busy ? "Creating account…" : "Create account"}
-        </button>
+        <AuthSubmitButton busy={busy} busyLabel="Creating account…">
+          Create account
+        </AuthSubmitButton>
       </form>
     </AuthFormPanel>
   );

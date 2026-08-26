@@ -6,12 +6,17 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import {
-  AUTH_SUBMIT_CLASS,
   AuthPasswordField,
+  AuthSubmitButton,
   AuthTextField,
 } from "#/components/auth/auth-form-fields";
 import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
+import {
+  beginWorkspaceHandoff,
+  getSessionUser,
+  toSessionUser,
+} from "#/lib/auth-session";
 import { clearSessionOnAuth } from "#/lib/session-storage";
 
 export const Route = createFileRoute("/_auth/login")({
@@ -23,8 +28,8 @@ export const Route = createFileRoute("/_auth/login")({
         : undefined,
   }),
   beforeLoad: async () => {
-    const session = await authClient.getSession();
-    if (session.data?.user) {
+    const user = await getSessionUser();
+    if (user) {
       throw redirect({ to: "/", viewTransition: true });
     }
   },
@@ -70,15 +75,20 @@ function LoginPage() {
         setFormError(
           result.error.message || "Invalid email or password",
         );
+        setBusy(false);
         return;
       }
 
-      clearSessionOnAuth();
-      // View transition: shared sidebar/topbar morph into the chat shell.
+      const signedIn = result.data?.user;
+      if (signedIn) {
+        beginWorkspaceHandoff(toSessionUser(signedIn));
+      } else {
+        clearSessionOnAuth();
+      }
+      // Stay busy until AuthShell swaps in the handoff / view transition.
       await navigate({ to: redirect ?? "/", viewTransition: true });
     } catch {
       setFormError("Could not sign in. Check your connection and try again.");
-    } finally {
       setBusy(false);
     }
   };
@@ -99,7 +109,12 @@ function LoginPage() {
         </>
       }
     >
-      <form className="flex flex-col gap-5" onSubmit={onSubmit} noValidate>
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={onSubmit}
+        noValidate
+        aria-busy={busy || undefined}
+      >
         <AuthTextField
           label="Email"
           type="email"
@@ -132,13 +147,9 @@ function LoginPage() {
           </div>
         ) : null}
 
-        <button
-          type="submit"
-          className={`${AUTH_SUBMIT_CLASS} mt-1`}
-          disabled={busy}
-        >
-          {busy ? "Signing in…" : "Continue"}
-        </button>
+        <AuthSubmitButton busy={busy} busyLabel="Signing in…">
+          Continue
+        </AuthSubmitButton>
       </form>
     </AuthFormPanel>
   );
