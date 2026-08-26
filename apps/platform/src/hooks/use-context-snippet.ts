@@ -38,7 +38,10 @@ export function useContextSnippet(sessionId: string) {
       setError(null);
     } catch {
       if (version !== mutationRef.current) return;
-      setError("Could not load context snippet");
+      // A missing or unreadable snippet is an empty chip, not a composer error.
+      // Pin/remove still surface their own mutation errors.
+      syncSnippet(null);
+      setError(null);
     } finally {
       if (version === mutationRef.current) setLoading(false);
     }

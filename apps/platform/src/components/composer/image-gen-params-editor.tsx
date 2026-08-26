@@ -64,16 +64,16 @@ export function ImageGenParamsEditor({
     const nextQualities = item?.imageCapabilities?.quality ?? [];
     const ratioStillValid = nextRatios.includes(settings.aspectRatio ?? "");
     const qualityStillValid = nextQualities.includes(settings.quality ?? "");
-    onChange({
-      ...settings,
-      modelId,
-      ...(ratioStillValid
-        ? {}
-        : nextRatios.length > 0
-          ? { aspectRatio: nextRatios[0] }
-          : { aspectRatio: undefined }),
-      ...(qualityStillValid ? {} : { quality: undefined }),
-    });
+    const next: ImageGenSettings = { ...settings, modelId };
+    if (!ratioStillValid) {
+      if (!requireExplicitModel && nextRatios.length > 0) {
+        next.aspectRatio = nextRatios[0];
+      } else {
+        delete next.aspectRatio;
+      }
+    }
+    if (!qualityStillValid) delete next.quality;
+    onChange(next);
   };
 
   const handleAspectRatioChange = (aspectRatio: string) => {

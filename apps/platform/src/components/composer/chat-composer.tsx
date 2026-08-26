@@ -69,7 +69,6 @@ export function ChatComposer({
   modelsError = null,
   onRetryModels = () => {},
   contextUsage = null,
-  contextUsageError = false,
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
@@ -124,8 +123,6 @@ export function ChatComposer({
   modelsError?: string | null;
   onRetryModels?: () => void;
   contextUsage?: ContextUsageInfo | null;
-  /** Latest context-usage refresh failed (ring shows a transient hint). */
-  contextUsageError?: boolean;
   /** Per-session web-search toggle state (default off). */
   webSearchEnabled?: boolean;
   /** Server has web tools configured (TAVILY_API_KEY). */
@@ -167,8 +164,11 @@ export function ChatComposer({
 }) {
   const active = isActiveComposerStatus(chatStatus);
   const busy = isIngesting || active;
-  const modelsReady = modelsStatus === "success" && models.length > 0;
-  const modelsUnavailable = modelsStatus !== "success";
+  const modelsReady =
+    modelsStatus === "success" &&
+    models.length > 0 &&
+    models.some((item) => item.modelId === model);
+  const modelsUnavailable = !modelsReady;
   // Exit animation state for the context chip: the remove action is deferred
   // ~180ms so the fade-out can play before the snippet unmounts.
   const [removingContext, setRemovingContext] = useState(false);
@@ -220,18 +220,22 @@ export function ChatComposer({
     if (!active) stopRequestedRef.current = false;
   }, [active]);
 
-  // Optimistic clear: when a run becomes active, empty the composer (text +
-  // image attachments) right away. The transition guard is important: the
-  // user may type a follow-up while submitted, and the later submitted →
-  // streaming transition must not erase that follow-up.
+  // Optimistic clear on send: ready/error → submitted blanks the field
+  // immediately. Skip waiting → submitted/streaming so a follow-up typed
+  // before an approval/clarification is not wiped when the user allows it.
   const wasActiveRef = useRef(false);
+  const previousStatusRef = useRef(chatStatus);
   useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = chatStatus;
     if (active && !wasActiveRef.current && !suppressOptimisticClear?.current) {
-      composer.setInput("");
-      composer.clearAttachments();
+      if (previousStatus !== "waiting") {
+        composer.setInput("");
+        composer.clearAttachments();
+      }
     }
     wasActiveRef.current = active;
-  }, [active, composer, suppressOptimisticClear]);
+  }, [active, chatStatus, composer, suppressOptimisticClear]);
 
   // Queue-item edit hydration: replace the composer contents with the item's
   // draft (text + attachments). A null draft clears the editor (cancel edit).
@@ -396,14 +400,14 @@ export function ChatComposer({
         onCancelEdit={onQueueCancelEdit}
       />
 
-      <div className="relative flex min-h-[2.75rem] flex-col pb-11">
+      <div className="relative pb-11">
         <ComposerPrimitive.TextareaInput
           ref={composerInputRef}
-          className="composer-input min-h-[1.5rem] w-full min-w-0 flex-1 bg-transparent px-1 text-sm leading-relaxed text-text"
+          className="composer-input chat-scroll block min-h-[1.625em] w-full min-w-0 resize-none bg-transparent px-1 text-sm leading-relaxed text-text"
           data-anvia-composer-editor
           data-anvia-composer-input
           minRows={1}
-          maxRows={8}
+          maxRows={4}
           placeholder={placeholderText}
           disabled={
             isIngesting ||
@@ -456,11 +460,6 @@ export function ChatComposer({
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5">
-            {contextUsageError ? (
-              <span className="shrink-0 text-[10px] font-medium text-danger/80 animate-fade-in">
-                Usage unavailable
-              </span>
-            ) : null}
             <ContextUsageIndicator
               models={models}
               contextUsage={contextUsage ?? null}

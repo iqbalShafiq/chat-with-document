@@ -42,6 +42,7 @@ import {
   deleteChatSession,
   fetchContextUsage,
   fetchRunStatus,
+  fetchInteractionStatus,
   fetchChatCapabilities,
   getOrCreateEmptyChatSession,
   getProject,
@@ -112,7 +113,11 @@ import {
   type ChatClientMetadata,
   type ChatRequestMetadata,
 } from "#/lib/chat/anvia-transport";
-import { createInteractionResumeStorage } from "#/lib/chat/interaction-resume-storage";
+import {
+  createInteractionResumeStorage,
+  discardChatResumeSnapshot,
+  peekPendingResumeInteractionIds,
+} from "#/lib/chat/interaction-resume-storage";
 import {
   ChatDataSchemas,
   ChatStreamMetadataSchema,
@@ -1043,7 +1048,7 @@ function Home() {
         ) : null}
 
         {showChatRoom ? (
-          initialMessages === null ? (
+          !sessionId || initialMessages === null ? (
             <div
               key="chat-loading"
               className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
@@ -1161,7 +1166,6 @@ function ChatSession({
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
-  const [contextUsageError, setContextUsageError] = useState(false);
   const [previousRunError, setPreviousRunError] = useState(false);
   /** Latest request policy for the v1 transport (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
@@ -1361,6 +1365,7 @@ function ChatSession({
   /** Fetch context usage once; shared by the polling effect and message_end. */
   const refreshContextUsage = useCallback(async () => {
     if (modelsStatusRef.current !== "success") return;
+    if (!selectedModelRef.current) return;
     const version = ++contextUsageVersionRef.current;
     try {
       const usage = await fetchContextUsage({
@@ -1370,10 +1375,10 @@ function ChatSession({
       });
       if (version !== contextUsageVersionRef.current) return;
       setContextUsage(usage);
-      setContextUsageError(false);
     } catch {
+      // Fresh chats and catalog races must not banner the composer.
       if (version === contextUsageVersionRef.current) {
-        setContextUsageError(true);
+        setContextUsage(null);
       }
     }
   }, [sessionId]);
@@ -1729,7 +1734,6 @@ function ChatSession({
     setAttachmentErrors([]);
     setIsIngesting(false);
     setContextUsage(null);
-    setContextUsageError(false);
     setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
     void refreshSessionDocuments();
@@ -1846,6 +1850,23 @@ function ChatSession({
         setPreviousRunError(true);
       }
       try {
+        // sessionStorage keeps a suspended approval after refresh. Redis may
+        // already have expired it — drop the snapshot so the card does not
+        // return as a live prompt.
+        const pendingIds = peekPendingResumeInteractionIds(
+          window.sessionStorage,
+          sessionId,
+        );
+        if (pendingIds.length > 0) {
+          const statuses = await Promise.all(
+            pendingIds.map((id) => fetchInteractionStatus(id)),
+          );
+          const anyLive = statuses.some((status) => status === "pending");
+          if (!anyLive) {
+            discardChatResumeSnapshot(window.sessionStorage, sessionId);
+            if (status?.status !== "running") return;
+          }
+        }
         // A native suspended interaction is terminal from the worker's
         // perspective but still resumable by the user. The custom storage
         // retains that v3 snapshot, so always let the controller restore it.
@@ -3236,7 +3257,6 @@ function ChatSession({
                     modelsError={modelsError}
                     onRetryModels={modelsRetry}
                     contextUsage={contextUsage}
-                    contextUsageError={contextUsageError}
                     deepResearchEnabled={deepResearchEnabled}
                     deepResearchAvailable={
                       capabilities?.deepResearchAvailable ?? false

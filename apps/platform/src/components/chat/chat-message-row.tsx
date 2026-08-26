@@ -32,17 +32,27 @@ import {
   messageHasUserFacingText,
 } from "#/lib/chat/message-text";
 
-function shouldShowMessageActions(
+export function shouldShowMessageActions(
   message: UIMessage,
   isGenerationEnd: boolean,
+  chatStatus: UseChatStatus = "ready",
+  lastMessageId?: string,
 ): boolean {
   if (message.role === "user") return true;
   if (message.role === "tool") return false;
   if (message.role !== "assistant") return false;
-  // Copy/timestamp footer only on the FINAL assistant message of a
-  // generation — an agent turn may emit several assistant messages
-  // (reply → tool → thinking → reply) and the footer belongs at the bottom.
-  return isGenerationEnd;
+  // Copy/reply only on the FINAL assistant message of a generation — an
+  // agent turn may emit several assistant messages and the footer belongs
+  // at the bottom. Hide them on the in-flight bubble until the run settles.
+  if (!isGenerationEnd) return false;
+  const inFlight =
+    chatStatus === "submitted" ||
+    chatStatus === "streaming" ||
+    chatStatus === "waiting";
+  if (inFlight && lastMessageId !== undefined && message.id === lastMessageId) {
+    return false;
+  }
+  return true;
 }
 
 function isIntermediateStepMessage(message: UIMessage): boolean {
@@ -155,6 +165,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   const showActions = shouldShowMessageActions(
     message,
     generationInfo?.isGenerationEnd ?? true,
+    chatStatus,
+    lastMessageId,
   );
   const isEditing =
     message.role === "user" && editingMessageId === message.id;
@@ -355,11 +367,15 @@ function AttachmentImageStrip({ parts }: { parts: AttachmentImagePart[] }) {
 
 export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
   if (part.type === "text") return part.text.trim().length > 0;
+  if (part.type === "data") {
+    // Progress/queue events have dedicated chrome; do not reprint them
+    // as transcript lines on every update.
+    return part.name !== "deepResearchProgress";
+  }
   if (
     part.type === "reasoning" ||
     part.type === "tool" ||
     part.type === "source" ||
-    part.type === "data" ||
     part.type === "error"
   ) return true;
   if (part.type === "attachment") {
@@ -524,11 +540,9 @@ function ChatMessageParts({
           return (
             <MessagePrimitive.Part className="min-w-0 max-w-full">
               <div className="text-xs text-text-muted" role="status">
-                {part.name === "deepResearchProgress"
-                  ? "Research progress updated"
-                  : part.name === "queuedMessageApplied"
-                    ? "Queued message applied"
-                    : "Chat state updated"}
+                {part.name === "queuedMessageApplied"
+                  ? "Queued message applied"
+                  : "Chat state updated"}
               </div>
             </MessagePrimitive.Part>
           );

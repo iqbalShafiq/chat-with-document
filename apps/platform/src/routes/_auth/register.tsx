@@ -12,11 +12,7 @@ import {
 } from "#/components/auth/auth-form-fields";
 import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
-import {
-  clearStoredSessionId,
-  createSessionId,
-  persistSessionId,
-} from "#/lib/session-storage";
+import { clearSessionOnAuth } from "#/lib/session-storage";
 
 export const Route = createFileRoute("/_auth/register")({
   component: RegisterPage,
@@ -89,8 +85,7 @@ function RegisterPage() {
         return;
       }
 
-      clearStoredSessionId();
-      persistSessionId(createSessionId());
+      clearSessionOnAuth();
       // View transition: shared sidebar/topbar morph into the chat shell.
       await navigate({ to: "/", viewTransition: true });
     } catch {

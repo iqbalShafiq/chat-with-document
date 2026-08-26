@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createInteractionResumeStorage } from "./interaction-resume-storage";
+import {
+  chatResumeStorageKey,
+  createInteractionResumeStorage,
+  discardChatResumeSnapshot,
+  peekPendingResumeInteractionIds,
+} from "./interaction-resume-storage";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -39,5 +44,30 @@ describe("createInteractionResumeStorage", () => {
     storage.removeItem("bad");
     expect(storage.getItem("done")).toBeNull();
     expect(storage.getItem("bad")).toBeNull();
+  });
+
+  it("reads pending interaction ids and discards a stale snapshot from backing storage", () => {
+    const backing = memoryStorage();
+    const sessionId = "session-1";
+    backing.setItem(
+      chatResumeStorageKey(sessionId),
+      JSON.stringify({
+        version: 3,
+        streamId: "stream-1",
+        lastEventId: 2,
+        messages: [],
+        interactions: [
+          { status: "pending", runId: "run-1", request: { id: "interaction-live" } },
+          { status: "responded", runId: "run-1", request: { id: "interaction-old" } },
+        ],
+        request: { type: "messages", messages: [] },
+      }),
+    );
+    expect(peekPendingResumeInteractionIds(backing, sessionId)).toEqual([
+      "interaction-live",
+    ]);
+    discardChatResumeSnapshot(backing, sessionId);
+    expect(backing.getItem(chatResumeStorageKey(sessionId))).toBeNull();
+    expect(peekPendingResumeInteractionIds(backing, sessionId)).toEqual([]);
   });
 });

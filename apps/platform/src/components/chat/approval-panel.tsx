@@ -160,17 +160,24 @@ function ApprovalCard({
         ...(input.reason !== undefined ? { reason: input.reason } : {}),
       });
       let policy: InteractionPolicy | undefined;
+      const compactEdited = compactImageSettings(editedSettings);
+      const compactOriginal = compactImageSettings(parsedImage?.settings ?? {});
       if (
         input.approved === true &&
         isImageTool &&
-        !imageSettingsEqual(parsedImage?.settings, editedSettings)
+        !imageSettingsEqual(compactOriginal, compactEdited)
       ) {
+        if (!compactEdited.modelId) {
+          throw new Error(
+            "Select an image model before changing generation settings.",
+          );
+        }
         if (modelsLoading || modelsError || models.length === 0) {
           throw new Error("Image settings are unavailable. Try again.");
         }
         policy = {
           ...(input.grantScope ? { grantScope: input.grantScope } : {}),
-          overrideArgs: buildImageOverride(editedSettings, { catalog: models }),
+          overrideArgs: buildImageOverride(compactEdited, { catalog: models }),
           imageCatalog: models,
         };
       } else if (input.grantScope) {
@@ -384,6 +391,16 @@ function parseImageArgs(
     ...(typeof input.prompt === "string" ? { prompt: input.prompt } : {}),
     settings,
   };
+}
+
+function compactImageSettings(settings: ImageGenSettings): ImageGenSettings {
+  const next: ImageGenSettings = {};
+  if (settings.modelId !== undefined) next.modelId = settings.modelId;
+  if (settings.aspectRatio !== undefined) next.aspectRatio = settings.aspectRatio;
+  if (settings.quality !== undefined) next.quality = settings.quality;
+  if (settings.background !== undefined) next.background = settings.background;
+  if (settings.n !== undefined) next.n = settings.n;
+  return next;
 }
 
 function imageSettingsEqual(

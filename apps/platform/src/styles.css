@@ -812,21 +812,18 @@ body {
 }
 
 /*
-  TipTap nests: [data-anvia-composer-input] > div > [data-anvia-composer-editor]
+  Native composer textarea (ComposerPrimitive.TextareaInput).
+  Anvia autoResize owns height (minRows→maxRows) and overflowY. Do not set
+  overflow/max-height here — they pin scrollHeight to one line. Scrollbars
+  use the shared .chat-scroll class once the primitive enables overflow.
 */
-.composer-input[data-anvia-composer-input] {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+.composer-input[data-anvia-composer-input],
+.composer-input[data-anvia-composer-input] [data-anvia-composer-editor],
+textarea[data-anvia-composer-editor] {
+  display: block;
+  resize: none;
+  min-height: 1.625em;
   color: var(--color-text);
-}
-
-.composer-input[data-anvia-composer-input]::-webkit-scrollbar {
-  width: 6px;
-}
-
-.composer-input[data-anvia-composer-input]::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  background-color: rgb(255 255 255 / 0.14);
 }
 
 .composer-input[data-anvia-composer-input] > div {
@@ -838,7 +835,8 @@ body {
 .composer-input[data-anvia-composer-input] [data-anvia-composer-editor] {
   width: 100%;
   outline: none;
-  min-height: 1.5em;
+  resize: none;
+  min-height: 1.625em;
 }
 
 .composer-input[data-anvia-composer-input] [data-anvia-composer-editor] p {

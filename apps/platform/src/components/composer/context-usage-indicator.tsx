@@ -159,7 +159,7 @@ export function ContextUsageIndicator({
                   </div>
                 </div>
               ) : contextUsage === null ? (
-                <p className="text-xs text-text-muted">Usage data unavailable</p>
+                <p className="text-xs text-text-muted">Estimating context usage…</p>
               ) : (
                 <div className="flex flex-col gap-2.5">
                   {(() => {

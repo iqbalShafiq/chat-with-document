@@ -69,7 +69,7 @@ function controller(
   };
 }
 
-function renderComposer(input: {
+function composerTree(input: {
   status: ChatController["status"];
   onQueueSubmit?: (text: string, attachments: UIAttachment[]) => Promise<void> | void;
   onStopRun?: () => void;
@@ -79,7 +79,7 @@ function renderComposer(input: {
 }) {
   const chat = controller(input.status, input.primitiveStop);
   const submitMessage = vi.fn(async (_args: ComposerSubmitMessageArgs) => undefined);
-  render(
+  const tree = (
     <ChatProvider controller={chat}>
       <ComposerPrimitive.Root
         attachments={input.defaultAttachments}
@@ -103,9 +103,22 @@ function renderComposer(input: {
           modelsStatus="success"
         />
       </ComposerPrimitive.Root>
-    </ChatProvider>,
+    </ChatProvider>
   );
-  return { chat, submitMessage };
+  return { chat, submitMessage, tree };
+}
+
+function renderComposer(input: {
+  status: ChatController["status"];
+  onQueueSubmit?: (text: string, attachments: UIAttachment[]) => Promise<void> | void;
+  onStopRun?: () => void;
+  primitiveStop?: () => void;
+  defaultAttachments?: UIAttachment[];
+  composerError?: string | null;
+}) {
+  const { chat, submitMessage, tree } = composerTree(input);
+  const view = render(tree);
+  return { chat, submitMessage, rerender: view.rerender, tree };
 }
 
 describe("Anvia v1 composer DOM contract", () => {
@@ -167,5 +180,99 @@ describe("Anvia v1 composer DOM contract", () => {
   it("associates immediate composer errors with an alert", () => {
     renderComposer({ status: "ready", composerError: "Send failed" });
     expect(screen.getByRole("alert").textContent).toContain("Send failed");
+  });
+
+  it("uses a non-resizable auto-growing textarea without usage banners", () => {
+    renderComposer({ status: "ready" });
+    const editor = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(editor.className).toContain("resize-none");
+    expect(editor.className).toContain("chat-scroll");
+    expect(editor.className).not.toContain("flex-1");
+    expect(editor.className).not.toContain("overflow-y-auto");
+    expect(editor.rows).toBe(1);
+    expect(editor.style.height).toMatch(/^\d+px$/);
+    expect(screen.queryByText("Usage unavailable")).toBeNull();
+    expect(screen.queryByText("Could not load context snippet")).toBeNull();
+  });
+
+  it("clears the composer as soon as a send becomes submitted", async () => {
+    const chat = controller("ready");
+    const submitMessage = vi.fn(async (_args: ComposerSubmitMessageArgs) => undefined);
+    const tree = (status: ChatController["status"]) => (
+      <ChatProvider controller={chat}>
+        <ComposerPrimitive.Root submitMessage={submitMessage}>
+          <ChatComposer
+            sessionId="session-1"
+            chatStatus={status}
+            isIngesting={false}
+            composerError={null}
+            attachmentErrors={[]}
+            composerInputRef={createRef<HTMLTextAreaElement>()}
+            model={model.modelId}
+            reasoningEffort="max"
+            onModelChange={() => undefined}
+            onReasoningChange={() => undefined}
+            onQueueSubmit={vi.fn()}
+            onDismissAttachmentError={() => undefined}
+            models={[model]}
+            modelsStatus="success"
+          />
+        </ComposerPrimitive.Root>
+      </ChatProvider>
+    );
+    const view = render(tree("ready"));
+    await userEvent.type(screen.getByRole("textbox"), "hello there");
+    view.rerender(tree("submitted"));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+  });
+
+  it("keeps a follow-up draft when a waiting interaction resumes the run", async () => {
+    const chat = controller("streaming");
+    const submitMessage = vi.fn(async (_args: ComposerSubmitMessageArgs) => undefined);
+    const tree = (status: ChatController["status"]) => (
+      <ChatProvider controller={chat}>
+        <ComposerPrimitive.Root submitMessage={submitMessage}>
+          <ChatComposer
+            sessionId="session-1"
+            chatStatus={status}
+            isIngesting={false}
+            composerError={null}
+            attachmentErrors={[]}
+            composerInputRef={createRef<HTMLTextAreaElement>()}
+            model={model.modelId}
+            reasoningEffort="max"
+            onModelChange={() => undefined}
+            onReasoningChange={() => undefined}
+            onQueueSubmit={vi.fn()}
+            onDismissAttachmentError={() => undefined}
+            models={[model]}
+            modelsStatus="success"
+          />
+        </ComposerPrimitive.Root>
+      </ChatProvider>
+    );
+    const view = render(tree("streaming"));
+    await userEvent.type(screen.getByRole("textbox"), "keep this follow up");
+    view.rerender(tree("waiting"));
+    view.rerender(tree("submitted"));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe(
+      "keep this follow up",
+    );
+  });
+
+  it("grows the textarea height as lines are added", async () => {
+    renderComposer({ status: "ready" });
+    const editor = screen.getByRole<HTMLTextAreaElement>("textbox");
+    Object.defineProperty(editor, "scrollHeight", {
+      configurable: true,
+      get() {
+        const lines = Math.max(1, editor.value.split("\n").length);
+        return lines * 24;
+      },
+    });
+    const startHeight = Number.parseFloat(editor.style.height);
+    await userEvent.type(editor, "one{Shift>}{Enter}{/Shift}two{Shift>}{Enter}{/Shift}three");
+    expect(editor.value).toBe("one\ntwo\nthree");
+    expect(Number.parseFloat(editor.style.height)).toBeGreaterThan(startHeight);
   });
 });

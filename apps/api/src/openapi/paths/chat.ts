@@ -1097,6 +1097,44 @@ export const chatPaths = {
       },
     },
   },
+  "/api/chat/interactions/{interactionId}": {
+    get: {
+      operationId: "getChatInteractionStatus",
+      tags: ["Chat"],
+      summary: "Read whether a native interaction can still be answered",
+      description:
+        "Returns `pending` when the authenticated owner can still answer the interaction. Expired, consumed, claimed, missing, and foreign records are `unavailable` so the browser can drop a stale approval card after refresh.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "interactionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", minLength: 1, maxLength: 256 },
+          example: "interaction_01",
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Interaction availability for the current user.",
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["status"],
+            properties: {
+              status: { type: "string", enum: ["pending", "unavailable"] },
+            },
+          },
+          {
+            pending: { summary: "Still awaiting a response", value: { status: "pending" } },
+            unavailable: { summary: "Expired or already handled", value: { status: "unavailable" } },
+          },
+        ),
+        "400": badRequest({ error: "interactionId is required", code: "INVALID_CLIENT_REQUEST" }),
+        "401": unauthorized,
+      },
+    },
+  },
   "/api/chat/interactions/{interactionId}/stage": {
     post: {
       operationId: "stageChatInteraction",

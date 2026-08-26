@@ -52,6 +52,11 @@ const EXPECTED_OPERATIONS: Array<{
   { path: "/api/chat/queue/sync", method: "post", operationId: "syncChatQueue" },
   { path: "/api/chat/capabilities", method: "get", operationId: "getChatCapabilities" },
   {
+    path: "/api/chat/interactions/{interactionId}",
+    method: "get",
+    operationId: "getChatInteractionStatus",
+  },
+  {
     path: "/api/chat/interactions/{interactionId}/stage",
     method: "post",
     operationId: "stageChatInteraction",

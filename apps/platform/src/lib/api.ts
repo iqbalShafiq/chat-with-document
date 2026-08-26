@@ -1195,6 +1195,31 @@ const STAGE_OVERRIDE_KEYS = new Set([
   "n",
 ]);
 
+/** Whether a restored approval/clarification can still be answered. */
+export async function fetchInteractionStatus(
+  interactionId: string,
+): Promise<"pending" | "unavailable"> {
+  try {
+    const response = await apiFetch(
+      `${API_BASE}/api/chat/interactions/${encodeURIComponent(interactionId)}`,
+    );
+    if (!response.ok) return "unavailable";
+    const body: unknown = await response.json().catch(() => null);
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      (body as { status?: unknown }).status === "pending"
+    ) {
+      return "pending";
+    }
+    return "unavailable";
+  } catch (error) {
+    if (error instanceof ApiAuthError) throw error;
+    // Keep the card when the status check itself fails.
+    return "pending";
+  }
+}
+
 /**
  * Stage application-owned policy for one native tool approval. The native
  * response itself is sent by @anvia/react; this helper never answers it.
@@ -1228,12 +1253,16 @@ export async function stageInteractionPolicy(
   if (response.status === 404 || code === "INTERACTION_NOT_FOUND") {
     throw new Error("This interaction is no longer available.");
   }
+  if (code === "INTERACTION_EXPIRED") {
+    throw new Error(
+      "This approval expired. Send a new message to continue.",
+    );
+  }
   if (
     response.status === 409 ||
     code === "INTERACTION_STATE_CONFLICT" ||
     code === "INTERACTION_POLICY_CONFLICT" ||
-    code === "INTERACTION_REPLAYED" ||
-    code === "INTERACTION_EXPIRED"
+    code === "INTERACTION_REPLAYED"
   ) {
     throw new Error("This interaction was already handled.");
   }
@@ -1647,6 +1676,7 @@ export async function fetchContextSnippet(
   const response = await apiFetch(
     `${API_BASE}/api/chat/${encodeURIComponent(sessionId)}/context-snippet`,
   );
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error("Failed to load context snippet");
   const body = (await response.json()) as { snippet?: unknown };
   const snippet = body.snippet;

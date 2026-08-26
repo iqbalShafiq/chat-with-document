@@ -240,3 +240,28 @@ describe("POST /api/chat/interactions/:interactionId/stage", () => {
     expect(await second.json()).toMatchObject({ code: "INTERACTION_POLICY_CONFLICT" });
   });
 });
+
+describe("GET /api/chat/interactions/:interactionId", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getInteraction.mockResolvedValue(record);
+  });
+
+  it("reports pending when the owner can still answer", async () => {
+    const result = await app.request(`/api/chat/interactions/${INTERACTION_ID}`);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ status: "pending" });
+  });
+
+  it("masks expired and foreign records as unavailable", async () => {
+    getInteraction.mockRejectedValueOnce(new InteractionExpiredError(INTERACTION_ID));
+    const expired = await app.request(`/api/chat/interactions/${INTERACTION_ID}`);
+    expect(expired.status).toBe(200);
+    expect(await expired.json()).toEqual({ status: "unavailable" });
+
+    getInteraction.mockRejectedValueOnce(new InteractionOwnershipError(INTERACTION_ID));
+    const foreign = await app.request(`/api/chat/interactions/${INTERACTION_ID}`);
+    expect(foreign.status).toBe(200);
+    expect(await foreign.json()).toEqual({ status: "unavailable" });
+  });
+});

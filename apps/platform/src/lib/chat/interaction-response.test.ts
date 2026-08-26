@@ -179,6 +179,12 @@ describe("native interaction response construction", () => {
     expect(() => buildImageOverride({ unknown: true }, { catalog: imageCatalog })).toThrow();
     expect(() => buildImageOverride({ n: 0 }, { catalog: imageCatalog })).toThrow();
     expect(() => buildImageOverride({ n: 11 }, { catalog: imageCatalog })).toThrow();
+    expect(
+      buildImageOverride(
+        { modelId: "image-model-1", quality: undefined, aspectRatio: "16:9" },
+        { catalog: imageCatalog },
+      ),
+    ).toEqual({ modelId: "image-model-1", aspectRatio: "16:9" });
     expect(() => buildImageOverride({ aspectRatio: "16:9" }, { catalog: imageCatalog })).toThrow();
     expect(() => buildImageOverride({ modelId: "unknown-model" }, { catalog: imageCatalog })).toThrow();
     expect(() => buildImageOverride({ modelId: "image-model-1", quality: "lossless" }, { catalog: imageCatalog })).toThrow();
@@ -294,6 +300,24 @@ describe("stageThenRespond", () => {
       message: "Interaction policy could not be staged. Try again.",
     });
     expect(respond).not.toHaveBeenCalled();
+  });
+
+  it("keeps bounded staging errors instead of masking them", async () => {
+    await expect(
+      stageThenRespond({
+        interaction,
+        response: buildApprovalResponse({ approved: true }),
+        policy: { grantScope: "session" },
+        stage: async () => {
+          throw new Error("This approval expired. Send a new message to continue.");
+        },
+        respond: vi.fn(async () => {}),
+        inFlight: new Set(),
+      }),
+    ).rejects.toMatchObject({
+      code: "stage_failed",
+      message: "This approval expired. Send a new message to continue.",
+    });
   });
 
   it("rejects a duplicate submission while the first response is in flight", async () => {
@@ -458,6 +482,25 @@ describe("stageInteractionPolicy", () => {
         grantScope: "session",
       }),
     ).rejects.toThrow("Interaction policy is temporarily unavailable.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: "interaction expired",
+            code: "INTERACTION_EXPIRED",
+          }),
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(
+      stageInteractionPolicy({
+        interactionId: "interaction-approval-1",
+        response: { type: "tool-approval", approved: true },
+        grantScope: "session",
+      }),
+    ).rejects.toThrow("This approval expired. Send a new message to continue.");
     await expect(
       stageInteractionPolicy({
         interactionId: "interaction-approval-1",

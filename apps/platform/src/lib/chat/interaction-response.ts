@@ -137,7 +137,9 @@ export function buildImageOverride(
       "The image settings are invalid.",
     );
   }
-  const keys = Object.keys(input);
+  const keys = Object.keys(input).filter(
+    (key) => input[key] !== undefined && input[key] !== null,
+  );
   if (
     keys.length === 0 ||
     keys.some((key) => !IMAGE_OVERRIDE_KEYS.has(key)) ||
@@ -356,7 +358,10 @@ export async function stageThenRespond(
       } catch (error) {
         throw new InteractionResponseError(
           "stage_failed",
-          "Interaction policy could not be staged. Try again.",
+          safeInteractionFailureMessage(
+            error,
+            "Interaction policy could not be staged. Try again.",
+          ),
           { cause: error },
         );
       }
@@ -366,13 +371,69 @@ export async function stageThenRespond(
     } catch (error) {
       throw new InteractionResponseError(
         "response_failed",
-        "Interaction response could not be sent. Try again.",
+        safeInteractionFailureMessage(
+          error,
+          "Interaction response could not be sent. Try again.",
+        ),
         { cause: error },
       );
     }
   } finally {
     inFlight.delete(interactionId);
   }
+}
+
+const SAFE_INTERACTION_FAILURE_MESSAGES = new Set([
+  "This interaction is no longer available.",
+  "This interaction was already handled.",
+  "This approval expired. Send a new message to continue.",
+  "Interaction policy is temporarily unavailable.",
+  "Interaction policy request is invalid.",
+]);
+
+function httpErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const body = (error as { body?: unknown }).body;
+  if (typeof body !== "string" || body.length === 0 || body.length > 2_048) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as { code?: unknown }).code === "string"
+    ) {
+      return (parsed as { code: string }).code;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function safeInteractionFailureMessage(
+  error: unknown,
+  fallback: string,
+): string {
+  if (error instanceof Error && SAFE_INTERACTION_FAILURE_MESSAGES.has(error.message)) {
+    return error.message;
+  }
+  const code = httpErrorCode(error);
+  if (code === "INTERACTION_EXPIRED") {
+    return "This approval expired. Send a new message to continue.";
+  }
+  if (code === "INTERACTION_NOT_FOUND") {
+    return "This interaction is no longer available.";
+  }
+  if (
+    code === "INTERACTION_REPLAYED" ||
+    code === "INTERACTION_STATE_CONFLICT" ||
+    code === "INTERACTION_POLICY_CONFLICT"
+  ) {
+    return "This interaction was already handled.";
+  }
+  return fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

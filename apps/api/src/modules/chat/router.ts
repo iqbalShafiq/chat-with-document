@@ -70,6 +70,7 @@ import {
   normalizeSessionTitle,
   ProjectMembershipError,
   renameChatSession,
+  resolveChatSessionForAgent,
   setChatSessionTitleIfEmpty,
   touchChatSession,
 } from "./chat-session.js";
@@ -749,6 +750,12 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const streamId = crypto.randomUUID();
     let recipe;
     try {
+      // History GET never creates a row (stale ids would stack empty chats).
+      // The first authenticated POST is the durable create boundary.
+      await resolveChatSessionForAgent({
+        userId: user.id,
+        sessionId: metadata.sessionId,
+      });
       recipe = await resolveChatAgentRecipe({
         sessionId: metadata.sessionId,
         userId: user.id,
@@ -943,6 +950,32 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       imageGenerationAvailable: imageGenerationConfig() !== null,
       context7Configured: isContext7Configured(),
     });
+  })
+  .get("/interactions/:interactionId", async (c) => {
+    const user = c.get("user");
+    const interactionId = c.req.param("interactionId");
+    if (!interactionId || interactionId.length > 256) {
+      return c.json({ error: "interactionId is required", code: "INVALID_CLIENT_REQUEST" }, 400);
+    }
+    try {
+      const record = await getInteractionStore().getForUser(interactionId, user.id);
+      if (record?.state === "pending") {
+        return c.json({ status: "pending" });
+      }
+      return c.json({ status: "unavailable" });
+    } catch (error) {
+      if (
+        error instanceof InteractionOwnershipError ||
+        error instanceof InteractionExpiredError ||
+        error instanceof InteractionReplayedError ||
+        error instanceof InteractionClaimedError ||
+        (error instanceof InteractionStoreError &&
+          (error.code === "not_found" || error.code === "ownership"))
+      ) {
+        return c.json({ status: "unavailable" });
+      }
+      throw error;
+    }
   })
   .post("/interactions/:interactionId/stage", async (c) => {
     const user = c.get("user");
