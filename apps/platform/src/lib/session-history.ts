@@ -98,12 +98,19 @@ export function isEmptyNewChat(session: Pick<SessionSummary, "title">): boolean 
 /**
  * Prefer reusing an existing empty draft in the current list (already
  * standalone- or project-scoped by the loader) instead of creating another.
+ * Skip drafts that still hold an active run — those look empty (no memory
+ * yet) but must not trap New chat or be treated as a blank composer.
  */
 export function findEmptyNewChat(
   list: SessionSummary[] | null | undefined,
+  busySessionIds?: ReadonlySet<string> | null,
 ): SessionSummary | null {
   const safe = Array.isArray(list) ? list : [];
-  return safe.find((s) => isEmptyNewChat(s)) ?? null;
+  return (
+    safe.find(
+      (s) => isEmptyNewChat(s) && !busySessionIds?.has(s.sessionId),
+    ) ?? null
+  );
 }
 
 /**

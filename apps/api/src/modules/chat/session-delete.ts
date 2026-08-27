@@ -9,7 +9,11 @@ import {
   getChatSession,
 } from "./chat-session.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
-import { ACTIVE_RUN_KEY, getChatRunQueue } from "./run-queue.js";
+import {
+  ACTIVE_RUN_KEY,
+  getChatRunQueue,
+  releaseActiveRun,
+} from "./run-queue.js";
 import { extractTextFromMessageJson } from "./session-list.js";
 import { buildSessionSnapshotText } from "./session-snapshot.js";
 
@@ -23,18 +27,89 @@ export class SessionRunActiveError extends Error {
 
 const RUN_SETTLE_TIMEOUT_MS = 12000;
 const RUN_SETTLE_POLL_MS = 400;
+/** Enqueue happens milliseconds after the lock; two empty polls are enough. */
+const MISSING_JOB_POLLS_BEFORE_ABANDON = 2;
+
+const TERMINAL_JOB_STATES = new Set(["completed", "failed", "unknown"]);
+const QUEUED_JOB_STATES = new Set([
+  "waiting",
+  "delayed",
+  "paused",
+  "waiting-children",
+  "prioritized",
+]);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type QueueJob = {
+  data?: { streamId?: string };
+  getState(): Promise<string>;
+  remove(): Promise<void>;
+};
+
+async function findChatRunJob(streamId: string): Promise<QueueJob | null> {
+  const queue = getChatRunQueue();
+  const byStartId = (await queue.getJob(`chat:${streamId}`)) as QueueJob | undefined;
+  if (byStartId) return byStartId;
+  if (typeof queue.getJobs !== "function") return null;
+  const jobs = (await queue.getJobs(
+    [
+      "active",
+      "waiting",
+      "delayed",
+      "paused",
+      "waiting-children",
+      "prioritized",
+    ],
+    0,
+    500,
+  )) as QueueJob[];
+  return jobs.find((job) => job.data?.streamId === streamId) ?? null;
+}
+
+async function closeRunningStream(
+  store: ReturnType<typeof getStreamStore>,
+  streamId: string,
+): Promise<void> {
+  try {
+    const state = await store.status({ streamId });
+    if (state.status === "running") {
+      await store.close({ streamId, status: "error" });
+    }
+  } catch {
+    // Already closed, missing, or a concurrent worker closed it.
+  }
+}
+
+async function abandonLockedRun(
+  sessionId: string,
+  streamId: string,
+): Promise<void> {
+  await closeRunningStream(getStreamStore(), streamId);
+  await releaseActiveRun(sessionId, streamId);
+}
+
+async function tryRemoveQueuedJob(job: QueueJob): Promise<boolean> {
+  const state = await job.getState();
+  if (TERMINAL_JOB_STATES.has(state)) return true;
+  if (!QUEUED_JOB_STATES.has(state)) return false;
+  try {
+    await job.remove();
+    return true;
+  } catch {
+    // Lost the race: the worker claimed the job. Cooperative stop continues.
+    return false;
+  }
+}
+
 /**
  * Ask the worker to end the run (stop flag + native stream cancellation),
- * then wait for the active-run lock to be released by the worker. Returns
- * true when a running stream was stopped. Throws SessionRunActiveError when
- * the run cannot settle within the timeout — delete must NOT race the
- * worker, because the memory store upserts its session row and could
- * resurrect the deleted session.
+ * then wait for the active-run lock to be released. Queued jobs are removed
+ * immediately so a stuck/waiting worker cannot pin the session. Throws
+ * SessionRunActiveError when an *active* worker does not settle in time —
+ * delete must NOT race a live memory upsert that could resurrect the row.
  */
 export async function stopActiveRunForSession(
   userId: string,
@@ -52,31 +127,53 @@ export async function stopActiveRunForSession(
     return false;
   }
 
-  // Liveness: only terminal job states prove no worker can write memory.
-  // Waiting/delayed/active/absent are reachable states (the router acquires
-  // the lock, opens the stream, then enqueues) — never drop the lock on them.
-  const runJob = await getChatRunQueue().getJob(`chat:${streamId}`);
+  const runJob = await findChatRunJob(streamId);
   if (runJob) {
     const jobState = await runJob.getState();
-    if (
-      jobState === "completed" ||
-      jobState === "failed" ||
-      jobState === "unknown"
-    ) {
+    if (TERMINAL_JOB_STATES.has(jobState)) {
       // Terminal job — no worker can write memory anymore. Stale lock.
       await redis.del(ACTIVE_RUN_KEY(sessionId));
       return false;
     }
   }
-  // Waiting/delayed/active/absent → the run may still execute; stop it and wait.
 
   await store.setStopFlag(streamId);
 
+  if (runJob && (await tryRemoveQueuedJob(runJob))) {
+    await abandonLockedRun(sessionId, streamId);
+    return true;
+  }
+
   const deadline = Date.now() + RUN_SETTLE_TIMEOUT_MS;
+  let missingPolls = runJob ? 0 : 1;
   while (Date.now() < deadline) {
     const current = await redis.get(ACTIVE_RUN_KEY(sessionId));
     if (!current) return true;
+
+    const liveJob = await findChatRunJob(current);
+    if (!liveJob) {
+      missingPolls += 1;
+      if (missingPolls >= MISSING_JOB_POLLS_BEFORE_ABANDON) {
+        await abandonLockedRun(sessionId, current);
+        return true;
+      }
+    } else if (await tryRemoveQueuedJob(liveJob)) {
+      await abandonLockedRun(sessionId, current);
+      return true;
+    } else {
+      missingPolls = 0;
+    }
     await sleep(RUN_SETTLE_POLL_MS);
+  }
+
+  const leftover = await redis.get(ACTIVE_RUN_KEY(sessionId));
+  if (!leftover) return true;
+
+  const leftoverJob = await findChatRunJob(leftover);
+  const leftoverState = leftoverJob ? await leftoverJob.getState() : "unknown";
+  if (leftoverState !== "active") {
+    await abandonLockedRun(sessionId, leftover);
+    return true;
   }
   throw new SessionRunActiveError();
 }

@@ -473,6 +473,10 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let cancelReason = "chat run stopped";
     let stopTimer: ReturnType<typeof setTimeout> | null = null;
     let stopMonitorDone = false;
+    let notifyCancelled: (() => void) | null = null;
+    const cancelledGate = new Promise<void>((resolve) => {
+      notifyCancelled = resolve;
+    });
     const cancelCurrentAttempt = (reason: string): void => {
       cancelled = true;
       cancelReason = reason;
@@ -483,6 +487,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       }
       nativeStream?.cancel(reason);
       controller.abort(reason);
+      notifyCancelled?.();
     };
     let doneResolve!: () => void;
     const done = new Promise<void>((resolve) => { doneResolve = resolve; });
@@ -530,6 +535,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let resumeOverrideTaken = false;
     let interactionPersistenceFailed = false;
     try {
+      monitorStop();
       if (await deps.isStopRequested(streamId)) {
         cancelCurrentAttempt("client stop");
       }
@@ -547,40 +553,62 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         throw Object.assign(new Error(cancelReason), { code: "CHAT_RUN_CANCELLED" });
       }
 
-      const runInput = await deps.reconstruct({
-        recipe: parsed.recipe,
-        grantHelpers: {
-          hasGrant: (toolName) => policyRegistry.hasToolGrant(parsed.sessionId, toolName),
-          takeToolOverride: async (toolName) => {
-            const policy = resumePolicy;
-            const stagedOverride = policy?.result.overrideArgs;
-            if (
-              policy &&
-              stagedOverride &&
-              policy.result.toolName === toolName &&
-              !resumeOverrideTaken
-            ) {
-              // The override becomes executable only at this run-local take
-              // boundary. Consuming before returning prevents a crash from
-              // exposing it to a later session/tool invocation.
-              resumeOverrideTaken = true;
-              try {
-                await deps.consumeInteractionPolicy(policy.input);
-                policyConsumed = true;
-                return stagedOverride;
-              } catch (error) {
-                resumeOverrideTaken = false;
-                throw error;
+      const reconstructWork = (async () => {
+        const context7Server = await deps.getContext7Server();
+        if (cancelled) {
+          throw Object.assign(new Error(cancelReason), { code: "CHAT_RUN_CANCELLED" });
+        }
+        return deps.reconstruct({
+          recipe: parsed.recipe,
+          grantHelpers: {
+            hasGrant: (toolName) => policyRegistry.hasToolGrant(parsed.sessionId, toolName),
+            takeToolOverride: async (toolName) => {
+              const policy = resumePolicy;
+              const stagedOverride = policy?.result.overrideArgs;
+              if (
+                policy &&
+                stagedOverride &&
+                policy.result.toolName === toolName &&
+                !resumeOverrideTaken
+              ) {
+                // The override becomes executable only at this run-local take
+                // boundary. Consuming before returning prevents a crash from
+                // exposing it to a later session/tool invocation.
+                resumeOverrideTaken = true;
+                try {
+                  await deps.consumeInteractionPolicy(policy.input);
+                  policyConsumed = true;
+                  return stagedOverride;
+                } catch (error) {
+                  resumeOverrideTaken = false;
+                  throw error;
+                }
               }
-            }
-            return null;
+              return null;
+            },
           },
-        },
-        onDeepResearchProgress: async (event) => {
-          appEvents.push({ type: "deep_research_progress", ...event });
-        },
-        context7Server: await deps.getContext7Server(),
-      });
+          onDeepResearchProgress: async (event) => {
+            appEvents.push({ type: "deep_research_progress", ...event });
+          },
+          context7Server,
+        });
+      })();
+      void reconstructWork.catch(() => undefined);
+      const reconstructed = await Promise.race([
+        reconstructWork.then((value) => ({ status: "done" as const, value })),
+        cancelledGate.then(() => ({ status: "cancelled" as const })),
+      ]);
+      if (reconstructed.status === "cancelled" || cancelled) {
+        throw Object.assign(new Error(cancelReason), { code: "CHAT_RUN_CANCELLED" });
+      }
+      const runInput = reconstructed.value;
+      if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
+        throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
+      }
+      const statusAfterReconstruct = await deps.streamStore.status({ streamId });
+      if (statusAfterReconstruct.status !== "running") {
+        throw Object.assign(new Error(cancelReason), { code: "CHAT_RUN_CANCELLED" });
+      }
 
       for (;;) {
         const trace = {

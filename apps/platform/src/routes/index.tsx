@@ -402,7 +402,7 @@ function Home() {
         if (!silent && (inProject || inStandalone)) {
           const activeInList = items.some((s) => s.sessionId === activeId);
           if (!activeInList) {
-            const empty = findEmptyNewChat(items);
+            const empty = findEmptyNewChat(items, activeRunsRef.current);
             if (empty) {
               setSessionId(empty.sessionId);
             } else if (items[0]) {
@@ -732,7 +732,7 @@ function Home() {
 
     // Prefer client-visible empty draft first (fast path).
     if (viewMode === "standalone" || viewMode === "project-workspace") {
-      const empty = findEmptyNewChat(sessions);
+      const empty = findEmptyNewChat(sessions, activeRuns);
       if (empty) {
         if (empty.sessionId !== sessionId) {
           setSessionId(empty.sessionId);
@@ -827,7 +827,7 @@ function Home() {
           });
           if (page.items.length > 0) {
             // Prefer existing empty draft in this project, else most recent chat.
-            const empty = findEmptyNewChat(page.items);
+            const empty = findEmptyNewChat(page.items, activeRunsRef.current);
             const pick = empty ?? page.items[0]!;
             setSessionId(pick.sessionId);
             setSessions(page.items);
@@ -900,7 +900,7 @@ function Home() {
         const rest = sessionsRef.current.filter(
           (s) => s.sessionId !== targetSessionId,
         );
-        const empty = findEmptyNewChat(rest);
+        const empty = findEmptyNewChat(rest, activeRunsRef.current);
         const replacement = empty ?? rest[0] ?? null;
         if (replacement) {
           setSessionId(replacement.sessionId);
@@ -977,8 +977,13 @@ function Home() {
       return false;
     }
     const active = sessions.find((s) => s.sessionId === sessionId);
-    return active ? isEmptyNewChat(active) : activeSessionTitle === EMPTY_CHAT_TITLE;
-  }, [activeSessionTitle, sessionId, sessions, viewMode]);
+    const emptyDraft = active
+      ? isEmptyNewChat(active)
+      : activeSessionTitle === EMPTY_CHAT_TITLE;
+    // A draft with a stuck/active run is not a usable blank chat — keep
+    // New chat enabled so the user can escape to a fresh session.
+    return emptyDraft && !activeRuns.has(sessionId);
+  }, [activeRuns, activeSessionTitle, sessionId, sessions, viewMode]);
 
   const showChatRoom =
     workspaceReady &&

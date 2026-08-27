@@ -448,6 +448,56 @@ describe("Anvia v1 chat worker", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
+  it("releases the run when a client stop wins during reconstruction", async () => {
+    let stopRequested = false;
+    let reconstructStarted!: () => void;
+    const started = new Promise<void>((resolve) => { reconstructStarted = resolve; });
+    const stream = vi.fn(() => fakeStream([responseEvent()]));
+    const h = createDependencies(fakeStream([responseEvent()]), {
+      isStopRequested: async () => stopRequested,
+      reconstruct: async () => {
+        reconstructStarted();
+        stopRequested = true;
+        await new Promise(() => undefined);
+        return {
+          agent: { stream },
+          projectId: null,
+          sessionId: SESSION_ID,
+          userId: USER_ID,
+        } as never;
+      },
+    });
+
+    const processing = createChatRunProcessor(h.dependencies)(startJob());
+    await started;
+    await expect(processing).rejects.toMatchObject({ name: "ChatRunCancelledError" });
+    expect(stream).not.toHaveBeenCalled();
+    expect(h.releases).toContain(STREAM_ID);
+  });
+
+  it("does not open a provider stream when the session is deleted during reconstruction", async () => {
+    let exists = true;
+    const stream = vi.fn(() => fakeStream([responseEvent()]));
+    const h = createDependencies(fakeStream([responseEvent()]), {
+      sessionExists: async () => exists,
+      reconstruct: async () => {
+        exists = false;
+        return {
+          agent: { stream },
+          projectId: null,
+          sessionId: SESSION_ID,
+          userId: USER_ID,
+        } as never;
+      },
+    });
+
+    await expect(createChatRunProcessor(h.dependencies)(startJob())).rejects.toMatchObject({
+      name: "ChatRunCancelledError",
+    });
+    expect(stream).not.toHaveBeenCalled();
+    expect(h.releases).toContain(STREAM_ID);
+  });
+
   it("maps response, interaction, and blocked terminals to v3 events and storage statuses", async () => {
     const responseHarness = createDependencies(fakeStream([responseEvent()]));
     await createChatRunProcessor(responseHarness.dependencies)(startJob());
