@@ -12,7 +12,7 @@ import {
   type ProfileScope,
   type ProfileSectionKey,
   type ProfileSections,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import type { CompletionModel } from "@anvia/core";
 import { prisma } from "../../utils/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";

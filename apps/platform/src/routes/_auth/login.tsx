@@ -96,7 +96,7 @@ function LoginPage() {
   return (
     <AuthFormPanel
       title="Sign in"
-      subtitle="Use the email and password for your DocChat workspace."
+      subtitle="Use the email and password for your anreal workspace."
       footer={
         <>
           New here?{" "}

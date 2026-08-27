@@ -1,4 +1,4 @@
-import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { AnrealMark } from "#/components/layout/anreal-brand";
 import { Menu, PanelLeftOpen, SquarePen } from "lucide-react";
 
 export function ChatTopBar({
@@ -39,7 +39,7 @@ export function ChatTopBar({
               className="absolute inset-0 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/expand:scale-95 group-hover/expand:opacity-0 group-focus-within/expand:scale-95 group-focus-within/expand:opacity-0"
               aria-hidden
             >
-              <DocChatMark />
+              <AnrealMark />
             </span>
             <button
               type="button"

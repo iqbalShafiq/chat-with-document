@@ -1,5 +1,5 @@
 import z from "zod";
-import type { ImageGenSettings } from "@assingment/agent";
+import type { ImageGenSettings } from "@anreal/agent";
 
 const settingsText = z.string().min(1).max(512);
 

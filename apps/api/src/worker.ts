@@ -18,7 +18,7 @@ import {
   type DocumentPageImage,
   type OcrPageTable,
   type TabularSheet,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
 import { buildPageImageR2Key, getObjectBuffer, putObject } from "./lib/r2.js";
 import {
@@ -61,7 +61,7 @@ import { join } from "node:path";
 function chatWorkerPidFile(): string {
   return (
     process.env.CHAT_WORKER_PID_FILE ??
-    join(tmpdir(), "chat-with-document-worker.pid")
+    join(tmpdir(), "anreal-worker.pid")
   );
 }
 

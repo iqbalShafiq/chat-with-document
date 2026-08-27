@@ -19,7 +19,7 @@ const WORKER_ENTRY = resolve(REPO_ROOT, "apps/api/src/worker.ts");
 export function chatWorkerPidFile(): string {
   return (
     process.env.CHAT_WORKER_PID_FILE ??
-    join(tmpdir(), "chat-with-document-worker.pid")
+    join(tmpdir(), "anreal-worker.pid")
   );
 }
 

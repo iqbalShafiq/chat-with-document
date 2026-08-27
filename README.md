@@ -1,6 +1,6 @@
-# Chat with Document
+# anreal
 
-Monorepo aplikasi **AI chat** berbasis [Anvia](https://anvia.dev): UI React (`platform`), API Hono (`api`), dan package agent bersama (`@assingment/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
+**anreal** adalah workspace AI privat untuk bertanya, membandingkan, dan membuat sesuatu dari dokumen, data, serta gambar. Monorepo ini berbasis [Anvia](https://anvia.dev): UI React (`@anreal/platform`), API Hono (`@anreal/api`), dan package agent bersama (`@anreal/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
 
 ## Apa yang dibangun
 
@@ -26,7 +26,7 @@ Aplikasi chat full-stack di mana user bisa:
                                                    │
                                    ┌───────────────┼───────────────┐
                                    ▼               ▼               ▼
-                          @assingment/agent   Prisma memory    Langfuse
+                           @anreal/agent     Prisma memory    Langfuse
                           (OpenAI + tools)    (Postgres)       (tracing)
 ```
 
@@ -80,7 +80,7 @@ docker-compose.yml     # Postgres lokal di port 15433
 .env.example
 ```
 
-### Package `@assingment/agent`
+### Package `@anreal/agent`
 
 Factory agent yang dipakai API:
 
@@ -143,8 +143,8 @@ Factory agent yang dipakai API:
 4. **Database**
 
    ```bash
-   pnpm --filter api db:generate
-   pnpm --filter api db:migrate
+   pnpm --filter @anreal/api db:generate
+   pnpm --filter @anreal/api db:migrate
    ```
 
 ## Development
@@ -172,25 +172,25 @@ Apps memuat env dari root `.env` lewat `dotenv-cli` (script `with-env`).
 
 ```bash
 # API only
-pnpm --filter api dev
+pnpm --filter @anreal/api dev
 
 # Platform only
-pnpm --filter platform dev
+pnpm --filter @anreal/platform dev
 
 # Prisma
-pnpm --filter api db:generate   # regenerate client → apps/api/src/generated
-pnpm --filter api db:migrate    # migrate (dev)
-pnpm --filter api db:deploy     # migrate (deploy)
-pnpm --filter api db:studio     # Prisma Studio
+pnpm --filter @anreal/api db:generate   # regenerate client → apps/api/src/generated
+pnpm --filter @anreal/api db:migrate    # migrate (dev)
+pnpm --filter @anreal/api db:deploy     # migrate (deploy)
+pnpm --filter @anreal/api db:studio     # Prisma Studio
 
 # API smoke (register → login → chat + usage audit); API must be running
-pnpm --filter api smoke:auth
+pnpm --filter @anreal/api smoke:auth
 ```
 
 ### E2E (Playwright)
 
 ```bash
-pnpm --filter platform exec playwright test
+pnpm --filter @anreal/platform exec playwright test
 ```
 
 Suite browser (8 test) di `apps/platform/e2e/` menguji alur image generation end-to-end terhadap stub LLM lokal. Prasyarat:
@@ -206,7 +206,7 @@ E2E **LLM asli** (OpenRouter dari `.env`, browser headed, tanpa stub):
 
 ```bash
 # API :3001 + platform :3000 sudah `pnpm dev` dengan key real
-pnpm --filter platform exec -- playwright test --config playwright.real-llm.config.ts
+pnpm --filter @anreal/platform exec -- playwright test --config playwright.real-llm.config.ts
 ```
 
 Jangan campur dengan suite stub: suite stub menolak `OPENAI_BASE_URL` selain `:18765`.
@@ -355,7 +355,7 @@ Response yang terlambat (approval/klarifikasi sudah resolved atau TTL) bersifat 
 
 ### Model registry
 
-Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed` — **idempotent**, run ulang menghasilkan `created=0 updated=0 removed=0`):
+Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api db:seed` — **idempotent**, run ulang menghasilkan `created=0 updated=0 removed=0`):
 
 | Kolom | Keterangan |
 | --- | --- |
@@ -402,6 +402,6 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 | Masalah | Cek |
 | --- | --- |
 | API tidak connect ke DB | `docker compose ps`, pastikan port `15433`, cocokkan `DATABASE_URL` |
-| Prisma error setelah pull | `pnpm --filter api db:generate` lalu `db:migrate` |
-| UI kosong / CORS | Pastikan API jalan di `:3001` dan `pnpm --filter api dev` |
+| Prisma error setelah pull | `pnpm --filter @anreal/api db:generate` lalu `db:migrate` |
+| UI kosong / CORS | Pastikan API jalan di `:3001` dan `pnpm --filter @anreal/api dev` |
 | Math tidak ter-render | Pastikan asisten memakai `$...$` / `$$...$$` (instruksi ada di base prompt) |

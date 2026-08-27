@@ -45,6 +45,13 @@ afterEach(() => {
 });
 
 describe("AuthShell handoff", () => {
+  it("presents the anreal identity before authentication", () => {
+    render(<AuthShell />);
+
+    expect(screen.getAllByText("anreal").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("img", { name: "anreal monogram" }).length).toBeGreaterThan(0);
+  });
+
   it("keeps the form while still on an auth route", () => {
     render(<AuthShell />);
     expect(screen.getByText("auth-form")).toBeTruthy();

@@ -1,4 +1,4 @@
-import { deleteDocumentChunks } from "@assingment/agent";
+import { deleteDocumentChunks } from "@anreal/agent";
 import { prisma } from "../../utils/prisma.js";
 import { deleteObject } from "../../lib/r2.js";
 

@@ -11,7 +11,7 @@ import {
   getImageStore,
   type ImageStore,
 } from "../images/service.js";
-import { createStaticToolDefinition } from "@assingment/agent";
+import { createStaticToolDefinition } from "@anreal/agent";
 import { findActiveModel, listModels } from "../models/service.js";
 
 /** Max bytes we'll download for an external image (8 MiB). */
@@ -355,7 +355,7 @@ export async function loadRemoteImage(input: {
         redirect: "manual",
         headers: {
           Accept: "image/*,*/*;q=0.8",
-          "User-Agent": "chat-with-document-view-image/1.0",
+          "User-Agent": "anreal-view-image/1.0",
         },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
@@ -550,7 +550,7 @@ export function sniffImageMediaType(buffer: Buffer): string | null {
 export async function resolveVisionHelperModel(): Promise<CompletionModel | null> {
   // Lazy import: constructing the OpenAI client at module load fails in
   // test environments without credentials.
-  const { createCompletionModel } = await import("@assingment/agent");
+  const { createCompletionModel } = await import("@anreal/agent");
   const envModelId = process.env.VISION_HELPER_MODEL;
   if (envModelId) {
     const info = await findActiveModel(envModelId);

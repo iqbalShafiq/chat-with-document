@@ -10,7 +10,7 @@ import {
 } from "#/components/auth/auth-handoff";
 import { preloadWorkspaceRoute } from "#/components/auth/preload-workspace";
 import { AnimatedStatusText } from "#/components/chat/animated-status-text";
-import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { AnrealBrand, AnrealMark } from "#/components/layout/anreal-brand";
 
 /**
  * Auth chrome — wide chat-demo rail + empty h-14 top bar + curved content frame.
@@ -56,7 +56,7 @@ export function AuthShell() {
             aria-hidden
           >
             <span className="lg:invisible lg:pointer-events-none">
-              <DocChatMark />
+              <AnrealBrand />
             </span>
           </header>
 
@@ -93,10 +93,7 @@ function AuthSidebar({ isRegister }: { isRegister: boolean }) {
     <aside className="glass-sidebar flex h-full w-full min-h-0 flex-col">
       {/* Same h-14 brand row as chat sidebar */}
       <div className="flex h-14 shrink-0 items-center gap-2.5 px-2.5">
-        <DocChatMark />
-        <span className="truncate text-sm font-semibold tracking-tight text-text">
-          DocChat
-        </span>
+        <AnrealBrand />
       </div>
 
       {/* Full remaining height = chat room preview (seed + multi-scene loop) */}
@@ -129,21 +126,6 @@ export function AuthFormPanel({
 }) {
   return (
     <div className="w-full">
-      <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-        <div className="relative">
-          <div
-            className="absolute inset-0 rounded-xl bg-accent/20 blur-xl"
-            aria-hidden
-          />
-          <span className="relative">
-            <DocChatMark />
-          </span>
-        </div>
-        <span className="text-sm font-semibold tracking-tight text-text">
-          DocChat
-        </span>
-      </div>
-
       {leading}
 
       <header className="mb-8">

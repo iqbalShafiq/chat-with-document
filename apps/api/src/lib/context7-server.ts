@@ -2,7 +2,7 @@ import {
   closeContext7Mcp as closeOwnedContext7Mcp,
   createContext7McpServer,
   type Context7McpServerOptions,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import type { McpServer } from "@anvia/core/mcp";
 
 /**

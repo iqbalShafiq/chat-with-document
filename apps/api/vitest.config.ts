@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 const ROOT_ENV = fileURLToPath(new URL("../../.env", import.meta.url));
 
 // The agent package constructs its Mistral client eagerly at import time, so
-// any test importing @assingment/agent needs MISTRAL_API_KEY in process.env.
+// any test importing @anreal/agent needs MISTRAL_API_KEY in process.env.
 // Inject only that key from the repo .env — loading the whole file would set
 // NODE_ENV/PORT/PLATFORM_ORIGIN/... and break env-sensitive tests such as
 // src/lib/origins.test.ts (vitest defaults NODE_ENV to "test" when unset).

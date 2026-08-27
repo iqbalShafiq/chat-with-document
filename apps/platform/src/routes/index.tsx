@@ -34,7 +34,7 @@ import {
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
 import { AppShell } from "#/components/layout/app-shell";
-import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { AnrealMark } from "#/components/layout/anreal-brand";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
@@ -1021,7 +1021,7 @@ function Home() {
             key="workspace-loading"
             className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
           >
-            <DocChatMark className="opacity-80" />
+            <AnrealMark className="opacity-80" />
             <div className="skeleton-shimmer h-4 w-40 rounded-full" />
             <p className="text-sm text-text-muted">Restoring workspace…</p>
           </div>
@@ -1046,7 +1046,7 @@ function Home() {
               key="chat-loading"
               className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
             >
-              <DocChatMark className="opacity-80" />
+              <AnrealMark className="opacity-80" />
               <div className="skeleton-shimmer h-4 w-40 rounded-full" />
               <p className="text-sm text-text-muted">Loading conversation…</p>
             </div>
@@ -1648,6 +1648,14 @@ function ChatSession({
   const focusComposer = useCallback(() => {
     composerInputRef.current?.focus();
   }, []);
+
+  const handleStarterPrompt = useCallback(
+    (prompt: string) => {
+      setComposerInputText(prompt);
+      focusComposer();
+    },
+    [focusComposer, setComposerInputText],
+  );
 
   useEffect(() => {
     const activeRun =
@@ -3097,7 +3105,7 @@ function ChatSession({
                   }}
                 >
                   <ThreadPrimitive.Empty className="flex min-h-0 flex-1 flex-col">
-                    <EmptyState />
+                    <EmptyState onSelectPrompt={handleStarterPrompt} />
                   </ThreadPrimitive.Empty>
 
                   <ThreadPrimitive.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />

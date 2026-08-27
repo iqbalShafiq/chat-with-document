@@ -14,7 +14,7 @@ import {
   PROFILE_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
 import { formatContextSnippetBlock } from "./context-snippets.js";
 import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";

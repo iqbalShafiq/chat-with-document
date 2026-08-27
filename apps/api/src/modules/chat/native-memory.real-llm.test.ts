@@ -3,7 +3,7 @@ import type { Message } from "@anvia/core";
 import {
   createCompletionModel,
   providerOptionsForReasoning,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import { describe, expect, it } from "vitest";
 
 const REAL_MODEL = "deepseek/deepseek-v4-flash-0731";

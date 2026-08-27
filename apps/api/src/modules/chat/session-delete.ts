@@ -1,4 +1,4 @@
-import type { ProfileScope } from "@assingment/agent";
+import type { ProfileScope } from "@anreal/agent";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
 import { prisma } from "../../utils/prisma.js";

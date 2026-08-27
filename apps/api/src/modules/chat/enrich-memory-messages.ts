@@ -3,7 +3,7 @@ import {
   citationsToJsonValue,
   extractTextFromMessageJson,
   parseCitationsFromText,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import { prisma } from "../../utils/prisma.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
 

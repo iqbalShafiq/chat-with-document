@@ -1,7 +1,7 @@
 import { Queue, QueueEvents, type Job } from "bullmq";
 import { getBullmqConnectionOptions, getRedis } from "../../lib/redis.js";
 import { profileConfig } from "./service.js";
-import type { ProfileScope } from "@assingment/agent";
+import type { ProfileScope } from "@anreal/agent";
 
 export const PROFILE_QUEUE = "profile-summary";
 

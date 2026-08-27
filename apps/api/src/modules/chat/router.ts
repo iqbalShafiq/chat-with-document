@@ -6,7 +6,7 @@ import {
   parseAgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { DEFAULT_COMPLETION_MODEL } from "@assingment/agent";
+import { DEFAULT_COMPLETION_MODEL } from "@anreal/agent";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";

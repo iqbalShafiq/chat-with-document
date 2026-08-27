@@ -26,7 +26,7 @@ importers:
       '@anvia/server':
         specifier: 1.0.1
         version: 1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))
-      '@assingment/agent':
+      '@anreal/agent':
         specifier: workspace:*
         version: link:../../packages/agent
       '@aws-sdk/client-s3':

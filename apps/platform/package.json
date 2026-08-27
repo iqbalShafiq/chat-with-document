@@ -1,5 +1,5 @@
 {
-  "name": "platform",
+  "name": "@anreal/platform",
   "private": true,
   "type": "module",
   "imports": {

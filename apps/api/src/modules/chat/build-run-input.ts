@@ -46,7 +46,7 @@ import {
   type ProfileScope,
   type ProfileSectionKey,
   type ReasoningEffort,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import {
   parseMessage,
   type Message,
@@ -958,7 +958,7 @@ export async function reconstructChatRunInput(input: {
   grantHelpers?: ToolGrantHelpers;
   /** Coarse Deep Research lifecycle events for the resumable stream. */
   onDeepResearchProgress?: (
-    event: import("@assingment/agent").DeepResearchProgress,
+    event: import("@anreal/agent").DeepResearchProgress,
   ) => Promise<void> | void;
   /** Connected context7 MCP server (nullable when unavailable). */
   context7Server?: McpServer | null;

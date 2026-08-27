@@ -1,5 +1,5 @@
-import type { DatasetResolver, TabularSheet } from "@assingment/agent";
-import { extractMarkdownTables, sheetFromRows } from "@assingment/agent";
+import type { DatasetResolver, TabularSheet } from "@anreal/agent";
+import { extractMarkdownTables, sheetFromRows } from "@anreal/agent";
 import { Prisma } from "../../generated/prisma/client.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 

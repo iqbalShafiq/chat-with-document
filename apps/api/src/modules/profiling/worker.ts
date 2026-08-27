@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import type { ProfileScope } from "@assingment/agent";
+import type { ProfileScope } from "@anreal/agent";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import {
   PROFILE_QUEUE,

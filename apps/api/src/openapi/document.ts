@@ -13,7 +13,7 @@ import { usagePaths } from "./paths/usage.js";
 export const OPENAPI_SPEC_VERSION = "1.1.0";
 
 const INFO_DESCRIPTION = `
-REST API for **Chat with Document**. The same endpoints power the web platform
+REST API for **anreal**. The same endpoints power the web platform
 and are intended for extra-repo clients (mobile, scripts, other frontends).
 
 ## Authentication
@@ -79,7 +79,7 @@ export function buildOpenApiDocument(input?: {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Chat with Document API",
+      title: "anreal API",
       version: OPENAPI_SPEC_VERSION,
       description: INFO_DESCRIPTION,
     },

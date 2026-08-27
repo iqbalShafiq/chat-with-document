@@ -10,7 +10,7 @@ const db = vi.hoisted(() => ({
   },
 }));
 vi.mock("../../utils/prisma.js", () => ({ prisma: db }));
-vi.mock("@assingment/agent", () => ({
+vi.mock("@anreal/agent", () => ({
   extractTextFromMessageJson: (message: { content?: unknown }) => {
     if (typeof message.content === "string") return message.content;
     if (!Array.isArray(message.content)) return "";

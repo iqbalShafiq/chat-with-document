@@ -1,4 +1,4 @@
-import type { ImageCapabilitySet } from "@assingment/agent";
+import type { ImageCapabilitySet } from "@anreal/agent";
 
 const CAPABILITY_KEYS = new Set([
   "n",

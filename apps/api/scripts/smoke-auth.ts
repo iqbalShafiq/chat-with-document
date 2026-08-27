@@ -2,7 +2,7 @@
  * API-level smoke: register → login → unauth guard → sessions → chat → usage audit.
  * Precondition: API running on SMOKE_API_BASE (default http://localhost:3001).
  *
- *   pnpm --filter api smoke:auth
+ *   pnpm --filter @anreal/api smoke:auth
  */
 import { prisma } from "../src/utils/prisma.js";
 
