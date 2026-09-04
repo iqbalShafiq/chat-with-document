@@ -26,6 +26,6 @@ function loadEnvKeys(keys: readonly string[]): Record<string, string> {
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
-    env: loadEnvKeys(["MISTRAL_API_KEY"]),
+    env: loadEnvKeys(["MISTRAL_API_KEY", "DATABASE_URL"]),
   },
 });

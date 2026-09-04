@@ -31,7 +31,7 @@ This is required by `@anvia/memory-prisma` 1.0.7. Canonical `load()` keeps full 
 
 App truncate (`truncateSessionMemory`) now writes `compactionState: Prisma.DbNull` so a user truncate cannot leave a stale checkpoint that skips deleted rows.
 
-`prisma validate` passed. `prisma migrate deploy` was **not** applied here: Docker Desktop was not running (`localhost:15433` unreachable). Apply with `pnpm --filter @anreal/api db:deploy` before using local Postgres.
+`prisma validate` passed. After Docker came up, `pnpm --filter @anreal/api db:deploy` applied `20260904000000_add_agent_memory_compaction_state`.
 
 ## Adapter deltas (types-backed)
 
@@ -53,15 +53,11 @@ App truncate (`truncateSessionMemory`) now writes `compactionState: Prisma.DbNul
 | `pnpm --filter @anreal/platform test` | 32 files, 191 passed |
 | `pnpm --filter @anreal/api test -- src/modules/chat/truncate-memory.test.ts` | 6 passed |
 | `pnpm --filter @anreal/api exec prisma validate` | pass |
-| `pnpm --filter @anreal/api test` (full) | 440 passed, 21 skipped; 3 env-dependent suites failed because Postgres/Redis were down |
-| Playwright real-LLM | **not run** — no `pnpm dev` stack, Docker down |
+| `pnpm --filter @anreal/api db:deploy` | applied `compactionState` |
+| `pnpm --filter @anreal/api test` (full, Docker up) | **51 passed / 1 skipped**, 460 tests passed; native-memory integration + Redis Lua suites green |
+| Playwright real-LLM | **not run** — still needs `pnpm dev` + OpenRouter key |
 
-Full API suite failures with Docker stopped:
-
-- `native-memory.integration.test.ts` (needs migrated Postgres)
-- `interaction-store.redis.test.ts` / `interaction-policy-store.redis.test.ts` (need Redis `:16379`)
-
-Those Redis suites were already environment-gated in practice; they error instead of skip when Redis is unreachable.
+Vitest now injects `DATABASE_URL` from repo `.env` (in addition to `MISTRAL_API_KEY`) so the Prisma memory integration hits local Postgres without loading the rest of `.env` (which would break `origins.test.ts`).
 
 ## Real-LLM Playwright (to run locally)
 
