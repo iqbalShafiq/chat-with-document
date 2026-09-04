@@ -14,21 +14,21 @@ importers:
 
   apps/api:
     dependencies:
-      '@anvia/client':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
-      '@anvia/core':
-        specifier: 1.0.1
-        version: 1.0.1(pdfjs-dist@6.2.108)
-      '@anvia/memory-prisma':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@prisma/client@7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
-      '@anvia/server':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))
       '@anreal/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@anvia/client':
+        specifier: 1.0.10
+        version: 1.0.10(@anvia/core@1.0.9)
+      '@anvia/core':
+        specifier: 1.0.9
+        version: 1.0.9
+      '@anvia/memory-prisma':
+        specifier: 1.0.9
+        version: 1.0.9(@anvia/core@1.0.9)(@prisma/client@7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
+      '@anvia/server':
+        specifier: 1.0.10
+        version: 1.0.10(@anvia/client@1.0.10(@anvia/core@1.0.9))
       '@aws-sdk/client-s3':
         specifier: ^3.888.0
         version: 3.1096.0
@@ -82,17 +82,17 @@ importers:
   apps/platform:
     dependencies:
       '@anvia/client':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
+        specifier: 1.0.10
+        version: 1.0.10(@anvia/core@1.0.9)
       '@anvia/core':
-        specifier: 1.0.1
-        version: 1.0.1(pdfjs-dist@6.2.108)
+        specifier: 1.0.9
+        version: 1.0.9
       '@anvia/react':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(react@19.2.8)
+        specifier: 1.0.11
+        version: 1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/core@1.0.9)(react@19.2.8)
       '@anvia/react-ui':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/react@1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.30.2(@tiptap/core@3.30.2(@tiptap/pm@3.30.2))(@tiptap/pm@3.30.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.0.11
+        version: 1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/react@1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/core@1.0.9)(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.30.2(@tiptap/core@3.30.2(@tiptap/pm@3.30.2))(@tiptap/pm@3.30.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -191,23 +191,23 @@ importers:
   packages/agent:
     dependencies:
       '@anvia/core':
-        specifier: 1.0.1
-        version: 1.0.1(pdfjs-dist@6.2.108)
+        specifier: 1.0.9
+        version: 1.0.9
       '@anvia/langfuse':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
+        specifier: 1.0.9
+        version: 1.0.9(@anvia/core@1.0.9)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
       '@anvia/mcp':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
+        specifier: 1.0.10
+        version: 1.0.10(@anvia/core@1.0.9)
       '@anvia/mistral':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
+        specifier: 1.0.9
+        version: 1.0.9(@anvia/core@1.0.9)(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
       '@anvia/openai':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
+        specifier: 1.0.9
+        version: 1.0.9(@anvia/core@1.0.9)(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
       '@anvia/qdrant':
-        specifier: 1.0.1
-        version: 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(typescript@7.0.2)
+        specifier: 1.0.10
+        version: 1.0.10(@anvia/core@1.0.9)(typescript@7.0.2)
       '@qdrant/js-client-rest':
         specifier: ^1.19.0
         version: 1.19.0(typescript@7.0.2)
@@ -245,71 +245,74 @@ importers:
 
 packages:
 
-  '@anvia/client@1.0.1':
-    resolution: {integrity: sha512-Pgb3BKvoHct2m9TNjezamNtDeHwXm0fl9i0hYv8Xr7sWNRnVAo+B1CnuTCBh/HhTM1WXOOwaGFKHyd5plg0tmQ==}
+  '@anvia/client@1.0.10':
+    resolution: {integrity: sha512-44PF4F66k7HbEdL88ItE03rq99SSa0JjRiNdWjI9KwsuYTWo+BbgsNSIhM7poDUZIOY6yVJ4bnZyt4Vg8Cj3kA==}
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
 
-  '@anvia/core@1.0.1':
-    resolution: {integrity: sha512-6YZ5A5ejPFQnEIWqTjzVwJMwdkc1/0yGBTLBxXZ25rYPChe6E5V+6AilqDJj/eFlrAJ2LUQM6aYV9sQI1ghhaQ==}
+  '@anvia/core@1.0.9':
+    resolution: {integrity: sha512-7pYzRi2yfKjzEjktw9fHMhYK69/hYWN4fzJSPI82S0Fc5jNUn2xucpILVdlQhbZfS1P45eP2QqurZALkpGwwQA==}
+
+  '@anvia/langfuse@1.0.9':
+    resolution: {integrity: sha512-TTOZIv9g6XB1v6e1UzgX8Frjzuj4ICF1liO07mKkWBN+WIxsPbnLrpoeK5jPWK1lbN0DIZAmMKDkox8goTqmQw==}
     peerDependencies:
-      pdfjs-dist: ^6.2.108
-    peerDependenciesMeta:
-      pdfjs-dist:
-        optional: true
+      '@anvia/core': 1.0.9
 
-  '@anvia/langfuse@1.0.1':
-    resolution: {integrity: sha512-9bluzxPq85Nolen2CsBjiYlh6JO1EufhGi5Ksit8DZ/07waJ7XgyTI6JEYESp1TepXol+u503WsBNhaYsRah9A==}
-    peerDependencies:
-      '@anvia/core': 1.0.1
-
-  '@anvia/mcp@1.0.1':
-    resolution: {integrity: sha512-LOsl7ASjjQOg1CzGyb5RUzoajV0c5dc8MTmvSZF39Oc9lACtQvHQByOBCpK2+iKICcKwZVuHPt3QvT+oUqLLSw==}
+  '@anvia/mcp@1.0.10':
+    resolution: {integrity: sha512-xEiVc6Y4HQVTqyDv/LGFntCgCAvESJ4er1iwuSDjh8XEYCwk9n8Dd4Yw0W6cyGbxTarJ8Ygbse43mD6NUuFWTA==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
 
-  '@anvia/memory-prisma@1.0.1':
-    resolution: {integrity: sha512-HVTnSvNTal4Gt5umZLS+kb1bjKx9I5B1FuLuFlPupfTYmfiw7ZylCVkTM5LS3NE8bN/bEIYD7FGtU/Q7cF/qkw==}
+  '@anvia/memory-prisma@1.0.9':
+    resolution: {integrity: sha512-Mz3WiZB/FGJAP0eCiEtqDibMQ+0IOGl814qXjzhvdek9MmxCPAG4umXGQQPFNE8Sc5p7gBiFQTgO855x6Tl5JA==}
     hasBin: true
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
       '@prisma/client': '>=7.9.1 <8.0.0'
 
-  '@anvia/mistral@1.0.1':
-    resolution: {integrity: sha512-gdu1xpjHgmTyu/tk74WrXsZK2j+3Y7GG0oLMEDouAwY6eygkKPieBklmqycOlfA+2dn6+iMcWmTwHHq0AoOGxA==}
+  '@anvia/mistral@1.0.9':
+    resolution: {integrity: sha512-o4FCe59oiL4WabwOEOmz0xDhkfEjE46DxW082U3XqI8ZISfzk7+YqQtQadCWsZDMWlkDbo+LIv+9L+MSIc8kdA==}
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
 
-  '@anvia/openai@1.0.1':
-    resolution: {integrity: sha512-MJ/72sIVj/KRLkuXU3Elu4QPu9B1A2kSx5eV4xsgOqF1uGyMkZngJm0F9Z8+hRsDtYaxUv7TWFvzjFIoX8bLKA==}
+  '@anvia/openai@1.0.9':
+    resolution: {integrity: sha512-9rTILKTYnRE2QAgNiXUIgxI4vfTKXNAvv8g58Rthde02R0t5YYhCSFwgOMUrR/GUy2uVO3/gdG7rABhEMpefEQ==}
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
 
-  '@anvia/qdrant@1.0.1':
-    resolution: {integrity: sha512-ak/FU+554hrtLcmBIcmvW36hA+t0rjNlBXrHCYonAnW2r//KXkGSSo27CMXrQXsQczgqqvSWi7kR04kzkgXxBg==}
+  '@anvia/qdrant@1.0.10':
+    resolution: {integrity: sha512-jmPFYbnGczXiIaBOGnnrfwCt4IeB6NbQS7nNYjjONQ/PhVpyq5p+f5rCRE7YLyngkKfCAg7seM4sYp2AlGntfg==}
     peerDependencies:
-      '@anvia/core': 1.0.1
+      '@anvia/core': 1.0.9
 
-  '@anvia/react-ui@1.0.1':
-    resolution: {integrity: sha512-1f7iGELBR+q+h4F1bdVfCtxXWu+FpAcFwtxbZSwK7kMTiRDwQfVTHftc9++S7qwt4Bbid8V4WMXcsO+a/0FlGw==}
+  '@anvia/react-ui@1.0.11':
+    resolution: {integrity: sha512-bT1xNpP2H+E4gpmMeaLIGDOdKEQ4NZZaOHspWG4GdXRBTVY+PGHT2uuTN6sJRiOEFdQmtD5kK45n6IiLGdJ9pw==}
     peerDependencies:
-      '@anvia/client': 1.0.1
-      '@anvia/react': 1.0.1
+      '@anvia/client': 1.0.10
+      '@anvia/graph': 1.0.11
+      '@anvia/react': 1.0.11
       react: '>=18'
       react-dom: '>=18'
+    peerDependenciesMeta:
+      '@anvia/graph':
+        optional: true
 
-  '@anvia/react@1.0.1':
-    resolution: {integrity: sha512-SNW52rwCgsHR+eR1+5pqV6lQyzY76UiZDYZ4JIkLmYB0q4XdI+alGpMKkAV7mzLX6Zr31E5XYQR956u0o1wRdg==}
+  '@anvia/react@1.0.11':
+    resolution: {integrity: sha512-OExJifDaigX3xF7n8dTpPx+hxXTJBf2DhPTFtqb+FpgMlsMGPb4JyixfZ+FaoaXq65vxgLMELUxHdTiqLZ0Egw==}
     peerDependencies:
-      '@anvia/client': 1.0.1
-      '@anvia/core': 1.0.1
+      '@anvia/client': 1.0.10
+      '@anvia/core': 1.0.9
+      '@anvia/graph': 1.0.11
       react: '>=18'
+    peerDependenciesMeta:
+      '@anvia/graph':
+        optional: true
 
-  '@anvia/server@1.0.1':
-    resolution: {integrity: sha512-vmkbvhvbFGCWJTgMnsoq/mFr43ch48xxixi9UMeb2LH/5v0wpoNnU+pX6KkPrlArM7Y0i5XCfAhzLZaZs3Rj0g==}
+  '@anvia/server@1.0.10':
+    resolution: {integrity: sha512-JPzQooAoNPJZEaA3nSZTCzEYLLzPUvRs40rsEV+SdVclk2hj7987k6xeCK3bka+9pPiTDd27gILn3dkRE+vg5Q==}
     peerDependencies:
-      '@anvia/client': 1.0.1
+      '@anvia/client': 1.0.10
 
   '@asamuzakjp/css-color@6.0.7':
     resolution: {integrity: sha512-vC/bk1Lz7Tn/EfU9/apOTBk80/8dyGyWMowPoV1tJ52muDGsDqt2HPT2klrFUiY60MQmQv9q8yIht15JnBgDGw==}
@@ -883,81 +886,6 @@ packages:
     resolution: {integrity: sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ==}
     cpu: [x64]
     os: [win32]
-
-  '@napi-rs/canvas-android-arm64@1.0.3':
-    resolution: {integrity: sha512-7kSCdUhoXiO+AaIMXdBGdtp6EctZNkmF62Rea/BmVQlwKaM3bBhOzyGUzxyxz9dv5vdBfpyAaxhSRSJF4kqK4A==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [android]
-
-  '@napi-rs/canvas-darwin-arm64@1.0.3':
-    resolution: {integrity: sha512-ds14V1BPagLszQyaDTeggny5fNeTCqsUQ5QhFj9VDxSEfzrVxXtdbR0LoFyKa0Siaaw8KvqSk4t7k/WoZJwvbg==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@napi-rs/canvas-darwin-x64@1.0.3':
-    resolution: {integrity: sha512-qof3LRAAycmkV2I1izZo9RoSHF8kCQr5O05sFwv0jK8rSdYV6KHVwimo6Qb7RxZj40WHKbLHm5JDaUF0o5XUAA==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@napi-rs/canvas-linux-arm-gnueabihf@1.0.3':
-    resolution: {integrity: sha512-FU2kKZLmolHA9+KcUA+l1+xH3WTLUUTQDU/kLv9SEUr2TrRPu94aytOeizFJDHPs/QBcw4QL1mCQhetQXYBbag==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [linux]
-
-  '@napi-rs/canvas-linux-arm64-gnu@1.0.3':
-    resolution: {integrity: sha512-GVSjntxKeA+/y/ZKf1F+cmUw1WeIkE5aMRPqnZUlBTBvBcrvgWccJAWuYCKPX4QJQwZILIIwhgdAbl51yj6fpA==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@napi-rs/canvas-linux-arm64-musl@1.0.3':
-    resolution: {integrity: sha512-J51oK/axyZ13kxycumSMfLiDZMdWdOVvqDFI28BpuViZHE3A0bQfr8B5vg8YnPEnqLD3BSn1hkdlh2buspEcNQ==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [musl]
-
-  '@napi-rs/canvas-linux-riscv64-gnu@1.0.3':
-    resolution: {integrity: sha512-CtQgQjoVTX67jS9XuCTtJ40Sl7wRLMguoFnnGnfDmCWf7kzKFZVwj5ynqUOIGKFMSB61ZCuQlwPvVNxYTTseaw==}
-    engines: {node: '>= 10'}
-    cpu: [riscv64]
-    os: [linux]
-    libc: [glibc]
-
-  '@napi-rs/canvas-linux-x64-gnu@1.0.3':
-    resolution: {integrity: sha512-jtfzAHFp+FRaR7zGT4jyCe6wUgAG/dVb5A4Apd8FY9jKarntDfUAlJXscugiH7ZF5kKnu7/lHFk9LaDPcrGEVQ==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
-  '@napi-rs/canvas-linux-x64-musl@1.0.3':
-    resolution: {integrity: sha512-xTzaUCKUHTY4bCGadeeRZggbRVbGUT1petg7Z8r9AJR2+D9Bqu6nQAgqBGC6D47tA70LjaaaLTrJ7wNY1T74dg==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [musl]
-
-  '@napi-rs/canvas-win32-arm64-msvc@1.0.3':
-    resolution: {integrity: sha512-ktVLuBkI6QVOm5BwO/WbdGwxgeetAMJa7TTmR8qBarXF0OU2NKjvjUtPJAl2y8t+zBRczJl/1VOl9gua6WcK2g==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [win32]
-
-  '@napi-rs/canvas-win32-x64-msvc@1.0.3':
-    resolution: {integrity: sha512-SGhlQ8bDjL1Cz2KnsKMasr/5sTcwG/SZkB6WCJxLsmSm/3aS2C+3p39bA7iZ2/94+NkVDySZfbiGoaSZSFHYxA==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [win32]
-
-  '@napi-rs/canvas@1.0.3':
-    resolution: {integrity: sha512-OlI657a5XXvKGFX7kNeIzJ8rO7IXt87Mqu2H8rXE46viAuOfum/JA7ysX7+eBhxNKznT+RCZh418mndlcFX3+w==}
-    engines: {node: '>= 10'}
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -3345,10 +3273,6 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
-  pdfjs-dist@6.2.108:
-    resolution: {integrity: sha512-YxFb+SQcodN2rnX9Tn3dHYlqfb7NjlzzfONPpJd+AKoKtUjEdevTfbC07d5TcczzOK6261auRkP/M8OBHs9vFQ==}
-    engines: {node: '>=22.13.0 || >=24'}
-
   perfect-debounce@2.1.0:
     resolution: {integrity: sha512-LjgdTytVFXeUgtHZr9WYViYSM/g8MkcTPYDlPa3cDqMirHjKiSZPYd6DoL7pK8AJQr+uWkQvCjHNdiMqsrJs+g==}
 
@@ -4084,20 +4008,18 @@ packages:
 
 snapshots:
 
-  '@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))':
+  '@anvia/client@1.0.10(@anvia/core@1.0.9)':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
 
-  '@anvia/core@1.0.1(pdfjs-dist@6.2.108)':
+  '@anvia/core@1.0.9':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3
-    optionalDependencies:
-      pdfjs-dist: 6.2.108
 
-  '@anvia/langfuse@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))':
+  '@anvia/langfuse@1.0.9(@anvia/core@1.0.9)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       '@langfuse/otel': 5.10.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
       '@langfuse/tracing': 5.10.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/api': 1.9.1
@@ -4109,20 +4031,20 @@ snapshots:
       - '@opentelemetry/exporter-trace-otlp-http'
       - '@opentelemetry/sdk-trace-base'
 
-  '@anvia/mcp@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))':
+  '@anvia/mcp@1.0.10(@anvia/core@1.0.9)':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       '@modelcontextprotocol/client': 2.0.0
       undici: 8.10.0
 
-  '@anvia/memory-prisma@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@prisma/client@7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
+  '@anvia/memory-prisma@1.0.9(@anvia/core@1.0.9)(@prisma/client@7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       '@prisma/client': 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
 
-  '@anvia/mistral@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))':
+  '@anvia/mistral@1.0.9(@anvia/core@1.0.9)(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       '@mistralai/mistralai': 2.6.4(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
     transitivePeerDependencies:
       - '@opentelemetry/api'
@@ -4132,9 +4054,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@anvia/openai@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)':
+  '@anvia/openai@1.0.9(@anvia/core@1.0.9)(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       openai: 7.5.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(ws@8.21.1)(zod@4.4.3)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
@@ -4143,17 +4065,17 @@ snapshots:
       - ws
       - zod
 
-  '@anvia/qdrant@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(typescript@7.0.2)':
+  '@anvia/qdrant@1.0.10(@anvia/core@1.0.9)(typescript@7.0.2)':
     dependencies:
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/core': 1.0.9
       '@qdrant/js-client-rest': 1.19.0(typescript@7.0.2)
     transitivePeerDependencies:
       - typescript
 
-  '@anvia/react-ui@1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/react@1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.30.2(@tiptap/core@3.30.2(@tiptap/pm@3.30.2))(@tiptap/pm@3.30.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@anvia/react-ui@1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/react@1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/core@1.0.9)(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.30.2(@tiptap/core@3.30.2(@tiptap/pm@3.30.2))(@tiptap/pm@3.30.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@anvia/client': 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
-      '@anvia/react': 1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(react@19.2.8)
+      '@anvia/client': 1.0.10(@anvia/core@1.0.9)
+      '@anvia/react': 1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/core@1.0.9)(react@19.2.8)
       '@radix-ui/react-slot': 1.3.3(@types/react@19.2.17)(react@19.2.8)
       '@tiptap/core': 3.30.2(@tiptap/pm@3.30.2)
       '@tiptap/extension-document': 3.30.2(@tiptap/core@3.30.2(@tiptap/pm@3.30.2))
@@ -4177,15 +4099,15 @@ snapshots:
       - '@types/react-dom'
       - supports-color
 
-  '@anvia/react@1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))(@anvia/core@1.0.1(pdfjs-dist@6.2.108))(react@19.2.8)':
+  '@anvia/react@1.0.11(@anvia/client@1.0.10(@anvia/core@1.0.9))(@anvia/core@1.0.9)(react@19.2.8)':
     dependencies:
-      '@anvia/client': 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
-      '@anvia/core': 1.0.1(pdfjs-dist@6.2.108)
+      '@anvia/client': 1.0.10(@anvia/core@1.0.9)
+      '@anvia/core': 1.0.9
       react: 19.2.8
 
-  '@anvia/server@1.0.1(@anvia/client@1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108)))':
+  '@anvia/server@1.0.10(@anvia/client@1.0.10(@anvia/core@1.0.9))':
     dependencies:
-      '@anvia/client': 1.0.1(@anvia/core@1.0.1(pdfjs-dist@6.2.108))
+      '@anvia/client': 1.0.10(@anvia/core@1.0.9)
 
   '@asamuzakjp/css-color@6.0.7':
     dependencies:
@@ -4771,54 +4693,6 @@ snapshots:
     optional: true
 
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
-    optional: true
-
-  '@napi-rs/canvas-android-arm64@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-darwin-arm64@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-darwin-x64@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-arm-gnueabihf@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-arm64-gnu@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-arm64-musl@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-riscv64-gnu@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-x64-gnu@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-linux-x64-musl@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-win32-arm64-msvc@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas-win32-x64-msvc@1.0.3':
-    optional: true
-
-  '@napi-rs/canvas@1.0.3':
-    optionalDependencies:
-      '@napi-rs/canvas-android-arm64': 1.0.3
-      '@napi-rs/canvas-darwin-arm64': 1.0.3
-      '@napi-rs/canvas-darwin-x64': 1.0.3
-      '@napi-rs/canvas-linux-arm-gnueabihf': 1.0.3
-      '@napi-rs/canvas-linux-arm64-gnu': 1.0.3
-      '@napi-rs/canvas-linux-arm64-musl': 1.0.3
-      '@napi-rs/canvas-linux-riscv64-gnu': 1.0.3
-      '@napi-rs/canvas-linux-x64-gnu': 1.0.3
-      '@napi-rs/canvas-linux-x64-musl': 1.0.3
-      '@napi-rs/canvas-win32-arm64-msvc': 1.0.3
-      '@napi-rs/canvas-win32-x64-msvc': 1.0.3
     optional: true
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
@@ -7398,11 +7272,6 @@ snapshots:
   path-key@3.1.1: {}
 
   pathe@2.0.3: {}
-
-  pdfjs-dist@6.2.108:
-    optionalDependencies:
-      '@napi-rs/canvas': 1.0.3
-    optional: true
 
   perfect-debounce@2.1.0: {}
 

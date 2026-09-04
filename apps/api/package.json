@@ -19,10 +19,10 @@
     "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
-    "@anvia/client": "1.0.1",
-    "@anvia/core": "1.0.1",
-    "@anvia/memory-prisma": "1.0.1",
-    "@anvia/server": "1.0.1",
+    "@anvia/client": "1.0.10",
+    "@anvia/core": "1.0.9",
+    "@anvia/memory-prisma": "1.0.9",
+    "@anvia/server": "1.0.10",
     "@anreal/agent": "workspace:*",
     "@aws-sdk/client-s3": "^3.888.0",
     "@better-auth/prisma-adapter": "^1.6.25",

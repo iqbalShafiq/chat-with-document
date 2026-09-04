@@ -4,7 +4,19 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const TARGET_VERSION = "1.0.1";
+const TARGET_VERSIONS = {
+  "@anvia/client": "1.0.10",
+  "@anvia/core": "1.0.9",
+  "@anvia/langfuse": "1.0.9",
+  "@anvia/mcp": "1.0.10",
+  "@anvia/memory-prisma": "1.0.9",
+  "@anvia/mistral": "1.0.9",
+  "@anvia/openai": "1.0.9",
+  "@anvia/qdrant": "1.0.10",
+  "@anvia/react": "1.0.11",
+  "@anvia/react-ui": "1.0.11",
+  "@anvia/server": "1.0.10",
+};
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCKFILE_PATH = join(REPOSITORY_ROOT, "pnpm-lock.yaml");
 const COMPOSE_PATH = join(REPOSITORY_ROOT, "docker-compose.yml");
@@ -31,10 +43,15 @@ const REQUIRED_DIRECT_DEPENDENCIES = {
   ],
   "apps/platform/package.json": [
     "@anvia/client",
+    "@anvia/core",
     "@anvia/react",
     "@anvia/react-ui",
   ],
 };
+
+function expectedVersion(packageName) {
+  return TARGET_VERSIONS[packageName];
+}
 
 function normalizePath(path) {
   return path.split("\\").join("/");
@@ -174,9 +191,14 @@ for (const manifestPath of manifestPaths) {
         continue;
       }
       referencedAnviaPackages.add(packageName);
-      if (specifier !== TARGET_VERSION) {
+      const expected = expectedVersion(packageName);
+      if (expected === undefined) {
         errors.push(
-          `${manifestName}: ${field}.${packageName} must be exactly ${TARGET_VERSION}; found ${specifier}`,
+          `${manifestName}: ${field}.${packageName} is not in the allowed Anvia package map`,
+        );
+      } else if (specifier !== expected) {
+        errors.push(
+          `${manifestName}: ${field}.${packageName} must be exactly ${expected}; found ${specifier}`,
         );
       }
     }
@@ -190,7 +212,7 @@ for (const [manifestName, packageNames] of Object.entries(
   for (const packageName of packageNames) {
     if (!(packageName in dependencies)) {
       errors.push(
-        `${manifestName}: dependencies.${packageName} is required at ${TARGET_VERSION}`,
+        `${manifestName}: dependencies.${packageName} is required at ${expectedVersion(packageName)}`,
       );
     }
   }
@@ -241,9 +263,10 @@ for (const [manifestName, manifest] of manifests) {
       const resolvedVersion = versionFromResolution(
         lockedDependency.version ?? "",
       );
-      if (resolvedVersion !== TARGET_VERSION) {
+      const expected = expectedVersion(packageName);
+      if (resolvedVersion !== expected) {
         errors.push(
-          `pnpm-lock.yaml: importer ${importerName} resolves ${packageName} to ${resolvedVersion ?? "missing"}; expected ${TARGET_VERSION}`,
+          `pnpm-lock.yaml: importer ${importerName} resolves ${packageName} to ${resolvedVersion ?? "missing"}; expected ${expected}`,
         );
       }
     }
@@ -260,7 +283,12 @@ for (const match of lockfile.matchAll(resolutionPattern)) {
   versions.add(version);
   lockedResolutionVersions.set(packageName, versions);
 
-  if (version !== TARGET_VERSION) {
+  const expected = expectedVersion(packageName);
+  if (expected === undefined) {
+    errors.push(
+      `pnpm-lock.yaml: unexpected resolution ${packageName}@${version}`,
+    );
+  } else if (version !== expected) {
     errors.push(
       `pnpm-lock.yaml: legacy resolution ${packageName}@${version} must be removed`,
     );
@@ -268,9 +296,13 @@ for (const match of lockfile.matchAll(resolutionPattern)) {
 }
 
 for (const packageName of referencedAnviaPackages) {
-  if (!lockedResolutionVersions.get(packageName)?.has(TARGET_VERSION)) {
+  const expected = expectedVersion(packageName);
+  if (expected === undefined) {
+    continue;
+  }
+  if (!lockedResolutionVersions.get(packageName)?.has(expected)) {
     errors.push(
-      `pnpm-lock.yaml: missing ${packageName}@${TARGET_VERSION} resolution`,
+      `pnpm-lock.yaml: missing ${packageName}@${expected} resolution`,
     );
   }
 }
@@ -312,6 +344,6 @@ if (uniqueErrors.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Anvia v1 dependency guard passed: ${manifestPaths.length} workspace manifests and pnpm-lock.yaml use exact @anvia/* ${TARGET_VERSION} dependencies.`,
+    `Anvia v1 dependency guard passed: ${manifestPaths.length} workspace manifests and pnpm-lock.yaml use exact pinned @anvia/* versions.`,
   );
 }

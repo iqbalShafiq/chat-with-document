@@ -56,9 +56,9 @@ Alur singkat:
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/client`/`@anvia/react`/`@anvia/react-ui` `1.0.1`, KaTeX |
-| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/client`/`@anvia/core`/`@anvia/memory-prisma`/`@anvia/server` `1.0.1` |
-| Agent | `@anvia/core`, `@anvia/langfuse`, `@anvia/mcp`, `@anvia/mistral`, `@anvia/openai`, `@anvia/qdrant` `1.0.1`, Zod |
+| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/client` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`, KaTeX |
+| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/client`/`@anvia/server` `1.0.10`, `@anvia/core`/`@anvia/memory-prisma` `1.0.9` |
+| Agent | `@anvia/core`/`@anvia/langfuse`/`@anvia/mistral`/`@anvia/openai` `1.0.9`, `@anvia/mcp`/`@anvia/qdrant` `1.0.10`, Zod |
 | Tooling | pnpm workspaces, Docker Compose (Postgres 16) |
 
 ## Struktur monorepo
@@ -392,7 +392,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 - CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
-- Semua package Anvia pada monorepo ini dikunci ke release train **v1.0.1**; browser memakai `@anvia/client` untuk UI/protocol types dan exact `*Primitive` exports dari `@anvia/react-ui`.
+- Semua package Anvia pada monorepo ini dikunci ke patch 1.0.x terbaru yang dipakai aplikasi (`@anvia/core` `1.0.9`, `@anvia/client`/`@anvia/server`/`@anvia/mcp`/`@anvia/qdrant` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`); browser memakai `@anvia/client` untuk UI/protocol types dan exact `*Primitive` exports dari `@anvia/react-ui`.
 - Memory memakai token-aware compaction native Anvia v1 dengan atomic prefix replacement dari `@anvia/memory-prisma`; aplikasi tidak memiliki engine, metadata log, event status, atau fallback summary sendiri.
 - Composer editor adalah native textarea yang dimiliki aplikasi: tetap editable saat status `submitted`/`streaming`, mengirim saat `ready`, dan queue/steer atau stop saat run aktif. Tidak ada patch `node_modules`, package patch, alias kompatibilitas, atau fallback v0.
 - Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
