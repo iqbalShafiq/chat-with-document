@@ -8,10 +8,7 @@ import { PrismaMemoryStore } from "@anvia/memory-prisma";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../utils/prisma.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
-import {
-  TruncateTargetNotFoundError,
-  truncateSessionMemory,
-} from "./truncate-memory.js";
+import { truncateSessionMemory } from "./truncate-memory.js";
 
 const userId = "anvia-native-memory-integration";
 const sessionId = `native-memory-${randomUUID()}`;
@@ -88,9 +85,15 @@ describe("native Anvia v1 Prisma memory integration", () => {
 
     expect(result).toEqual({ status: "committed" });
     const loaded = await memory.load({ scope });
-    expect(loaded).toHaveLength(2);
-    expect(isMemoryCompactionMessage(loaded[0]!)).toBe(true);
-    expect(loaded[1]).toEqual(user("latest"));
+    expect(loaded).toHaveLength(3);
+    expect(loaded.filter(isMemoryCompactionMessage)).toHaveLength(0);
+    expect(loaded[0]).toEqual(user("first"));
+    expect(loaded[2]).toEqual(user("latest"));
+
+    const projected = await memory.compaction!.snapshot({ scope });
+    expect(projected.messages).toHaveLength(2);
+    expect(isMemoryCompactionMessage(projected.messages[0]!)).toBe(true);
+    expect(projected.messages[1]).toEqual(user("latest"));
   });
 
   it("rejects a stale replacement without deleting a concurrent turn", async () => {
@@ -130,15 +133,24 @@ describe("native Anvia v1 Prisma memory integration", () => {
     expect(staleResult).toEqual({ status: "conflict" });
 
     const loaded = await first.load({ scope });
-    expect(loaded.filter(isMemoryCompactionMessage)).toHaveLength(1);
+    expect(loaded.filter(isMemoryCompactionMessage)).toHaveLength(0);
+    expect(loaded).toHaveLength(4);
     expect(loaded.some((message) =>
+      message.role === "assistant" &&
+      message.content instanceof Array &&
+      message.content.some((part) => part.type === "text" && part.text === "concurrent answer"),
+    )).toBe(true);
+
+    const projected = await first.compaction!.snapshot({ scope });
+    expect(projected.messages.some(isMemoryCompactionMessage)).toBe(true);
+    expect(projected.messages.some((message) =>
       message.role === "assistant" &&
       message.content instanceof Array &&
       message.content.some((part) => part.type === "text" && part.text === "concurrent answer"),
     )).toBe(true);
   });
 
-  it("fails closed when a UI position was deleted or reused by native compaction", async () => {
+  it("keeps canonical rows after compaction and clears the checkpoint on truncate", async () => {
     const memory = store();
     await memory.clear({ scope });
     await memory.append({
@@ -157,25 +169,21 @@ describe("native Anvia v1 Prisma memory integration", () => {
       runId: "memory-compaction:run-native-truncate:1",
     });
 
-    await expect(
-      truncateSessionMemory({
-        sessionId,
-        userId,
-        mode: "include",
-        memoryPosition: 0,
-      }),
-    ).rejects.toBeInstanceOf(TruncateTargetNotFoundError);
-    await expect(
-      truncateSessionMemory({
-        sessionId,
-        userId,
-        mode: "include",
-        memoryPosition: 1,
-      }),
-    ).rejects.toBeInstanceOf(TruncateTargetNotFoundError);
+    const truncated = await truncateSessionMemory({
+      sessionId,
+      userId,
+      mode: "include",
+      memoryPosition: 0,
+    });
+    expect(truncated.ok).toBe(true);
+    expect(truncated.deleted).toBe(2);
 
     const loaded = await memory.load({ scope });
-    expect(loaded.filter(isMemoryCompactionMessage)).toHaveLength(1);
-    expect(loaded).toHaveLength(2);
+    expect(loaded).toEqual([user("first")]);
+    expect(loaded.filter(isMemoryCompactionMessage)).toHaveLength(0);
+
+    const projected = await memory.compaction!.snapshot({ scope });
+    expect(projected.messages).toEqual([user("first")]);
+    expect(projected.messages.filter(isMemoryCompactionMessage)).toHaveLength(0);
   });
 });

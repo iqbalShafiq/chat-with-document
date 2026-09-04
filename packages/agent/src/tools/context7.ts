@@ -100,6 +100,7 @@ export function createContext7McpServer(
         ? { headers: { authorization: `Bearer ${apiKey}` } }
         : {}),
     },
+    versionNegotiation: { mode: "auto" },
   });
   serverPromise = client.connect().catch(() => null);
   return serverPromise;

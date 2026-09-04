@@ -44,6 +44,7 @@ async function outcomeOf(
     suiteName: "test",
     case: evalCase(expected),
     output,
+    signal: new AbortController().signal,
   });
 }
 

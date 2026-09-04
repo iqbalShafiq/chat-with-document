@@ -10,7 +10,7 @@ import {
 } from "#/components/auth/auth-handoff";
 import { preloadWorkspaceRoute } from "#/components/auth/preload-workspace";
 import { AnimatedStatusText } from "#/components/chat/animated-status-text";
-import { AnrealBrand, AnrealMark } from "#/components/layout/anreal-brand";
+import { AnrealBrand } from "#/components/layout/anreal-brand";
 
 /**
  * Auth chrome — wide chat-demo rail + empty h-14 top bar + curved content frame.

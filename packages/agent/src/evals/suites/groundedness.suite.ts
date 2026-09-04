@@ -62,6 +62,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         outputContains: ["remote-first"],
       },
     },
+    context: FIXTURE_CHUNK_TEXTS,
   },
   {
     id: NO_FABRICATION_CASE,
@@ -74,6 +75,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
       },
       expected: {},
     },
+    context: FIXTURE_CHUNK_TEXTS,
   },
 ];
 
@@ -96,7 +98,6 @@ const noFabricationJudge = gEval<
     "Penalize invented bonus policy details, numbers, or rules that are not present in the context.",
     "Reward answers that say the documents do not cover annual bonuses or otherwise abstain.",
   ],
-  context: () => FIXTURE_CHUNK_TEXTS,
 });
 
 const noFabricationMetric: EvalMetric<

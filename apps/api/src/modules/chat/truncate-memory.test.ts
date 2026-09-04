@@ -15,6 +15,7 @@ vi.mock("../../utils/prisma.js", () => ({
   prisma: db,
 }));
 
+import { Prisma } from "../../generated/prisma/client.js";
 import {
   TruncateTargetNotFoundError,
   truncateSessionMemory,
@@ -106,6 +107,10 @@ describe("truncateSessionMemory", () => {
       },
     });
     expect(db.agentMemorySession.update).toHaveBeenCalledOnce();
+    expect(db.agentMemorySession.update).toHaveBeenCalledWith({
+      where: { id: "memory-1" },
+      data: { updatedAt: expect.any(Date), compactionState: Prisma.DbNull },
+    });
     expect(db.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       { isolationLevel: "Serializable" },

@@ -82,6 +82,7 @@ describe("Context7 MCP v1 lifecycle", () => {
         ssrfProtection: "strict",
         headers: { authorization: "Bearer context7-secret" },
       },
+      versionNegotiation: { mode: "auto" },
     });
     expect(mocks.connect).toHaveBeenCalledOnce();
     expect(mocks.legacyHttp).not.toHaveBeenCalled();
@@ -103,6 +104,7 @@ describe("Context7 MCP v1 lifecycle", () => {
         url: context7.DEFAULT_CONTEXT7_URL,
         ssrfProtection: "strict",
       },
+      versionNegotiation: { mode: "auto" },
     });
   });
 

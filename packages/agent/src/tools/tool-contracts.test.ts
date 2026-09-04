@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const SOURCE_ROOT = new URL("../", import.meta.url).pathname;
+const SOURCE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LEGACY_KEYS = new Set(["input", "output", "approval"]);
 
 function sourceFiles(directory: string): string[] {

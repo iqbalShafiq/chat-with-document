@@ -1,5 +1,6 @@
 import { isMemoryCompactionMessage } from "@anvia/core/memory";
 import { parseMessage, type Message } from "@anvia/core/completion";
+import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../../utils/prisma.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
 
@@ -188,9 +189,11 @@ export async function truncateSessionMemory(
       });
 
       // Touch session updatedAt so history list reorders predictably.
+      // Drop the 1.0.7 model-context checkpoint so snapshot() cannot skip
+      // canonical rows that this truncate just deleted.
       await tx.agentMemorySession.update({
         where: { id: session.id },
-        data: { updatedAt: new Date() },
+        data: { updatedAt: new Date(), compactionState: Prisma.DbNull },
       });
 
       return {
