@@ -55,7 +55,7 @@ App truncate (`truncateSessionMemory`) now writes `compactionState: Prisma.DbNul
 | `pnpm --filter @anreal/api exec prisma validate` | pass |
 | `pnpm --filter @anreal/api db:deploy` | applied `compactionState` |
 | `pnpm --filter @anreal/api test` (full, Docker up) | **51 passed / 1 skipped**, 460 tests passed; native-memory integration + Redis Lua suites green |
-| Playwright real-LLM | **not run** — still needs `pnpm dev` + OpenRouter key |
+| Playwright real-LLM (`playwright.real-llm.config.ts`, headless, `--workers=1`) | **17 unique tests passed** across the full run + `--last-failed` rerun. Remaining 8 failures are attach/upload (`waitForRequest` after file chooser); 2 worker-restart tests SIGTERM the chat worker and were skipped on rerun. |
 
 Vitest now injects `DATABASE_URL` from repo `.env` (in addition to `MISTRAL_API_KEY`) so the Prisma memory integration hits local Postgres without loading the rest of `.env` (which would break `origins.test.ts`).
 

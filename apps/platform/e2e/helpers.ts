@@ -27,7 +27,7 @@ export async function openFreshChat(page: Page): Promise<void> {
     window.localStorage.setItem("chat.viewMode", "standalone");
   }, sessionId);
   await page.reload();
-  await expect(page.getByText("Ask anything about your documents")).toBeVisible({
+  await expect(page.getByRole("heading", { name: /trying to understand/i })).toBeVisible({
     timeout: 30_000,
   });
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();
@@ -53,7 +53,12 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   await editor.click();
   await expect(editor).toBeEditable();
   await editor.pressSequentially(text, { delay: 15 });
-  await editor.press("Enter");
+  const send = page.getByRole("button", { name: "Send", exact: true });
+  if (await send.isVisible().catch(() => false)) {
+    await send.click();
+  } else {
+    await editor.press("Enter");
+  }
   if (requestPromise) {
     const body = requestPromise.then((request) => request.postDataJSON() as {
       metadata?: { modelId?: string; reasoningEffort?: string };
@@ -73,7 +78,7 @@ export async function waitForStreaming(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 30_000 });
 }
 
-export async function waitForRunDone(page: Page, timeout = 150_000): Promise<void> {
+export async function waitForRunDone(page: Page, timeout = 240_000): Promise<void> {
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible({
     timeout,
   });

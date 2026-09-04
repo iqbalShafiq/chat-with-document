@@ -16,7 +16,7 @@ import {
 test("pins DeepSeek V4 Flash at max and keeps the v3 stream protocol", async ({
   page,
 }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const protocols: string[] = [];
   const captured: { metadata?: { modelId?: string; reasoningEffort?: string } } =
     {};
@@ -112,11 +112,11 @@ test("replayed history still shows original user prompts", async ({ page }) => {
   await sendMessage(page, "Reply with exactly HISTORY_TURN_TWO.");
   await waitForStreaming(page);
   await waitForRunDone(page);
-  await expect(page.getByText(first, { exact: true })).toBeVisible();
-  await expect(page.getByText("HISTORY_TURN_TWO").last()).toBeVisible();
+  await expect(page.getByRole("main").getByText(first, { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText("HISTORY_TURN_TWO").last()).toBeVisible();
   await page.reload();
-  await expect(page.getByText(first, { exact: true })).toBeVisible({
+  await expect(page.getByRole("main").getByText(first, { exact: true })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText("HISTORY_TURN_TWO").last()).toBeVisible();
+  await expect(page.getByRole("main").getByText("HISTORY_TURN_TWO").last()).toBeVisible();
 });
