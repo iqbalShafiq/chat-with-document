@@ -22,7 +22,7 @@ import {
 } from "#/components/ui/select-list";
 
 /** Used only to order the icon fill; the actual list comes from props. */
-const EFFORT_ORDER = ["low", "medium", "high", "max"];
+const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
  * Hover detail for a model option: input modality tags (icons only), max

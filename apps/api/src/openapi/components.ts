@@ -378,7 +378,7 @@ export const chatRequestMetadataSchema = {
       items: { type: "string", format: "uuid" },
     },
     modelId: { type: "string", minLength: 1, maxLength: 256 },
-    reasoningEffort: { type: ["string", "null"], enum: ["low", "medium", "high", "max", null] },
+    reasoningEffort: { type: ["string", "null"], enum: ["minimal", "low", "medium", "high", "xhigh", "max", null] },
     webSearchEnabled: { type: "boolean" },
     imageGenerationEnabled: { type: "boolean" },
     deepResearchEnabled: { type: "boolean" },

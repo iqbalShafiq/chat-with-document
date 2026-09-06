@@ -7,7 +7,7 @@ export type CompletionModelId = string;
 export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "openai/gpt-5.6-luna";
 export const DEFAULT_COMPLETION_PROVIDER = "openai";
 
-export const REASONING_EFFORTS = ["low", "medium", "high", "max"] as const;
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
@@ -46,7 +46,20 @@ function getOpenAIClient(): OpenAIClient {
 export function createCompletionModel(
   modelId: CompletionModelId = DEFAULT_COMPLETION_MODEL,
 ): StreamingCompletionModel {
-  return getOpenAIClient().completionModel({ modelId, api: "responses" });
+  // Meta's Muse Spark contributor tier returns encrypted-only reasoning on
+  // the Responses API with no reasoning deltas, which the Anvia stream
+  // accumulator rejects after the answer text already streamed. Chat
+  // Completions carries the same top-level reasoning_effort control and a
+  // stream shape this model satisfies (reasoning_details stay inert).
+  const api = modelId.startsWith("meta/") ? "chat" : "responses";
+  return getOpenAIClient().completionModel({ modelId, api });
+}
+
+/** Top-level Chat Completions reasoning control for Meta Muse models. */
+export function metaMuseReasoningEffort(
+  effort: ReasoningEffort,
+): { reasoning_effort: ReasoningEffort } {
+  return { reasoning_effort: effort };
 }
 
 /** Strict OpenAI Responses options supplied at Agent construction time. */

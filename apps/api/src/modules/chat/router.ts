@@ -105,6 +105,43 @@ function requireSessionId(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Fallback for a stale reasoning effort on the context-usage estimate (e.g.
+ * max sent right after switching to the Meta contributor tier, which tops
+ * out at xhigh). Mirrors the client's resolveReasoningFallback ordering:
+ * nearest supported level below, then above, then no reasoning. Returns
+ * undefined when no retry is possible so the original error still throws.
+ */
+async function resolveContextUsageEffortFallback(
+  modelId: string,
+  effort: string | null,
+): Promise<string | null | undefined> {
+  const { findActiveModel, listModels } = await import("../models/service.js");
+  const modelInfo = await findActiveModel(modelId);
+  if (!modelInfo) return undefined;
+  const catalog = await listModels();
+  const ordered = [...catalog.reasoningEfforts].sort((a, b) => a.sortOrder - b.sortOrder);
+  const supported = [...modelInfo.reasoningEfforts].sort(
+    (a, b) =>
+      ordered.findIndex((entry) => entry.key === a) -
+      ordered.findIndex((entry) => entry.key === b),
+  );
+  if (supported.length === 0) return null;
+  if (effort !== null && !supported.includes(effort)) {
+    const currentIndex = ordered.findIndex((entry) => entry.key === effort);
+    if (currentIndex !== -1) {
+      for (let i = currentIndex - 1; i >= 0; i -= 1) {
+        if (supported.includes(ordered[i]!.key)) return ordered[i]!.key;
+      }
+      for (let i = currentIndex + 1; i < ordered.length; i += 1) {
+        if (supported.includes(ordered[i]!.key)) return ordered[i]!.key;
+      }
+    }
+    return supported[0] ?? null;
+  }
+  return undefined;
+}
+
 function parseTruncateMode(value: unknown): TruncateMode | null {
   return value === "include" || value === "exclude" ? value : null;
 }
@@ -480,9 +517,27 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const effortRaw = c.req.query("reasoningEffort");
     const reasoningEffort = effortRaw && effortRaw.trim() ? effortRaw.trim() : null;
 
-    return c.json(
-      await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
-    );
+    try {
+      return c.json(
+        await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort }),
+      );
+    } catch (error) {
+      // A stale effort (e.g. max after switching to the Meta contributor
+      // tier) must not fail the compaction indicator with a 500: fall back
+      // to the model's closest supported effort, then to no reasoning.
+      if (
+        error instanceof Error &&
+        /does not support reasoning effort/.test(error.message)
+      ) {
+        const fallback = await resolveContextUsageEffortFallback(model, reasoningEffort);
+        if (fallback !== undefined) {
+          return c.json(
+            await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort: fallback }),
+          );
+        }
+      }
+      throw error;
+    }
   })
   .get("/:sessionId/context-snippet", async (c) => {
     const user = c.get("user");

@@ -13,7 +13,7 @@ import {
   type ChatStreamMetadata,
 } from "./client-data";
 
-export type ChatReasoningEffort = "low" | "medium" | "high" | "max";
+export type ChatReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ChatRequestMetadata = {
   sessionId: string;
@@ -33,7 +33,7 @@ export function requireChatReasoningEffort(
   value: string | null,
 ): ChatReasoningEffort | null {
   if (value === null) return null;
-  if (value === "low" || value === "medium" || value === "high" || value === "max") {
+  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
     return value;
   }
   throw new Error("Chat reasoning effort is invalid.");
@@ -117,7 +117,7 @@ export function assertChatRequestMetadata(
       (id) => !nonBlankString(id, MAX_IDENTIFIER_LENGTH),
     ) ||
     (value.reasoningEffort !== null &&
-      !["low", "medium", "high", "max"].includes(value.reasoningEffort as string)) ||
+      !["minimal", "low", "medium", "high", "xhigh", "max"].includes(value.reasoningEffort as string)) ||
     typeof value.webSearchEnabled !== "boolean" ||
     typeof value.imageGenerationEnabled !== "boolean" ||
     typeof value.deepResearchEnabled !== "boolean" ||
