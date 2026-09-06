@@ -1168,6 +1168,11 @@ function ChatSession({
   /** Latest request policy for the v1 transport (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
+  /** Latest catalog for synchronous model-switch fallback (avoids stale closures). */
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const reasoningEffortsRef = useRef(reasoningEfforts);
+  reasoningEffortsRef.current = reasoningEfforts;
   const webSearchEnabledRef = useRef(webSearchEnabled);
   const deepResearchEnabledRef = useRef(deepResearchEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
@@ -1555,6 +1560,21 @@ function ChatSession({
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
     persistSelectedModel(model);
+    // Resolve the reasoning effort against the NEW model's supported set
+    // immediately, so no request (chat or context-usage) can carry the
+    // previous model's stale effort (e.g. max on the Meta contributor tier).
+    const nextModel = modelById(modelsRef.current, model);
+    if (nextModel) {
+      const next = resolveReasoningFallback(
+        selectedReasoningEffortRef.current,
+        nextModel.reasoningEfforts,
+        reasoningEffortsRef.current,
+      );
+      if (next !== selectedReasoningEffortRef.current) {
+        setSelectedReasoningEffort(next);
+        persistSelectedReasoningEffort(next);
+      }
+    }
   }, []);
 
   const handleReasoningChange = useCallback((effort: string | null) => {

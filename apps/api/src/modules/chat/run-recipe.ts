@@ -160,7 +160,7 @@ export const chatAgentRecipeSchema = z
     model: z
       .object({
         id,
-        reasoningEffort: z.enum(["low", "medium", "high", "max"]).nullable(),
+        reasoningEffort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).nullable(),
       })
       .strict(),
     memoryPolicy: memoryPolicySchema,

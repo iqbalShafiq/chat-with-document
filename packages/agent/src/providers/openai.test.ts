@@ -58,14 +58,26 @@ describe("OpenAI provider", () => {
   });
 
   it("maps reasoning effort to strict provider options", () => {
-    const provider = openaiProvider as typeof openaiProvider & {
-      providerOptionsForReasoning?: (
-        effort: openaiProvider.ReasoningEffort,
-      ) => Record<string, unknown>;
-    };
-
-    expect(provider.providerOptionsForReasoning?.("high")).toEqual({
+    expect(openaiProvider.providerOptionsForReasoning("high")).toEqual({
       reasoning: { effort: "high", summary: "auto" },
+    });
+    expect(openaiProvider.metaMuseReasoningEffort("xhigh")).toEqual({
+      reasoning_effort: "xhigh",
+    });
+  });
+
+  it("routes Meta Muse models through Chat Completions", () => {
+    mocks.completionModel.mockClear();
+    openaiProvider.createCompletionModel("meta/muse-spark-1.3-contributor");
+    expect(mocks.completionModel).toHaveBeenCalledWith({
+      modelId: "meta/muse-spark-1.3-contributor",
+      api: "chat",
+    });
+    mocks.completionModel.mockClear();
+    openaiProvider.createCompletionModel("openai/gpt-5.6-luna");
+    expect(mocks.completionModel).toHaveBeenCalledWith({
+      modelId: "openai/gpt-5.6-luna",
+      api: "responses",
     });
   });
 });

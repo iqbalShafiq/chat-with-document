@@ -12,6 +12,7 @@ import type { McpServer } from "@anvia/core/mcp";
 import {
   DEFAULT_REASONING_EFFORT,
   defaultModel,
+  metaMuseReasoningEffort,
   providerOptionsForReasoning,
   type ReasoningEffort,
 } from "./providers/openai.js";
@@ -75,13 +76,25 @@ export function createAgent(opts: CreateAgentOptions): Agent {
       ? opts.memory
       : { store: opts.memory, savePolicy: "turn" as const };
 
+  const model = opts.model ?? defaultModel();
+  const modelId =
+    model && typeof model === "object" && "modelId" in model
+      ? (model as { modelId?: unknown }).modelId
+      : undefined;
+  // Meta Muse models run on Chat Completions (see createCompletionModel):
+  // send reasoning_effort top-level instead of the Responses reasoning map.
+  const providerOptions =
+    typeof modelId === "string" && modelId.startsWith("meta/")
+      ? metaMuseReasoningEffort(reasoningEffort)
+      : providerOptionsForReasoning(reasoningEffort);
+
   return new Agent({
     id: opts.agentId,
-    model: opts.model ?? defaultModel(),
+    model,
     instructions,
     context: [...(opts.context ?? []), ...convenienceContext],
     tools: [...(opts.additionalTools ?? [])],
-    providerOptions: providerOptionsForReasoning(reasoningEffort),
+    providerOptions,
     maxTurns: opts.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
     ...(memory ? { memory } : {}),
     ...(opts.mcpServers?.length ? { mcpServers: [...opts.mcpServers] } : {}),

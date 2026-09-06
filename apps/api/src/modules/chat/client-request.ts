@@ -36,7 +36,7 @@ export const ChatRequestMetadataSchema = z
       .max(MAX_CHAT_DOCUMENTS)
       .refine((ids) => new Set(ids).size === ids.length, "document ids must be unique"),
     modelId: boundedIdentifier,
-    reasoningEffort: z.enum(["low", "medium", "high", "max"]).nullable(),
+    reasoningEffort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).nullable(),
     webSearchEnabled: z.boolean(),
     imageGenerationEnabled: z.boolean(),
     deepResearchEnabled: z.boolean(),
