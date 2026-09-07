@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Link2, ShieldOff } from "lucide-react";
+import { Check, Copy, Share2, ShieldOff } from "lucide-react";
 import { copyToClipboard } from "#/lib/clipboard";
 import {
   ApiAuthError,
@@ -181,7 +181,7 @@ export function SharePopover({
         {state.kind === "ready" ? (
           <>
             <div className="flex items-center gap-2.5 rounded-2xl bg-white/[0.04] px-3.5 py-3">
-              <Link2 className="size-4 shrink-0 text-text-muted" strokeWidth={1.75} />
+              <Share2 className="size-4 shrink-0 text-text-muted" strokeWidth={1.75} />
               <p className="text-sm text-text">
                 {state.active ? (
                   <>

@@ -1,5 +1,5 @@
 import { useRef, useState, type RefObject } from "react";
-import { Link2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import {
   DIALOG_PRIMARY_BUTTON_CLASS,
@@ -140,7 +140,7 @@ export function SessionActionsMenu({
                   id: "share",
                   label: "Share",
                   description: "Create a public read-only link",
-                  icon: <Link2 className="size-3.5" strokeWidth={1.75} />,
+                  icon: <Share2 className="size-3.5" strokeWidth={1.75} />,
                   onSelect: () => onShare(session),
                 },
               ]

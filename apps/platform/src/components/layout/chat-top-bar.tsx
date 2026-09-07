@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { AnrealMark } from "#/components/layout/anreal-brand";
 import { AutoDismissPopover } from "#/components/ui/auto-dismiss-popover";
-import { Check, Link2, Menu, PanelLeftOpen, SquarePen } from "lucide-react";
+import { Check, Link2, Menu, PanelLeftOpen, Share2, SquarePen } from "lucide-react";
 import { copyToClipboard } from "#/lib/clipboard";
 
 export function ChatTopBar({
@@ -97,7 +97,7 @@ export function ChatTopBar({
               title={shareActive ? "Sharing on — manage link" : "Share chat"}
               className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
             >
-              <Link2 className="size-4" strokeWidth={1.75} />
+              <Share2 className="size-4" strokeWidth={1.75} />
               {shareActive ? (
                 <span
                   aria-hidden
