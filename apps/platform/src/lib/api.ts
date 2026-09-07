@@ -6,12 +6,19 @@ const DEFAULT_API_PORT = 3001;
 /**
  * API origin for this page. Opening the UI at http://192.168.x.x:3000 talks to
  * http://192.168.x.x:3001 — localhost would point at the phone itself.
- * Override with VITE_API_BASE when the API is on a different host.
+ * Override with VITE_API_BASE when the API is on a different host/port.
+ * Otherwise the port comes from VITE_API_PORT in the shared root .env
+ * (kept in sync with the API's PORT; Vite only exposes VITE_* to the browser).
  */
-export function resolveApiBase(hostname?: string, protocol?: string): string {
-  if (hostname === undefined) {
-    const fromEnv = import.meta.env.VITE_API_BASE?.trim();
-    if (fromEnv) return fromEnv.replace(/\/+$/, "");
+export function resolveApiBase(
+  hostname?: string,
+  protocol?: string,
+  env?: { VITE_API_BASE?: string; VITE_API_PORT?: string },
+): string {
+  const viteEnv = env ?? import.meta.env;
+  const fromEnv = viteEnv.VITE_API_BASE?.trim();
+  if (fromEnv && (hostname === undefined || fromEnv.includes("://"))) {
+    return fromEnv.replace(/\/+$/, "");
   }
   const host =
     hostname ??
@@ -19,7 +26,8 @@ export function resolveApiBase(hostname?: string, protocol?: string): string {
   const proto =
     protocol ??
     (typeof window === "undefined" ? "http:" : window.location.protocol);
-  return `${proto}//${host}:${DEFAULT_API_PORT}`;
+  const port = viteEnv.VITE_API_PORT?.trim() || String(DEFAULT_API_PORT);
+  return `${proto}//${host}:${port}`;
 }
 
 export const API_BASE = resolveApiBase();

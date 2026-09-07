@@ -6,12 +6,13 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "pnpm with-env vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
     "@anvia/client": "1.0.10",

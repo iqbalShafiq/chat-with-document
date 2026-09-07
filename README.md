@@ -381,7 +381,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 
 ## Frontend notes
 
-- Endpoint API di UI mengikuti hostname halaman (localhost → `:3001`, `192.168.x.x` → `http://192.168.x.x:3001`). Override lewat `VITE_API_BASE`.
+- Endpoint API di UI mengikuti hostname halaman dan VITE_API_PORT dari root `.env` (localhost → `:<VITE_API_PORT>`, `192.168.x.x` → `http://192.168.x.x:<VITE_API_PORT>`). Override lewat `VITE_API_BASE`.
 - Session aktif disimpan di `localStorage` (`chat.sessionId`).
 - Pesan asisten dirender lewat `MathMarkdown`: normalisasi delimiter LaTeX umum (`\[...\]`, `\(...\)`, `[ \frac{...} ]`) lalu KaTeX.
 
