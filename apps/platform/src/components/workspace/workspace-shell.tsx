@@ -136,11 +136,6 @@ export function WorkspaceShell({
   const [sharedSessionIds, setSharedSessionIds] = useState<
     ReadonlySet<string>
   >(new Set());
-  // Newest active public-link token per session. The topbar Copy button
-  // copies this token — never a stale one, never a raw session URL.
-  const [latestShareTokens, setLatestShareTokens] = useState<
-    ReadonlyMap<string, string>
-  >(new Map());
 
   const refreshRecentProjects = useCallback(async () => {
     try {
@@ -410,28 +405,14 @@ export function WorkspaceShell({
         else next.delete(sessionId);
         return next;
       });
-      if (!active) {
-        setLatestShareTokens((current) => {
-          if (!current.has(sessionId)) return current;
-          const next = new Map(current);
-          next.delete(sessionId);
-          return next;
-        });
-      }
     },
     [],
   );
 
-  const refreshLatestShareToken = useCallback(
+  const refreshShareStatus = useCallback(
     async (sessionId: string) => {
       try {
         const latest = await fetchLatestShareLink(sessionId);
-        setLatestShareTokens((current) => {
-          const next = new Map(current);
-          if (latest) next.set(sessionId, latest.token);
-          else next.delete(sessionId);
-          return next;
-        });
         handleShareStatusChange(sessionId, latest !== null);
       } catch (error) {
         if (error instanceof ApiAuthError) {
@@ -449,10 +430,9 @@ export function WorkspaceShell({
     if (active) setShareTarget(active);
   }, [activeSessionId, sessions]);
 
-  // Keep the topbar Copy target fresh: fetch the newest token whenever the
-  // active chat changes (and once on mount). The cache stores only tokens
-  // fetched while viewing that session; a row read from another session's
-  // list view must not mark this session as tokenless.
+  // Keep the share badge fresh: fetch the newest token whenever the active
+  // chat changes (and once on mount). The token itself stays inside the
+  // share dialog — the top bar only needs the active boolean.
   const latestFetchKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeSessionId) return;
@@ -460,8 +440,8 @@ export function WorkspaceShell({
     const key = `${viewMode}:${activeSessionId}`;
     if (latestFetchKeyRef.current === key) return;
     latestFetchKeyRef.current = key;
-    void refreshLatestShareToken(activeSessionId);
-  }, [activeSessionId, refreshLatestShareToken, viewMode]);
+    void refreshShareStatus(activeSessionId);
+  }, [activeSessionId, refreshShareStatus, viewMode]);
 
   const sessionsContextValue = useMemo(
     () => ({ refreshQuiet, onImageContextActions: setImageContextActions }),
@@ -494,19 +474,11 @@ export function WorkspaceShell({
           onDeleteSession={handleDeleteSession}
           onShareSession={handleOpenShare}
           onRemoveSession={handleRemoveSession}
-          showCopyLink={
-            viewMode === "standalone" || viewMode === "project-workspace"
-          }
           showShare={
             viewMode === "standalone" || viewMode === "project-workspace"
           }
           shareActive={sharedSessionIds.has(activeSessionId)}
           onShare={handleShareActiveChat}
-          copyLinkToken={
-            viewMode === "standalone" || viewMode === "project-workspace"
-              ? (latestShareTokens.get(activeSessionId) ?? null)
-              : null
-          }
           viewMode={viewMode}
           recentProjects={recentProjects}
           activeProjectId={activeProjectId}
@@ -522,11 +494,15 @@ export function WorkspaceShell({
         <SharePopover
           sessionId={shareTarget.sessionId}
           sessionTitle={shareTarget.title?.trim() || EMPTY_CHAT_TITLE}
+          sessionUpdatedAt={
+            sessions.find((s) => s.sessionId === shareTarget.sessionId)
+              ?.updatedAt ?? null
+          }
           open
           onClose={handleCloseShare}
           onStatusChange={handleShareStatusChange}
           onGenerated={(sessionId) => {
-            void refreshLatestShareToken(sessionId);
+            void refreshShareStatus(sessionId);
           }}
           onAuthFailure={handleAuthFailure}
         />

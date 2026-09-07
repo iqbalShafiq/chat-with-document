@@ -2,7 +2,7 @@
  * Public share-link E2E (stub LLM, no real key):
  * generate → anonymous read → login fork → deactivate → delete cascade.
  *
- * Share semantics under test (frozen snapshot, one-shot token display,
+ * Share semantics under test (frozen snapshot, latest-link display,
  * all-or-nothing deactivate, independent forks):
  * - the token works without auth and shows the frozen thread;
  * - sending as a signed-in viewer forks into THEIR session and navigates
@@ -198,7 +198,7 @@ test.describe("public share links", () => {
     });
   });
 
-  test("owner popover generates once and tracks status", async ({ page }) => {
+  test("owner popover shows the link inline and tracks status", async ({ page }) => {
     const stamp = Date.now();
     const sessionId = await seedChat(
       page,
@@ -215,36 +215,138 @@ test.describe("public share links", () => {
       .first();
     await expect(shareButton).toBeVisible({ timeout: 30_000 });
     await shareButton.click();
-    await expect(page.getByRole("dialog", { name: /share chat/i })).toBeVisible(
-      { timeout: 30_000 },
-    );
-    await page.getByRole("button", { name: /generate link/i }).click();
-    await expect(page.getByText(/shown once/i)).toBeVisible({
+    const dialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: /generate link/i }).click();
+    await expect(dialog.getByText(/link copied|new link copied/i)).toBeVisible({
       timeout: 30_000,
     });
-    // Close drops the token: reopening shows status only, never the link.
-    await page.getByRole("button", { name: /^done$/i }).click();
+    const firstToken = await dialog
+      .locator("p.truncate")
+      .innerText()
+      .then((text) => text.trim().split("/").pop() ?? "");
+    expect(firstToken.length).toBeGreaterThanOrEqual(21);
+    // Close keeps the link visible on reopen: the dialog always shows the
+    // newest active link inline.
+    await page.getByRole("button", { name: /^close$/i }).click();
     const reopenButton = page
       .getByRole("button", { name: /share chat|sharing on/i })
       .first();
     await expect(reopenButton).toBeVisible({ timeout: 30_000 });
     await reopenButton.click();
-    await expect(page.getByRole("dialog", { name: /share chat/i })).toBeVisible(
-      { timeout: 30_000,
-      },
-    );
-    await expect(page.getByText(/shared link active/i)).toBeVisible({
+    const reopened = page.getByRole("dialog", { name: /share chat/i });
+    await expect(reopened).toBeVisible({ timeout: 30_000 });
+    await expect(reopened.locator("p.truncate")).toContainText(firstToken, {
       timeout: 30_000,
     });
-    await expect(page.getByText(/shown once/i)).toHaveCount(0);
+    await expect(
+      reopened.getByRole("button", { name: /copy link/i }),
+    ).toBeVisible({ timeout: 30_000 });
     // Topbar badge reflects the active state.
-    await page.getByRole("button", { name: /^done$/i }).click();
+    await page.getByRole("button", { name: /^close$/i }).click();
     await expect(
       page.getByRole("button", { name: /sharing on/i }).first(),
     ).toBeVisible({ timeout: 30_000 });
   });
 
-  test("topbar copy is disabled without a link, copies the newest link", async ({
+  test("stale link shows an outdated status until regenerated", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const sessionId = await seedChat(
+      page,
+      `share-stale-${stamp}`,
+      `share stale seed ${stamp}`,
+    );
+    await page.goto(`/chat/${sessionId}`);
+    await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page
+      .getByRole("button", { name: /share chat/i })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: /generate link/i }).click();
+    await expect(dialog.getByText(/link copied|new link copied/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByRole("button", { name: /^close$/i }).click();
+
+    // New chat activity after minting makes the link stale.
+    const editor = page.locator("[data-anvia-composer-editor]");
+    await editor.click();
+    await editor.pressSequentially(`share stale follow-up ${stamp}`, {
+      delay: 5,
+    });
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    const stop = page.getByRole("button", { name: "Stop" });
+    if (await send.isVisible().catch(() => false)) {
+      await send.click();
+    } else {
+      await editor.press("Enter");
+    }
+    await stop
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .catch(() => undefined);
+    await expect(send).toBeVisible({ timeout: 120_000 });
+
+    await page
+      .getByRole("button", { name: /sharing on/i })
+      .first()
+      .click();
+    const staleDialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(staleDialog).toBeVisible({ timeout: 30_000 });
+    await expect(
+      staleDialog.getByText(/public link activated/i),
+    ).toBeVisible({ timeout: 30_000 });
+    await staleDialog
+      .getByRole("button", { name: /generate a fresh link/i })
+      .click();
+    await expect(
+      staleDialog.getByText(/new link copied/i),
+    ).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("deactivate from the dialog clears the inline link", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const sessionId = await seedChat(
+      page,
+      `share-deactivate-${stamp}`,
+      `share deactivate seed ${stamp}`,
+    );
+    await page.goto(`/chat/${sessionId}`);
+    await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page
+      .getByRole("button", { name: /share chat/i })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: /generate link/i }).click();
+    await expect(
+      dialog.locator("p.truncate", { hasText: "/share/" }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await dialog.getByRole("button", { name: /deactivate links/i }).click();
+    await expect(dialog.getByText(/not shared/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      dialog.getByRole("button", { name: /generate link/i }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(dialog.locator("p.truncate")).toHaveCount(0);
+    await expect(
+      dialog.getByRole("button", { name: /copy link/i }),
+    ).toHaveCount(0);
+  });
+
+  test("dialog copy keeps the newest link on the clipboard", async ({
     page,
   }) => {
     const stamp = Date.now();
@@ -258,62 +360,69 @@ test.describe("public share links", () => {
       timeout: 30_000,
     });
 
-    // No public link yet: the Copy button is disabled with guidance.
-    // Poll for the disabled state: the shell fetches the (absent) token
-    // right after the chat room mounts.
-    const copyButton = page
-      .getByRole("button", { name: /copy.*public link|no public link/i })
-      .first();
-    await expect(copyButton).toBeVisible({ timeout: 30_000 });
-    await expect(copyButton).toBeDisabled({ timeout: 30_000 });
-
-    // Two links: the button must copy the newest one, not the first.
-    // Generate via the owner popover so the shell refreshes its copy
-    // target through the same path a real user triggers.
+    // No public link yet: the share button shows the not-shared state.
     await page
       .getByRole("button", { name: /share chat/i })
       .first()
       .click();
-    const dialog = page.getByRole("dialog", { name: /share chat/i });
-    await expect(dialog).toBeVisible({ timeout: 30_000 });
-    await dialog.getByRole("button", { name: /generate link/i }).click();
-    await expect(dialog.getByText(/shown once/i)).toBeVisible({
+    const freshDialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(freshDialog).toBeVisible({ timeout: 30_000 });
+    await expect(freshDialog.getByText(/not shared/i)).toBeVisible({
       timeout: 30_000,
     });
-    const firstToken = await dialog
-      .locator("p.font-mono")
+
+    // Two links: the dialog must surface the newest one, not the first.
+    await freshDialog.getByRole("button", { name: /generate link/i }).click();
+    const firstToken = await freshDialog
+      .locator("p.truncate")
       .innerText()
       .then((text) => text.trim().split("/").pop() ?? "");
     expect(firstToken.length).toBeGreaterThanOrEqual(21);
-    await page.getByRole("button", { name: /^done$/i }).click();
+    await page.getByRole("button", { name: /^close$/i }).click();
+
+    const editor = page.locator("[data-anvia-composer-editor]");
+    await editor.click();
+    await editor.pressSequentially(`share copy follow-up ${stamp}`, {
+      delay: 5,
+    });
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    const stop = page.getByRole("button", { name: "Stop" });
+    if (await send.isVisible().catch(() => false)) {
+      await send.click();
+    } else {
+      await editor.press("Enter");
+    }
+    await stop
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .catch(() => undefined);
+    await expect(send).toBeVisible({ timeout: 120_000 });
+
     await page
       .getByRole("button", { name: /share chat|sharing on/i })
       .first()
       .click();
+    const regenerateDialog = page.getByRole("dialog", {
+      name: /share chat/i,
+    });
+    await expect(regenerateDialog).toBeVisible({ timeout: 30_000 });
     await expect(
-      page.getByRole("dialog", { name: /share chat/i }),
+      regenerateDialog.getByText(/public link activated/i),
     ).toBeVisible({ timeout: 30_000 });
-    await page
-      .getByRole("dialog", { name: /share chat/i })
-      .getByRole("button", { name: /generate new link/i })
+    await regenerateDialog
+      .getByRole("button", { name: /generate a fresh link/i })
       .click();
-    await expect(
-      page
-        .getByRole("dialog", { name: /share chat/i })
-        .getByText(/shown once/i),
-    ).toBeVisible({ timeout: 30_000 });
-    const secondToken = await page
-      .getByRole("dialog", { name: /share chat/i })
-      .locator("p.font-mono")
+    await expect(regenerateDialog.getByText(/new link copied/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    const secondToken = await regenerateDialog
+      .locator("p.truncate")
       .innerText()
       .then((text) => text.trim().split("/").pop() ?? "");
     expect(secondToken).not.toBe(firstToken);
-    await page.getByRole("button", { name: /^done$/i }).click();
-    await expect(copyButton).toBeEnabled({ timeout: 30_000 });
 
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await copyButton.click();
-    await expect(page.getByText(/public link copied/i)).toBeVisible({
+    await regenerateDialog.getByRole("button", { name: /copy link/i }).click();
+    await expect(regenerateDialog.getByText(/link copied/i)).toBeVisible({
       timeout: 30_000,
     });
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());

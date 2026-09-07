@@ -1,33 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Share2, ShieldOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy, Link2, Loader2, Share2 } from "lucide-react";
 import { copyToClipboard } from "#/lib/clipboard";
 import {
   ApiAuthError,
   createShareLink,
   deactivateShareLinks,
-  fetchShareStatus,
+  fetchLatestShareLink,
   shareUrl,
 } from "#/lib/api";
 import { AutoDismissPopover } from "#/components/ui/auto-dismiss-popover";
+import {
+  BUTTON_BASE_CLASS,
+  BUTTON_SIZE_CLASSES,
+  BUTTON_VARIANT_CLASSES,
+} from "#/components/ui/button";
 import {
   DIALOG_PRIMARY_BUTTON_CLASS,
   DIALOG_SECONDARY_BUTTON_CLASS,
 } from "#/components/ui/dialog-actions";
 import { DialogShell } from "#/components/ui/dialog-shell";
+import { isShareLinkStale } from "#/lib/session-history";
 
-type ShareState =
+const DIALOG_DANGER_BUTTON_CLASS = [
+  BUTTON_BASE_CLASS,
+  BUTTON_VARIANT_CLASSES.danger,
+  BUTTON_SIZE_CLASSES.md,
+].join(" ");
+
+type ShareLinkState =
   | { kind: "loading" }
-  | { kind: "ready"; active: boolean; token: string | null }
+  | { kind: "ready"; link: { token: string; createdAt: string } | null }
   | { kind: "error"; message: string };
 
 /**
- * Share popover: status, one-shot Generate (token shown once), Deactivate
- * all. The owner is never given a listing of past tokens — closing the
- * dialog drops the token from memory for good.
+ * Share dialog: the active link lives inline in the status row (single line,
+ * truncated), with a trailing copy action. Generating snapshots the current
+ * history; sending a new message afterwards makes the link stale, so the row
+ * keeps a short "activated" status and the copy action regenerates instead.
  */
 export function SharePopover({
   sessionId,
   sessionTitle,
+  sessionUpdatedAt,
   open,
   onClose,
   onStatusChange,
@@ -36,6 +50,8 @@ export function SharePopover({
 }: {
   sessionId: string;
   sessionTitle: string;
+  /** ISO timestamp of the chat's latest activity (stale-link detection). */
+  sessionUpdatedAt?: string | null;
   open: boolean;
   onClose: () => void;
   onStatusChange?: (sessionId: string, active: boolean) => void;
@@ -43,17 +59,24 @@ export function SharePopover({
   onGenerated?: (sessionId: string) => void;
   onAuthFailure?: () => void;
 }) {
-  const [state, setState] = useState<ShareState>({ kind: "loading" });
+  const [state, setState] = useState<ShareLinkState>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"copied" | "generated" | null>(
+    null,
+  );
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const status = await fetchShareStatus(sessionId);
-      setState({ kind: "ready", active: status.active, token: null });
-      onStatusChange?.(sessionId, status.active);
+      const latest = await fetchLatestShareLink(sessionId);
+      setState({
+        kind: "ready",
+        link: latest
+          ? { token: latest.token, createdAt: latest.createdAt }
+          : null,
+      });
+      onStatusChange?.(sessionId, latest !== null);
     } catch (error) {
       if (error instanceof ApiAuthError) {
         onAuthFailure?.();
@@ -69,11 +92,9 @@ export function SharePopover({
 
   useEffect(() => {
     if (open) {
-      setCopied(false);
+      setFeedback(null);
       void load();
     } else {
-      // Dropping the token on close is the privacy guarantee: past links
-      // cannot be viewed again, only replaced or deactivated.
       setState({ kind: "loading" });
     }
   }, [load, open]);
@@ -83,13 +104,16 @@ export function SharePopover({
     setBusy(true);
     try {
       const created = await createShareLink(sessionId);
-      setState({ kind: "ready", active: true, token: created.token });
+      setState({
+        kind: "ready",
+        link: { token: created.token, createdAt: created.createdAt },
+      });
       onStatusChange?.(sessionId, true);
       onGenerated?.(sessionId);
       const ok = await copyToClipboard(
         `${window.location.origin}${shareUrl(created.token)}`,
       );
-      setCopied(ok);
+      if (ok) setFeedback("generated");
     } catch (error) {
       if (error instanceof ApiAuthError) {
         onAuthFailure?.();
@@ -105,11 +129,11 @@ export function SharePopover({
     }
   }, [busy, onAuthFailure, onGenerated, onStatusChange, sessionId]);
 
-  const handleCopyAgain = useCallback(async (token: string) => {
+  const handleCopyLink = useCallback(async (token: string) => {
     const ok = await copyToClipboard(
       `${window.location.origin}${shareUrl(token)}`,
     );
-    setCopied(ok);
+    if (ok) setFeedback("copied");
   }, []);
 
   const handleDeactivate = useCallback(async () => {
@@ -117,7 +141,7 @@ export function SharePopover({
     setBusy(true);
     try {
       await deactivateShareLinks(sessionId);
-      setState({ kind: "ready", active: false, token: null });
+      setState({ kind: "ready", link: null });
       onStatusChange?.(sessionId, false);
     } catch (error) {
       if (error instanceof ApiAuthError) {
@@ -134,6 +158,21 @@ export function SharePopover({
     }
   }, [busy, onAuthFailure, onStatusChange, sessionId]);
 
+  const activeLink =
+    state.kind === "ready" && state.link
+      ? `${window.location.origin}${shareUrl(state.link.token)}`
+      : null;
+  const linkStale = useMemo(
+    () =>
+      state.kind === "ready" && state.link
+        ? isShareLinkStale({
+            linkCreatedAt: state.link.createdAt,
+            sessionUpdatedAt,
+          })
+        : false,
+    [sessionUpdatedAt, state],
+  );
+
   return (
     <DialogShell
       open={open}
@@ -148,18 +187,39 @@ export function SharePopover({
       dismissDisabled={busy}
       initialFocusRef={closeRef}
       footer={
-        <button
-          ref={closeRef}
-          type="button"
-          disabled={busy}
-          onClick={onClose}
-          className={DIALOG_SECONDARY_BUTTON_CLASS}
-        >
-          Done
-        </button>
+        <>
+          <button
+            ref={closeRef}
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+            className={DIALOG_SECONDARY_BUTTON_CLASS}
+          >
+            Close
+          </button>
+          {state.kind === "ready" && state.link ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void handleDeactivate()}
+              className={DIALOG_DANGER_BUTTON_CLASS}
+            >
+              {busy ? "Working…" : "Deactivate links"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || state.kind !== "ready"}
+              onClick={() => void handleGenerate()}
+              className={DIALOG_PRIMARY_BUTTON_CLASS}
+            >
+              {busy ? "Working…" : "Generate link"}
+            </button>
+          )}
+        </>
       }
     >
-      <div className="flex flex-col gap-4 px-4 py-4">
+      <div className="flex flex-col gap-4 overflow-x-clip px-4 py-4">
         {state.kind === "loading" ? (
           <div className="flex items-center gap-3">
             <div className="skeleton-shimmer h-4 w-40 rounded-full" />
@@ -183,82 +243,70 @@ export function SharePopover({
         ) : null}
 
         {state.kind === "ready" ? (
-          <>
-            <div className="flex items-center gap-2.5 rounded-2xl bg-white/[0.04] px-3.5 py-3">
-              <Share2 className="size-4 shrink-0 text-text-muted" strokeWidth={1.75} />
-              <p className="text-sm text-text">
-                {state.active ? (
-                  <>
-                    Shared link <strong>active</strong>
-                  </>
+          <div className="flex items-center gap-2.5 rounded-2xl bg-white/[0.04] px-3.5 py-3">
+            {state.link ? (
+              <>
+                <Link2
+                  className="size-4 shrink-0 text-text-muted"
+                  strokeWidth={1.75}
+                />
+                {linkStale ? (
+                  <p className="min-w-0 flex-1 truncate text-sm text-text">
+                    Public link activated
+                  </p>
                 ) : (
-                  <>Not shared</>
+                  <p
+                    title={activeLink ?? undefined}
+                    className="min-w-0 flex-1 truncate font-mono text-xs text-text"
+                  >
+                    {activeLink}
+                  </p>
                 )}
-              </p>
-            </div>
-
-            {state.token ? (
-              <div className="flex flex-col gap-2 rounded-2xl border border-accent/30 bg-accent/[0.07] px-3.5 py-3 animate-fade-in">
-                <p className="text-xs font-medium text-text">
-                  Copy it now — this link is shown once and never again.
-                </p>
-                <p className="break-all font-mono text-xs text-text-muted">
-                  {`${window.location.origin}${shareUrl(state.token)}`}
-                </p>
-                <span className="relative inline-flex self-start">
+                <span className="relative inline-flex shrink-0">
                   <button
                     type="button"
-                    onClick={() => void handleCopyAgain(state.token!)}
-                    className={DIALOG_PRIMARY_BUTTON_CLASS}
+                    disabled={busy}
+                    onClick={() =>
+                      linkStale
+                        ? void handleGenerate()
+                        : void handleCopyLink(state.link!.token)
+                    }
+                    aria-label={
+                      linkStale ? "Generate a fresh link" : "Copy link"
+                    }
+                    title={linkStale ? "Generate a fresh link" : "Copy link"}
+                    className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {copied ? (
-                      <Check className="size-3.5" strokeWidth={2} />
+                    {busy ? (
+                      <Loader2
+                        className="size-4 animate-spin motion-reduce:animate-none"
+                        strokeWidth={1.75}
+                      />
+                    ) : feedback === "copied" ? (
+                      <Check className="size-4" strokeWidth={1.75} />
                     ) : (
-                      <Copy className="size-3.5" strokeWidth={2} />
+                      <Copy className="size-4" strokeWidth={1.75} />
                     )}
-                    {copied ? "Copied" : "Copy link"}
                   </button>
                   <AutoDismissPopover
-                    open={copied}
-                    onDismiss={() => setCopied(false)}
+                    open={feedback !== null}
+                    onDismiss={() => setFeedback(null)}
+                    className="right-0 left-auto translate-x-0"
                   >
-                    Copied
+                    {feedback === "generated" ? "New link copied" : "Link copied"}
                   </AutoDismissPopover>
                 </span>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleGenerate()}
-                className={DIALOG_PRIMARY_BUTTON_CLASS}
-              >
-                {busy
-                  ? "Working…"
-                  : state.active
-                    ? "Generate new link"
-                    : "Generate link"}
-              </button>
-              {state.active ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void handleDeactivate()}
-                  className={DIALOG_SECONDARY_BUTTON_CLASS}
-                >
-                  <ShieldOff className="size-3.5" strokeWidth={1.75} />
-                  Deactivate all
-                </button>
-              ) : null}
-            </div>
-            <p className="text-[11px] leading-relaxed text-text-faint">
-              Deactivating turns off every link of this chat at once. Deleting
-              the chat deletes its links too. Readers who send a message get
-              their own independent copy.
-            </p>
-          </>
+              </>
+            ) : (
+              <>
+                <Share2
+                  className="size-4 shrink-0 text-text-muted"
+                  strokeWidth={1.75}
+                />
+                <p className="text-sm text-text">Not shared</p>
+              </>
+            )}
+          </div>
         ) : null}
       </div>
     </DialogShell>

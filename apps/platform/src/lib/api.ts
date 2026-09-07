@@ -290,14 +290,15 @@ export type PublicShareSnapshot = {
   messages: unknown;
 };
 
-/** Canonical browser URL for a share token (shareable, shown once). */
+/** Canonical browser URL for a share token. */
 export function shareUrl(token: string): string {
   return `/share/${encodeURIComponent(token)}`;
 }
 
 /**
- * Mint a new public link (frozen snapshot of current history). The token is
- * shown once — the owner is never given a listing of past tokens.
+ * Mint a new public link (frozen snapshot of current history). Only the
+ * newest active link is shown — older tokens stay valid but are replaced
+ * on display (latest wins).
  */
 export async function createShareLink(
   sessionId: string,

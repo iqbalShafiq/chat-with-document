@@ -38,8 +38,6 @@ export function AppShell({
   onSelectSession,
   onNewChat,
   newChatDisabled = false,
-  showCopyLink = false,
-  copyLinkToken = null,
   showShare = false,
   shareActive = false,
   onShare,
@@ -71,8 +69,6 @@ export function AppShell({
   onSelectSession: (sessionId: string) => void;
   onNewChat: () => void;
   newChatDisabled?: boolean;
-  showCopyLink?: boolean;
-  copyLinkToken?: string | null;
   showShare?: boolean;
   shareActive?: boolean;
   onShare?: () => void;
@@ -191,8 +187,6 @@ export function AppShell({
             onToggleSidebar={toggleSidebar}
             onNewChat={onNewChat}
             newChatDisabled={newChatDisabled}
-            showCopyLink={showCopyLink}
-            copyLinkToken={copyLinkToken}
             showShare={showShare}
             shareActive={shareActive}
             onShare={onShare}
