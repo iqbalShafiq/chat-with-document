@@ -9,18 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/_auth'
+import { Route as WorkspaceRouteImport } from './routes/_workspace'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AuthRegisterRouteImport } from './routes/_auth/register'
+import { Route as WorkspaceIndexRouteImport } from './routes/_workspace/index'
+import { Route as WorkspaceChatSessionIdRouteImport } from './routes/_workspace/chat.$sessionId'
+import { Route as WorkspaceDocumentsIndexRouteImport } from './routes/_workspace/documents.index'
+import { Route as WorkspaceProjectsIndexRouteImport } from './routes/_workspace/projects.index'
+import { Route as WorkspaceProjectsProjectIdIndexRouteImport } from './routes/_workspace/projects.$projectId.index'
+import { Route as WorkspaceProjectsProjectIdChatSessionIdRouteImport } from './routes/_workspace/projects.$projectId.chat.$sessionId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceRoute = WorkspaceRouteImport.update({
+  id: '/_workspace',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
@@ -33,51 +38,126 @@ const AuthRegisterRoute = AuthRegisterRouteImport.update({
   path: '/register',
   getParentRoute: () => AuthRoute,
 } as any)
+const WorkspaceIndexRoute = WorkspaceIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceChatSessionIdRoute = WorkspaceChatSessionIdRouteImport.update({
+  id: '/chat/$sessionId',
+  path: '/chat/$sessionId',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceDocumentsIndexRoute = WorkspaceDocumentsIndexRouteImport.update({
+  id: '/documents/',
+  path: '/documents/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceProjectsIndexRoute = WorkspaceProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceProjectsProjectIdIndexRoute =
+  WorkspaceProjectsProjectIdIndexRouteImport.update({
+    id: '/projects/$projectId/',
+    path: '/projects/$projectId/',
+    getParentRoute: () => WorkspaceRoute,
+  } as any)
+const WorkspaceProjectsProjectIdChatSessionIdRoute =
+  WorkspaceProjectsProjectIdChatSessionIdRouteImport.update({
+    id: '/projects/$projectId/chat/$sessionId',
+    path: '/projects/$projectId/chat/$sessionId',
+    getParentRoute: () => WorkspaceRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof WorkspaceIndexRoute
   '/login': typeof AuthLoginRoute
   '/register': typeof AuthRegisterRoute
+  '/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
+  '/documents/': typeof WorkspaceDocumentsIndexRoute
+  '/projects/': typeof WorkspaceProjectsIndexRoute
+  '/projects/$projectId/': typeof WorkspaceProjectsProjectIdIndexRoute
+  '/projects/$projectId/chat/$sessionId': typeof WorkspaceProjectsProjectIdChatSessionIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/': typeof WorkspaceIndexRoute
   '/login': typeof AuthLoginRoute
   '/register': typeof AuthRegisterRoute
+  '/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
+  '/documents': typeof WorkspaceDocumentsIndexRoute
+  '/projects': typeof WorkspaceProjectsIndexRoute
+  '/projects/$projectId': typeof WorkspaceProjectsProjectIdIndexRoute
+  '/projects/$projectId/chat/$sessionId': typeof WorkspaceProjectsProjectIdChatSessionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/_auth': typeof AuthRouteWithChildren
+  '/_workspace': typeof WorkspaceRouteWithChildren
   '/_auth/login': typeof AuthLoginRoute
   '/_auth/register': typeof AuthRegisterRoute
+  '/_workspace/': typeof WorkspaceIndexRoute
+  '/_workspace/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
+  '/_workspace/documents/': typeof WorkspaceDocumentsIndexRoute
+  '/_workspace/projects/': typeof WorkspaceProjectsIndexRoute
+  '/_workspace/projects/$projectId/': typeof WorkspaceProjectsProjectIdIndexRoute
+  '/_workspace/projects/$projectId/chat/$sessionId': typeof WorkspaceProjectsProjectIdChatSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/register'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/register'
+    | '/chat/$sessionId'
+    | '/documents/'
+    | '/projects/'
+    | '/projects/$projectId/'
+    | '/projects/$projectId/chat/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/register'
-  id: '__root__' | '/' | '/_auth' | '/_auth/login' | '/_auth/register'
+  to:
+    | '/'
+    | '/login'
+    | '/register'
+    | '/chat/$sessionId'
+    | '/documents'
+    | '/projects'
+    | '/projects/$projectId'
+    | '/projects/$projectId/chat/$sessionId'
+  id:
+    | '__root__'
+    | '/_auth'
+    | '/_workspace'
+    | '/_auth/login'
+    | '/_auth/register'
+    | '/_workspace/'
+    | '/_workspace/chat/$sessionId'
+    | '/_workspace/documents/'
+    | '/_workspace/projects/'
+    | '/_workspace/projects/$projectId/'
+    | '/_workspace/projects/$projectId/chat/$sessionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRouteWithChildren
+  WorkspaceRoute: typeof WorkspaceRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_auth': {
       id: '/_auth'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_workspace': {
+      id: '/_workspace'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof WorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_auth/login': {
@@ -94,6 +174,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRegisterRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_workspace/': {
+      id: '/_workspace/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof WorkspaceIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/chat/$sessionId': {
+      id: '/_workspace/chat/$sessionId'
+      path: '/chat/$sessionId'
+      fullPath: '/chat/$sessionId'
+      preLoaderRoute: typeof WorkspaceChatSessionIdRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/documents/': {
+      id: '/_workspace/documents/'
+      path: '/documents'
+      fullPath: '/documents/'
+      preLoaderRoute: typeof WorkspaceDocumentsIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/projects/': {
+      id: '/_workspace/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof WorkspaceProjectsIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/projects/$projectId/': {
+      id: '/_workspace/projects/$projectId/'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId/'
+      preLoaderRoute: typeof WorkspaceProjectsProjectIdIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/projects/$projectId/chat/$sessionId': {
+      id: '/_workspace/projects/$projectId/chat/$sessionId'
+      path: '/projects/$projectId/chat/$sessionId'
+      fullPath: '/projects/$projectId/chat/$sessionId'
+      preLoaderRoute: typeof WorkspaceProjectsProjectIdChatSessionIdRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
   }
 }
 
@@ -109,9 +231,32 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface WorkspaceRouteChildren {
+  WorkspaceIndexRoute: typeof WorkspaceIndexRoute
+  WorkspaceChatSessionIdRoute: typeof WorkspaceChatSessionIdRoute
+  WorkspaceDocumentsIndexRoute: typeof WorkspaceDocumentsIndexRoute
+  WorkspaceProjectsIndexRoute: typeof WorkspaceProjectsIndexRoute
+  WorkspaceProjectsProjectIdIndexRoute: typeof WorkspaceProjectsProjectIdIndexRoute
+  WorkspaceProjectsProjectIdChatSessionIdRoute: typeof WorkspaceProjectsProjectIdChatSessionIdRoute
+}
+
+const WorkspaceRouteChildren: WorkspaceRouteChildren = {
+  WorkspaceIndexRoute: WorkspaceIndexRoute,
+  WorkspaceChatSessionIdRoute: WorkspaceChatSessionIdRoute,
+  WorkspaceDocumentsIndexRoute: WorkspaceDocumentsIndexRoute,
+  WorkspaceProjectsIndexRoute: WorkspaceProjectsIndexRoute,
+  WorkspaceProjectsProjectIdIndexRoute: WorkspaceProjectsProjectIdIndexRoute,
+  WorkspaceProjectsProjectIdChatSessionIdRoute:
+    WorkspaceProjectsProjectIdChatSessionIdRoute,
+}
+
+const WorkspaceRouteWithChildren = WorkspaceRoute._addFileChildren(
+  WorkspaceRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AuthRoute: AuthRouteWithChildren,
+  WorkspaceRoute: WorkspaceRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

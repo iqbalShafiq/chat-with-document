@@ -19,14 +19,7 @@ export async function openFreshChat(page: Page): Promise<void> {
   });
   expect(draft.ok()).toBe(true);
   const { sessionId } = (await draft.json()) as { sessionId: string };
-  await page.goto("/");
-  await page.evaluate((id) => {
-    window.localStorage.clear();
-    window.localStorage.setItem("chat.sessionId", id);
-    window.localStorage.setItem("chat.lastStandaloneSessionId", id);
-    window.localStorage.setItem("chat.viewMode", "standalone");
-  }, sessionId);
-  await page.reload();
+  await page.goto(`/chat/${encodeURIComponent(sessionId)}`);
   await expect(page.getByRole("heading", { name: /trying to understand/i })).toBeVisible({
     timeout: 30_000,
   });

@@ -6,7 +6,8 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = resolve(E2E_DIR, ".auth");
 const STORAGE_STATE_PATH = resolve(AUTH_DIR, "user.json");
 
-const API_ORIGIN = "http://localhost:3001";
+const API_ORIGIN =
+  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:4312";
 const STUB_ORIGIN = "http://127.0.0.1:18765";
 const STUB_BASE_URL = `${STUB_ORIGIN}/api/v1`;
 const HEALTH_URL = `${API_ORIGIN}/api/auth/get-session`;

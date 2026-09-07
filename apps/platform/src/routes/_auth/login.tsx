@@ -3,6 +3,7 @@ import {
   Link,
   redirect,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { useState } from "react";
 import {
@@ -12,6 +13,7 @@ import {
 } from "#/components/auth/auth-form-fields";
 import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
+import { navigateToHref, parseRedirectSearch } from "#/lib/auth-redirect";
 import {
   beginWorkspaceHandoff,
   getSessionUser,
@@ -21,23 +23,19 @@ import { clearSessionOnAuth } from "#/lib/session-storage";
 
 export const Route = createFileRoute("/_auth/login")({
   component: LoginPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    redirect:
-      typeof search.redirect === "string" && search.redirect.startsWith("/")
-        ? search.redirect
-        : undefined,
-  }),
-  beforeLoad: async () => {
+  validateSearch: parseRedirectSearch,
+  beforeLoad: async ({ search }) => {
     const user = await getSessionUser();
     if (user) {
-      throw redirect({ to: "/", viewTransition: true });
+      throw redirect({ to: search.redirect ?? "/", viewTransition: true });
     }
   },
 });
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { redirect } = Route.useSearch();
+  const router = useRouter();
+  const { redirect: redirectHref } = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -86,7 +84,11 @@ function LoginPage() {
         clearSessionOnAuth();
       }
       // Stay busy until AuthShell swaps in the handoff / view transition.
-      await navigate({ to: redirect ?? "/", viewTransition: true });
+      if (redirectHref) {
+        navigateToHref(router, redirectHref);
+        return;
+      }
+      await navigate({ to: "/", viewTransition: true });
     } catch {
       setFormError("Could not sign in. Check your connection and try again.");
       setBusy(false);
@@ -102,6 +104,7 @@ function LoginPage() {
           New here?{" "}
           <Link
             to="/register"
+            search={{ redirect: redirectHref }}
             className="font-medium text-accent transition hover:text-accent-hover"
           >
             Create an account
