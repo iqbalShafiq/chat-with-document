@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -20,6 +21,7 @@ import { useWorkspaceSessions } from "#/hooks/use-workspace-sessions";
 import {
   ApiAuthError,
   deleteChatSession,
+  fetchLatestShareLink,
   getOrCreateEmptyChatSession,
   getProject,
   listProjects,
@@ -134,6 +136,11 @@ export function WorkspaceShell({
   const [sharedSessionIds, setSharedSessionIds] = useState<
     ReadonlySet<string>
   >(new Set());
+  // Newest active public-link token per session. The topbar Copy button
+  // copies this token — never a stale one, never a raw session URL.
+  const [latestShareTokens, setLatestShareTokens] = useState<
+    ReadonlyMap<string, string>
+  >(new Map());
 
   const refreshRecentProjects = useCallback(async () => {
     try {
@@ -403,14 +410,58 @@ export function WorkspaceShell({
         else next.delete(sessionId);
         return next;
       });
+      if (!active) {
+        setLatestShareTokens((current) => {
+          if (!current.has(sessionId)) return current;
+          const next = new Map(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
     },
     [],
+  );
+
+  const refreshLatestShareToken = useCallback(
+    async (sessionId: string) => {
+      try {
+        const latest = await fetchLatestShareLink(sessionId);
+        setLatestShareTokens((current) => {
+          const next = new Map(current);
+          if (latest) next.set(sessionId, latest.token);
+          else next.delete(sessionId);
+          return next;
+        });
+        handleShareStatusChange(sessionId, latest !== null);
+      } catch (error) {
+        if (error instanceof ApiAuthError) {
+          handleAuthFailure();
+          return;
+        }
+        console.error("[share] failed to load latest link", error);
+      }
+    },
+    [handleAuthFailure, handleShareStatusChange],
   );
 
   const handleShareActiveChat = useCallback(() => {
     const active = sessions.find((s) => s.sessionId === activeSessionId);
     if (active) setShareTarget(active);
   }, [activeSessionId, sessions]);
+
+  // Keep the topbar Copy target fresh: fetch the newest token whenever the
+  // active chat changes (and once on mount). The cache stores only tokens
+  // fetched while viewing that session; a row read from another session's
+  // list view must not mark this session as tokenless.
+  const latestFetchKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeSessionId) return;
+    if (viewMode !== "standalone" && viewMode !== "project-workspace") return;
+    const key = `${viewMode}:${activeSessionId}`;
+    if (latestFetchKeyRef.current === key) return;
+    latestFetchKeyRef.current = key;
+    void refreshLatestShareToken(activeSessionId);
+  }, [activeSessionId, refreshLatestShareToken, viewMode]);
 
   const sessionsContextValue = useMemo(
     () => ({ refreshQuiet, onImageContextActions: setImageContextActions }),
@@ -451,6 +502,11 @@ export function WorkspaceShell({
           }
           shareActive={sharedSessionIds.has(activeSessionId)}
           onShare={handleShareActiveChat}
+          copyLinkToken={
+            viewMode === "standalone" || viewMode === "project-workspace"
+              ? (latestShareTokens.get(activeSessionId) ?? null)
+              : null
+          }
           viewMode={viewMode}
           recentProjects={recentProjects}
           activeProjectId={activeProjectId}
@@ -469,6 +525,9 @@ export function WorkspaceShell({
           open
           onClose={handleCloseShare}
           onStatusChange={handleShareStatusChange}
+          onGenerated={(sessionId) => {
+            void refreshLatestShareToken(sessionId);
+          }}
           onAuthFailure={handleAuthFailure}
         />
       ) : null}

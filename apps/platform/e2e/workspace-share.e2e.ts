@@ -243,4 +243,81 @@ test.describe("public share links", () => {
       page.getByRole("button", { name: /sharing on/i }).first(),
     ).toBeVisible({ timeout: 30_000 });
   });
+
+  test("topbar copy is disabled without a link, copies the newest link", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const sessionId = await seedChat(
+      page,
+      `share-copy-${stamp}`,
+      `share copy seed ${stamp}`,
+    );
+    await page.goto(`/chat/${sessionId}`);
+    await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // No public link yet: the Copy button is disabled with guidance.
+    // Poll for the disabled state: the shell fetches the (absent) token
+    // right after the chat room mounts.
+    const copyButton = page
+      .getByRole("button", { name: /copy.*public link|no public link/i })
+      .first();
+    await expect(copyButton).toBeVisible({ timeout: 30_000 });
+    await expect(copyButton).toBeDisabled({ timeout: 30_000 });
+
+    // Two links: the button must copy the newest one, not the first.
+    // Generate via the owner popover so the shell refreshes its copy
+    // target through the same path a real user triggers.
+    await page
+      .getByRole("button", { name: /share chat/i })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog", { name: /share chat/i });
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: /generate link/i }).click();
+    await expect(dialog.getByText(/shown once/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    const firstToken = await dialog
+      .locator("p.font-mono")
+      .innerText()
+      .then((text) => text.trim().split("/").pop() ?? "");
+    expect(firstToken.length).toBeGreaterThanOrEqual(21);
+    await page.getByRole("button", { name: /^done$/i }).click();
+    await page
+      .getByRole("button", { name: /share chat|sharing on/i })
+      .first()
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: /share chat/i }),
+    ).toBeVisible({ timeout: 30_000 });
+    await page
+      .getByRole("dialog", { name: /share chat/i })
+      .getByRole("button", { name: /generate new link/i })
+      .click();
+    await expect(
+      page
+        .getByRole("dialog", { name: /share chat/i })
+        .getByText(/shown once/i),
+    ).toBeVisible({ timeout: 30_000 });
+    const secondToken = await page
+      .getByRole("dialog", { name: /share chat/i })
+      .locator("p.font-mono")
+      .innerText()
+      .then((text) => text.trim().split("/").pop() ?? "");
+    expect(secondToken).not.toBe(firstToken);
+    await page.getByRole("button", { name: /^done$/i }).click();
+    await expect(copyButton).toBeEnabled({ timeout: 30_000 });
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await copyButton.click();
+    await expect(page.getByText(/public link copied/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboard).toContain(`/share/${secondToken}`);
+    expect(clipboard).not.toContain(firstToken);
+  });
 });

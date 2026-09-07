@@ -354,6 +354,55 @@ export const chatPaths = {
       },
     },
   },
+  "/api/chat/sessions/{id}/shares/latest": {
+    get: {
+      operationId: "getLatestChatShare",
+      tags: ["Chat"],
+      summary: "Get the newest active share link",
+      description:
+        "Returns the most recently created active link (latest wins). 404 when the session has no active link — the topbar Copy button stays disabled then.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Newest active link.",
+          {
+            type: "object",
+            required: ["token", "urlPath", "sessionId"],
+            properties: {
+              token: { type: "string" },
+              urlPath: { type: "string" },
+              sessionId: { type: "string", format: "uuid" },
+              title: { type: ["string", "null"] },
+              createdAt: { type: "string", format: "date-time" },
+            },
+          },
+          {
+            default: {
+              summary: "Latest",
+              value: {
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                urlPath: "/share/mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                sessionId: SESSION_ID_EXAMPLE,
+                title: "Q3 revenue notes",
+                createdAt: ISO_EXAMPLE,
+              },
+            },
+          },
+        ),
+        "401": unauthorized,
+        "404": notFound({ error: "No active share link" }),
+      },
+    },
+  },
   "/api/chat/sessions/{id}/shares/deactivate": {
     post: {
       operationId: "deactivateChatShares",

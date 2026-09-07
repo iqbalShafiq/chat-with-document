@@ -116,6 +116,22 @@ export async function hasActiveChatShare(
 }
 
 /**
+ * Newest active link of a session (by creation order). The topbar Copy
+ * button always copies this one — the owner never sees a token listing,
+ * so "latest wins" is the only sane resolution when several links exist.
+ */
+export async function getLatestActiveChatShare(input: {
+  userId: string;
+  sessionId: string;
+}): Promise<ChatShareRow | null> {
+  const row = await prisma.chatShare.findFirst({
+    where: { userId: input.userId, sessionId: input.sessionId, revokedAt: null },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  return row ? toRow(row) : null;
+}
+
+/**
  * Deactivate ALL public links of a session at once. There is intentionally
  * no per-link revoke and no link listing: the owner never sees old tokens.
  */

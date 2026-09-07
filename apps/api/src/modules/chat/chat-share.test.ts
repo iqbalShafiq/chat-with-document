@@ -4,6 +4,7 @@ import {
   ChatShareNotFoundError,
   deactivateChatShares,
   generateShareToken,
+  getLatestActiveChatShare,
   getPublicShareSnapshot,
 } from "./chat-share.js";
 import { createChatShare } from "./chat-share.js";
@@ -14,6 +15,7 @@ const { prismaMock, getChatSessionMock, loadMessagesMock } = vi.hoisted(
       chatShare: {
         create: vi.fn(),
         findUnique: vi.fn(),
+        findFirst: vi.fn(),
         count: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -110,6 +112,39 @@ describe("getPublicShareSnapshot", () => {
     await expect(getPublicShareSnapshot("nope")).rejects.toBeInstanceOf(
       ChatShareNotFoundError,
     );
+  });
+});
+
+describe("getLatestActiveChatShare", () => {
+  it("returns the newest active link first", async () => {
+    prismaMock.chatShare.findFirst.mockResolvedValue({
+      id: "share-2",
+      token: "tok-new",
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      title: "v2",
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+      revokedAt: null,
+    });
+
+    const latest = await getLatestActiveChatShare({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    expect(latest?.token).toBe("tok-new");
+    expect(prismaMock.chatShare.findFirst).toHaveBeenCalledWith({
+      where: { userId: USER_ID, sessionId: SESSION_ID, revokedAt: null },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+  });
+
+  it("returns null when no active link exists", async () => {
+    prismaMock.chatShare.findFirst.mockResolvedValue(null);
+
+    await expect(
+      getLatestActiveChatShare({ userId: USER_ID, sessionId: SESSION_ID }),
+    ).resolves.toBeNull();
   });
 });
 

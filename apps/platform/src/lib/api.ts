@@ -315,6 +315,34 @@ export async function createShareLink(
   return (await response.json()) as ShareLinkCreated;
 }
 
+export type LatestShareLink = {
+  token: string;
+  urlPath: string;
+  sessionId: string;
+  title: string | null;
+  createdAt: string;
+} | null;
+
+/**
+ * Newest active public link of a session, or null when none exists.
+ * The topbar Copy button always copies this token (latest wins).
+ */
+export async function fetchLatestShareLink(
+  sessionId: string,
+): Promise<LatestShareLink> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/latest`,
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to load share link");
+  }
+  return (await response.json()) as Exclude<LatestShareLink, null>;
+}
+
 /** Whether the session currently has at least one active public link. */
 export async function fetchShareStatus(
   sessionId: string,

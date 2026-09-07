@@ -78,6 +78,7 @@ import {
   ChatShareNotFoundError,
   createChatShare,
   deactivateChatShares,
+  getLatestActiveChatShare,
   getPublicShareSnapshot,
   hasActiveChatShare,
 } from "./chat-share.js";
@@ -473,6 +474,33 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     try {
       const active = await hasActiveChatShare(user.id, c.req.param("id"));
       return c.json({ sessionId: c.req.param("id"), active });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .get("/sessions/:id/shares/latest", async (c) => {
+    const user = c.get("user");
+    try {
+      const latest = await getLatestActiveChatShare({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      if (!latest) {
+        return c.json(
+          { error: "No active share link", code: "CHAT_SHARE_NOT_FOUND" },
+          404,
+        );
+      }
+      return c.json({
+        token: latest.token,
+        urlPath: `/share/${latest.token}`,
+        sessionId: latest.sessionId,
+        title: latest.title,
+        createdAt: latest.createdAt.toISOString(),
+      });
     } catch (error) {
       if (error instanceof ChatSessionNotFoundError) {
         return c.json({ error: error.message, code: error.code }, 404);

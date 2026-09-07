@@ -31,6 +31,7 @@ export function SharePopover({
   open,
   onClose,
   onStatusChange,
+  onGenerated,
   onAuthFailure,
 }: {
   sessionId: string;
@@ -38,6 +39,8 @@ export function SharePopover({
   open: boolean;
   onClose: () => void;
   onStatusChange?: (sessionId: string, active: boolean) => void;
+  /** Fired with the fresh token so the shell can refresh its copy target. */
+  onGenerated?: (sessionId: string) => void;
   onAuthFailure?: () => void;
 }) {
   const [state, setState] = useState<ShareState>({ kind: "loading" });
@@ -82,6 +85,7 @@ export function SharePopover({
       const created = await createShareLink(sessionId);
       setState({ kind: "ready", active: true, token: created.token });
       onStatusChange?.(sessionId, true);
+      onGenerated?.(sessionId);
       const ok = await copyToClipboard(
         `${window.location.origin}${shareUrl(created.token)}`,
       );
@@ -99,7 +103,7 @@ export function SharePopover({
     } finally {
       setBusy(false);
     }
-  }, [busy, onAuthFailure, onStatusChange, sessionId]);
+  }, [busy, onAuthFailure, onGenerated, onStatusChange, sessionId]);
 
   const handleCopyAgain = useCallback(async (token: string) => {
     const ok = await copyToClipboard(

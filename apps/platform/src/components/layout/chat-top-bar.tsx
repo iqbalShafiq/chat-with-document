@@ -3,6 +3,7 @@ import { AnrealMark } from "#/components/layout/anreal-brand";
 import { AutoDismissPopover } from "#/components/ui/auto-dismiss-popover";
 import { Check, Link2, Menu, PanelLeftOpen, Share2, SquarePen } from "lucide-react";
 import { copyToClipboard } from "#/lib/clipboard";
+import { shareUrl } from "#/lib/api";
 
 export function ChatTopBar({
   title,
@@ -12,6 +13,7 @@ export function ChatTopBar({
   onNewChat,
   newChatDisabled = false,
   showCopyLink = false,
+  copyLinkToken = null,
   showShare = false,
   shareActive = false,
   onShare,
@@ -24,6 +26,12 @@ export function ChatTopBar({
   newChatDisabled?: boolean;
   /** True inside a chat room (standalone / project-workspace). */
   showCopyLink?: boolean;
+  /**
+   * Newest active public-link token for the active chat, or null when the
+   * chat has no public link. The Copy button copies this token's public
+   * URL — and stays disabled while null.
+   */
+  copyLinkToken?: string | null;
   /** True when the share popover is available for the active chat. */
   showShare?: boolean;
   shareActive?: boolean;
@@ -31,14 +39,18 @@ export function ChatTopBar({
 }) {
   const showLeftControl = isMobile || !sidebarOpen;
   const showNewChat = isMobile || !sidebarOpen;
+  const copyDisabled = copyLinkToken === null;
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
     "idle",
   );
 
   const handleCopyLink = useCallback(async () => {
-    const ok = await copyToClipboard(window.location.href);
+    if (!copyLinkToken) return;
+    const ok = await copyToClipboard(
+      `${window.location.origin}${shareUrl(copyLinkToken)}`,
+    );
     setCopyState(ok ? "copied" : "error");
-  }, []);
+  }, [copyLinkToken]);
 
   const handleCopyDismiss = useCallback(() => {
     setCopyState("idle");
@@ -113,9 +125,22 @@ export function ChatTopBar({
                 onClick={() => {
                   void handleCopyLink();
                 }}
-                aria-label={copyState === "copied" ? "Link copied" : "Copy link"}
-                title={copyState === "copied" ? "Link copied" : "Copy link"}
-                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
+                disabled={copyDisabled}
+                aria-label={
+                  copyState === "copied"
+                    ? "Public link copied"
+                    : copyDisabled
+                      ? "No public link yet — share this chat first"
+                      : "Copy public link"
+                }
+                title={
+                  copyState === "copied"
+                    ? "Public link copied"
+                    : copyDisabled
+                      ? "No public link yet — share this chat first"
+                      : "Copy newest public link"
+                }
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-text-muted disabled:active:scale-100"
               >
                 {copyState === "copied" ? (
                   <Check className="size-4 text-success" strokeWidth={1.75} />
@@ -127,7 +152,7 @@ export function ChatTopBar({
                 open={copyState === "copied"}
                 onDismiss={handleCopyDismiss}
               >
-                Link copied
+                Public link copied
               </AutoDismissPopover>
               <AutoDismissPopover
                 open={copyState === "error"}

@@ -22,6 +22,7 @@ const EXPECTED_OPERATIONS: Array<{
   { path: "/api/chat/sessions/{id}", method: "delete", operationId: "deleteChatSession" },
   { path: "/api/chat/sessions/{id}/shares", method: "post", operationId: "createChatShare" },
   { path: "/api/chat/sessions/{id}/shares/status", method: "get", operationId: "getChatShareStatus" },
+  { path: "/api/chat/sessions/{id}/shares/latest", method: "get", operationId: "getLatestChatShare" },
   { path: "/api/chat/sessions/{id}/shares/deactivate", method: "post", operationId: "deactivateChatShares" },
   { path: "/api/chat/fork", method: "post", operationId: "forkSharedChat" },
   { path: "/api/shares/{token}", method: "get", operationId: "getPublicShare" },
