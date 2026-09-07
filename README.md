@@ -1,6 +1,6 @@
-# Chat with Document
+# anreal
 
-Monorepo aplikasi **AI chat** berbasis [Anvia](https://anvia.dev): UI React (`platform`), API Hono (`api`), dan package agent bersama (`@assingment/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
+**anreal** adalah workspace AI privat untuk bertanya, membandingkan, dan membuat sesuatu dari dokumen, data, serta gambar. Monorepo ini berbasis [Anvia](https://anvia.dev): UI React (`@anreal/platform`), API Hono (`@anreal/api`), dan package agent bersama (`@anreal/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
 
 ## Apa yang dibangun
 
@@ -26,7 +26,7 @@ Aplikasi chat full-stack di mana user bisa:
                                                    │
                                    ┌───────────────┼───────────────┐
                                    ▼               ▼               ▼
-                          @assingment/agent   Prisma memory    Langfuse
+                           @anreal/agent     Prisma memory    Langfuse
                           (OpenAI + tools)    (Postgres)       (tracing)
 ```
 
@@ -41,7 +41,7 @@ Alur singkat:
 
 | Area | Detail |
 | --- | --- |
-| Chat streaming | `@anvia/react` + `@anvia/server` (`createEventStream`, format `jsonl`) |
+| Chat streaming | Anvia v1 client protocol v3 via `@anvia/client` + `@anvia/react` and `@anvia/react-ui` primitives |
 | Queued follow-ups | Kirim pesan saat streaming — antrean per session (localStorage), `PromptRequest.steer()` ke run aktif (1 pesan/turn FIFO), auto-flush saat idle, hold setelah stop/error, edit + drag reorder, persist lintas reload |
 | Multi-session | Session ID di `localStorage`; daftar session dari DB |
 | Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
@@ -56,9 +56,9 @@ Alur singkat:
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/react` ^0.11.6 + `@anvia/react-ui` ^0.7.1, KaTeX |
-| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/server` ^0.7.6, `@anvia/memory-prisma` ^0.3.1 |
-| Agent | `@anvia/core` ^0.26.0 (v0 line), `@anvia/openai` ^0.5.1, `@anvia/mistral` ^0.4.1, `@anvia/qdrant` ^0.4.0, Langfuse, Zod |
+| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/client` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`, KaTeX |
+| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/client`/`@anvia/server` `1.0.10`, `@anvia/core`/`@anvia/memory-prisma` `1.0.9` |
+| Agent | `@anvia/core`/`@anvia/langfuse`/`@anvia/mistral`/`@anvia/openai` `1.0.9`, `@anvia/mcp`/`@anvia/qdrant` `1.0.10`, Zod |
 | Tooling | pnpm workspaces, Docker Compose (Postgres 16) |
 
 ## Struktur monorepo
@@ -80,11 +80,11 @@ docker-compose.yml     # Postgres lokal di port 15433
 .env.example
 ```
 
-### Package `@assingment/agent`
+### Package `@anreal/agent`
 
 Factory agent yang dipakai API:
 
-- `createAgent()` — `AgentBuilder` + base instructions + optional tools/memory/tracing
+- `createAgent()` — native Anvia v1 agent with base instructions and optional tools/memory/tracing
 - `createDataAnalysisTool()` — tiga tool statistik numerik
 - `tracing` — instance Langfuse dari env
 - Default model: OpenAI via OpenRouter Responses API (`openai/gpt-5.6-luna`), konfigurasi via `OPENAI_*`
@@ -143,8 +143,8 @@ Factory agent yang dipakai API:
 4. **Database**
 
    ```bash
-   pnpm --filter api db:generate
-   pnpm --filter api db:migrate
+   pnpm --filter @anreal/api db:generate
+   pnpm --filter @anreal/api db:migrate
    ```
 
 ## Development
@@ -172,25 +172,25 @@ Apps memuat env dari root `.env` lewat `dotenv-cli` (script `with-env`).
 
 ```bash
 # API only
-pnpm --filter api dev
+pnpm --filter @anreal/api dev
 
 # Platform only
-pnpm --filter platform dev
+pnpm --filter @anreal/platform dev
 
 # Prisma
-pnpm --filter api db:generate   # regenerate client → apps/api/src/generated
-pnpm --filter api db:migrate    # migrate (dev)
-pnpm --filter api db:deploy     # migrate (deploy)
-pnpm --filter api db:studio     # Prisma Studio
+pnpm --filter @anreal/api db:generate   # regenerate client → apps/api/src/generated
+pnpm --filter @anreal/api db:migrate    # migrate (dev)
+pnpm --filter @anreal/api db:deploy     # migrate (deploy)
+pnpm --filter @anreal/api db:studio     # Prisma Studio
 
 # API smoke (register → login → chat + usage audit); API must be running
-pnpm --filter api smoke:auth
+pnpm --filter @anreal/api smoke:auth
 ```
 
 ### E2E (Playwright)
 
 ```bash
-pnpm --filter platform exec playwright test
+pnpm --filter @anreal/platform exec playwright test
 ```
 
 Suite browser (8 test) di `apps/platform/e2e/` menguji alur image generation end-to-end terhadap stub LLM lokal. Prasyarat:
@@ -206,7 +206,7 @@ E2E **LLM asli** (OpenRouter dari `.env`, browser headed, tanpa stub):
 
 ```bash
 # API :3001 + platform :3000 sudah `pnpm dev` dengan key real
-pnpm --filter platform exec -- playwright test --config playwright.real-llm.config.ts
+pnpm --filter @anreal/platform exec -- playwright test --config playwright.real-llm.config.ts
 ```
 
 Jangan campur dengan suite stub: suite stub menolak `OPENAI_BASE_URL` selain `:18765`.
@@ -276,7 +276,7 @@ Body `POST` (ringkas):
 ```json
 {
   "sessionId": "<uuid>",
-  "messages": [ /* core messages dari @anvia/react */ ],
+  "messages": [ /* canonical messages dari @anvia/client */ ],
   "stream": true
 }
 ```
@@ -355,7 +355,7 @@ Response yang terlambat (approval/klarifikasi sudah resolved atau TTL) bersifat 
 
 ### Model registry
 
-Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed` — **idempotent**, run ulang menghasilkan `created=0 updated=0 removed=0`):
+Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api db:seed` — **idempotent**, run ulang menghasilkan `created=0 updated=0 removed=0`):
 
 | Kolom | Keterangan |
 | --- | --- |
@@ -381,7 +381,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 
 ## Frontend notes
 
-- Endpoint API di UI mengikuti hostname halaman (localhost → `:3001`, `192.168.x.x` → `http://192.168.x.x:3001`). Override lewat `VITE_API_BASE`.
+- Endpoint API di UI mengikuti hostname halaman dan VITE_API_PORT dari root `.env` (localhost → `:<VITE_API_PORT>`, `192.168.x.x` → `http://192.168.x.x:<VITE_API_PORT>`). Override lewat `VITE_API_BASE`.
 - Session aktif disimpan di `localStorage` (`chat.sessionId`).
 - Pesan asisten dirender lewat `MathMarkdown`: normalisasi delimiter LaTeX umum (`\[...\]`, `\(...\)`, `[ \frac{...} ]`) lalu KaTeX.
 
@@ -392,9 +392,9 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 - CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
 - Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
 - Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
-- Anvia tetap di kereta **v0** (`@anvia/core@0.26.x` + adapter yang matching). Dokumentasi resmi sudah menunjuk v1 (`1.0.0-rc.x`, `new Agent` tanpa `AgentBuilder`); rewrite itu belum diterapkan di app ini.
-- Compaction resmi `@anvia/memory-prisma` (hapus prefix baris) **tidak** dinyalakan. Compaction session tetap app-layer di `AgentMemorySession.metadata.compaction`.
-- **`@anvia/react-ui` di-patch** (`patches/@anvia__react-ui.patch`, via `pnpm.patchedDependencies`): editor composer dibuat tetap editable + submittable saat streaming (SDK 0.7.1 masih mengunci `contenteditable` dan `canSubmit` selama streaming). Fitur queue follow-up bergantung pada patch ini; saat upgrade `@anvia/react-ui`, patch harus dicek ulang.
+- Semua package Anvia pada monorepo ini dikunci ke patch 1.0.x terbaru yang dipakai aplikasi (`@anvia/core` `1.0.9`, `@anvia/client`/`@anvia/server`/`@anvia/mcp`/`@anvia/qdrant` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`); browser memakai `@anvia/client` untuk UI/protocol types dan exact `*Primitive` exports dari `@anvia/react-ui`.
+- Memory memakai token-aware compaction native Anvia v1 dengan atomic prefix replacement dari `@anvia/memory-prisma`; aplikasi tidak memiliki engine, metadata log, event status, atau fallback summary sendiri.
+- Composer editor adalah native textarea yang dimiliki aplikasi: tetap editable saat status `submitted`/`streaming`, mengirim saat `ready`, dan queue/steer atau stop saat run aktif. Tidak ada patch `node_modules`, package patch, alias kompatibilitas, atau fallback v0.
 - Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
 
 ## Troubleshooting singkat
@@ -402,6 +402,6 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter api db:seed`
 | Masalah | Cek |
 | --- | --- |
 | API tidak connect ke DB | `docker compose ps`, pastikan port `15433`, cocokkan `DATABASE_URL` |
-| Prisma error setelah pull | `pnpm --filter api db:generate` lalu `db:migrate` |
-| UI kosong / CORS | Pastikan API jalan di `:3001` dan `pnpm --filter api dev` |
+| Prisma error setelah pull | `pnpm --filter @anreal/api db:generate` lalu `db:migrate` |
+| UI kosong / CORS | Pastikan API jalan di `:3001` dan `pnpm --filter @anreal/api dev` |
 | Math tidak ter-render | Pastikan asisten memakai `$...$` / `$$...$$` (instruksi ada di base prompt) |

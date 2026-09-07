@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("OpenRouterImageGenerationModel", () => {
-  it("posts to the images endpoint with merged params and auth header", async () => {
+  it("posts to the images endpoint with merged provider options and auth header", async () => {
     const fetchMock = mockFetch({ data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] });
     const model = makeModel();
 
@@ -46,7 +46,7 @@ describe("OpenRouterImageGenerationModel", () => {
       prompt: "a red fox in the snow",
       width: 1024,
       height: 1024,
-      additionalParams: { quality: "high" },
+      providerOptions: { quality: "high" },
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -61,6 +61,35 @@ describe("OpenRouterImageGenerationModel", () => {
       model: DEFAULT_MODEL,
       prompt: "a red fox in the snow",
       size: "1024x1024",
+      quality: "high",
+    });
+  });
+
+  it("maps the current product image settings without adding pixel size", async () => {
+    const fetchMock = mockFetch({
+      data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }],
+    });
+    const model = makeModel();
+
+    await model.imageGeneration({
+      prompt: "a wide watercolor landscape",
+      width: 1536,
+      height: 1024,
+      providerOptions: {
+        model: "google/gemini-2.5-flash-image",
+        aspect_ratio: "16:9",
+        resolution: "2k",
+        output_format: "png",
+        quality: "high",
+      },
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({
+      model: "google/gemini-2.5-flash-image",
+      prompt: "a wide watercolor landscape",
+      aspect_ratio: "16:9",
+      resolution: "2k",
+      output_format: "png",
       quality: "high",
     });
   });
@@ -85,9 +114,15 @@ describe("OpenRouterImageGenerationModel", () => {
     expect(result.images[0]!.data).toEqual(
       new Uint8Array(Buffer.from("AB", "utf8")),
     );
-    expect(result.image).toBe(result.images[0]!.data);
-    expect(result.mediaType).toBe("image/png");
-    expect(result.rawResponse).toEqual(raw);
+    expect(result).toEqual({
+      images: [
+        {
+          data: new Uint8Array(Buffer.from("AB", "utf8")),
+          mediaType: "image/png",
+        },
+      ],
+      rawResponse: raw,
+    });
   });
 
   it("maps multiple images in order", async () => {
@@ -110,7 +145,6 @@ describe("OpenRouterImageGenerationModel", () => {
     expect(result.images[0]!.mediaType).toBe("image/png");
     expect(result.images[1]!.data).toEqual(new Uint8Array(Buffer.from("B", "utf8")));
     expect(result.images[1]!.mediaType).toBe("image/jpeg");
-    expect(result.image).toBe(result.images[0]!.data);
   });
 
   it("throws when all entries lack a b64 payload", async () => {
@@ -248,6 +282,27 @@ describe("OpenRouterImageGenerationModel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("forwards abortSignal and does not retry an aborted request", async () => {
+    const controller = new AbortController();
+    const abortError = new DOMException("The operation was aborted", "AbortError");
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBe(controller.signal);
+      controller.abort();
+      throw abortError;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const model = makeModel({ retryDelaysMs: [1, 1] });
+
+    await expect(
+      model.imageGeneration(
+        { prompt: "p", width: 256, height: 256 },
+        { abortSignal: controller.signal },
+      ),
+    ).rejects.toBe(abortError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to the bounded message when upstream omits details", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -285,7 +340,7 @@ describe("OpenRouterImageGenerationModel", () => {
 
     await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
 
-    expect(model.defaultModel).toBe(DEFAULT_MODEL);
+    expect(model.modelId).toBe(DEFAULT_MODEL);
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body).model).toBe(
       DEFAULT_MODEL,
     );

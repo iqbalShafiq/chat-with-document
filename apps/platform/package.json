@@ -1,21 +1,24 @@
 {
-  "name": "platform",
+  "name": "@anreal/platform",
   "private": true,
   "type": "module",
   "imports": {
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "pnpm with-env vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
-    "@anvia/react": "^0.11.6",
-    "@anvia/react-ui": "^0.7.1",
+    "@anvia/client": "1.0.10",
+    "@anvia/core": "1.0.9",
+    "@anvia/react": "1.0.11",
+    "@anvia/react-ui": "1.0.11",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@tailwindcss/vite": "^4.1.18",
@@ -38,11 +41,14 @@
     "@tanstack/devtools-vite": "latest",
     "@tanstack/router-cli": "^1.132.0",
     "@tanstack/router-plugin": "latest",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
     "@types/katex": "^0.16.8",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^30.0.1",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
     "vitest": "^4.1.10"

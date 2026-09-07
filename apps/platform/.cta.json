@@ -1,5 +1,5 @@
 {
-  "projectName": "platform",
+  "projectName": "anreal-platform",
   "mode": "file-router",
   "typescript": true,
   "packageManager": "pnpm",

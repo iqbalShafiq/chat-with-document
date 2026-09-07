@@ -46,6 +46,21 @@ export function clearStoredSessionId() {
   }
 }
 
+export function clearLastStandaloneSessionId() {
+  try {
+    localStorage.removeItem(LAST_STANDALONE_SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** Drop client-invented session ids after login/register so Home opens a server draft. */
+export function clearSessionOnAuth() {
+  clearStoredSessionId();
+  clearLastStandaloneSessionId();
+  clearWorkspaceProjectState();
+}
+
 export function readLastStandaloneSessionId(): string | null {
   try {
     const stored = localStorage.getItem(LAST_STANDALONE_SESSION_KEY);

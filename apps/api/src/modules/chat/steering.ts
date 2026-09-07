@@ -1,9 +1,6 @@
 import type { Redis } from "ioredis";
-import {
-  Message,
-  UserContent,
-  type Message as MessageType,
-} from "@anvia/core/completion";
+import type { AgentStream } from "@anvia/core/agent";
+import type { UserMessage, UserContentPart } from "@anvia/core/completion";
 import { getRedis } from "../../lib/redis.js";
 
 export type SteerContextSnippet = {
@@ -13,7 +10,7 @@ export type SteerContextSnippet = {
 
 export type SteerAttachment = {
   mediaType: string;
-  data: string; // base64 or data URL
+  data: string;
 };
 
 export type SteerMessage = {
@@ -23,12 +20,66 @@ export type SteerMessage = {
   contextSnippet?: SteerContextSnippet | null;
 };
 
-const STEER_KEY = (streamId: string) => `rs-steer:${streamId}`;
-const STEER_SENT_KEY = (streamId: string) => `rs-steer-sent:${streamId}`;
 const STEER_TTL_SECONDS = 24 * 60 * 60;
+const MAX_CLIENT_MESSAGE_ID = 256;
+const MAX_TEXT = 8_000;
+const MAX_ATTACHMENTS = 8;
+const MAX_ATTACHMENT_DATA = 12_000_000;
+const MAX_SNIPPET_TEXT = 16_000;
+
+const steerTag = (streamId: string) => `{${streamId}}`;
+const STEER_KEY = (streamId: string) => `rs-steer:${steerTag(streamId)}:queue`;
+const STEER_SENT_KEY = (streamId: string) => `rs-steer:${steerTag(streamId)}:seen`;
+
+const PUSH_SCRIPT = `-- anvia-v1-steer-push
+local added = redis.call("SADD", KEYS[2], ARGV[1])
+if added == 0 then return 0 end
+redis.call("RPUSH", KEYS[1], ARGV[2])
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[3])
+return 1`;
+
+const POP_SCRIPT = `-- anvia-v1-steer-pop
+return redis.call("LPOP", KEYS[1]) or ""`;
+
+const REQUEUE_SCRIPT = `-- anvia-v1-steer-requeue
+redis.call("LPUSH", KEYS[1], ARGV[1])
+redis.call("EXPIRE", KEYS[1], ARGV[2])
+return 1`;
+
+const DRAIN_SCRIPT = `-- anvia-v1-steer-drain
+local count = redis.call("LLEN", KEYS[1])
+redis.call("DEL", KEYS[1])
+return count`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function boundedString(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+export function isSteerMessage(value: unknown): value is SteerMessage {
+  if (!isRecord(value)) return false;
+  if (!boundedString(value.clientMessageId, MAX_CLIENT_MESSAGE_ID)) return false;
+  if (!boundedString(value.text, MAX_TEXT)) return false;
+  if (value.attachments !== undefined) {
+    if (!Array.isArray(value.attachments) || value.attachments.length > MAX_ATTACHMENTS) return false;
+    if (!value.attachments.every((attachment) =>
+      isRecord(attachment) &&
+      boundedString(attachment.mediaType, 128) &&
+      boundedString(attachment.data, MAX_ATTACHMENT_DATA),
+    )) return false;
+  }
+  if (value.contextSnippet !== undefined && value.contextSnippet !== null) {
+    if (!isRecord(value.contextSnippet) ||
+      !boundedString(value.contextSnippet.text, MAX_SNIPPET_TEXT) ||
+      (value.contextSnippet.sourceRole !== "user" && value.contextSnippet.sourceRole !== "assistant")) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function base64FromData(value: string): string {
@@ -36,109 +87,85 @@ function base64FromData(value: string): string {
   return match ? match[1] : value;
 }
 
-export function isSteerMessage(value: unknown): value is SteerMessage {
-  if (!isRecord(value)) return false;
-  if (
-    typeof value.clientMessageId !== "string" ||
-    value.clientMessageId.length === 0
-  ) {
-    return false;
-  }
-  if (typeof value.text !== "string") return false;
-  if (value.attachments !== undefined) {
-    if (!Array.isArray(value.attachments)) return false;
-    for (const attachment of value.attachments) {
-      if (
-        !isRecord(attachment) ||
-        typeof attachment.mediaType !== "string" ||
-        typeof attachment.data !== "string"
-      ) {
-        return false;
-      }
-    }
-  }
-  if (value.contextSnippet !== undefined && value.contextSnippet !== null) {
-    if (
-      !isRecord(value.contextSnippet) ||
-      typeof value.contextSnippet.text !== "string" ||
-      (value.contextSnippet.sourceRole !== "user" &&
-        value.contextSnippet.sourceRole !== "assistant")
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/** Builds the user Message the SDK steer() accepts (images inline, snippet prepended). */
-export function steerMessageToCoreMessage(input: SteerMessage): MessageType {
-  const parts: UserContent[] = [];
+/** Builds the strict v1 UserMessage accepted by AgentStream.steer({ prompt }). */
+export function steerMessageToCoreMessage(input: SteerMessage): UserMessage {
+  const parts: UserContentPart[] = [];
   for (const attachment of input.attachments ?? []) {
-    parts.push(
-      UserContent.imageBase64(
-        base64FromData(attachment.data),
-        attachment.mediaType,
-        { detail: "auto" },
-      ),
-    );
+    parts.push({
+      type: "image",
+      image: { type: "data", data: base64FromData(attachment.data) },
+      mediaType: attachment.mediaType,
+      detail: "auto",
+    });
   }
-  if (input.contextSnippet && input.contextSnippet.text.trim().length > 0) {
-    const source =
-      input.contextSnippet.sourceRole === "user"
-        ? "User-selected text from an earlier user message"
-        : "Text selected from an earlier assistant message";
-    parts.push(
-      UserContent.text(
-        `Additional context\n${source}:\n${input.contextSnippet.text}\n`,
-      ),
-    );
+  if (input.contextSnippet && input.contextSnippet.text.trim()) {
+    const source = input.contextSnippet.sourceRole === "user"
+      ? "User-selected text from an earlier user message"
+      : "Text selected from an earlier assistant message";
+    parts.push({
+      type: "text",
+      text: `Additional context\n${source}:\n${input.contextSnippet.text}\n`,
+    });
   }
-  if (input.text.trim().length > 0 || parts.length === 0) {
-    parts.push(UserContent.text(input.text));
+  if (input.text.trim() || parts.length === 0) {
+    parts.push({ type: "text", text: input.text });
   }
-  return Message.user(parts, {
+  return {
+    role: "user",
+    content: parts,
     metadata: {
       clientMessageId: input.clientMessageId,
       queued: true,
       createdAt: new Date().toISOString(),
     },
-  });
+  };
+}
+
+function redisEval(redis: Redis, script: string, keys: string[], args: string[]): Promise<unknown> {
+  const command = redis as unknown as { eval?: (...values: string[]) => Promise<unknown> };
+  if (typeof command.eval !== "function") throw new Error("steering requires Redis EVAL support");
+  return command.eval(script, String(keys.length), ...keys, ...args);
+}
+
+function parseRedisJson(value: unknown): SteerMessage | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isSteerMessage(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createSteeringStore(redis: Redis) {
   return {
-    steerKey: STEER_KEY,
-    /**
-     * Idempotent per stream: a clientMessageId already pushed to this stream
-     * (double click / reload while the run is still active) is skipped.
-     */
     async push(streamId: string, message: SteerMessage): Promise<boolean> {
-      const added = await redis.sadd(
-        STEER_SENT_KEY(streamId),
-        message.clientMessageId,
+      if (!isSteerMessage(message)) throw new Error("invalid steering message");
+      const serialized = JSON.stringify(message);
+      const result = await redisEval(
+        redis,
+        PUSH_SCRIPT,
+        [STEER_KEY(streamId), STEER_SENT_KEY(streamId)],
+        [message.clientMessageId, serialized, String(STEER_TTL_SECONDS)],
       );
-      if (added === 0) return false;
-      await redis.expire(STEER_SENT_KEY(streamId), STEER_TTL_SECONDS);
-      await redis.rpush(STEER_KEY(streamId), JSON.stringify(message));
-      await redis.expire(STEER_KEY(streamId), STEER_TTL_SECONDS);
-      return true;
+      return Number(result) === 1;
     },
+
     async pop(streamId: string): Promise<SteerMessage | null> {
-      const raw = await redis.lpop(STEER_KEY(streamId));
-      if (raw === null) return null;
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        return isSteerMessage(parsed) ? parsed : null;
-      } catch {
-        return null;
-      }
+      const raw = await redisEval(redis, POP_SCRIPT, [STEER_KEY(streamId)], []);
+      return parseRedisJson(raw);
     },
-    /** Drops the remaining list; the client still owns those messages. */
+
+    /** Reinsert an already-seen message after a failed/unapplied stream attempt. */
+    async requeue(streamId: string, message: SteerMessage): Promise<void> {
+      if (!isSteerMessage(message)) throw new Error("invalid steering message");
+      await redisEval(redis, REQUEUE_SCRIPT, [STEER_KEY(streamId)], [JSON.stringify(message), String(STEER_TTL_SECONDS)]);
+    },
+
     async drain(streamId: string): Promise<number> {
-      const count = await redis.llen(STEER_KEY(streamId));
-      if (count > 0) {
-        await redis.del(STEER_KEY(streamId));
-      }
+      const result = await redisEval(redis, DRAIN_SCRIPT, [STEER_KEY(streamId)], []);
+      const count = Number(result);
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid steering drain result");
       return count;
     },
   };
@@ -148,108 +175,106 @@ export type SteeringStore = ReturnType<typeof createSteeringStore>;
 
 let steeringStore: SteeringStore | null = null;
 
-/** Process-wide singleton shared by the chat router and run worker. */
 export function getSteeringStore(): SteeringStore {
-  if (!steeringStore) {
-    steeringStore = createSteeringStore(getRedis());
-  }
+  if (!steeringStore) steeringStore = createSteeringStore(getRedis());
   return steeringStore;
 }
 
-/**
- * Narrow structural view of the SDK's PromptRequest (the class is not
- * exported from the package root). The concrete request satisfies it.
- */
-export type SteerableRequest = {
-  steer(input: MessageType): boolean;
-  stream(): AsyncIterable<unknown>;
+export type SteeringTarget = Pick<AgentStream, "steer">;
+
+type ActiveSteer = {
+  message: SteerMessage;
+  receiptId: string;
+  attempt: number;
 };
 
-function isTurnStartEvent(
-  event: unknown,
-): event is { type: "turn_start"; turn?: unknown } {
-  return isRecord(event) && event.type === "turn_start";
+function isSteeringApplied(event: unknown): event is { type: "steering_applied"; id: string } {
+  return isRecord(event) && event.type === "steering_applied" && typeof event.id === "string";
 }
 
 /**
- * Serializes steering: pops at most one queued message per model turn,
- * acks it (`onApplied`) exactly when the steered turn starts (first
- * turn_start after the steer), and re-injects after a transient retry.
+ * Owns at most one durable queued message per native stream attempt. The
+ * durable item is acknowledged only by the matching v1 steering_applied id.
  */
 export class SteeringPump {
-  private activeSteer: SteerMessage | null = null;
-  private steeredAfterTurn = 0;
-  private lastTurn = 0;
+  private active: ActiveSteer | null = null;
   private rearmPending = false;
+  private closed = false;
+  private closePromise: Promise<void> | null = null;
+  private attempt = 0;
 
   constructor(
     private readonly streamId: string,
     private readonly steering: SteeringStore,
-    private readonly getTarget: () => SteerableRequest | null,
+    private readonly getTarget: () => SteeringTarget | null,
     private readonly onApplied: (applied: SteerMessage) => Promise<void>,
   ) {}
 
-  /** Call when the transient-retry wrapper rebuilds the request. */
   rearmSteer(): void {
-    this.rearmPending = true;
+    if (!this.closed && this.active) {
+      this.attempt += 1;
+      this.rearmPending = true;
+    }
   }
 
-  /** Call BEFORE appending an agent stream event to the stream store. */
   async beforeEvent(event: unknown): Promise<void> {
-    if (isTurnStartEvent(event) && typeof event.turn === "number") {
-      this.lastTurn = event.turn;
-    }
-    if (
-      this.activeSteer !== null &&
-      isTurnStartEvent(event) &&
-      typeof event.turn === "number" &&
-      event.turn > this.steeredAfterTurn
-    ) {
-      const applied = this.activeSteer;
-      this.activeSteer = null;
-      await this.onApplied(applied);
-    }
+    if (this.closed || !this.active || !isSteeringApplied(event)) return;
+    if (event.id !== this.active.receiptId) return;
+    const applied = this.active.message;
+    this.active = null;
+    await this.onApplied(applied);
   }
 
-  /** Call AFTER appending an agent stream event to the stream store. */
+  private async submit(message: SteerMessage): Promise<void> {
+    const target = this.getTarget();
+    if (!target) {
+      await this.steering.requeue(this.streamId, message);
+      return;
+    }
+    const receipt = target.steer({ prompt: steerMessageToCoreMessage(message) });
+    if (!receipt || receipt.status !== "queued" || typeof receipt.id !== "string" || receipt.id.length === 0) {
+      await this.steering.requeue(this.streamId, message);
+      throw new Error("native steering did not return a queued receipt");
+    }
+    this.active = { message, receiptId: receipt.id, attempt: this.attempt };
+  }
+
   async afterEvent(): Promise<void> {
-    if (this.rearmPending) {
-      this.rearmPending = false;
-      if (this.activeSteer !== null) {
-        const target = this.getTarget();
-        if (
-          target === null ||
-          !target.steer(steerMessageToCoreMessage(this.activeSteer))
-        ) {
-          console.warn("[chat-run] steer rejected (run terminal)", {
-            streamId: this.streamId,
-            clientMessageId: this.activeSteer.clientMessageId,
-          });
-          this.activeSteer = null;
-          return;
-        }
-        this.steeredAfterTurn = this.lastTurn;
+    if (this.closed || this.active) {
+      if (this.rearmPending && this.active) {
+        this.rearmPending = false;
+        const message = this.active.message;
+        this.active = null;
+        await this.submit(message);
       }
       return;
     }
-    if (this.activeSteer !== null) return;
     const item = await this.steering.pop(this.streamId);
-    if (item === null) return;
-    const target = this.getTarget();
-    if (target === null || !target.steer(steerMessageToCoreMessage(item))) {
-      console.warn("[chat-run] steer rejected (run terminal)", {
-        streamId: this.streamId,
-        clientMessageId: item.clientMessageId,
-      });
-      return;
-    }
-    this.activeSteer = item;
-    this.steeredAfterTurn = this.lastTurn;
+    if (!item) return;
+    await this.submit(item);
   }
 
-  /** Discard leftover list entries (client re-sends after stream end). */
+  get inFlight(): SteerMessage | null {
+    return this.active?.message ?? null;
+  }
+
+  async close(options: { requeueUnapplied?: boolean } = {}): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    this.closePromise = (async () => {
+      if (this.active && options.requeueUnapplied) {
+        const pending = this.active.message;
+        this.active = null;
+        await this.steering.requeue(this.streamId, pending);
+      } else {
+        this.active = null;
+      }
+    })();
+    return this.closePromise;
+  }
+
   async drain(): Promise<number> {
-    this.activeSteer = null;
+    await this.close();
     return this.steering.drain(this.streamId);
   }
 }

@@ -216,7 +216,9 @@ export function createImageStore(deps: ImageStoreDeps) {
           sessionId: input.sessionId,
           imageId: input.imageId,
         },
-        update: {},
+        // A user repinning the same image while a prior enqueue is pending
+        // creates a fresh unclaimed context; the old claim cannot consume it.
+        update: { claimId: null, claimedAt: null },
       });
       return true;
     },
@@ -236,8 +238,9 @@ export function createImageStore(deps: ImageStoreDeps) {
     },
 
     /**
-     * Active image context is single-use: the run that consumes it clears it
-     * so the next message starts clean (see run-worker).
+     * Active image context is single-use. A fresh run claims these rows before
+     * enqueue; the queue commits or releases that durable claim. Claimed rows
+     * stay hidden from the next turn until one of those transitions completes.
      */
     async clearSessionImageContexts(input: {
       userId: string;
@@ -262,7 +265,7 @@ export function createImageStore(deps: ImageStoreDeps) {
       if (!session) return [];
 
       const rows = await deps.prisma.sessionImageContext.findMany({
-        where: { sessionId: input.sessionId },
+        where: { sessionId: input.sessionId, claimId: null },
         orderBy: { createdAt: "asc" },
         include: { image: true },
       });

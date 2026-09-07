@@ -1,8 +1,20 @@
-import type { AnyTool } from "@anvia/core";
+import type {
+  AnyTool,
+  ToolCallContext,
+  ToolResultContentPart,
+} from "@anvia/core";
 import { createTool } from "@anvia/core";
-import z from "zod";
-import type { ToolResultContent } from "@anvia/core";
+import { ToolOutput } from "@anvia/core/tool";
+import z, { type JSONType } from "zod";
 import { normalizePageImages } from "../document/types.js";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
+
+function throwIfAborted(context: ToolCallContext): void {
+  context.abortSignal?.throwIfAborted();
+}
 
 export interface FindDocumentsPrisma {
   document: {
@@ -45,7 +57,8 @@ export interface NextPagePrisma {
       where: {
         id: string;
         userId: string;
-        sessionLinks: { some: { sessionId: string; userId: string } };
+        status?: "ready";
+        sessionLinks?: { some: { sessionId: string; userId: string } };
       };
       select: { id: true; pageCount: true; filename: true };
     }): Promise<{ id: string; pageCount: number; filename: string } | null>;
@@ -111,6 +124,8 @@ export interface ChunkSearchService {
 export interface DocumentToolsDeps {
   userId: string;
   sessionId: string;
+  /** Authenticated document scope frozen into a resumable run recipe. */
+  documentIds?: readonly string[];
   /** When set, only project corpus docs may be resolved (defense in depth). */
   projectId?: string | null;
   prisma: FindDocumentsPrisma &
@@ -123,27 +138,87 @@ export interface DocumentToolsDeps {
   includeImageBytes?: boolean;
 }
 
+const findDocumentsInput = z.object({
+  query: z.string().min(1).describe("Search query for document discovery"),
+  limit: z.number().int().min(1).max(20).optional().default(5),
+});
+const searchDocumentPagesInput = z.object({
+  query: z.string().min(1).describe("Semantic search query"),
+  documentIds: z
+    .array(z.string())
+    .optional()
+    .describe("Optional document ids to narrow search"),
+  limit: z.number().int().min(1).max(10).optional().default(5),
+});
+const getDocumentNextPageInput = z.object({
+  documentId: z.string().min(1),
+  pageIndex: z.number().int().min(0),
+});
+const getDocumentPageImagesInput = z.object({
+  documentId: z.string().min(1).describe("Document id from the session catalog"),
+  pageIndex: z.number().int().min(0).describe("0-based page index"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(8)
+    .optional()
+    .default(5)
+    .describe("Max images to return"),
+});
+
+const findDocumentsSpec = {
+  name: "find_documents",
+  description:
+    "Search documents in the current chat session by filename or summary text. Use when the relevant document id is not clear from the session catalog.",
+  inputSchema: findDocumentsInput,
+} as const;
+const searchDocumentPagesSpec = {
+  name: "search_document_pages",
+  description:
+    "Semantic search over document page chunks in the current session. Returns top matching chunks grouped by relevance.",
+  inputSchema: searchDocumentPagesInput,
+} as const;
+const getDocumentNextPageSpec = {
+  name: "get_document_next_page",
+  description:
+    "Fetch the next page of a document as raw markdown. Use when vector search results seem incomplete and you need sequential continuation.",
+  inputSchema: getDocumentNextPageInput,
+} as const;
+const getDocumentPageImagesSpec = {
+  name: "get_document_page_images",
+  description:
+    "Fetch images extracted from a document page (charts, photos, diagrams). Use when the answer depends on visual content in the document. Returns the images together with markdown references you can embed inline in your answer at the most relevant position.",
+  inputSchema: getDocumentPageImagesInput,
+} as const;
+
+export const DOCUMENT_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(findDocumentsSpec),
+  createStaticToolDefinition(searchDocumentPagesSpec),
+  createStaticToolDefinition(getDocumentNextPageSpec),
+  createStaticToolDefinition(getDocumentPageImagesSpec),
+];
+
 export function createFindDocumentsTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: FindDocumentsPrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
-    name: "find_documents",
-    description:
-      "Search documents in the current chat session by filename or summary text. Use when the relevant document id is not clear from the session catalog.",
-    input: z.object({
-      query: z.string().min(1).describe("Search query for document discovery"),
-      limit: z.number().int().min(1).max(20).optional().default(5),
-    }),
-    execute: async ({ query, limit }) => {
+    ...findDocumentsSpec,
+    outputSchema: z.json(),
+    execute: async ({ query, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
+      throwIfAborted(context);
       if (sessionDocIds.length === 0) {
         return { results: [] };
       }
@@ -169,6 +244,7 @@ export function createFindDocumentsTool(deps: {
           pageCount: true,
         },
       });
+      throwIfAborted(context);
 
       return {
         results: documents.map((doc) => ({
@@ -187,7 +263,9 @@ async function resolveSessionDocumentIds(
   userId: string,
   sessionId: string,
   projectId?: string | null,
+  frozenDocumentIds?: readonly string[],
 ): Promise<string[]> {
+  if (frozenDocumentIds !== undefined) return [...frozenDocumentIds];
   const links = await prisma.documentSession.findMany({
     where: {
       sessionId,
@@ -212,28 +290,23 @@ export function createSearchDocumentPagesTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: SessionDocumentIdsPrisma;
   searchService: ChunkSearchService;
 }) {
   return createTool({
-    name: "search_document_pages",
-    description:
-      "Semantic search over document page chunks in the current session. Returns top matching chunks grouped by relevance.",
-    input: z.object({
-      query: z.string().min(1).describe("Semantic search query"),
-      documentIds: z
-        .array(z.string())
-        .optional()
-        .describe("Optional document ids to narrow search"),
-      limit: z.number().int().min(1).max(10).optional().default(5),
-    }),
-    execute: async ({ query, documentIds, limit }) => {
+    ...searchDocumentPagesSpec,
+    outputSchema: z.json(),
+    execute: async ({ query, documentIds, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
+      throwIfAborted(context);
       if (sessionDocIds.length === 0) {
         return { results: [] };
       }
@@ -255,6 +328,7 @@ export function createSearchDocumentPagesTool(deps: {
         documentIds: scopedIds,
         limit,
       });
+      throwIfAborted(context);
 
       const byPage = new Map<string, ChunkSearchHit[]>();
       for (const hit of hits) {
@@ -291,23 +365,22 @@ export function createGetDocumentNextPageTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: NextPagePrisma & SessionDocumentIdsPrisma;
 }) {
   return createTool({
-    name: "get_document_next_page",
-    description:
-      "Fetch the next page of a document as raw markdown. Use when vector search results seem incomplete and you need sequential continuation.",
-    input: z.object({
-      documentId: z.string().min(1),
-      pageIndex: z.number().int().min(0),
-    }),
-    execute: async ({ documentId, pageIndex }) => {
+    ...getDocumentNextPageSpec,
+    outputSchema: z.json(),
+    execute: async ({ documentId, pageIndex }, context): Promise<JSONType> => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
+      throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {
         return { found: false, reason: "Document not found in current session" };
       }
@@ -316,12 +389,17 @@ export function createGetDocumentNextPageTool(deps: {
         where: {
           id: documentId,
           userId: deps.userId,
-          sessionLinks: {
-            some: { sessionId: deps.sessionId, userId: deps.userId },
-          },
+          ...(deps.documentIds === undefined
+            ? {
+                sessionLinks: {
+                  some: { sessionId: deps.sessionId, userId: deps.userId },
+                },
+              }
+            : { status: "ready" }),
         },
         select: { id: true, pageCount: true, filename: true },
       });
+      throwIfAborted(context);
 
       if (!document) {
         return { found: false, reason: "Document not found in current session" };
@@ -346,6 +424,7 @@ export function createGetDocumentNextPageTool(deps: {
           rawMarkdown: true,
         },
       });
+      throwIfAborted(context);
 
       if (!page) {
         return {
@@ -396,37 +475,27 @@ export function createGetDocumentPageImagesTool(deps: {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  documentIds?: readonly string[];
   prisma: PageImagesPrisma & SessionDocumentIdsPrisma;
   fetchPageImage: FetchPageImage;
   maxImages?: number;
   /** Text-only models cannot receive image bytes; when false, return metadata only. */
   includeImageBytes?: boolean;
-}) {
+}): AnyTool {
   return createTool({
-    name: "get_document_page_images",
-    description:
-      "Fetch images extracted from a document page (charts, photos, diagrams). Use when the answer depends on visual content in the document. Returns the images together with markdown references you can embed inline in your answer at the most relevant position.",
-    input: z.object({
-      documentId: z.string().min(1).describe("Document id from the session catalog"),
-      pageIndex: z.number().int().min(0).describe("0-based page index"),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(8)
-        .optional()
-        .default(5)
-        .describe("Max images to return"),
-    }),
-    execute: async ({ documentId, pageIndex, limit }) => {
+    ...getDocumentPageImagesSpec,
+    execute: async ({ documentId, pageIndex, limit }, context) => {
+      throwIfAborted(context);
       const sessionDocIds = await resolveSessionDocumentIds(
         deps.prisma,
         deps.userId,
         deps.sessionId,
         deps.projectId,
+        deps.documentIds,
       );
+      throwIfAborted(context);
       if (!sessionDocIds.includes(documentId)) {
-        return [
+        return ToolOutput.content([
           {
             type: "text",
             text: JSON.stringify({
@@ -434,25 +503,26 @@ export function createGetDocumentPageImagesTool(deps: {
               reason: "Document not found in current session",
             }),
           },
-        ] satisfies ToolResultContent[];
+        ] satisfies ToolResultContentPart[]);
       }
 
       const page = await deps.prisma.documentPage.findFirst({
         where: { documentId, pageIndex },
         select: { id: true, images: true },
       });
+      throwIfAborted(context);
       const images = normalizePageImages(page?.images).slice(0, limit);
 
       if (images.length === 0) {
-        return [
+        return ToolOutput.content([
           {
             type: "text",
             text: JSON.stringify({ found: true, pageIndex, imageCount: 0 }),
           },
-        ] satisfies ToolResultContent[];
+        ] satisfies ToolResultContentPart[]);
       }
 
-      const content: ToolResultContent[] = [
+      const content: ToolResultContentPart[] = [
         {
           type: "text",
           text: JSON.stringify({
@@ -472,7 +542,7 @@ export function createGetDocumentPageImagesTool(deps: {
       ];
 
       if (deps.includeImageBytes === false) {
-        return content;
+        return ToolOutput.content(content);
       }
 
       const toFetch = images.slice(0, deps.maxImages ?? 5);
@@ -482,16 +552,21 @@ export function createGetDocumentPageImagesTool(deps: {
           data: await deps.fetchPageImage(image.r2Key),
         })),
       );
+      throwIfAborted(context);
       for (const result of results) {
         if (result.status === "rejected") continue;
         content.push({
-          type: "image",
-          data: Buffer.from(result.value.data).toString("base64"),
+          type: "file",
+          data: {
+            type: "data",
+            data: Buffer.from(result.value.data).toString("base64"),
+          },
           mediaType: result.value.image.mediaType,
+          filename: result.value.image.id,
         });
       }
 
-      return content;
+      return ToolOutput.content(content);
     },
   });
 }

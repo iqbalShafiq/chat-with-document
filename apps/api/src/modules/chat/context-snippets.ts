@@ -80,8 +80,8 @@ export function createContextSnippetStore(deps: {
       sessionId: string;
     }): Promise<ContextSnippetRecord | null> {
       if (!(await sessionOwnedByUser(input))) return null;
-      const row = await deps.prisma.sessionContextSnippet.findUnique({
-        where: { sessionId: input.sessionId },
+      const row = await deps.prisma.sessionContextSnippet.findFirst({
+        where: { sessionId: input.sessionId, claimId: null },
       });
       return row as ContextSnippetRecord | null;
     },
@@ -108,7 +108,14 @@ export function createContextSnippetStore(deps: {
           text: input.text,
           sourceRole: input.sourceRole,
         },
-        update: { text: input.text, sourceRole: input.sourceRole },
+        // Editing a claimed snippet is a new user context, so detach the old
+        // claim before the prior queue transition can commit.
+        update: {
+          text: input.text,
+          sourceRole: input.sourceRole,
+          claimId: null,
+          claimedAt: null,
+        },
       });
       return row as ContextSnippetRecord;
     },

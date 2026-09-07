@@ -25,6 +25,18 @@ export type ChatSessionRow = {
   updatedAt: Date;
 };
 
+export async function selectReusableChatSessions(
+  sessions: ChatSessionRow[],
+  isReusable?: (sessionId: string) => Promise<boolean>,
+): Promise<ChatSessionRow[]> {
+  if (!isReusable) return sessions;
+  const reusable: ChatSessionRow[] = [];
+  for (const session of sessions) {
+    if (await isReusable(session.id)) reusable.push(session);
+  }
+  return reusable;
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -299,6 +311,8 @@ export async function findEmptyChatSessions(
 export async function getOrCreateEmptyChatSession(input: {
   userId: string;
   projectId?: string | null;
+  /** Excludes active/reserved drafts without deleting them as duplicates. */
+  isReusable?: (sessionId: string) => Promise<boolean>;
 }): Promise<ChatSessionRow> {
   let projectId: string | null = null;
   if (input.projectId) {
@@ -313,8 +327,9 @@ export async function getOrCreateEmptyChatSession(input: {
   }
 
   const empties = await findEmptyChatSessions(input.userId, projectId);
-  if (empties.length > 0) {
-    const [keeper, ...extras] = empties;
+  const reusable = await selectReusableChatSessions(empties, input.isReusable);
+  if (reusable.length > 0) {
+    const [keeper, ...extras] = reusable;
     if (extras.length > 0) {
       await deleteChatSessionsHard(
         input.userId,

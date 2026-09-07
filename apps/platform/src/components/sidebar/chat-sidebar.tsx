@@ -1,4 +1,4 @@
-import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { AnrealMark, AnrealWordmark } from "#/components/layout/anreal-brand";
 import { ImageGalleryModal } from "#/components/images/image-gallery-modal";
 import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
@@ -114,7 +114,7 @@ export function ChatSidebar({
               className="absolute inset-0 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/brand:scale-95 group-hover/brand:opacity-0 group-focus-within/brand:scale-95 group-focus-within/brand:opacity-0"
               aria-hidden={Boolean(onCollapse)}
             >
-              <DocChatMark />
+              <AnrealMark />
             </span>
 
             {onCollapse ? (
@@ -130,9 +130,7 @@ export function ChatSidebar({
             ) : null}
           </div>
 
-          <span className="truncate text-sm font-semibold tracking-tight text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]">
-            DocChat
-          </span>
+          <AnrealWordmark className="truncate transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]" />
         </div>
 
         <button

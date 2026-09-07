@@ -83,6 +83,7 @@ model AgentMemorySession {
   sessionId String
   userId    String?
   metadata  Json
+  compactionState Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -410,11 +411,15 @@ model SessionImageContext {
   userId    String
   sessionId String
   imageId   String
+  /// Non-null while a fresh run owns this context before queue acceptance.
+  claimId   String?
+  claimedAt DateTime?
   image     GeneratedImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
   createdAt DateTime       @default(now())
 
   @@unique([sessionId, imageId])
   @@index([userId, sessionId])
+  @@index([claimId, claimedAt])
   @@map("session_image_context")
 }
 
@@ -424,9 +429,13 @@ model SessionContextSnippet {
   sessionId  String   @unique
   text       String   @db.Text
   sourceRole String
+  /// Non-null while a fresh run owns this context before queue acceptance.
+  claimId    String?
+  claimedAt  DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   @@index([userId])
+  @@index([claimId, claimedAt])
   @@map("session_context_snippet")
 }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ContextUsageInfo, ModelInfo } from "#/lib/api";
 import { modelById } from "#/lib/chat/models";
@@ -14,52 +14,36 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 /** Popover width in px — used for clamping to the viewport. */
 const PANEL_WIDTH = 280;
 
-/** Transient highlight duration after compaction completes/errors. */
-const FLASH_MS = 1500;
-
-/** Compaction threshold marker position on the bars. */
-const THRESHOLD_RATIO = 0.7;
+/** Display fallback while the usage endpoint has not returned policy data. */
+const DEFAULT_THRESHOLD_RATIO = 0.7;
 
 export function ContextUsageIndicator({
   models,
   contextUsage,
-  compaction,
   className,
 }: {
   models: ModelInfo[];
   contextUsage: ContextUsageInfo | null;
-  compaction: { phase: "idle" | "start" | "complete" | "error" };
   className?: string;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const [flash, setFlash] = useState<"complete" | "error" | null>(null);
 
   const rawRatio = contextUsage?.ratio ?? 0;
   const ratio = Math.max(0, Math.min(CONTEXT_WINDOW_CAP, rawRatio));
   const percent = Math.round(rawRatio * 100);
+  const thresholdRatio = Math.max(
+    0,
+    Math.min(1, contextUsage?.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO),
+  );
 
-  useEffect(() => {
-    if (compaction.phase !== "complete" && compaction.phase !== "error") return;
-    setFlash(compaction.phase);
-    const timer = window.setTimeout(() => setFlash(null), FLASH_MS);
-    return () => window.clearTimeout(timer);
-  }, [compaction.phase]);
-
-  const flashColor =
-    flash === "error"
-      ? "text-danger"
-      : flash === "complete"
-        ? "text-accent"
-        : null;
   const ringColor =
-    flashColor ??
-    (rawRatio >= 0.9
+    rawRatio >= 0.9
       ? "text-danger"
-      : rawRatio >= THRESHOLD_RATIO
+      : rawRatio >= thresholdRatio
         ? "text-amber-400"
-        : "text-text-muted");
+        : "text-text-muted";
 
   const updatePanelPosition = () => {
     const el = buttonRef.current;
@@ -93,8 +77,7 @@ export function ContextUsageIndicator({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- position from button rect + refs
   }, [open]);
 
-  const compacting = compaction.phase === "start";
-  const ringPulse = compacting || flash !== null || contextUsage === null;
+  const ringPulse = contextUsage === null;
 
   return (
     <div className={`relative ${className ?? ""}`}>
@@ -146,12 +129,6 @@ export function ContextUsageIndicator({
         </svg>
       </button>
 
-      {compacting ? (
-        <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap text-[11px] font-medium text-amber-400/90 animate-pulse">
-          Compacting context…
-        </span>
-      ) : null}
-
       {open && pos
         ? createPortal(
             <div
@@ -167,15 +144,9 @@ export function ContextUsageIndicator({
                 <h2 className="text-xs font-semibold text-text">Context usage</h2>
                 <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-faint">
                   <span className="h-2 w-0.5 rounded-full bg-amber-400/70" aria-hidden />
-                  70% compaction threshold
+                  {Math.round(thresholdRatio * 100)}% compaction threshold
                 </span>
               </div>
-
-              {compaction.phase === "error" ? (
-                <p className="mt-1.5 rounded-lg bg-danger-soft px-2 py-1 text-[10px] text-danger">
-                  Context compaction failed.
-                </p>
-              ) : null}
 
               <div className="my-2 h-px bg-white/[0.07]" aria-hidden />
 
@@ -188,7 +159,7 @@ export function ContextUsageIndicator({
                   </div>
                 </div>
               ) : contextUsage === null ? (
-                <p className="text-xs text-text-muted">Usage data unavailable</p>
+                <p className="text-xs text-text-muted">Estimating context usage…</p>
               ) : (
                 <div className="flex flex-col gap-2.5">
                   {(() => {
@@ -199,6 +170,7 @@ export function ContextUsageIndicator({
                         model={active}
                         estimatedTokens={contextUsage.estimatedTokens}
                         ratio={ratio}
+                        thresholdRatio={thresholdRatio}
                         colorClass={ringColor}
                       />
                     ) : (
@@ -221,11 +193,13 @@ function ContextUsageRow({
   model,
   estimatedTokens,
   ratio,
+  thresholdRatio,
   colorClass,
 }: {
   model: ModelInfo;
   estimatedTokens: number;
   ratio: number;
+  thresholdRatio: number;
   colorClass: string;
 }) {
   const { input, cachedInput, output } = model.prices;
@@ -261,7 +235,7 @@ function ContextUsageRow({
         />
         <div
           className="absolute inset-y-0 w-px bg-amber-400/70"
-          style={{ left: `${THRESHOLD_RATIO * 100}%` }}
+          style={{ left: `${thresholdRatio * 100}%` }}
         />
       </div>
 

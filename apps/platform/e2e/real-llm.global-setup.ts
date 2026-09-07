@@ -9,14 +9,20 @@ const STORAGE_STATE_PATH = resolve(AUTH_DIR, "real-llm-user.json");
 const API_ORIGIN = "http://localhost:3001";
 const HEALTH_URL = `${API_ORIGIN}/api/auth/get-session`;
 const SIGN_UP_URL = `${API_ORIGIN}/api/auth/sign-up/email`;
+const MODELS_URL = `${API_ORIGIN}/api/models`;
 const PASSWORD = "password123";
+const REQUIRED_BASE_URL = "https://openrouter.ai/api/v1";
+const REQUIRED_MODEL = "deepseek/deepseek-v4-flash-0731";
 
-function assertRealLlmEnv(): void {
-  const base = process.env.OPENAI_BASE_URL ?? "";
-  if (base.includes("127.0.0.1:18765") || base.includes("localhost:18765")) {
+export function assertRealLlmEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const base = (env.OPENAI_BASE_URL ?? "").replace(/\/+$/, "");
+  if (base !== REQUIRED_BASE_URL) {
     throw new Error(
-      "OPENAI_BASE_URL points at the local stub — real-LLM e2e must use OpenRouter.",
+      `real-LLM e2e requires OPENAI_BASE_URL=${REQUIRED_BASE_URL}`,
     );
+  }
+  if (!(env.OPENAI_API_KEY ?? "").trim()) {
+    throw new Error("real-LLM e2e requires a non-empty OPENAI_API_KEY");
   }
 }
 
@@ -99,11 +105,32 @@ async function writeStorageState(cookieValue: string): Promise<void> {
   );
 }
 
+async function assertRequiredModel(cookieValue: string): Promise<void> {
+  const response = await fetch(MODELS_URL, {
+    headers: { cookie: `better-auth.session_token=${cookieValue}` },
+  });
+  if (!response.ok) {
+    throw new Error(`model catalog preflight failed: HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    models?: Array<{ modelId?: string; reasoningEfforts?: string[] }>;
+  };
+  const model = body.models?.find(
+    (candidate) => candidate.modelId === REQUIRED_MODEL,
+  );
+  if (!model || !model.reasoningEfforts?.includes("max")) {
+    throw new Error(
+      `model catalog must expose ${REQUIRED_MODEL} with reasoning effort max`,
+    );
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   assertRealLlmEnv();
   await waitForApi();
   const email = `real-llm-${Date.now()}@test.local`;
   const cookie = await signUp(email);
+  await assertRequiredModel(cookie);
   await writeStorageState(cookie);
   console.log(`[real-llm-setup] user ready: ${email}`);
 }

@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Redis } from "ioredis";
+import { describe, expect, it, vi } from "vitest";
+import type { AgentStream, AgentStreamEvent } from "@anvia/core/agent";
 import {
   createSteeringStore,
   isSteerMessage,
@@ -8,57 +8,35 @@ import {
   type SteerMessage,
 } from "./steering.js";
 
-type FakeRedis = Pick<
-  Redis,
-  "sadd" | "expire" | "rpush" | "lpop" | "llen" | "del"
->;
+type FakeRedis = {
+  eval: ReturnType<typeof vi.fn>;
+};
 
-function createFakeRedis(): FakeRedis & {
-  lists: Map<string, string[]>;
-  sets: Map<string, Set<string>>;
-  ttlKeys: Set<string>;
-  ttlValues: Map<string, number>;
-} {
-  const lists = new Map<string, string[]>();
-  const sets = new Map<string, Set<string>>();
-  const ttlKeys = new Set<string>();
-  const ttlValues = new Map<string, number>();
-  const fake = {
-    lists,
-    sets,
-    ttlKeys,
-    ttlValues,
-    async sadd(key: string, member: unknown) {
-      const set = sets.get(key) ?? new Set<string>();
-      const had = set.has(String(member));
-      set.add(String(member));
-      sets.set(key, set);
-      return had ? 0 : 1;
-    },
-    async expire(key: string, ttl: number) {
-      ttlKeys.add(key);
-      ttlValues.set(key, ttl);
-      return 1;
-    },
-    async rpush(key: string, value: unknown) {
-      const list = lists.get(key) ?? [];
-      list.push(String(value));
-      lists.set(key, list);
-      return list.length;
-    },
-    async lpop(key: string) {
-      const list = lists.get(key) ?? [];
-      return list.shift() ?? null;
-    },
-    async llen(key: string) {
-      return (lists.get(key) ?? []).length;
-    },
-    async del(key: string) {
-      lists.delete(key);
-      return 1;
-    },
-  } as unknown as FakeRedis & ReturnType<typeof createFakeRedis>;
-  return fake;
+function createFakeRedis(): FakeRedis {
+  const queue: string[] = [];
+  const seen = new Set<string>();
+  return {
+    eval: vi.fn(async (script: string, _keys: number, ...args: string[]) => {
+      if (script.includes("steer-push")) {
+        const id = args[2]!;
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        queue.push(args[3]!);
+        return 1;
+      }
+      if (script.includes("steer-requeue")) {
+        queue.unshift(args[1]!);
+        return 1;
+      }
+      if (script.includes("steer-pop")) return queue.shift() ?? "";
+      if (script.includes("steer-drain")) {
+        const count = queue.length;
+        queue.length = 0;
+        return count;
+      }
+      return 0;
+    }),
+  };
 }
 
 const sample: SteerMessage = {
@@ -66,245 +44,118 @@ const sample: SteerMessage = {
   text: "follow up",
 };
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+function fakeStream(steer: (input: unknown) => { id: string; status: "queued" }): AgentStream {
+  const events = (async function* (): AsyncGenerator<AgentStreamEvent> {})();
+  return {
+    events,
+    [Symbol.asyncIterator]() { return events[Symbol.asyncIterator](); },
+    textStream: (async function* () {})(),
+    text: Promise.resolve(""),
+    result: Promise.resolve(undefined as never),
+    steer,
+    cancel: vi.fn(),
+  } as AgentStream;
+}
 
 describe("createSteeringStore", () => {
-  it("pushes a message into the per-stream list with a TTL", async () => {
+  it("uses one atomic Redis operation for idempotent FIFO push", async () => {
     const redis = createFakeRedis();
-    const store = createSteeringStore(redis as unknown as Redis);
-    const ok = await store.push("stream-1", sample);
-    expect(ok).toBe(true);
-    expect(redis.lists.get("rs-steer:stream-1")).toEqual([JSON.stringify(sample)]);
-    expect(redis.ttlKeys.has("rs-steer:stream-1")).toBe(true);
-    expect(redis.ttlKeys.has("rs-steer-sent:stream-1")).toBe(true);
-    expect(redis.ttlValues.get("rs-steer:stream-1")).toBe(86400);
-    expect(redis.ttlValues.get("rs-steer-sent:stream-1")).toBe(86400);
-  });
-
-  it("is idempotent per stream (same clientMessageId pushes once)", async () => {
-    const redis = createFakeRedis();
-    const store = createSteeringStore(redis as unknown as Redis);
+    const store = createSteeringStore(redis as never);
     expect(await store.push("stream-1", sample)).toBe(true);
-    expect(await store.push("stream-1", { ...sample, text: "edited" })).toBe(false);
-    expect(redis.lists.get("rs-steer:stream-1")).toHaveLength(1);
+    expect(await store.push("stream-1", sample)).toBe(false);
+    expect(redis.eval).toHaveBeenCalledTimes(2);
+    expect(redis.eval.mock.calls[0]?.[0]).toContain("steer");
   });
 
-  it("pops messages FIFO and drops malformed JSON", async () => {
+  it("validates queued payloads and keeps FIFO order", async () => {
     const redis = createFakeRedis();
-    const store = createSteeringStore(redis as unknown as Redis);
+    const store = createSteeringStore(redis as never);
     await store.push("stream-1", sample);
     await store.push("stream-1", { ...sample, clientMessageId: "msg-2" });
-    redis.lists.get("rs-steer:stream-1")!.push("{not json");
     expect(await store.pop("stream-1")).toEqual(sample);
     expect((await store.pop("stream-1"))?.clientMessageId).toBe("msg-2");
     expect(await store.pop("stream-1")).toBeNull();
   });
-
-  it("drain returns the discarded count and deletes the list", async () => {
-    const redis = createFakeRedis();
-    const store = createSteeringStore(redis as unknown as Redis);
-    await store.push("stream-1", sample);
-    await store.push("stream-1", { ...sample, clientMessageId: "msg-2" });
-    expect(await store.drain("stream-1")).toBe(2);
-    expect(redis.lists.has("rs-steer:stream-1")).toBe(false);
-    expect(await store.drain("stream-1")).toBe(0);
-  });
 });
 
 describe("steerMessageToCoreMessage", () => {
-  it("maps text, image attachments, and metadata", () => {
+  it("maps the queued message to the native {prompt} input", () => {
     const message = steerMessageToCoreMessage({
       clientMessageId: "msg-1",
       text: "look at this",
-      attachments: [
-        { mediaType: "image/png", data: "data:image/png;base64,AAAA" },
-      ],
     });
     expect(message.role).toBe("user");
-    const content = message.content as Array<Record<string, unknown>>;
-    expect(content).toHaveLength(2);
-    expect(content[0]).toMatchObject({
-      type: "image",
-      source: { type: "base64", data: "AAAA", mediaType: "image/png" },
-    });
-    expect(content[1]).toEqual({ type: "text", text: "look at this" });
-    expect(message.metadata).toMatchObject({
-      clientMessageId: "msg-1",
-      queued: true,
-    });
-  });
-
-  it("prepends the context snippet as a text block before the text", () => {
-    const message = steerMessageToCoreMessage({
-      clientMessageId: "msg-1",
-      text: "continue",
-      contextSnippet: { text: "pinned note", sourceRole: "user" },
-    });
-    const content = message.content as Array<{ type: string; text?: string }>;
-    const texts = content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text ?? "");
-    expect(texts).toHaveLength(2);
-    expect(texts[0]).toContain("pinned note");
-    expect(texts[1]).toBe("continue");
-  });
-
-  it("keeps an empty text part when there are no attachments", () => {
-    const message = steerMessageToCoreMessage({
-      clientMessageId: "msg-1",
-      text: "",
-    });
-    expect((message.content as unknown[]).length).toBe(1);
+    expect(message.metadata).toMatchObject({ clientMessageId: "msg-1", queued: true });
   });
 });
 
 describe("isSteerMessage", () => {
-  it("accepts a valid message and rejects malformed shapes", () => {
+  it("accepts only bounded strict queued messages", () => {
     expect(isSteerMessage(sample)).toBe(true);
-    expect(isSteerMessage({ ...sample, clientMessageId: 5 })).toBe(false);
-    expect(isSteerMessage({ ...sample, text: undefined })).toBe(false);
-    expect(
-      isSteerMessage({ ...sample, attachments: [{ mediaType: "image/png" }] }),
-    ).toBe(false);
-    expect(
-      isSteerMessage({
-        ...sample,
-        contextSnippet: { text: "x", sourceRole: "system" },
-      }),
-    ).toBe(false);
+    expect(isSteerMessage({ ...sample, clientMessageId: "" })).toBe(false);
+    expect(isSteerMessage({ ...sample, text: 5 })).toBe(false);
+    expect(isSteerMessage({ ...sample, attachments: [{ mediaType: "image/png" }] })).toBe(false);
   });
 });
 
 describe("SteeringPump", () => {
-  function createHarness() {
+  it("acknowledges only a matching native steering_applied receipt", async () => {
     const redis = createFakeRedis();
-    const store = createSteeringStore(redis as unknown as Redis);
-    const steered: string[] = [];
-    const applied: SteerMessage[] = [];
-    const target = {
-      steer(input: unknown): boolean {
-        const message = input as { metadata?: Record<string, unknown> };
-        steered.push(String(message.metadata?.clientMessageId));
-        return true;
-      },
-      stream(): AsyncIterable<unknown> {
-        return (async function* () {})();
-      },
-    };
+    const store = createSteeringStore(redis as never);
+    await store.push("stream-1", sample);
+    const steered: unknown[] = [];
+    const applied: string[] = [];
+    const stream = fakeStream((input) => {
+      steered.push(input);
+      return { id: "receipt-1", status: "queued" };
+    });
     const pump = new SteeringPump(
       "stream-1",
       store,
-      () => target,
-      async (item) => {
-        applied.push(item);
-      },
+      () => stream,
+      async (item) => { applied.push(item.clientMessageId); },
     );
-    return { store, pump, target, steered, applied };
-  }
-
-  const turnStart = (turn: number) => ({ type: "turn_start", turn });
-  const textDelta = (turn: number) => ({ type: "text_delta", turn, delta: "x" });
-
-  it("steers one message per turn and acks at the next turn_start", async () => {
-    const h = createHarness();
-    await h.store.push("stream-1", sample);
-    await h.store.push("stream-1", { ...sample, clientMessageId: "msg-2" });
-
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent(); // pops msg-1 during turn 0
-    expect(h.steered).toEqual(["msg-1"]);
-
-    await h.pump.beforeEvent(textDelta(0));
-    await h.pump.afterEvent(); // active steer holds the queue
-    expect(h.steered).toEqual(["msg-1"]);
-    expect(h.applied).toEqual([]);
-
-    await h.pump.beforeEvent(turnStart(1)); // steered turn begins -> ack msg-1
-    await h.pump.afterEvent(); // pops msg-2 for the next turn
-    expect(h.applied.map((item) => item.clientMessageId)).toEqual(["msg-1"]);
-    expect(h.steered).toEqual(["msg-1", "msg-2"]);
-
-    await h.pump.beforeEvent(turnStart(2)); // ack msg-2
-    expect(h.applied.map((item) => item.clientMessageId)).toEqual([
-      "msg-1",
-      "msg-2",
-    ]);
+    await pump.afterEvent();
+    expect(steered[0]).toMatchObject({ prompt: { role: "user" } });
+    await pump.beforeEvent({ type: "turn_start", turn: 1 });
+    expect(applied).toEqual([]);
+    await pump.beforeEvent({ type: "steering_applied", id: "wrong", turn: 1 });
+    expect(applied).toEqual([]);
+    await pump.beforeEvent({ type: "steering_applied", id: "receipt-1", turn: 1 });
+    expect(applied).toEqual(["msg-1"]);
   });
 
-  it("does not ack at the same turn the steer happened", async () => {
-    const h = createHarness();
-    await h.store.push("stream-1", sample);
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent();
-    await h.pump.beforeEvent(turnStart(0)); // duplicate no-op guard
-    expect(h.applied).toEqual([]);
-    await h.pump.beforeEvent(turnStart(1));
-    expect(h.applied.map((item) => item.clientMessageId)).toEqual(["msg-1"]);
+  it("rearms an unapplied item after retry without popping the next message", async () => {
+    const redis = createFakeRedis();
+    const store = createSteeringStore(redis as never);
+    await store.push("stream-1", sample);
+    await store.push("stream-1", { ...sample, clientMessageId: "msg-2" });
+    const steered: string[] = [];
+    const stream = fakeStream((input) => {
+      const message = input as { prompt?: { metadata?: { clientMessageId?: string } } };
+      steered.push(message.prompt?.metadata?.clientMessageId ?? "");
+      return { id: `receipt-${steered.length}`, status: "queued" };
+    });
+    const pump = new SteeringPump("stream-1", store, () => stream, async () => {});
+    await pump.afterEvent();
+    pump.rearmSteer();
+    await pump.afterEvent();
+    expect(steered).toEqual(["msg-1", "msg-1"]);
+    await pump.beforeEvent({ type: "steering_applied", id: "receipt-2", turn: 1 });
+    await pump.afterEvent();
+    expect(steered).toEqual(["msg-1", "msg-1", "msg-2"]);
   });
 
-  it("drops the message when steer() returns false (run terminal)", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const h = createHarness();
-    h.target.steer = () => false;
-    await h.store.push("stream-1", sample);
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent();
-    await h.pump.beforeEvent(turnStart(1));
-    await h.pump.beforeEvent(turnStart(2));
-    expect(h.applied).toEqual([]);
-  });
-
-  it("re-injects the pending steer into a new target after rearmSteer()", async () => {
-    const h = createHarness();
-    await h.store.push("stream-1", sample);
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent(); // steer msg-1 into target A
-    expect(h.steered).toEqual(["msg-1"]);
-
-    h.pump.rearmSteer(); // transient retry: new request instance
-    await h.pump.beforeEvent(turnStart(0)); // new run turn 0 = original prompt
-    await h.pump.afterEvent(); // re-steers into the new target
-    expect(h.steered).toEqual(["msg-1", "msg-1"]);
-
-    await h.pump.beforeEvent(turnStart(1)); // steered turn of the new run
-    expect(h.applied.map((item) => item.clientMessageId)).toEqual(["msg-1"]);
-  });
-
-  it("clears the pending steer when the re-armed target rejects it", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const h = createHarness();
-    await h.store.push("stream-1", sample);
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent(); // steer msg-1 into target A
-    expect(h.steered).toEqual(["msg-1"]);
-
-    h.target.steer = (input: unknown) => {
-      const message = input as { metadata?: Record<string, unknown> };
-      h.steered.push(String(message.metadata?.clientMessageId));
-      return false; // new request rejects the re-steer
-    };
-    h.pump.rearmSteer(); // transient retry: new request instance
-    await h.pump.beforeEvent(turnStart(0)); // new run turn 0 = original prompt
-    await h.pump.afterEvent(); // re-steer rejected -> activeSteer cleared
-    expect(h.steered).toEqual(["msg-1", "msg-1"]); // steer attempted once more
-    expect(h.applied).toEqual([]);
-
-    await h.pump.beforeEvent(turnStart(1));
-    await h.pump.beforeEvent(turnStart(2));
-    expect(h.applied).toEqual([]); // never acked after the rejection
-  });
-
-  it("drain clears the active steer and discards the remaining list", async () => {
-    const h = createHarness();
-    await h.store.push("stream-1", sample);
-    await h.pump.beforeEvent(turnStart(0));
-    await h.pump.afterEvent();
-    expect(await h.pump.drain()).toBe(0); // popped already
-    await h.store.push("stream-1", { ...sample, clientMessageId: "msg-2" });
-    expect(await h.pump.drain()).toBe(1);
-    await h.pump.beforeEvent(turnStart(1));
-    expect(h.applied).toEqual([]);
+  it("requeues an unapplied item on terminal cleanup and rejects new submissions after close", async () => {
+    const redis = createFakeRedis();
+    const store = createSteeringStore(redis as never);
+    await store.push("stream-1", sample);
+    const stream = fakeStream(() => ({ id: "receipt-1", status: "queued" }));
+    const pump = new SteeringPump("stream-1", store, () => stream, async () => {});
+    await pump.afterEvent();
+    await pump.close({ requeueUnapplied: true });
+    expect(await store.pop("stream-1")).toEqual(sample);
+    await pump.afterEvent();
+    expect(await store.pop("stream-1")).toBeNull();
   });
 });

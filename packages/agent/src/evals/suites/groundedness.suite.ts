@@ -5,10 +5,12 @@ import {
   type EvalCase,
   type EvalMetric,
 } from "@anvia/core/evals";
+import type { CompletionModel } from "@anvia/core/completion";
 import {
   createCompletionModel,
   parseReasoningEffort,
-  withReasoningEffort,
+  providerOptionsForReasoning,
+  type ReasoningEffort,
 } from "../../providers/openai.js";
 import { createBehaviorTarget } from "../behavior-target.js";
 import { evalConfig } from "../config.js";
@@ -21,6 +23,27 @@ export const NO_FABRICATION_CASE = "no-fabrication-when-absent";
 const FIXTURE_CHUNK_TEXTS = FIXTURE_DOCUMENTS.flatMap((document) =>
   document.chunks.map((chunk) => chunk.chunkText),
 );
+
+function judgeModelWithReasoning(
+  model: CompletionModel,
+  effort: ReasoningEffort,
+): CompletionModel {
+  return {
+    ...model,
+    completion(request, options) {
+      return model.completion(
+        {
+          ...request,
+          providerOptions: {
+            ...(request.providerOptions ?? {}),
+            ...providerOptionsForReasoning(effort),
+          },
+        },
+        options,
+      );
+    },
+  };
+}
 
 const cases: EvalCase<EvalCaseInput, unknown>[] = [
   {
@@ -39,6 +62,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         outputContains: ["remote-first"],
       },
     },
+    context: FIXTURE_CHUNK_TEXTS,
   },
   {
     id: NO_FABRICATION_CASE,
@@ -51,6 +75,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
       },
       expected: {},
     },
+    context: FIXTURE_CHUNK_TEXTS,
   },
 ];
 
@@ -61,7 +86,7 @@ const noFabricationJudge = gEval<
   "no_fabricated_bonus_policy"
 >({
   name: "no_fabricated_bonus_policy",
-  model: withReasoningEffort(
+  model: judgeModelWithReasoning(
     createCompletionModel(evalConfig.judgeModel),
     parseReasoningEffort(evalConfig.judgeEffort) ?? "high",
   ),
@@ -73,7 +98,6 @@ const noFabricationJudge = gEval<
     "Penalize invented bonus policy details, numbers, or rules that are not present in the context.",
     "Reward answers that say the documents do not cover annual bonuses or otherwise abstain.",
   ],
-  context: () => FIXTURE_CHUNK_TEXTS,
 });
 
 const noFabricationMetric: EvalMetric<

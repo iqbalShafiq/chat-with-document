@@ -57,6 +57,8 @@ docker-data/
 *.db-journal
 
 # Playwright
+/test-results/
+/playwright-report/
 apps/platform/test-results/
 apps/platform/playwright-report/
 apps/platform/e2e/.auth/*

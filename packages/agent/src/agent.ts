@@ -1,87 +1,110 @@
 import {
-  AgentBuilder,
+  Agent,
   type AnyTool,
   type CompletionModel,
+  type GuardrailPolicyInput,
+  type MemoryOptions,
   type MemoryStore,
-  type ToolApprovalsOptions,
 } from "@anvia/core";
-import type { AgentObserver } from "@anvia/core/observability";
+import type { AgentObservabilityOptions } from "@anvia/core/observability";
+import type { AgentContextInput as NativeAgentContextInput } from "@anvia/core/agent";
 import type { McpServer } from "@anvia/core/mcp";
-import type { LangfuseTracing } from "@anvia/langfuse";
 import {
   DEFAULT_REASONING_EFFORT,
   defaultModel,
+  metaMuseReasoningEffort,
+  providerOptionsForReasoning,
   type ReasoningEffort,
 } from "./providers/openai.js";
 import { BASE_INSTRUCTIONS } from "./prompts/base-instructions.js";
+
+export const DEFAULT_AGENT_MAX_TURNS = 20;
 
 export type AgentContextBlock = {
   text: string;
   id?: string;
 };
+export type AgentContextInput = NativeAgentContextInput;
 
-interface CreateAgentOptions {
+/**
+ * Declarative memory policy passed to Anvia v1. The store and every native
+ * compaction option stay process-local; only the policy values are resolved
+ * by the caller and may be reconstructed from a durable run recipe.
+ */
+export type CreateAgentMemoryOptions = MemoryOptions & {
+  store: MemoryStore;
+};
+
+export interface CreateAgentOptions {
   agentId: string;
   model?: CompletionModel;
   reasoningEffort?: ReasoningEffort;
+  maxTurns?: number;
   additionalTools?: AnyTool[];
   additionalInstructions?: string[];
-  /** Small request facts (e.g. project workspace name) via Anvia AgentBuilder.context */
   additionalContext?: AgentContextBlock[];
-  tracing?: LangfuseTracing;
-  memory?: MemoryStore;
-  /** Optional approval handler (e.g. human approval for web tools). */
-  approvals?: ToolApprovalsOptions;
-  /** Optional MCP servers (e.g. context7) to expose to the agent. */
+  context?: readonly AgentContextInput[];
+  observability?: AgentObservabilityOptions;
+  guardrails?: GuardrailPolicyInput;
+  memory?: MemoryStore | CreateAgentMemoryOptions;
   mcpServers?: McpServer[];
-  /** Optional run observers (e.g. tool error tracking). */
-  observers?: AgentObserver[];
 }
 
-export function createAgent(
-  opts: CreateAgentOptions,
-): ReturnType<AgentBuilder["build"]> {
+export function createAgent(opts: CreateAgentOptions): Agent {
   const reasoningEffort = opts.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
-
-  const agent = new AgentBuilder(opts.agentId, opts.model ?? defaultModel())
-    .instructions(BASE_INSTRUCTIONS)
-    .tools([...(opts.additionalTools ?? [])])
-    .additionalParams({
-      reasoning: {
-        effort: reasoningEffort,
-        summary: "auto",
+  const instructions = [
+    BASE_INSTRUCTIONS,
+    ...(opts.additionalInstructions ?? []),
+  ]
+    .map((instruction) => instruction.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  const convenienceContext = (opts.additionalContext ?? []).flatMap((block, index) => {
+    const text = block.text.trim();
+    if (!text) return [];
+    return [
+      {
+        id: block.id?.trim() || `context-${index}`,
+        text,
       },
-      include: ["reasoning.encrypted_content"],
-    });
+    ];
+  });
 
-  if (opts.tracing) {
-    agent.observe(opts.tracing);
-  }
+  const memory = opts.memory === undefined
+    ? undefined
+    : isMemoryOptions(opts.memory)
+      ? opts.memory
+      : { store: opts.memory, savePolicy: "turn" as const };
 
-  for (const observer of opts.observers ?? []) {
-    agent.observe(observer);
-  }
+  const model = opts.model ?? defaultModel();
+  const modelId =
+    model && typeof model === "object" && "modelId" in model
+      ? (model as { modelId?: unknown }).modelId
+      : undefined;
+  // Meta Muse models run on Chat Completions (see createCompletionModel):
+  // send reasoning_effort top-level instead of the Responses reasoning map.
+  const providerOptions =
+    typeof modelId === "string" && modelId.startsWith("meta/")
+      ? metaMuseReasoningEffort(reasoningEffort)
+      : providerOptionsForReasoning(reasoningEffort);
 
-  for (const instruction of opts.additionalInstructions ?? []) {
-    agent.instructions(instruction);
-  }
+  return new Agent({
+    id: opts.agentId,
+    model,
+    instructions,
+    context: [...(opts.context ?? []), ...convenienceContext],
+    tools: [...(opts.additionalTools ?? [])],
+    providerOptions,
+    maxTurns: opts.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
+    ...(memory ? { memory } : {}),
+    ...(opts.mcpServers?.length ? { mcpServers: [...opts.mcpServers] } : {}),
+    ...(opts.observability ? { observability: opts.observability } : {}),
+    ...(opts.guardrails !== undefined ? { guardrails: opts.guardrails } : {}),
+  });
+}
 
-  for (const block of opts.additionalContext ?? []) {
-    if (!block.text.trim()) continue;
-    agent.context(block.text, block.id);
-  }
-
-  if (opts.memory) {
-    agent.memory(opts.memory);
-  }
-
-  if (opts.approvals) {
-    agent.approvals(opts.approvals);
-  }
-
-  if (opts.mcpServers && opts.mcpServers.length > 0) {
-    agent.mcp(opts.mcpServers);
-  }
-
-  return agent.build();
+function isMemoryOptions(
+  value: MemoryStore | CreateAgentMemoryOptions,
+): value is CreateAgentMemoryOptions {
+  return typeof value === "object" && value !== null && "store" in value;
 }

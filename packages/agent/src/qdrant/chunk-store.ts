@@ -1,71 +1,173 @@
-import { vectorFilter } from "@anvia/core/vector-store";
-import type { EmbeddedDocument } from "@anvia/core/embeddings";
-import { QdrantClient } from "@qdrant/js-client-rest";
-import { QdrantVectorStore } from "@anvia/qdrant";
+import type {
+  EmbeddingModel,
+  EmbeddedDocument,
+} from "@anvia/core/embeddings";
+import {
+  retrieveDocuments,
+  vectorFilter,
+} from "@anvia/core/vector-store";
+import {
+  QdrantVectorClient,
+  type QdrantClientLike,
+  type QdrantVectorStore,
+} from "@anvia/qdrant";
 import {
   EMBEDDING_DIMENSIONS,
   QDRANT_COLLECTION,
   type DocumentChunkMetadata,
 } from "../document/types.js";
-import { embeddingModel } from "../providers/mistral.js";
+import { createEmbeddingModel } from "../providers/mistral.js";
 import type { ChunkSearchHit, ChunkSearchService } from "../tools/documents.js";
 
-let storePromise: Promise<QdrantVectorStore<string, DocumentChunkMetadata>> | null =
-  null;
+export type QdrantChunkStoreOptions = {
+  /** Native delegate injection keeps the adapter testable without Qdrant I/O. */
+  client?: QdrantClientLike;
+  model?: EmbeddingModel;
+  url?: string;
+};
+
+export type QdrantChunkStoreLifecycle = {
+  upsertDocumentChunks(
+    documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+  ): Promise<void>;
+  deleteDocumentChunks(documentId: string): Promise<void>;
+  createChunkSearchService(): ChunkSearchService;
+  close(): Promise<void>;
+};
 
 function getQdrantUrl() {
   return process.env.QDRANT_URL ?? "http://localhost:16333";
 }
 
-async function getStore() {
-  if (!storePromise) {
-    storePromise = QdrantVectorStore.connect<string, DocumentChunkMetadata>({
-      client: new QdrantClient({ url: getQdrantUrl() }),
-      collectionName: QDRANT_COLLECTION,
-      vectorSize: EMBEDDING_DIMENSIONS,
-      createIfMissing: true,
-      distance: "Cosine",
-    });
-  }
-  return storePromise;
-}
-
-export async function upsertDocumentChunks(
-  documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
-) {
-  const store = await getStore();
-  await store.upsertDocuments(documents);
-}
-
 function isMissingCollectionError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const status = "status" in error ? error.status : undefined;
-  if (status === 404) return true;
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  if (
+    candidate.status === 404 ||
+    candidate.statusCode === 404 ||
+    candidate.response?.status === 404
+  ) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : String(error);
-  return /not\s*found/i.test(message);
+  return /(?:\b404\b|not\s*found|missing\s+collection)/i.test(message);
 }
 
-export async function deleteDocumentChunks(documentId: string) {
-  const client = new QdrantClient({ url: getQdrantUrl() });
-
-  try {
-    const { collections } = await client.getCollections();
-    const exists = collections.some(
-      (collection) => collection.name === QDRANT_COLLECTION,
-    );
-    if (!exists) return;
-
-    await client.delete(QDRANT_COLLECTION, {
-      wait: true,
-      filter: {
-        must: [{ key: "documentId", match: { value: documentId } }],
-      },
+/**
+ * Own one Anvia v1 Qdrant client and its dense store for the process lifetime.
+ * Construction is I/O-free; the collection is ensured once on first use.
+ */
+export function createQdrantChunkStore(
+  options: QdrantChunkStoreOptions = {},
+): QdrantChunkStoreLifecycle {
+  const vectorClient = new QdrantVectorClient(
+    options.client === undefined
+      ? { url: options.url ?? getQdrantUrl() }
+      : { client: options.client },
+  );
+  const store: QdrantVectorStore<string, DocumentChunkMetadata> =
+    vectorClient.vectorStore<string, DocumentChunkMetadata>({
+      collectionName: QDRANT_COLLECTION,
+      dimensions: EMBEDDING_DIMENSIONS,
+      metric: "cosine",
     });
-  } catch (error) {
-    // First ingest (or wiped Qdrant) has no collection yet — treat as empty.
-    if (isMissingCollectionError(error)) return;
-    throw error;
+  const model = options.model ?? createEmbeddingModel();
+  let ensurePromise: Promise<void> | null = null;
+  let closePromise: Promise<void> | null = null;
+
+  async function getStore(): Promise<
+    QdrantVectorStore<string, DocumentChunkMetadata>
+  > {
+    if (!ensurePromise) {
+      ensurePromise = store.ensure().catch((error: unknown) => {
+        ensurePromise = null;
+        throw error;
+      });
+    }
+    await ensurePromise;
+    return store;
   }
+
+  async function upsertDocumentChunks(
+    documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+  ): Promise<void> {
+    const readyStore = await getStore();
+    await readyStore.upsert({ documents });
+  }
+
+  async function deleteDocumentChunks(documentId: string): Promise<void> {
+    await getStore();
+    const nativeClient = await vectorClient.nativeClient();
+    if (!nativeClient.delete) {
+      throw new TypeError("Qdrant metadata deletion requires delete(...).");
+    }
+
+    try {
+      // The public v1 store deletes Anvia logical ids. Re-ingest must instead
+      // purge every chunk whose application metadata belongs to this document.
+      await nativeClient.delete(QDRANT_COLLECTION, {
+        wait: true,
+        filter: {
+          must: [{ key: "documentId", match: { value: documentId } }],
+        },
+      });
+    } catch (error) {
+      // A concurrently wiped collection is equivalent to an empty chunk set.
+      if (isMissingCollectionError(error)) return;
+      throw error;
+    }
+  }
+
+  function createChunkSearchService(): ChunkSearchService {
+    return {
+      async search({ userId, query, documentIds, limit }) {
+        if (!documentIds || documentIds.length === 0) {
+          return [];
+        }
+
+        const readyStore = await getStore();
+        const results = await retrieveDocuments({
+          store: readyStore,
+          model,
+          query,
+          topK: limit,
+          filter: buildUserDocumentsFilter(userId, documentIds),
+        });
+
+        return results.map((result) => {
+          const metadata = result.metadata!;
+          return {
+            chunkId: result.id,
+            documentId: metadata.documentId,
+            filename: metadata.filename,
+            pageId: metadata.pageId,
+            pageIndex: metadata.pageIndex,
+            chunkIndex: metadata.chunkIndex,
+            chunkText: metadata.chunkText,
+            score: result.score,
+            hasNextPage:
+              metadata.pageIndex + 1 < (metadata.documentPageCount ?? 0),
+          } satisfies ChunkSearchHit;
+        });
+      },
+    };
+  }
+
+  function close(): Promise<void> {
+    closePromise ??= vectorClient.close();
+    return closePromise;
+  }
+
+  return {
+    upsertDocumentChunks,
+    deleteDocumentChunks,
+    createChunkSearchService,
+    close,
+  };
 }
 
 /**
@@ -101,36 +203,30 @@ function buildUserDocumentsFilter(userId: string, documentIds: string[]) {
   return vectorFilter.and(ownership, docOr);
 }
 
+let processChunkStore: QdrantChunkStoreLifecycle | null = null;
+
+function getProcessChunkStore(): QdrantChunkStoreLifecycle {
+  // Both Qdrant and Mistral are live process dependencies. Keep their
+  // construction behind the first ingest/search call so importing the agent
+  // package remains credential-free and testable.
+  processChunkStore ??= createQdrantChunkStore();
+  return processChunkStore;
+}
+
+export function upsertDocumentChunks(
+  documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+): Promise<void> {
+  return getProcessChunkStore().upsertDocumentChunks(documents);
+}
+
+export function deleteDocumentChunks(documentId: string): Promise<void> {
+  return getProcessChunkStore().deleteDocumentChunks(documentId);
+}
+
 export function createChunkSearchService(): ChunkSearchService {
-  return {
-    async search({ userId, query, documentIds, limit }) {
-      if (!documentIds || documentIds.length === 0) {
-        return [];
-      }
+  return getProcessChunkStore().createChunkSearchService();
+}
 
-      const store = await getStore();
-      const index = store.index(embeddingModel);
-      const results = await index.search({
-        query,
-        topK: limit,
-        filter: buildUserDocumentsFilter(userId, documentIds),
-      });
-
-      return results.map((result) => {
-        const metadata = result.metadata!;
-        return {
-          chunkId: result.id,
-          documentId: metadata.documentId,
-          filename: metadata.filename,
-          pageId: metadata.pageId,
-          pageIndex: metadata.pageIndex,
-          chunkIndex: metadata.chunkIndex,
-          chunkText: metadata.chunkText,
-          score: result.score,
-          hasNextPage:
-            metadata.pageIndex + 1 < (metadata.documentPageCount ?? 0),
-        } satisfies ChunkSearchHit;
-      });
-    },
-  };
+export function closeQdrant(): Promise<void> {
+  return getProcessChunkStore().close();
 }

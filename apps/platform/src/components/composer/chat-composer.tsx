@@ -1,7 +1,8 @@
 import type { UseChatStatus } from "@anvia/react";
-import { Composer, useComposer } from "@anvia/react-ui";
+import type { UIAttachment } from "@anvia/client";
+import { ComposerPrimitive, useComposer } from "@anvia/react-ui";
 import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
-import { useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -25,8 +26,23 @@ import type { AttachmentReject } from "#/lib/documents/upload-file";
 /** 3 cards × 2.5rem + 2 gaps × 0.375rem — taller stacks scroll. */
 const ATTACHMENT_ERRORS_MAX_HEIGHT = "max-h-[8.25rem]";
 
+export type ComposerAction = "send" | "queue" | "stop" | "inactive";
+
+export function isActiveComposerStatus(status: UseChatStatus): boolean {
+  return status === "submitted" || status === "streaming";
+}
+
+export function composerActionForStatus(
+  status: UseChatStatus,
+  hasContent: boolean,
+): ComposerAction {
+  if (isActiveComposerStatus(status)) return hasContent ? "queue" : "stop";
+  if ((status === "ready" || status === "error") && hasContent) return "send";
+  return "inactive";
+}
+
 /**
- * Input shell only — must sit inside Composer.Root.
+ * Input shell only — must sit inside ComposerPrimitive.Root.
  * Session docs / attachments live in the right SessionDocumentsPanel.
  */
 export function ChatComposer({
@@ -43,6 +59,7 @@ export function ChatComposer({
   onModelChange,
   onReasoningChange,
   onStopRun,
+  onQueueSubmit,
   onLinkedDocuments,
   onAttachmentRejected,
   onDismissAttachmentError,
@@ -51,9 +68,7 @@ export function ChatComposer({
   modelsStatus = "loading",
   modelsError = null,
   onRetryModels = () => {},
-  compaction = { phase: "idle" },
   contextUsage = null,
-  contextUsageError = false,
   webSearchEnabled = false,
   webSearchAvailable = true,
   onWebSearchToggle = () => {},
@@ -87,13 +102,18 @@ export function ChatComposer({
   isIngesting: boolean;
   composerError: string | null;
   attachmentErrors: AttachmentReject[];
-  composerInputRef: RefObject<HTMLDivElement | null>;
+  composerInputRef: RefObject<HTMLTextAreaElement | null>;
   model: string;
   reasoningEffort: string | null;
   onModelChange: (model: string) => void;
   onReasoningChange: (effort: string | null) => void;
   /** Wired in routes/index.tsx — stops the run server-side (worker stop flag). */
   onStopRun?: () => void;
+  /** Application-owned active-run queue/steer path. */
+  onQueueSubmit?: (
+    input: string,
+    attachments: UIAttachment[],
+  ) => Promise<void> | void;
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   onAttachmentRejected?: (rejects: AttachmentReject[]) => void;
   onDismissAttachmentError: (id: string) => void;
@@ -102,11 +122,7 @@ export function ChatComposer({
   modelsStatus?: "loading" | "success" | "error";
   modelsError?: string | null;
   onRetryModels?: () => void;
-  /** Wired in Task 14 — declared now so `routes/index.tsx` can pass them. */
-  compaction?: { phase: "idle" | "start" | "complete" | "error" };
   contextUsage?: ContextUsageInfo | null;
-  /** Latest context-usage refresh failed (ring shows a transient hint). */
-  contextUsageError?: boolean;
   /** Per-session web-search toggle state (default off). */
   webSearchEnabled?: boolean;
   /** Server has web tools configured (TAVILY_API_KEY). */
@@ -146,41 +162,80 @@ export function ChatComposer({
   /** When true at stream start, skip the optimistic composer clear (auto-flush). */
   suppressOptimisticClear?: RefObject<boolean> | null;
 }) {
-  const busy = isIngesting || chatStatus === "streaming";
-  const modelsReady = modelsStatus === "success" && models.length > 0;
-  const modelsUnavailable = modelsStatus !== "success";
+  const active = isActiveComposerStatus(chatStatus);
+  const busy = isIngesting || active;
+  const modelsReady =
+    modelsStatus === "success" &&
+    models.length > 0 &&
+    models.some((item) => item.modelId === model);
+  const modelsUnavailable = !modelsReady;
   // Exit animation state for the context chip: the remove action is deferred
   // ~180ms so the fade-out can play before the snippet unmounts.
   const [removingContext, setRemovingContext] = useState(false);
   // Local photo attachments (image/*) preview above the field; they are
   // uploaded as session images when the message is sent.
   const composer = useComposer();
-  const editingItem =
-    queuedItems.find((item) => item.status === "editing") ?? null;
   const composerHasInput =
     composer.input.trim().length > 0 || composer.attachments.length > 0;
+  const composerAction = composerActionForStatus(chatStatus, composerHasInput);
+  const queueSubmissionInFlightRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+  const [queueSubmitting, setQueueSubmitting] = useState(false);
   const localImageAttachments = composer.attachments.filter(
     (attachment) => isImageAttachmentLike(attachment),
   );
 
   const placeholderText =
-    chatStatus === "streaming"
+    active
       ? "The agent is generating…"
       : isIngesting
         ? "Processing document…"
         : "Ask about your documents…";
 
-  // Optimistic clear: when a stream starts, empty the composer (text +
-  // image attachments) right away. Only input + attachments are touched —
-  // the full SDK clear() (entities, triggers) runs post-stream where the
-  // ComposerInput editor is stable.
+  const submitQueueDraft = useCallback(async () => {
+    if (
+      composerAction !== "queue" ||
+      onQueueSubmit === undefined ||
+      queueSubmissionInFlightRef.current
+    ) {
+      return;
+    }
+    queueSubmissionInFlightRef.current = true;
+    setQueueSubmitting(true);
+    try {
+      await onQueueSubmit(composer.input, composer.attachments);
+    } finally {
+      queueSubmissionInFlightRef.current = false;
+      setQueueSubmitting(false);
+    }
+  }, [composer.attachments, composer.input, composerAction, onQueueSubmit]);
+
+  const requestStop = useCallback(() => {
+    if (stopRequestedRef.current) return;
+    stopRequestedRef.current = true;
+    onStopRun?.();
+  }, [onStopRun]);
+
   useEffect(() => {
-    if (chatStatus !== "streaming") return;
-    if (suppressOptimisticClear?.current) return;
-    composer.setInput("");
-    composer.clearAttachments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per stream start
-  }, [chatStatus]);
+    if (!active) stopRequestedRef.current = false;
+  }, [active]);
+
+  // Optimistic clear on send: ready/error → submitted blanks the field
+  // immediately. Skip waiting → submitted/streaming so a follow-up typed
+  // before an approval/clarification is not wiped when the user allows it.
+  const wasActiveRef = useRef(false);
+  const previousStatusRef = useRef(chatStatus);
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = chatStatus;
+    if (active && !wasActiveRef.current && !suppressOptimisticClear?.current) {
+      if (previousStatus !== "waiting") {
+        composer.setInput("");
+        composer.clearAttachments();
+      }
+    }
+    wasActiveRef.current = active;
+  }, [active, chatStatus, composer, suppressOptimisticClear]);
 
   // Queue-item edit hydration: replace the composer contents with the item's
   // draft (text + attachments). A null draft clears the editor (cancel edit).
@@ -199,46 +254,6 @@ export function ChatComposer({
     composer.clearAttachments();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
   }, [clearComposerSignal?.version]);
-
-  // @anvia/react-ui's useEditor does not re-apply the Placeholder extension
-  // when the prop changes, and Tiptap may recreate the empty <p> on clears.
-  // Patch data-placeholder only when status changes — never via MutationObserver
-  // on that attribute (setAttribute ↔ Tiptap decoration ping-pongs and freezes
-  // the main thread).
-  useEffect(() => {
-    let cancelled = false;
-    let attempts = 0;
-    const maxAttempts = 20;
-
-    const apply = () => {
-      if (cancelled) return true;
-      const editorEl = document.querySelector<HTMLElement>(
-        "[data-anvia-composer-editor]",
-      );
-      const p = editorEl?.querySelector("p[data-placeholder]");
-      if (!p) return false;
-      if (p.getAttribute("data-placeholder") !== placeholderText) {
-        p.setAttribute("data-placeholder", placeholderText);
-      }
-      return true;
-    };
-
-    if (apply()) return;
-
-    // Editor can mount a frame later (Composer.Input). Retry briefly; do not
-    // observe mutations — that re-introduced a CPU spin with Tiptap.
-    const timer = window.setInterval(() => {
-      attempts += 1;
-      if (apply() || attempts >= maxAttempts) {
-        window.clearInterval(timer);
-      }
-    }, 50);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [placeholderText]);
 
   // A new snippet always starts non-removing, even if the removal timeout
   // never ran (e.g. the snippet was cleared externally).
@@ -291,7 +306,10 @@ export function ChatComposer({
       ) : null}
 
       {composerError ? (
-        <div className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
+        <div
+          className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in"
+          role="alert"
+        >
           {composerError}
         </div>
       ) : null}
@@ -382,14 +400,37 @@ export function ChatComposer({
         onCancelEdit={onQueueCancelEdit}
       />
 
-      <div className="relative flex min-h-[2.75rem] flex-col pb-11">
-        <Composer.Input
+      <div className="relative pb-11">
+        <ComposerPrimitive.TextareaInput
           ref={composerInputRef}
-          className="composer-input min-h-[1.5rem] w-full min-w-0 flex-1 bg-transparent px-1 text-sm leading-relaxed text-text"
+          className="composer-input chat-scroll block min-h-[1.625em] w-full min-w-0 resize-none bg-transparent px-1 text-sm leading-relaxed text-text"
+          data-anvia-composer-editor
+          data-anvia-composer-input
           minRows={1}
-          maxRows={8}
+          maxRows={4}
           placeholder={placeholderText}
-          disabled={isIngesting || modelsUnavailable}
+          disabled={
+            isIngesting ||
+            modelsUnavailable ||
+            chatStatus === "waiting"
+          }
+          onKeyDown={(event) => {
+            if (
+              event.defaultPrevented ||
+              event.key !== "Enter" ||
+              event.shiftKey ||
+              event.nativeEvent.isComposing ||
+              !active
+            ) {
+              return;
+            }
+            event.preventDefault();
+            if (composerAction === "queue") {
+              void submitQueueDraft();
+            } else if (composerAction === "stop") {
+              requestStop();
+            }
+          }}
         />
 
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2">
@@ -419,15 +460,9 @@ export function ChatComposer({
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5">
-            {contextUsageError ? (
-              <span className="shrink-0 text-[10px] font-medium text-danger/80 animate-fade-in">
-                Usage unavailable
-              </span>
-            ) : null}
             <ContextUsageIndicator
               models={models}
               contextUsage={contextUsage ?? null}
-              compaction={compaction ?? { phase: "idle" }}
             />
 
             <ComposerAttachControl
@@ -439,35 +474,66 @@ export function ChatComposer({
               onRejectedFiles={onAttachmentRejected}
             />
 
-            {chatStatus === "streaming" ? (
-              editingItem !== null || composerHasInput ? (
-                <Composer.Submit
-                  aria-label="Add to queue"
-                  title="Add to queue"
-                  disabled={isIngesting || !modelsReady}
-                  className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <CornerDownLeft className="size-4" strokeWidth={2.25} />
-                </Composer.Submit>
-              ) : (
-                <Composer.Stop
-                  aria-label="Stop"
-                  title="Stop"
-                  onClick={onStopRun}
-                  className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-text text-canvas transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96]"
-                >
-                  <Square className="size-3 fill-current" strokeWidth={0} />
-                </Composer.Stop>
-              )
-            ) : (
-              <Composer.Submit
+            {composerAction === "queue" ? (
+              <button
+                type="button"
+                aria-label="Add to queue"
+                title="Add to queue"
+                aria-busy={queueSubmitting}
+                disabled={
+                  isIngesting ||
+                  !modelsReady ||
+                  onQueueSubmit === undefined ||
+                  queueSubmitting
+                }
+                onClick={() => {
+                  void submitQueueDraft();
+                }}
+                className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <CornerDownLeft className="size-4" strokeWidth={2.25} />
+              </button>
+            ) : composerAction === "stop" ? (
+              <ComposerPrimitive.Stop
+                aria-label="Stop"
+                title="Stop"
+                onClick={(event) => {
+                  // The route owns the API stop + client finalization. Prevent
+                  // the primitive from issuing a second chat.stop() call.
+                  event.preventDefault();
+                  requestStop();
+                }}
+                className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-text text-canvas transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:opacity-90 active:scale-[0.96]"
+              >
+                <Square className="size-3 fill-current" strokeWidth={0} />
+              </ComposerPrimitive.Stop>
+            ) : composerAction === "send" ? (
+              <ComposerPrimitive.Submit
                 aria-label={isIngesting ? "Processing document" : "Send"}
                 title={isIngesting ? "Processing document" : "Send"}
                 disabled={isIngesting || !modelsReady}
                 className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ArrowUp className="size-4" strokeWidth={2.25} />
-              </Composer.Submit>
+              </ComposerPrimitive.Submit>
+            ) : (
+              <button
+                type="button"
+                aria-label={
+                  chatStatus === "waiting"
+                    ? "Waiting for agent"
+                    : "Send"
+                }
+                title={
+                  chatStatus === "waiting"
+                    ? "Waiting for agent"
+                    : "Send"
+                }
+                disabled
+                className="inline-flex size-9 shrink-0 cursor-not-allowed items-center justify-center rounded-xl bg-accent text-canvas opacity-40"
+              >
+                <ArrowUp className="size-4" strokeWidth={2.25} />
+              </button>
             )}
           </div>
         </div>

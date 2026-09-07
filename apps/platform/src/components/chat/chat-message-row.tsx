@@ -1,5 +1,6 @@
-import type { UIMessage, UIMessagePart, UseChatStatus } from "@anvia/react";
-import { Message, useMessage } from "@anvia/react-ui";
+import type { UIMessage, UIMessagePart } from "@anvia/client";
+import type { UseChatStatus } from "@anvia/react";
+import { MessagePrimitive, useMessage } from "@anvia/react-ui";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
@@ -11,7 +12,8 @@ import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { useImagePreview } from "#/components/images/image-preview";
-import { MathMarkdown } from "#/components/math-markdown";import { ReasoningPanel } from "#/components/reasoning-panel";
+import { MathMarkdown } from "#/components/math-markdown";
+import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
@@ -30,17 +32,27 @@ import {
   messageHasUserFacingText,
 } from "#/lib/chat/message-text";
 
-function shouldShowMessageActions(
+export function shouldShowMessageActions(
   message: UIMessage,
   isGenerationEnd: boolean,
+  chatStatus: UseChatStatus = "ready",
+  lastMessageId?: string,
 ): boolean {
   if (message.role === "user") return true;
   if (message.role === "tool") return false;
   if (message.role !== "assistant") return false;
-  // Copy/timestamp footer only on the FINAL assistant message of a
-  // generation — an agent turn may emit several assistant messages
-  // (reply → tool → thinking → reply) and the footer belongs at the bottom.
-  return isGenerationEnd;
+  // Copy/reply only on the FINAL assistant message of a generation — an
+  // agent turn may emit several assistant messages and the footer belongs
+  // at the bottom. Hide them on the in-flight bubble until the run settles.
+  if (!isGenerationEnd) return false;
+  const inFlight =
+    chatStatus === "submitted" ||
+    chatStatus === "streaming" ||
+    chatStatus === "waiting";
+  if (inFlight && lastMessageId !== undefined && message.id === lastMessageId) {
+    return false;
+  }
+  return true;
 }
 
 function isIntermediateStepMessage(message: UIMessage): boolean {
@@ -153,6 +165,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   const showActions = shouldShowMessageActions(
     message,
     generationInfo?.isGenerationEnd ?? true,
+    chatStatus,
+    lastMessageId,
   );
   const isEditing =
     message.role === "user" && editingMessageId === message.id;
@@ -192,12 +206,12 @@ export const ChatMessageRow = memo(function ChatMessageRow({
       data-starts-activity={startsWithActivity ? "" : undefined}
       className="relative flex w-full min-w-0 flex-col"
     >
-      <Message.Root
+      <MessagePrimitive.Root
         className={`group grid w-full min-w-0 data-[role=user]:justify-items-end data-[role=assistant]:justify-items-start ${
           intermediate ? "gap-1" : "gap-1.5"
         }`}
       >
-        <Message.Content
+        <MessagePrimitive.Content
           ref={contentRef}
           className="glass-bubble min-w-0 max-w-full text-sm leading-relaxed group-data-[role=user]:max-w-[min(100%,42rem)] group-data-[role=user]:rounded-2xl group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-text group-data-[role=assistant]:w-full group-data-[role=assistant]:max-w-full group-data-[role=assistant]:text-text"
           style={
@@ -215,7 +229,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           {isEditing ? (
             <UserMessageEdit
               initialText={rawText}
-              busy={chatStatus === "streaming"}
+              busy={chatStatus === "submitted" || chatStatus === "streaming"}
               onCancel={onCancelEdit}
               onSubmit={(text) => onSubmitEdit(message, text)}
               contextImages={editContextImages}
@@ -251,7 +265,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
               ) : null}
             </>
           )}
-        </Message.Content>
+        </MessagePrimitive.Content>
 
         {message.role === "user" || message.role === "assistant" ? (
           <MessageSelectionToolbar
@@ -281,7 +295,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
             }
           />
         ) : null}
-      </Message.Root>
+      </MessagePrimitive.Root>
     </div>
   );
 
@@ -351,12 +365,23 @@ function AttachmentImageStrip({ parts }: { parts: AttachmentImagePart[] }) {
   );
 }
 
-function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
+export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): boolean {
   if (part.type === "text") return part.text.trim().length > 0;
-  if (part.type === "reasoning" || part.type === "tool") return true;
+  if (part.type === "data") {
+    // Progress/queue events have dedicated chrome; do not reprint them
+    // as transcript lines on every update.
+    return part.name !== "deepResearchProgress";
+  }
+  if (
+    part.type === "reasoning" ||
+    part.type === "tool" ||
+    part.type === "source" ||
+    part.type === "error"
+  ) return true;
   if (part.type === "attachment") {
-    // Image attachments (active image context) render in the user bubble.
-    return role === "user" && part.attachment?.type === "image";
+    // Image attachments (active image context) render in the user bubble;
+    // file/document attachments retain a bounded visible row for every role.
+    return part.attachment?.type === "image" ? role === "user" : true;
   }
   return false;
 }
@@ -438,7 +463,7 @@ function ChatMessageParts({
   }, [attachmentImageRuns]);
 
   return (
-    <Message.Parts
+    <MessagePrimitive.Parts
       filter={(part) => isRenderablePart(part, message.role)}
       className={PARTS_STACK_CLASS}
       stream={{
@@ -453,21 +478,21 @@ function ChatMessageParts({
       {(part) => {
         if (part.type === "text") {
           return (
-            <Message.Part className="min-w-0 max-w-full">
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
               <MathMarkdown />
-            </Message.Part>
+            </MessagePrimitive.Part>
           );
         }
 
         if (part.type === "reasoning") {
           return (
-            <Message.Part className="min-w-0 max-w-full">
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
               <ReasoningPanel
                 isStreamingMessage={
                   chatStatus === "streaming" && lastMessageId === message.id
                 }
               />
-            </Message.Part>
+            </MessagePrimitive.Part>
           );
         }
 
@@ -481,7 +506,7 @@ function ChatMessageParts({
             ...new Map(runImages.map((image) => [image.id, image])).values(),
           ];
           return (
-            <Message.Part className="min-w-0 max-w-full">
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
               <ToolActivityPanel part={part} />
               {isRunStart && uniqueRunImages.length > 0 ? (
                 uniqueRunImages.length > 1 ? (
@@ -492,7 +517,47 @@ function ChatMessageParts({
                   </div>
                 )
               ) : null}
-            </Message.Part>
+            </MessagePrimitive.Part>
+          );
+        }
+
+        if (part.type === "source") {
+          return (
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
+              <a
+                href={part.source.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="block max-w-full truncate text-xs text-accent underline-offset-2 hover:underline"
+              >
+                {part.source.title?.trim() || part.source.url}
+              </a>
+            </MessagePrimitive.Part>
+          );
+        }
+
+        if (part.type === "data") {
+          return (
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
+              <div className="text-xs text-text-muted" role="status">
+                {part.name === "queuedMessageApplied"
+                  ? "Queued message applied"
+                  : "Chat state updated"}
+              </div>
+            </MessagePrimitive.Part>
+          );
+        }
+
+        if (part.type === "error") {
+          return (
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
+              <div
+                className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger"
+                role="alert"
+              >
+                {part.error.message.slice(0, 500)}
+              </div>
+            </MessagePrimitive.Part>
           );
         }
 
@@ -500,7 +565,7 @@ function ChatMessageParts({
           const run = attachmentStripForPart.get(part);
           if (!run) return null; // rendered by the strip of the run's first part
           return (
-            <Message.Part className="min-w-0 max-w-full">
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
               {run.length > 1 ? (
                 <AttachmentImageStrip parts={run} />
               ) : (
@@ -508,12 +573,23 @@ function ChatMessageParts({
                   <AttachmentImageTile part={run[0]!} />
                 </div>
               )}
-            </Message.Part>
+            </MessagePrimitive.Part>
+          );
+        }
+
+        if (part.type === "attachment") {
+          return (
+            <MessagePrimitive.Part className="min-w-0 max-w-full">
+              <MessagePrimitive.Attachment className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-text-muted">
+                {part.attachment.name?.trim() ||
+                  (part.attachment.type === "document" ? "Attached document" : "Attached file")}
+              </MessagePrimitive.Attachment>
+            </MessagePrimitive.Part>
           );
         }
 
         return null;
       }}
-    </Message.Parts>
+    </MessagePrimitive.Parts>
   );
 }

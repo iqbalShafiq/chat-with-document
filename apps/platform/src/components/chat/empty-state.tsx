@@ -1,28 +1,31 @@
-import { ScanSearch } from "lucide-react";
+type EmptyStateProps = {
+  onSelectPrompt?: (prompt: string) => void;
+};
 
-/** Centered in the band between top app bar and composer (parent is flex-1). */
-export function EmptyState() {
+/** Minimal editorial hero — only the watermark + headline, vertically centered. */
+export function EmptyState(_props: EmptyStateProps) {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-5 px-1 py-6 text-center animate-fade-up">
-      <div className="relative">
-        <div
-          className="absolute inset-0 rounded-3xl bg-accent/20 blur-2xl"
-          aria-hidden
-        />
-        <div className="glass relative flex size-16 items-center justify-center rounded-3xl text-accent">
-          <ScanSearch className="size-7" strokeWidth={1.5} />
+    <section className="anreal-empty mx-auto flex w-full max-w-[36rem] flex-1 flex-col justify-center px-6 py-10 animate-fade-up">
+      <div className="anreal-empty-accent" aria-hidden />
+      <div className="anreal-empty-main relative w-full">
+        <div className="anreal-empty-watermark" aria-hidden>
+          a
         </div>
-      </div>
 
-      <div className="flex flex-col gap-2">
-        <h2 className="text-balance text-2xl font-semibold tracking-tight text-text md:text-[1.75rem]">
-          Ask anything about your documents
-        </h2>
-        <p className="mx-auto max-w-md text-pretty text-sm leading-relaxed text-text-muted">
-          Upload a PDF or image, then ask questions. Answers stay grounded in
-          what you attached.
-        </p>
+        <header className="relative">
+          <p className="anreal-empty-kicker mb-4 font-mono text-[10px] leading-none tracking-[0.18em] text-text-faint">
+            ANREAL - NEW SESSION
+          </p>
+          <h2 className="text-balance text-[2.15rem] font-semibold leading-[0.92] tracking-[-0.06em] text-text md:text-[3rem]">
+            What are you
+            <br />
+            <span className="font-[350] tracking-[-0.05em] text-text-muted">trying to understand?</span>
+          </h2>
+          <p className="mt-4 max-w-[28rem] text-pretty text-sm leading-[1.75] text-text-muted md:text-[14.5px]">
+            Start with a question, or pick a direction. Every answer stays grounded in the PDFs and images you attach.
+          </p>
+        </header>
       </div>
-    </div>
+    </section>
   );
 }

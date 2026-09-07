@@ -1,6 +1,10 @@
 import { createTool, type AnyTool } from "@anvia/core";
-import z from "zod";
+import z, { type JSONType } from "zod";
 import { PROFILE_SECTION_KEYS, type ProfileScope } from "./types.js";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "../tools/static-definition.js";
 
 export type RememberUserProfileDeps = {
   scope: ProfileScope;
@@ -20,31 +24,47 @@ export type RememberUserProfileDeps = {
   reschedule: () => Promise<void>;
 };
 
+const rememberUserProfileInput = z.object({
+  fact: z.string().min(1).max(500),
+  section: z.enum(PROFILE_SECTION_KEYS).optional(),
+});
+const rememberUserProfileSpec = {
+  name: "remember_user_profile",
+  description:
+    "Save an explicit fact about the user into their durable profile, immediately. " +
+    "Call this ONLY when the user explicitly asks you to remember something about them " +
+    "(for example 'remember that I prefer X' or 'remember my name is X'). One fact per call.",
+  inputSchema: rememberUserProfileInput,
+} as const;
+
+export const PROFILE_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(rememberUserProfileSpec),
+];
+
 export function createRememberUserProfileTool(
   deps: RememberUserProfileDeps,
 ): AnyTool {
   return createTool({
-    name: "remember_user_profile",
-    description:
-      "Save an explicit fact about the user into their durable profile, immediately. " +
-      "Call this ONLY when the user explicitly asks you to remember something about them " +
-      "(for example 'remember that I prefer X' or 'remember my name is X'). One fact per call.",
-    input: z.object({
-      fact: z.string().min(1).max(500),
-      section: z.enum(PROFILE_SECTION_KEYS).optional(),
-    }),
-    execute: async ({ fact, section }) => {
+    ...rememberUserProfileSpec,
+    outputSchema: z.json(),
+    execute: async ({ fact, section }, context): Promise<JSONType> => {
       try {
+        context.abortSignal?.throwIfAborted();
         await deps.waitForActiveJob();
+        context.abortSignal?.throwIfAborted();
         await deps.appendFact({ section: section ?? null, fact, source: deps.source });
+        context.abortSignal?.throwIfAborted();
         const { processed } = await deps.refreshNow();
+        context.abortSignal?.throwIfAborted();
         await deps.reschedule();
+        context.abortSignal?.throwIfAborted();
         return {
           ok: true,
           remembered: fact,
           processed,
         };
       } catch (error) {
+        context.abortSignal?.throwIfAborted();
         // Facts are already persisted; the chat's stream-complete tap will
         // still enqueue the background refresh, so nothing is lost.
         const message = error instanceof Error ? error.message : String(error);

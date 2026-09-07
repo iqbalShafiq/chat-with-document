@@ -1,13 +1,13 @@
 {
-  "name": "chat-with-document",
+  "name": "anreal",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "pnpm --filter api --filter platform --parallel \"/^(dev|worker:dev)$/\"",
-    "dev:api": "pnpm --filter api dev",
-    "dev:worker": "pnpm --filter api worker:dev",
-    "dev:platform": "pnpm --filter platform dev"
+    "dev": "pnpm --filter @anreal/api --filter @anreal/platform --parallel \"/^(dev|worker:dev)$/\"",
+    "dev:api": "pnpm --filter @anreal/api dev",
+    "dev:worker": "pnpm --filter @anreal/api worker:dev",
+    "dev:platform": "pnpm --filter @anreal/platform dev"
   },
   "keywords": [],
   "author": "",
@@ -17,10 +17,7 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "lightningcss"
-    ],
-    "patchedDependencies": {
-      "@anvia/react-ui": "patches/@anvia__react-ui.patch"
-    }
+    ]
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0"

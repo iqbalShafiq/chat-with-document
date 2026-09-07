@@ -1,13 +1,18 @@
+import { createMemoryScopeKey } from "@anvia/core/memory";
+
 /**
- * Mirrors @anvia/memory-prisma default scope key:
- * JSON.stringify([sessionId, userId ?? null]) with includeUserId: true.
- * Keep in sync if the agent memory store is constructed with custom scope options.
- *
- * Authenticated paths must pass a real userId so sessions isolate per user.
+ * Keep one application boundary for the authenticated memory scope while
+ * delegating the actual bytes to Anvia v1. Metadata, model ids, projects, and
+ * run ids are intentionally not part of the default key.
  */
 export function createDefaultMemoryScopeKey(
   sessionId: string,
   userId?: string | null,
 ): string {
-  return JSON.stringify([sessionId, userId ?? null]);
+  return createMemoryScopeKey({
+    scope: {
+      sessionId,
+      ...(userId === undefined || userId === null ? {} : { userId }),
+    },
+  });
 }

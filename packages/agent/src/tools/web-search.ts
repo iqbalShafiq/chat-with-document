@@ -1,6 +1,10 @@
-import { createTool, type AnyTool } from "@anvia/core";
+import { createTool, type AnyTool, type ToolCallContext } from "@anvia/core";
 import { tavily, type TavilyClient } from "@tavily/core";
-import z from "zod";
+import z, { type JSONType } from "zod";
+import {
+  createStaticToolDefinition,
+  type ToolDefinition,
+} from "./static-definition.js";
 
 /** Create a Tavily client from a server-side API key (never ship this to the browser). */
 export function createTavilyClient(apiKey: string): TavilyClient {
@@ -67,10 +71,32 @@ const webFetchInput = z.object({
     ),
 });
 
+const webSearchSpec = {
+  name: "web_search",
+  description:
+    "Search the live web for up-to-date information using Tavily. Use when the answer needs current, factual, or out-of-scope information not present in the session documents — news, prices, dates, specs, events. Always provide a precise query and a clear reason.",
+  inputSchema: webSearchInput,
+} as const;
+const webFetchSpec = {
+  name: "web_fetch",
+  description:
+    "Fetch and read the full content of a specific web page (http/https) using Tavily Extract. Use when you already know the exact URL to consult — follow up on a search result, verify a claim, or read a page the user linked.",
+  inputSchema: webFetchInput,
+} as const;
+
+export const WEB_SEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
+  createStaticToolDefinition(webSearchSpec),
+  createStaticToolDefinition(webFetchSpec),
+];
+
 export type WebSearchToolScope = {
   tavilyClient: TavilyClient;
   /** Per-session toggle: false → the model must ask the user before searching. */
   enabled: boolean;
+  /** Session-scoped native approval grant, checked immediately before each call. */
+  hasGrant?: (toolName: "web_search" | "web_fetch") =>
+    | Promise<boolean>
+    | boolean;
   maxResults?: number;
   /** Truncate result content to this many characters (default 400). */
   contentLimitChars?: number;
@@ -93,6 +119,26 @@ function truncate(text: string, limit: number): string {
 function truncateDesc(text: string, limit: number): string {
   const t = text.trim();
   return t.length <= limit ? t : `${t.slice(0, limit).replace(/\s+\S*$/, "")}…`;
+}
+
+function throwIfAborted(context: ToolCallContext): void {
+  context.abortSignal?.throwIfAborted();
+}
+
+async function safeHasGrant(
+  scope: WebSearchToolScope,
+  toolName: "web_search" | "web_fetch",
+): Promise<boolean> {
+  if (!scope.hasGrant) return false;
+  try {
+    return await scope.hasGrant(toolName);
+  } catch (error) {
+    console.warn("[web-tools] grant lookup failed, requiring approval", {
+      toolName,
+      error,
+    });
+    return false;
+  }
 }
 
 /** Map Tavily failures to bounded, non-sensitive messages. */
@@ -121,22 +167,20 @@ export function createWebSearchTools(
   const maxResults = scope.maxResults ?? MAX_RESULTS;
   const contentLimitChars = scope.contentLimitChars ?? 400;
 
-  const approval = {
-    when: () => !scope.enabled,
-    reason: (ctx: { args: { reason: string } }) => ctx.args.reason,
-    rejectMessage:
-      "Web access was declined by the user; answer from available knowledge without the web.",
-  };
+  const requiresApproval = (toolName: "web_search" | "web_fetch") =>
+    async (args: { reason: string }, _context: unknown) =>
+      scope.enabled || (await safeHasGrant(scope, toolName))
+        ? false
+        : { reason: args.reason };
 
   return [
     createTool({
-      name: "web_search",
-      description:
-        "Search the live web for up-to-date information using Tavily. Use when the answer needs current, factual, or out-of-scope information not present in the session documents — news, prices, dates, specs, events. Always provide a precise query and a clear reason.",
-      input: webSearchInput,
-      approval,
-      execute: async ({ query, maxResults: requestedMax, timeRange }) => {
+      ...webSearchSpec,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("web_search"),
+      execute: async ({ query, maxResults: requestedMax, timeRange }, context): Promise<JSONType> => {
         try {
+          throwIfAborted(context);
           const response = await scope.tavilyClient.search(query, {
             searchDepth: "basic",
             maxResults: Math.min(requestedMax ?? maxResults, MAX_RESULTS),
@@ -145,6 +189,7 @@ export function createWebSearchTools(
             includeImages: true,
             includeImageDescriptions: true,
           });
+          throwIfAborted(context);
           return {
             query: response.query,
             answer: response.answer ?? null,
@@ -161,26 +206,34 @@ export function createWebSearchTools(
             })),
             images: (response.images ?? []).slice(0, MAX_IMAGES).map((img) => ({
               url: img.url,
-              description: img.description ? truncateDesc(img.description, IMAGE_DESC_LIMIT) : undefined,
+              ...(img.description
+                ? {
+                    description: truncateDesc(
+                      img.description,
+                      IMAGE_DESC_LIMIT,
+                    ),
+                  }
+                : {}),
             })),
           };
         } catch (error) {
+          throwIfAborted(context);
           return { query, answer: null, results: [], error: mapTavilyError(error) };
         }
       },
     }),
     createTool({
-      name: "web_fetch",
-      description:
-        "Fetch and read the full content of a specific web page (http/https) using Tavily Extract. Use when you already know the exact URL to consult — follow up on a search result, verify a claim, or read a page the user linked.",
-      input: webFetchInput,
-      approval,
-      execute: async ({ url }) => {
+      ...webFetchSpec,
+      outputSchema: z.json(),
+      requiresApproval: requiresApproval("web_fetch"),
+      execute: async ({ url }, context): Promise<JSONType> => {
         try {
+          throwIfAborted(context);
           const response = await scope.tavilyClient.extract([url], {
             format: "markdown",
             includeImages: true,
           });
+          throwIfAborted(context);
           const result = response.results[0];
           if (!result) {
             const failed = response.failedResults[0];
@@ -194,11 +247,12 @@ export function createWebSearchTools(
           }
           return {
             url: result.url,
-            title: result.title,
+            title: result.title ?? null,
             content: truncate(result.rawContent, contentLimitChars * 3),
             images: (result.images ?? []).slice(0, MAX_IMAGES),
           };
         } catch (error) {
+          throwIfAborted(context);
           return {
             url,
             title: null,

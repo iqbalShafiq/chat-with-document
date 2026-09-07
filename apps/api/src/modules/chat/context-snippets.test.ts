@@ -30,6 +30,7 @@ function setup() {
     chatSession: { findFirst: vi.fn() },
     sessionContextSnippet: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       upsert: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -52,13 +53,13 @@ describe("createContextSnippetStore", () => {
       });
 
       expect(snippet).toBeNull();
-      expect(fakePrisma.sessionContextSnippet.findUnique).not.toHaveBeenCalled();
+      expect(fakePrisma.sessionContextSnippet.findFirst).not.toHaveBeenCalled();
     });
 
     it("returns the row for an owned session", async () => {
       const { fakePrisma, store } = setup();
       fakePrisma.chatSession.findFirst.mockResolvedValue({ id: SESSION_ID });
-      fakePrisma.sessionContextSnippet.findUnique.mockResolvedValue(
+      fakePrisma.sessionContextSnippet.findFirst.mockResolvedValue(
         makeRecord(),
       );
 
@@ -68,8 +69,8 @@ describe("createContextSnippetStore", () => {
       });
 
       expect(snippet?.text).toBe("The quick brown fox jumps over the lazy dog.");
-      expect(fakePrisma.sessionContextSnippet.findUnique).toHaveBeenCalledWith({
-        where: { sessionId: SESSION_ID },
+      expect(fakePrisma.sessionContextSnippet.findFirst).toHaveBeenCalledWith({
+        where: { sessionId: SESSION_ID, claimId: null },
       });
     });
   });
@@ -103,6 +104,7 @@ describe("createContextSnippetStore", () => {
             text: "Replacement text",
             sourceRole: "user",
           }),
+          update: { text: "Replacement text", sourceRole: "user", claimId: null, claimedAt: null },
         }),
       );
       expect(snippet.text).toBe("Replacement text");

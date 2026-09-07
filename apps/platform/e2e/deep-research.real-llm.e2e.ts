@@ -8,7 +8,6 @@ import {
   attachFile,
   openFreshChat,
   sendMessage,
-  setModel,
   setSwitch,
   waitForRunDone,
   waitForStreaming,
@@ -19,7 +18,6 @@ import { fileURLToPath } from "node:url";
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const evidenceDir = path.resolve(e2eDir, "../../../.playwright-mcp/deep-research");
-const REAL_TEST_MODEL = "deepseek/deepseek-v4-flash-0731";
 type ConsoleEvidence = {
   kind: "console" | "pageerror";
   level?: string;
@@ -54,26 +52,32 @@ async function saveEvidence(page: Page, caseId: string): Promise<void> {
   await page.screenshot({
     path: path.join(evidenceDir, `${caseId}.png`),
     scale: "css",
+    mask: [page.locator("article"), page.locator("nav")],
   });
-  const body = await page.locator("body").innerText();
-  const snapshot = await page.locator("body").ariaSnapshot();
+  const entries = consoleEvidence.get(page) ?? [];
+  const safeSummary = {
+    caseId,
+    url: new URL(page.url()).pathname,
+    researchActivityCount: await page
+      .getByRole("button", { name: /Deep Research/i })
+      .count(),
+    consoleErrorCount: entries.filter(
+      (entry) => entry.kind === "pageerror" || entry.level === "error",
+    ).length,
+  };
   fs.writeFileSync(
     path.join(evidenceDir, `${caseId}.yml`),
-    `case: ${caseId}\nurl: ${page.url()}\nbody_tail: |\n${body
-      .slice(-5000)
-      .split("\n")
-      .map((line) => `  ${line}`)
-      .join("\n")}\n`,
+    `case: ${caseId}\npath: ${safeSummary.url}\nresearch_activity_count: ${safeSummary.researchActivityCount}\nconsole_error_count: ${safeSummary.consoleErrorCount}\n`,
     "utf8",
   );
   fs.writeFileSync(
     path.join(evidenceDir, `${caseId}.snapshot.yml`),
-    snapshot ?? "",
+    `# Redacted evidence: prompts, outputs, reasoning, and tool arguments are intentionally omitted.\ncase: ${caseId}\n`,
     "utf8",
   );
   fs.writeFileSync(
     path.join(evidenceDir, `${caseId}.console.json`),
-    JSON.stringify(consoleEvidence.get(page) ?? [], null, 2) + "\n",
+    JSON.stringify(safeSummary, null, 2) + "\n",
     "utf8",
   );
 }
@@ -84,19 +88,15 @@ async function requireDeepResearch(page: Page): Promise<void> {
   const capabilities = (await response.json()) as {
     deepResearchAvailable?: boolean;
   };
-  test.skip(
-    !capabilities.deepResearchAvailable,
-    "Deep Research is unavailable: configure Tavily or link a document",
-  );
+  expect(
+    capabilities.deepResearchAvailable,
+    "real Deep Research capability is required",
+  ).toBe(true);
 }
 
 async function attachCorpus(page: Page): Promise<void> {
   await attachFile(page, "sales.csv");
   await attachFile(page, "table-rich.pdf");
-}
-
-async function useRealTestModel(page: Page): Promise<void> {
-  await setModel(page, REAL_TEST_MODEL);
 }
 
 async function waitForApproval(page: Page): Promise<void> {
@@ -108,7 +108,6 @@ async function waitForApproval(page: Page): Promise<void> {
 test("P2-C9: toggle on runs direct and produces citations", async ({ page }) => {
   test.setTimeout(420_000);
   await openFreshChat(page);
-  await useRealTestModel(page);
   await requireDeepResearch(page);
   await setSwitch(page, "Deep Research", true);
   await sendMessage(
@@ -124,7 +123,6 @@ test("P2-C9: toggle on runs direct and produces citations", async ({ page }) => 
 test("P2-C10: toggle off offers allow once for the whole research run", async ({ page }) => {
   test.setTimeout(420_000);
   await openFreshChat(page);
-  await useRealTestModel(page);
   await requireDeepResearch(page);
   await sendMessage(
     page,
@@ -139,7 +137,6 @@ test("P2-C10: toggle off offers allow once for the whole research run", async ({
 test("P2-C11: rejecting Deep Research does not fabricate citations", async ({ page }) => {
   test.setTimeout(240_000);
   await openFreshChat(page);
-  await useRealTestModel(page);
   await requireDeepResearch(page);
   await sendMessage(
     page,
@@ -155,35 +152,54 @@ test("P2-C11: rejecting Deep Research does not fabricate citations", async ({ pa
 });
 
 test("P2-C12: Deep Research grounds a CSV + PDF + web corpus", async ({ page }) => {
-  test.setTimeout(480_000);
+  // Nested research is capped at six minutes. Parent planning and the
+  // reasoning-max synthesis turn after the report still need a visible
+  // terminal frame; do not raise the production child budget.
+  test.setTimeout(720_000);
   await openFreshChat(page);
-  await useRealTestModel(page);
   await requireDeepResearch(page);
   await setSwitch(page, "Deep Research", true);
   await attachCorpus(page);
   await sendMessage(
     page,
-    "Call the deep_research tool now to reconcile the sales CSV, PDF table, and current official web evidence. Do not ask a clarification question. Separate and cite each source type, explain disagreements, and verify the synthesis.",
+    "Call the deep_research tool now to reconcile the sales CSV, PDF table, and current official web evidence. Use at most four retrieval/tool calls total: inspect the CSV once, the PDF once, and use the remaining calls for one authoritative web source. Do not ask a clarification question. Return a concise comparison that cites each source type, explains disagreements, and verifies the synthesis.",
   );
   await waitForStreaming(page);
-  await waitForRunDone(page, 360_000);
+  await waitForRunDone(page, 600_000);
   await expect(page.locator("article").last()).toContainText(/CSV|PDF|source|citation/i);
   await saveEvidence(page, "P2-C12");
 });
 
 test("P2-C13: Deep Research progress is visible while running", async ({ page }) => {
-  test.setTimeout(420_000);
+  test.setTimeout(540_000);
   await openFreshChat(page);
-  await useRealTestModel(page);
   await requireDeepResearch(page);
   await setSwitch(page, "Deep Research", true);
   await sendMessage(
     page,
     "Call the deep_research tool now for the concrete question: summarize the official Anvia documentation on specialist agents and tool approvals. Do not ask a clarification question. Perform a bounded investigation using authoritative sources, then synthesize and verify the result.",
   );
-  await expect(page.getByRole("status").filter({ hasText: /Research|Searching|Synthesizing/i })).toBeVisible({
+  await expect(page.locator('p[role="status"][aria-live="polite"]').filter({
+    hasText: /Research|Searching|Synthesizing/i,
+  })).toBeVisible({
     timeout: 120_000,
   });
-  await waitForRunDone(page, 360_000);
+  const secondApproval = page.getByRole("region", {
+    name: /approve searching the web/i,
+  });
+  await expect
+    .poll(
+      async () => {
+        if ((await secondApproval.count()) > 0) {
+          throw new Error(
+            "parent opened a second retrieval approval after Deep Research",
+          );
+        }
+        return page.getByRole("button", { name: "Send", exact: true }).isVisible();
+      },
+      { timeout: 480_000 },
+    )
+    .toBe(true);
+  await expect(secondApproval).toHaveCount(0);
   await saveEvidence(page, "P2-C13");
 });

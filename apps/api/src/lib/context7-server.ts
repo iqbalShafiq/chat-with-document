@@ -1,7 +1,8 @@
 import {
+  closeContext7Mcp as closeOwnedContext7Mcp,
   createContext7McpServer,
   type Context7McpServerOptions,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import type { McpServer } from "@anvia/core/mcp";
 
 /**
@@ -47,4 +48,9 @@ export async function getContext7McpServer(): Promise<McpServer | null> {
       });
   }
   return pending;
+}
+
+/** Close the process-owned Context7 transport during worker shutdown. */
+export function closeContext7Mcp(): Promise<void> {
+  return closeOwnedContext7Mcp();
 }

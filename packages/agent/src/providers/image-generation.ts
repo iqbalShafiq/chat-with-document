@@ -2,8 +2,9 @@ import type {
   GeneratedImage,
   ImageGenerationModel,
   ImageGenerationRequest,
-  ImageGenerationResponse,
+  ImageGenerationResult,
 } from "@anvia/core/image-generation";
+import type { ModelCallOptions } from "@anvia/core";
 
 export type OpenRouterImageGenerationModelOptions = {
   apiKey: string;
@@ -28,8 +29,36 @@ function isTransientMessage(message: string): boolean {
   );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortError(signal?: AbortSignal): DOMException {
+  return signal?.reason instanceof DOMException
+    ? signal.reason
+    : new DOMException("The operation was aborted", "AbortError");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError(signal);
+}
+
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  return (
+    signal?.aborted === true ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError(signal));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -80,10 +109,10 @@ type OpenRouterImageResponse = {
 
 /** OpenRouter image generation via its dedicated `POST /images` API. */
 export class OpenRouterImageGenerationModel
-  implements ImageGenerationModel<unknown, string>
+  implements ImageGenerationModel<unknown>
 {
   readonly provider = "openrouter";
-  readonly defaultModel: string;
+  readonly modelId: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -92,24 +121,27 @@ export class OpenRouterImageGenerationModel
   constructor(options: OpenRouterImageGenerationModelOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.defaultModel = options.defaultModel ?? "openai/gpt-5-image-mini";
+    this.modelId = options.defaultModel ?? "openai/gpt-5-image-mini";
     this.fetchFn = options.fetchFn ?? fetch;
     this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   }
 
   async imageGeneration(
     request: ImageGenerationRequest,
-  ): Promise<ImageGenerationResponse<unknown>> {
+    options: ModelCallOptions = {},
+  ): Promise<ImageGenerationResult<unknown>> {
+    const abortSignal = options.abortSignal;
+    throwIfAborted(abortSignal);
     const body: Record<string, unknown> = {
-      model: this.defaultModel,
+      model: this.modelId,
       prompt: request.prompt,
     };
     if (
-      typeof request.additionalParams === "object" &&
-      request.additionalParams !== null &&
-      !Array.isArray(request.additionalParams)
+      typeof request.providerOptions === "object" &&
+      request.providerOptions !== null &&
+      !Array.isArray(request.providerOptions)
     ) {
-      Object.assign(body, request.additionalParams);
+      Object.assign(body, request.providerOptions);
     }
     // Gemini/Grok-style models do not accept `size` — the tool signals this
     // by passing `aspect_ratio` (+ `resolution`), so omit the pixel size.
@@ -120,6 +152,7 @@ export class OpenRouterImageGenerationModel
     let raw: unknown;
     let lastError: Error | null = null;
     for (let attempt = 0; ; attempt++) {
+      throwIfAborted(abortSignal);
       let response: Response;
       try {
         response = await this.fetchFn(`${this.baseUrl}/images`, {
@@ -129,14 +162,18 @@ export class OpenRouterImageGenerationModel
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
+          ...(abortSignal ? { signal: abortSignal } : {}),
         });
-      } catch {
+      } catch (error) {
+        if (isAbortError(error, abortSignal)) throw error;
         // Network failure — bounded message, retried like a transient error.
         lastError = new Error("Image generation temporarily unavailable");
         if (attempt >= this.retryDelaysMs.length) throw lastError;
-        await sleep(this.retryDelaysMs[attempt] ?? 0);
+        await sleep(this.retryDelaysMs[attempt] ?? 0, abortSignal);
         continue;
       }
+
+      throwIfAborted(abortSignal);
 
       if (!response.ok) {
         const upstream = upstreamMessage(
@@ -151,7 +188,7 @@ export class OpenRouterImageGenerationModel
         if (!transient || attempt >= this.retryDelaysMs.length) {
           throw lastError;
         }
-        await sleep(this.retryDelaysMs[attempt] ?? 0);
+        await sleep(this.retryDelaysMs[attempt] ?? 0, abortSignal);
         continue;
       }
 
@@ -173,15 +210,12 @@ export class OpenRouterImageGenerationModel
         },
       ];
     });
-    if (images.length === 0) {
+    const [first, ...remaining] = images;
+    if (!first) {
       throw new Error("Image generation returned no usable images");
     }
-
-    const first = images[0]!;
     return {
-      image: first.data,
-      images,
-      ...(first.mediaType ? { mediaType: first.mediaType } : {}),
+      images: [first, ...remaining],
       rawResponse: raw,
     };
   }

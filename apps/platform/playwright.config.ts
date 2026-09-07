@@ -3,10 +3,12 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.e2e.ts",
+  testIgnore: ["**/*real-llm*.e2e.ts", "**/anvia-v1-migration.e2e.ts"],
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
+  workers: 1,
   retries: 1,
   reporter: "line",
   use: {

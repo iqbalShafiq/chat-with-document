@@ -1,4 +1,4 @@
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useId, useState, type InputHTMLAttributes } from "react";
 
 /**
@@ -116,3 +116,34 @@ export function AuthPasswordField({
 /** Primary CTA — solid amber, same family as chat send / brand accent. */
 export const AUTH_SUBMIT_CLASS =
   "inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-2xl bg-accent px-4 text-sm font-medium text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring focus-visible:ring-offset-2 focus-visible:ring-offset-canvas";
+
+export function AuthSubmitButton({
+  busy,
+  busyLabel,
+  children,
+}: {
+  busy: boolean;
+  busyLabel: string;
+  children: string;
+}) {
+  return (
+    <button
+      type="submit"
+      className={`${AUTH_SUBMIT_CLASS} mt-1`}
+      disabled={busy}
+    >
+      {busy ? (
+        <span className="inline-flex items-center gap-2">
+          <Loader2
+            className="size-4 animate-spin motion-reduce:animate-none"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          {busyLabel}
+        </span>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}

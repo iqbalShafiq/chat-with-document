@@ -23,8 +23,8 @@ export function registerOpenApi(app: Hono) {
     "/scalar",
     Scalar({
       url: "/doc",
-      pageTitle: "Chat with Document API",
-      theme: "purple",
+      pageTitle: "anreal API",
+      theme: "default",
       authentication: {
         preferredSecurityScheme: "bearerAuth",
       },

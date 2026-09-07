@@ -14,7 +14,9 @@ services:
       - "16379:6379"
 
   qdrant:
-    image: qdrant/qdrant:v1.13.2
+    # Keep the local server on the same minor line as @qdrant/js-client-rest
+    # pulled by Anvia; the client rejects drift greater than one minor.
+    image: qdrant/qdrant:v1.19.0
     ports:
       - "16333:6333"
       - "16334:6334"

@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { normalizeSessionTitle } from "./chat-session.js";
+import {
+  normalizeSessionTitle,
+  selectReusableChatSessions,
+  type ChatSessionRow,
+} from "./chat-session.js";
+
+function row(id: string): ChatSessionRow {
+  return {
+    id,
+    userId: "user-1",
+    projectId: null,
+    title: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+}
 
 describe("normalizeSessionTitle", () => {
   it("trims and collapses whitespace", () => {
@@ -35,5 +50,18 @@ describe("normalizeSessionTitle", () => {
     const out = normalizeSessionTitle(mixed)!;
     expect(Array.from(out)).toHaveLength(48);
     expect(out).not.toContain("\uFFFD");
+  });
+});
+
+describe("selectReusableChatSessions", () => {
+  it("excludes active drafts without treating them as deletable duplicates", async () => {
+    const sessions = [row("active"), row("available")];
+    const result = await selectReusableChatSessions(
+      sessions,
+      async (sessionId) => sessionId !== "active",
+    );
+
+    expect(result.map((session) => session.id)).toEqual(["available"]);
+    expect(sessions.map((session) => session.id)).toEqual(["active", "available"]);
   });
 });

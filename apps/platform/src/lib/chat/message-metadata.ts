@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { MessageCitation } from "#/lib/chat/citations";
 import { parseCitationsFromMetadata } from "#/lib/chat/citations";
@@ -8,14 +8,25 @@ export type ChatMessageMeta = {
   clientMessageId?: string;
   memoryPosition?: number;
   documentIds?: string[];
-  sessionId?: string;
   attachedDocuments?: Array<{ name: string; mediaType?: string }>;
   /** Single pinned context snippet carried by a sent user message. */
   contextSnippet?: { text: string; sourceRole: ContextSnippetSourceRole };
   /** Dual-written structured citations (server and/or client). */
   citations?: MessageCitation[];
-  /** UI-only classification: failed run (error) or compaction boundary (summary). */
+  /** UI classification: failed run, or summary derived only from the native marker. */
   kind?: "summary" | "error";
+  /** Canonical Anvia v1 memory-summary marker; never synthesized by the UI. */
+  anvia?: {
+    memoryCompaction: {
+      version: 1;
+      compactedMessageCount: number;
+    };
+  };
+};
+
+/** Fields that callers may write. A summary is derived from Anvia's native marker. */
+export type ChatMessageMetaPatch = Omit<ChatMessageMeta, "kind"> & {
+  kind?: "error";
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -23,7 +34,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function readChatMessageMeta(
-  metadata: UIMessage["metadata"],
+  metadata: unknown,
 ): ChatMessageMeta {
   if (!isPlainObject(metadata)) return {};
 
@@ -40,9 +51,6 @@ export function readChatMessageMeta(
     Number.isInteger(metadata.memoryPosition)
   ) {
     meta.memoryPosition = metadata.memoryPosition;
-  }
-  if (typeof metadata.sessionId === "string") {
-    meta.sessionId = metadata.sessionId;
   }
   if (Array.isArray(metadata.documentIds)) {
     meta.documentIds = metadata.documentIds.filter(
@@ -71,8 +79,26 @@ export function readChatMessageMeta(
     };
   }
 
-  if (metadata.kind === "summary" || metadata.kind === "error") {
-    meta.kind = metadata.kind;
+  const anvia = metadata.anvia;
+  const memoryCompaction =
+    isPlainObject(anvia) && isPlainObject(anvia.memoryCompaction)
+      ? anvia.memoryCompaction
+      : null;
+  if (
+    memoryCompaction?.version === 1 &&
+    typeof memoryCompaction.compactedMessageCount === "number" &&
+    Number.isSafeInteger(memoryCompaction.compactedMessageCount) &&
+    memoryCompaction.compactedMessageCount > 0
+  ) {
+    meta.anvia = {
+      memoryCompaction: {
+        version: 1,
+        compactedMessageCount: memoryCompaction.compactedMessageCount,
+      },
+    };
+    meta.kind = "summary";
+  } else if (metadata.kind === "error") {
+    meta.kind = "error";
   }
 
   const citations = parseCitationsFromMetadata(metadata);
@@ -85,7 +111,7 @@ export function readChatMessageMeta(
 
 export function withChatMessageMeta(
   base: UIMessage["metadata"],
-  patch: ChatMessageMeta,
+  patch: ChatMessageMetaPatch,
 ): ChatMessageMeta {
   const current: Record<string, unknown> = isPlainObject(base)
     ? { ...base }
@@ -99,7 +125,6 @@ export function withChatMessageMeta(
     current.memoryPosition = patch.memoryPosition;
   }
   if (patch.documentIds !== undefined) current.documentIds = patch.documentIds;
-  if (patch.sessionId !== undefined) current.sessionId = patch.sessionId;
   if (patch.attachedDocuments !== undefined) {
     current.attachedDocuments = patch.attachedDocuments.map((doc) => {
       if (doc.mediaType === undefined) return { name: doc.name };
@@ -127,7 +152,17 @@ export function withChatMessageMeta(
       return row;
     });
   }
-  if (patch.kind !== undefined) current.kind = patch.kind;
+  if (patch.anvia !== undefined) {
+    current.anvia = {
+      memoryCompaction: { ...patch.anvia.memoryCompaction },
+    };
+  }
+  if (patch.kind === "error") current.kind = patch.kind;
+  // Never carry a legacy summary classification across a write. Native
+  // compaction metadata is the sole source of truth for summary messages.
+  if (current.kind === "summary" && !isPlainObject(current.anvia)) {
+    delete current.kind;
+  }
 
   return current as ChatMessageMeta;
 }

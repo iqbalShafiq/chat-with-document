@@ -1,5 +1,5 @@
 {
-  "name": "api",
+  "name": "@anreal/api",
   "type": "module",
   "scripts": {
     "dev": "pnpm with-env node --import tsx --watch src/index.ts",
@@ -10,17 +10,20 @@
     "db:migrate": "pnpm with-env prisma migrate dev",
     "db:studio": "pnpm with-env prisma studio",
     "db:generate": "pnpm with-env prisma generate",
+    "postinstall": "prisma generate",
     "db:deploy": "pnpm with-env prisma migrate deploy",
     "db:seed": "pnpm with-env tsx prisma/seed.ts",
+    "memory:anvia-v1:migrate": "pnpm with-env tsx scripts/migrate-anvia-v1-memory.ts",
     "smoke:auth": "pnpm with-env tsx scripts/smoke-auth.ts",
     "test": "vitest run",
     "with-env": "dotenv -e ../../.env -- "
   },
   "dependencies": {
-    "@anvia/core": "^0.26.0",
-    "@anvia/memory-prisma": "^0.3.1",
-    "@anvia/server": "^0.7.6",
-    "@assingment/agent": "workspace:*",
+    "@anvia/client": "1.0.10",
+    "@anvia/core": "1.0.9",
+    "@anvia/memory-prisma": "1.0.9",
+    "@anvia/server": "1.0.10",
+    "@anreal/agent": "workspace:*",
     "@aws-sdk/client-s3": "^3.888.0",
     "@better-auth/prisma-adapter": "^1.6.25",
     "@hono/node-server": "^2.0.11",

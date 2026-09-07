@@ -6,6 +6,8 @@ import { expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 export const API_ORIGIN = "http://localhost:3001";
+export const REAL_LLM_MODEL = "deepseek/deepseek-v4-flash-0731";
+export const REAL_LLM_REASONING_EFFORT = "max";
 
 export function fixturePath(name: string): string {
   return fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
@@ -16,21 +18,58 @@ export async function openFreshChat(page: Page): Promise<void> {
     data: { projectId: null },
   });
   expect(draft.ok()).toBe(true);
+  const { sessionId } = (await draft.json()) as { sessionId: string };
   await page.goto("/");
-  await page.evaluate(() => window.localStorage.clear());
+  await page.evaluate((id) => {
+    window.localStorage.clear();
+    window.localStorage.setItem("chat.sessionId", id);
+    window.localStorage.setItem("chat.lastStandaloneSessionId", id);
+    window.localStorage.setItem("chat.viewMode", "standalone");
+  }, sessionId);
   await page.reload();
-  await expect(page.getByText("Ask anything about your documents")).toBeVisible({
+  await expect(page.getByRole("heading", { name: /trying to understand/i })).toBeVisible({
     timeout: 30_000,
   });
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();
+  await setModel(page, REAL_LLM_MODEL);
+  await setReasoningEffort(page, REAL_LLM_REASONING_EFFORT);
 }
 
 export async function sendMessage(page: Page, text: string): Promise<void> {
   const editor = page.locator("[data-anvia-composer-editor]");
+  const sendsImmediately = await page
+    .getByRole("button", { name: "Send", exact: true })
+    .isVisible()
+    .catch(() => false);
+  const requestPromise = sendsImmediately
+    ? page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          request.url() === `${API_ORIGIN}/api/chat` &&
+          request.postDataJSON()?.type === "messages",
+        { timeout: 30_000 },
+      )
+    : null;
   await editor.click();
-  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await expect(editor).toBeEditable();
   await editor.pressSequentially(text, { delay: 15 });
-  await editor.press("Enter");
+  const send = page.getByRole("button", { name: "Send", exact: true });
+  if (await send.isVisible().catch(() => false)) {
+    await send.click();
+  } else {
+    await editor.press("Enter");
+  }
+  if (requestPromise) {
+    const body = requestPromise.then((request) => request.postDataJSON() as {
+      metadata?: { modelId?: string; reasoningEffort?: string };
+    });
+    await expect(body).resolves.toMatchObject({
+      metadata: {
+        modelId: REAL_LLM_MODEL,
+        reasoningEffort: REAL_LLM_REASONING_EFFORT,
+      },
+    });
+  }
 }
 
 export async function waitForStreaming(page: Page): Promise<void> {
@@ -39,10 +78,30 @@ export async function waitForStreaming(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 30_000 });
 }
 
-export async function waitForRunDone(page: Page, timeout = 150_000): Promise<void> {
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({
+export async function waitForRunDone(page: Page, timeout = 240_000): Promise<void> {
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible({
     timeout,
   });
+}
+
+/** Wait until the composer is idle and no queued follow-up remains. */
+export async function waitForIdleComposer(page: Page, timeout = 300_000): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const sendVisible = await page
+          .getByRole("button", { name: "Send", exact: true })
+          .isVisible()
+          .catch(() => false);
+        const queueVisible = await page
+          .getByRole("list", { name: "Queued messages" })
+          .isVisible()
+          .catch(() => false);
+        return sendVisible && !queueVisible;
+      },
+      { timeout },
+    )
+    .toBe(true);
 }
 
 export async function openFeaturesPopover(page: Page): Promise<void> {
@@ -53,6 +112,7 @@ export async function openFeaturesPopover(page: Page): Promise<void> {
 export async function setSwitch(page: Page, name: string, on: boolean): Promise<void> {
   await openFeaturesPopover(page);
   const toggle = page.getByRole("switch", { name });
+  await expect(toggle).toBeVisible({ timeout: 10_000 });
   const checked = (await toggle.getAttribute("aria-checked")) === "true";
   if (checked !== on) await toggle.click();
   await page.keyboard.press("Escape");
@@ -69,6 +129,20 @@ export async function setModel(page: Page, modelId: string): Promise<void> {
   await expect(option).toBeVisible({ timeout: 10_000 });
   await option.click();
   await expect(effectiveTrigger).toContainText(/./);
+}
+
+/** Select and visibly verify the reasoning effort used by every real-LLM run. */
+export async function setReasoningEffort(
+  page: Page,
+  effort: string,
+): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Reasoning effort" });
+  await expect(trigger).toBeVisible({ timeout: 10_000 });
+  await trigger.click();
+  const option = page.locator(`[data-option-value="${effort}"]`);
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.click();
+  await expect(trigger).toContainText(new RegExp(effort, "i"));
 }
 
 /**

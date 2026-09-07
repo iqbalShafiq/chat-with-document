@@ -12,6 +12,8 @@ type ImageGenParamsEditorProps = {
   loading: boolean;
   error: boolean;
   onRetry: () => void;
+  /** Approval editors must never silently select a catalog default. */
+  requireExplicitModel?: boolean;
 };
 
 /**
@@ -26,18 +28,16 @@ export function ImageGenParamsEditor({
   loading,
   error,
   onRetry,
+  requireExplicitModel = false,
 }: ImageGenParamsEditorProps) {
   const selectedModel = useMemo(() => {
     if (models.length === 0) return null;
-    return (
-      models.find((item) => item.modelId === settings.modelId) ??
-      models[0] ??
-      null
-    );
-  }, [models, settings.modelId]);
+    const matchingModel = models.find((item) => item.modelId === settings.modelId);
+    return requireExplicitModel ? matchingModel ?? null : matchingModel ?? models[0] ?? null;
+  }, [models, requireExplicitModel, settings.modelId]);
 
   const capabilities = selectedModel?.imageCapabilities ?? null;
-  const aspectRatios = capabilities?.aspectRatios ?? ["1:1"];
+  const aspectRatios = capabilities?.aspectRatios ?? (requireExplicitModel ? [] : ["1:1"]);
   const qualityOptions: SelectOption[] =
     capabilities?.quality?.map((quality) => ({
       value: quality,
@@ -58,16 +58,22 @@ export function ImageGenParamsEditor({
 
   const handleModelChange = (modelId: string) => {
     const item = models.find((candidate) => candidate.modelId === modelId);
-    const nextRatios = item?.imageCapabilities?.aspectRatios ?? ["1:1"];
+    const nextRatios =
+      item?.imageCapabilities?.aspectRatios ??
+      (requireExplicitModel ? [] : ["1:1"]);
     const nextQualities = item?.imageCapabilities?.quality ?? [];
     const ratioStillValid = nextRatios.includes(settings.aspectRatio ?? "");
     const qualityStillValid = nextQualities.includes(settings.quality ?? "");
-    onChange({
-      ...settings,
-      modelId,
-      ...(ratioStillValid ? {} : { aspectRatio: nextRatios[0] ?? "1:1" }),
-      ...(qualityStillValid ? {} : { quality: undefined }),
-    });
+    const next: ImageGenSettings = { ...settings, modelId };
+    if (!ratioStillValid) {
+      if (!requireExplicitModel && nextRatios.length > 0) {
+        next.aspectRatio = nextRatios[0];
+      } else {
+        delete next.aspectRatio;
+      }
+    }
+    if (!qualityStillValid) delete next.quality;
+    onChange(next);
   };
 
   const handleAspectRatioChange = (aspectRatio: string) => {
@@ -131,8 +137,19 @@ export function ImageGenParamsEditor({
             disabled={loading}
           />
         )}
+        {requireExplicitModel && !loading && !error && !selectedModel ? (
+          <p className="text-[10px] text-danger">
+            Select an image model from the authoritative catalog before staging changes.
+          </p>
+        ) : null}
+        {requireExplicitModel && !loading && !error && selectedModel && !capabilities ? (
+          <p className="text-[10px] text-danger">
+            This model has no known capabilities and cannot be used for an override.
+          </p>
+        ) : null}
       </div>
 
+      {capabilities && aspectRatios.length > 0 ? (
       <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-text-faint">
           Aspect ratio
@@ -158,6 +175,7 @@ export function ImageGenParamsEditor({
           })}
         </div>
       </div>
+      ) : null}
 
       {qualityOptions.length > 0 ? (
         <div className="flex flex-col gap-1">

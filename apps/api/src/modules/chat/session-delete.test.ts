@@ -9,14 +9,19 @@ vi.mock("../../lib/resumable-stream-store.js", () => ({
   getStreamStore: vi.fn(),
 }));
 
-vi.mock("./approval-registry.js", () => ({
-  getApprovalRegistry: vi.fn(),
-}));
-
-vi.mock("./run-queue.js", () => ({
-  ACTIVE_RUN_KEY: (sessionId: string) => `rs-active:${sessionId}`,
-  getChatRunQueue: vi.fn(),
-}));
+vi.mock("./run-queue.js", async () => {
+  const { getRedis } = await import("../../lib/redis.js");
+  const ACTIVE_RUN_KEY = (sessionId: string) => `rs-active:${sessionId}`;
+  return {
+    ACTIVE_RUN_KEY,
+    getChatRunQueue: vi.fn(),
+    releaseActiveRun: vi.fn(async (sessionId: string, streamId: string) => {
+      const redis = getRedis();
+      const current = await redis.get(ACTIVE_RUN_KEY(sessionId));
+      if (current === streamId) await redis.del(ACTIVE_RUN_KEY(sessionId));
+    }),
+  };
+});
 
 vi.mock("../profiling/queue.js", () => ({
   enqueueProfileReconsideration: vi.fn(async () => {}),
@@ -53,7 +58,6 @@ import { prisma } from "../../utils/prisma.js";
 import { enqueueProfileReconsideration } from "../profiling/queue.js";
 import { profileConfig } from "../profiling/service.js";
 import type { ProfileConfig } from "../profiling/service.js";
-import { getApprovalRegistry } from "./approval-registry.js";
 import {
   ChatSessionNotFoundError,
   deleteChatSessionsHard,
@@ -97,9 +101,11 @@ function createFakes() {
 
   const storeStatus = vi.fn();
   const setStopFlag = vi.fn(async () => undefined);
+  const storeClose = vi.fn(async () => undefined);
   vi.mocked(getStreamStore).mockReturnValue({
     status: storeStatus,
     setStopFlag,
+    close: storeClose,
   } as unknown as ResumableStreamStoreWithMeta);
 
   const queueGetJob = vi.fn();
@@ -107,21 +113,13 @@ function createFakes() {
     getJob: queueGetJob,
   } as unknown as ReturnType<typeof getChatRunQueue>);
 
-  const cancelPendingForStream = vi.fn(async () => ({
-    approvals: 0,
-    clarifications: 0,
-  }));
-  vi.mocked(getApprovalRegistry).mockReturnValue({
-    cancelPendingForStream,
-  } as unknown as ReturnType<typeof getApprovalRegistry>);
-
   return {
     redisGet,
     redisDel,
     storeStatus,
     setStopFlag,
+    storeClose,
     queueGetJob,
-    cancelPendingForStream,
   };
 }
 
@@ -182,7 +180,7 @@ describe("stopActiveRunForSession", () => {
     expect(fakes.setStopFlag).not.toHaveBeenCalled();
   });
 
-  it("sets the stop flag, cancels approvals, and waits for the lock to clear", async () => {
+  it("sets the stop flag and waits for the native worker to clear the lock", async () => {
     fakes.redisGet.mockResolvedValueOnce(STREAM_ID).mockResolvedValue(null);
     fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
     fakes.queueGetJob.mockResolvedValue({ getState: async () => "active" });
@@ -192,7 +190,6 @@ describe("stopActiveRunForSession", () => {
     ).resolves.toBe(true);
 
     expect(fakes.setStopFlag).toHaveBeenCalledWith(STREAM_ID);
-    expect(fakes.cancelPendingForStream).toHaveBeenCalledWith(STREAM_ID);
     expect(fakes.redisDel).not.toHaveBeenCalled();
   });
 
@@ -200,7 +197,12 @@ describe("stopActiveRunForSession", () => {
     vi.useFakeTimers();
     fakes.redisGet.mockResolvedValue(STREAM_ID);
     fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
-    fakes.queueGetJob.mockResolvedValue({ getState: async () => "active" });
+    fakes.queueGetJob.mockResolvedValue({
+      getState: async () => "active",
+      remove: async () => {
+        throw new Error("cannot remove active job");
+      },
+    });
 
     const promise = stopActiveRunForSession(USER_ID, SESSION_ID);
     const assertion = expect(promise).rejects.toThrow(SessionRunActiveError);
@@ -209,6 +211,45 @@ describe("stopActiveRunForSession", () => {
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(12_001);
     await assertion;
+  });
+
+  it("removes a waiting job and releases the lock without waiting", async () => {
+    fakes.redisGet.mockResolvedValue(STREAM_ID);
+    fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
+    const remove = vi.fn(async () => undefined);
+    fakes.queueGetJob.mockResolvedValue({
+      getState: async () => "waiting",
+      remove,
+    });
+
+    await expect(
+      stopActiveRunForSession(USER_ID, SESSION_ID),
+    ).resolves.toBe(true);
+
+    expect(remove).toHaveBeenCalled();
+    expect(fakes.setStopFlag).toHaveBeenCalledWith(STREAM_ID);
+    expect(fakes.storeClose).toHaveBeenCalledWith({
+      streamId: STREAM_ID,
+      status: "error",
+    });
+    expect(fakes.redisDel).toHaveBeenCalledWith(RUN_KEY);
+  });
+
+  it("reclaims a stale lock when no run job exists after a brief settle", async () => {
+    fakes.redisGet.mockResolvedValue(STREAM_ID);
+    fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
+    fakes.queueGetJob.mockResolvedValue(null);
+
+    await expect(
+      stopActiveRunForSession(USER_ID, SESSION_ID),
+    ).resolves.toBe(true);
+
+    expect(fakes.setStopFlag).toHaveBeenCalledWith(STREAM_ID);
+    expect(fakes.storeClose).toHaveBeenCalledWith({
+      streamId: STREAM_ID,
+      status: "error",
+    });
+    expect(fakes.redisDel).toHaveBeenCalledWith(RUN_KEY);
   });
 });
 

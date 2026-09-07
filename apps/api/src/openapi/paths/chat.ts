@@ -3,21 +3,21 @@ import {
   SESSION_ID_EXAMPLE,
   STREAM_ID_EXAMPLE,
   UUID_EXAMPLE,
+  canonicalChatRequestSchema,
   chatMessageSchema,
   chatSessionSchema,
   contextSnippetSchema,
   exampleChatSession,
+  interactionStagingRequestSchema,
   sessionListItemSchema,
 } from "../components.js";
 import {
   badRequest,
   bearerOrCookie,
   conflict,
-  forbidden,
   jsonResponse,
   jsonSchema,
   notFound,
-  textResponse,
   unauthorized,
 } from "../helpers.js";
 
@@ -338,91 +338,111 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Send a message (JSONL stream) or resume a stream",
       description:
-        "Starts an agent run and returns a **JSON Lines** event stream (`format: jsonl`). The last item in `messages` is the new user turn.\n\nTo resume an in-flight stream after a disconnect, send `{ sessionId, resume: { streamId, after } }` instead of a new prompt. Pending tool-approval and clarification cards are re-emitted so the UI can render them again.\n\nA session can only have one active run (`409 RUN_ACTIVE`). Queue follow-ups with `POST /api/chat/steer` while a run is live.",
+        "Accepts only the canonical Anvia v1 client stream request: a `messages` turn or a native `interaction_response`, each with strict product metadata. A top-level `resume` cursor on either branch is a pure subscription and never enqueues work.\n\nReturns protocol-v3 JSON Lines (`application/x-ndjson`) with a resumable stream. A session can only have one active run (`409 RUN_ACTIVE`). Queue follow-ups with `POST /api/chat/steer` while a run is live.",
       security: bearerOrCookie,
       requestBody: {
         required: true,
         content: jsonSchema(
-          {
-            type: "object",
-            required: ["sessionId"],
-            properties: {
-              sessionId: { type: "string", format: "uuid" },
-              messages: { type: "array", items: chatMessageSchema },
-              stream: { type: "boolean" },
-              model: { type: "string" },
-              reasoningEffort: { type: ["string", "null"] },
-              webSearchEnabled: { type: "boolean" },
-              imageGenerationEnabled: { type: "boolean" },
-              deepResearchEnabled: { type: "boolean" },
-              imageGenSettings: {
-                type: "object",
-                properties: {
-                  modelId: { type: "string" },
-                  aspectRatio: { type: "string" },
-                  quality: { type: "string" },
-                  background: { type: "string" },
-                  n: { type: "integer", minimum: 1, maximum: 10 },
-                },
-              },
-              resume: {
-                type: "object",
-                required: ["streamId", "after"],
-                properties: {
-                  streamId: { type: "string", format: "uuid" },
-                  after: { type: "integer", minimum: 0 },
-                },
-              },
-              metadata: {
-                type: "object",
-                properties: { sessionId: { type: "string" } },
-              },
-            },
-          },
+          canonicalChatRequestSchema,
           {
             send: {
               summary: "New user turn",
               value: {
-                sessionId: SESSION_ID_EXAMPLE,
-                stream: true,
-                model: "openai/gpt-5.6-luna",
-                webSearchEnabled: false,
-                imageGenerationEnabled: false,
-                deepResearchEnabled: false,
+                type: "messages",
+                metadata: {
+                  sessionId: SESSION_ID_EXAMPLE,
+                  documentIds: [],
+                  modelId: "deepseek/deepseek-v4-flash-0731",
+                  reasoningEffort: "max",
+                  webSearchEnabled: false,
+                  imageGenerationEnabled: false,
+                  deepResearchEnabled: false,
+                  imageGenSettings: null,
+                },
                 messages: [
                   {
                     role: "user",
-                    content: [{ type: "text", text: "What is 2 + 2?" }],
+                    content: "What is 2 + 2?",
                   },
                 ],
               },
             },
-            resume: {
-              summary: "Resume after disconnect",
+            interaction: {
+              summary: "Respond to a native interaction",
               value: {
-                sessionId: SESSION_ID_EXAMPLE,
-                resume: { streamId: STREAM_ID_EXAMPLE, after: 12 },
+                type: "interaction_response",
+                interactionId: "interaction_01",
+                response: { type: "tool-approval", approved: true },
+                metadata: {
+                  sessionId: SESSION_ID_EXAMPLE,
+                  documentIds: [],
+                  modelId: "deepseek/deepseek-v4-flash-0731",
+                  reasoningEffort: "max",
+                  webSearchEnabled: false,
+                  imageGenerationEnabled: false,
+                  deepResearchEnabled: false,
+                  imageGenSettings: null,
+                },
               },
             },
           },
         ),
       },
       responses: {
-        "200": textResponse(
-          "JSONL event stream. Each line is one Anvia event (text deltas, tool calls, approvals, finish).",
-          "application/x-ndjson",
-          [
-            `{"type":"text","text":"4"}`,
-            `{"type":"finish"}`,
-          ].join("\n"),
-        ),
-        "400": badRequest({ error: "sessionId is required" }),
+        "200": {
+          description:
+            "Protocol-v3 JSONL event stream. Each line is a canonical Anvia client frame.",
+          headers: {
+            "x-anvia-stream-protocol": {
+              required: true,
+              schema: { type: "string", const: "anvia.client.v3" },
+              description: "The exact Anvia client stream protocol negotiated by this API.",
+            },
+          },
+          content: {
+            "application/x-ndjson": {
+              schema: { type: "string" },
+              examples: {
+                default: {
+                  summary: "Protocol-v3 frames",
+                  value: [
+                    JSON.stringify({ type: "stream_start", protocol: "anvia.client.v3", streamId: STREAM_ID_EXAMPLE, eventId: 0, resumable: true }),
+                    JSON.stringify({ type: "stream_end", streamId: STREAM_ID_EXAMPLE, eventId: 0, status: "completed" }),
+                  ].join("\n"),
+                },
+              },
+            },
+          },
+        },
+        "400": badRequest({ error: "client request is invalid", code: "INVALID_CLIENT_REQUEST" }),
         "401": unauthorized,
-        "404": notFound({ error: "stream not found", code: "STREAM_NOT_FOUND" }),
-        "409": conflict({
-          error: "Session is already processing in another tab",
-          code: "RUN_ACTIVE",
-        }),
+        "404": notFound({ error: "stream or interaction not found", code: "STREAM_NOT_FOUND" }),
+        "409": jsonResponse(
+          "The stream cursor or interaction state conflicts with the current server state.",
+          {
+            type: "object",
+            required: ["error", "code"],
+            properties: { error: { type: "string" }, code: { type: "string" } },
+          },
+          {
+            cursor: { summary: "Cursor is ahead of the stream", value: { error: "resume cursor is invalid", code: "RESUME_CURSOR_INVALID" } },
+            active: { summary: "Session already has a run", value: { error: "Session is already processing in another tab", code: "RUN_ACTIVE" } },
+            replayed: { summary: "Interaction already consumed", value: { error: "interaction already replayed", code: "INTERACTION_REPLAYED" } },
+            expired: { summary: "Interaction expired", value: { error: "interaction expired", code: "INTERACTION_EXPIRED" } },
+            claimed: { summary: "Interaction is being handled", value: { error: "interaction is already being handled", code: "INTERACTION_CLAIMED" } },
+            policy: { summary: "Policy stage conflict", value: { error: "interaction policy conflicts with an existing stage", code: "INTERACTION_POLICY_CONFLICT" } },
+          },
+        ),
+        "422": badRequest({ error: "request metadata is invalid", code: "INVALID_REQUEST_METADATA" }),
+        "503": jsonResponse(
+          "The run queue is temporarily unavailable or requires reconciliation.",
+          {
+            type: "object",
+            required: ["error", "code"],
+            properties: { error: { type: "string" }, code: { type: "string", const: "CHAT_RUN_QUEUE_ERROR" } },
+          },
+          { unavailable: { summary: "Queue unavailable", value: { error: "chat run could not be queued", code: "CHAT_RUN_QUEUE_ERROR" } } },
+        ),
       },
     },
   },
@@ -850,7 +870,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Stop an in-flight stream",
       description:
-        "Sets the stop flag and cancels pending approval / clarification waiters so the worker does not hang.",
+        "Sets the native Anvia stream stop flag for an owned stream. The response contains only `{ ok: true }`; durable native interactions are not converted into synthetic rejection answers.",
       security: bearerOrCookie,
       requestBody: {
         required: true,
@@ -866,26 +886,8 @@ export const chatPaths = {
       responses: {
         "200": jsonResponse(
           "Stop requested.",
-          {
-            type: "object",
-            required: ["ok", "cancelled"],
-            properties: {
-              ok: { type: "boolean" },
-              cancelled: {
-                type: "object",
-                properties: {
-                  approvals: { type: "integer" },
-                  clarifications: { type: "integer" },
-                },
-              },
-            },
-          },
-          {
-            default: {
-              summary: "Stopped",
-              value: { ok: true, cancelled: { approvals: 1, clarifications: 0 } },
-            },
-          },
+          { type: "object", required: ["ok"], properties: { ok: { type: "boolean", const: true } } },
+          { default: { summary: "Stopped", value: { ok: true } } },
         ),
         "400": badRequest({ error: "streamId is required" }),
         "401": unauthorized,
@@ -899,7 +901,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Queue follow-up messages into the active run",
       description:
-        "Pushes 1–20 follow-up messages onto the live run. The worker injects them via `PromptRequest.steer()` one per turn (FIFO). Returns `409 NO_ACTIVE_RUN` when the session is idle — the client should send a normal `POST /api/chat` instead.\n\nEach message needs `clientMessageId` + `text` (and optional `attachments`, `contextSnippet`).",
+        "Pushes 1–20 follow-up messages onto the live run. The worker injects them through the native Anvia `AgentStream.steer()` boundary one per turn (FIFO). Returns `409 NO_ACTIVE_RUN` when the session is idle — the client should send a normal `POST /api/chat` instead.\n\nEach message needs `clientMessageId` + `text` (and optional `attachments`, `contextSnippet`).",
       security: bearerOrCookie,
       requestBody: {
         required: true,
@@ -1055,7 +1057,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Feature flags for this deployment",
       description:
-        "Tells the client whether web search, Deep Research, image generation, and Context7 MCP are available. Pass sessionId to include document-only Deep Research availability.",
+        "Tells the client whether web search, Deep Research, and image generation are available, and whether Context7 MCP is configured. Pass sessionId to include document-only Deep Research availability.",
       security: bearerOrCookie,
       responses: {
         "200": jsonResponse(
@@ -1066,13 +1068,17 @@ export const chatPaths = {
               "webSearchAvailable",
               "deepResearchAvailable",
               "imageGenerationAvailable",
-              "context7Available",
+              "context7Configured",
             ],
             properties: {
               webSearchAvailable: { type: "boolean" },
               deepResearchAvailable: { type: "boolean" },
               imageGenerationAvailable: { type: "boolean" },
-              context7Available: { type: "boolean" },
+              context7Configured: {
+                type: "boolean",
+                description:
+                  "True when Context7 MCP is configured. Live connectivity is validated fail-closed by the chat worker when a run requests Context7.",
+              },
             },
           },
           {
@@ -1082,7 +1088,7 @@ export const chatPaths = {
                 webSearchAvailable: true,
                 deepResearchAvailable: true,
                 imageGenerationAvailable: true,
-                context7Available: false,
+                context7Configured: false,
               },
             },
           },
@@ -1091,53 +1097,81 @@ export const chatPaths = {
       },
     },
   },
-  "/api/chat/approvals/{approvalId}/decision": {
-    post: {
-      operationId: "decideToolApproval",
+  "/api/chat/interactions/{interactionId}": {
+    get: {
+      operationId: "getChatInteractionStatus",
       tags: ["Chat"],
-      summary: "Approve or reject a tool call",
+      summary: "Read whether a native interaction can still be answered",
       description:
-        "Resolves a pending human-approval card (`web_search`, `web_fetch`, `generate_image`, `edit_image`).\n\n- `approved: true` + `grantScope: \"session\"` writes a session-long grant so the gate is skipped for that tool.\n- `overrideArgs` stages edited tool arguments (consumed once).\n- Late / already-resolved decisions return `{ ok: true, alreadyResolved: true }` (idempotent).",
+        "Returns `pending` when the authenticated owner can still answer the interaction. Expired, consumed, claimed, missing, and foreign records are `unavailable` so the browser can drop a stale approval card after refresh.",
       security: bearerOrCookie,
       parameters: [
         {
-          name: "approvalId",
+          name: "interactionId",
           in: "path",
           required: true,
-          schema: { type: "string" },
-          example: "apr_01",
+          schema: { type: "string", minLength: 1, maxLength: 256 },
+          example: "interaction_01",
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Interaction availability for the current user.",
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["status"],
+            properties: {
+              status: { type: "string", enum: ["pending", "unavailable"] },
+            },
+          },
+          {
+            pending: { summary: "Still awaiting a response", value: { status: "pending" } },
+            unavailable: { summary: "Expired or already handled", value: { status: "unavailable" } },
+          },
+        ),
+        "400": badRequest({ error: "interactionId is required", code: "INVALID_CLIENT_REQUEST" }),
+        "401": unauthorized,
+      },
+    },
+  },
+  "/api/chat/interactions/{interactionId}/stage": {
+    post: {
+      operationId: "stageChatInteraction",
+      tags: ["Chat"],
+      summary: "Stage interaction-scoped tool policy",
+      description:
+        "Validates and stages an interaction-scoped session grant or one-shot tool argument override. This route does not answer, publish, or unblock the native Anvia interaction; the canonical `POST /api/chat` interaction_response performs that transition.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "interactionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", minLength: 1, maxLength: 256 },
+          example: "interaction_01",
         },
       ],
       requestBody: {
         required: true,
         content: jsonSchema(
-          {
-            type: "object",
-            required: ["approved"],
-            properties: {
-              approved: { type: "boolean" },
-              reason: { type: "string" },
-              grantScope: { type: "string", enum: ["session"] },
-              overrideArgs: { type: "object", additionalProperties: true },
-            },
-          },
+          interactionStagingRequestSchema,
           {
             allowOnce: {
-              summary: "Allow once",
-              value: { approved: true },
+              summary: "Stage an allow-once response",
+              value: { response: { type: "tool-approval", approved: true } },
             },
             allowSession: {
-              summary: "Allow for the rest of the session",
-              value: { approved: true, grantScope: "session" },
-            },
-            reject: {
-              summary: "Reject",
-              value: { approved: false, reason: "Not needed" },
+              summary: "Stage a session grant",
+              value: {
+                response: { type: "tool-approval", approved: true },
+                grantScope: "session",
+              },
             },
             override: {
-              summary: "Allow with edited image args",
+              summary: "Stage edited image args",
               value: {
-                approved: true,
+                response: { type: "tool-approval", approved: true },
                 overrideArgs: { aspectRatio: "16:9", quality: "high" },
               },
             },
@@ -1146,104 +1180,45 @@ export const chatPaths = {
       },
       responses: {
         "200": jsonResponse(
-          "Decision recorded (or already resolved).",
+          "Interaction policy staged.",
+          { type: "object", required: ["ok"], properties: { ok: { type: "boolean", const: true } } },
+          { default: { summary: "Staged", value: { ok: true } } },
+        ),
+        "400": badRequest({ error: "interaction staging request is invalid", code: "INTERACTION_STAGE_INVALID" }),
+        "401": unauthorized,
+        "404": notFound({ error: "interaction not found", code: "INTERACTION_NOT_FOUND" }),
+        "409": jsonResponse(
+          "The interaction is terminal or the requested policy conflicts with an existing stage.",
           {
             type: "object",
-            required: ["ok"],
-            properties: {
-              ok: { type: "boolean" },
-              alreadyResolved: { type: "boolean" },
-            },
+            required: ["error", "code"],
+            properties: { error: { type: "string" }, code: { type: "string" } },
           },
           {
-            applied: { summary: "Applied", value: { ok: true } },
-            late: {
-              summary: "Already resolved",
-              value: { ok: true, alreadyResolved: true },
-            },
+            state: { summary: "Interaction is no longer pending", value: { error: "interaction cannot be staged in its current state", code: "INTERACTION_STATE_CONFLICT" } },
+            policy: { summary: "Policy stage conflict", value: { error: "interaction policy conflicts with an existing stage", code: "INTERACTION_POLICY_CONFLICT" } },
           },
         ),
-        "400": badRequest({ error: "approved (boolean) is required" }),
-        "401": unauthorized,
-        "403": forbidden,
-      },
-    },
-  },
-  "/api/chat/clarifications/{id}/response": {
-    post: {
-      operationId: "answerClarification",
-      tags: ["Chat"],
-      summary: "Answer a clarification wizard",
-      description:
-        "Submits answers for a `request_clarification` wizard. `answers` is a map of question id → `string` or `string[]`. Optional questions the user skipped go in `skipped`.\n\nLate responses are idempotent (`alreadyResolved: true`).",
-      security: bearerOrCookie,
-      parameters: [
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          example: "clr_01",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: jsonSchema(
+        "503": jsonResponse(
+          "The durable interaction policy store is temporarily unavailable.",
           {
             type: "object",
-            required: ["answers"],
+            required: ["error", "code"],
             properties: {
-              answers: {
-                type: "object",
-                additionalProperties: {
-                  oneOf: [
-                    { type: "string" },
-                    { type: "array", items: { type: "string" } },
-                  ],
-                },
-              },
-              skipped: { type: "array", items: { type: "string" } },
+              error: { type: "string" },
+              code: { type: "string", const: "INTERACTION_POLICY_UNAVAILABLE" },
             },
           },
           {
             default: {
-              summary: "Answer two questions, skip one",
+              summary: "Policy store unavailable",
               value: {
-                answers: {
-                  style: "watercolor",
-                  subjects: ["fox", "library"],
-                },
-                skipped: ["palette"],
+                error: "interaction policy is temporarily unavailable",
+                code: "INTERACTION_POLICY_UNAVAILABLE",
               },
             },
           },
         ),
-      },
-      responses: {
-        "200": jsonResponse(
-          "Answers recorded (or already resolved).",
-          {
-            type: "object",
-            required: ["ok"],
-            properties: {
-              ok: { type: "boolean" },
-              alreadyResolved: { type: "boolean" },
-            },
-          },
-          {
-            applied: { summary: "Applied", value: { ok: true } },
-            late: {
-              summary: "Already resolved",
-              value: { ok: true, alreadyResolved: true },
-            },
-          },
-        ),
-        "400": badRequest({
-          error:
-            "answers (object of string | string[]) and optional skipped (string[]) are required",
-        }),
-        "401": unauthorized,
-        "403": forbidden,
       },
     },
   },

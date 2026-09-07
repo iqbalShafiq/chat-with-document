@@ -17,6 +17,7 @@ const PROVIDERS = [
   { slug: "deepseek", name: "DeepSeek", sortOrder: 1 },
   { slug: "google", name: "Google", sortOrder: 2 },
   { slug: "xai", name: "xAI", sortOrder: 3 },
+  { slug: "meta", name: "Meta", sortOrder: 4 },
 ];
 
 /** OpenAI wordmark mark (hexagonal bloom), theme-adaptive via currentColor. */
@@ -31,6 +32,9 @@ const GEMINI_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"
 /** xAI Grok monogram mark (stylized X), theme-adaptive via currentColor. */
 /** Grok official icon (Wikimedia): rounded square + spiral X mark, theme-adaptive. */
 const GROK_ICON_SVG = `<svg viewBox="0 0 512 509.641" fill="none" aria-hidden="true"><path fill="currentColor" fill-opacity="0.14" d="M115.612 0h280.776C459.975 0 512 52.026 512 115.612v278.416c0 63.587-52.025 115.613-115.612 115.613H115.612C52.026 509.641 0 457.615 0 394.028V115.612C0 52.026 52.026 0 115.612 0z"/><path fill="currentColor" d="M213.235 306.019l178.976-180.002v.169l51.695-51.763c-.924 1.32-1.86 2.605-2.785 3.89-39.281 54.164-58.46 80.649-43.07 146.922l-.09-.101c10.61 45.11-.744 95.137-37.398 131.836-46.216 46.306-120.167 56.611-181.063 14.928l42.462-19.675c38.863 15.278 81.392 8.57 111.947-22.03 30.566-30.6 37.432-75.159 22.065-112.252-2.92-7.025-11.67-8.795-17.792-4.263l-124.947 92.341zm-25.786 22.437l-.033.034L68.094 435.217c7.565-10.429 16.957-20.294 26.327-30.149 26.428-27.803 52.653-55.359 36.654-94.302-21.422-52.112-8.952-113.177 30.724-152.898 41.243-41.254 101.98-51.661 152.706-30.758 11.23 4.172 21.016 10.114 28.638 15.639l-42.359 19.584c-39.44-16.563-84.629-5.299-112.207 22.313-37.298 37.308-44.84 102.003-1.128 143.81z"/></svg>`;
+
+/** Meta infinity-loop mark (Simple Icons, CC0), theme-adaptive via currentColor. */
+const META_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill="currentColor" d="M6.915 4.03c-1.968 0-3.683 1.28-4.871 3.113C.704 9.208 0 11.883 0 14.449c0 .706.07 1.369.21 1.973a6.624 6.624 0 0 0 .265.86 5.297 5.297 0 0 0 .371.761c.696 1.159 1.818 1.927 3.593 1.927 1.497 0 2.633-.671 3.965-2.444.76-1.012 1.144-1.626 2.663-4.32l.756-1.339.186-.325c.061.1.121.196.183.3l2.152 3.595c.724 1.21 1.665 2.556 2.47 3.314 1.046.987 1.992 1.22 3.06 1.22 1.075 0 1.876-.355 2.455-.843a3.743 3.743 0 0 0 .81-.973c.542-.939.861-2.127.861-3.745 0-2.72-.681-5.357-2.084-7.45-1.282-1.912-2.957-2.93-4.716-2.93-1.047 0-2.088.467-3.053 1.308-.652.57-1.257 1.29-1.82 2.05-.69-.875-1.335-1.547-1.958-2.056-1.182-.966-2.315-1.303-3.454-1.303zm10.16 2.053c1.147 0 2.188.758 2.992 1.999 1.132 1.748 1.647 4.195 1.647 6.4 0 1.548-.368 2.9-1.839 2.9-.58 0-1.027-.23-1.664-1.004-.496-.601-1.343-1.878-2.832-4.358l-.617-1.028a44.908 44.908 0 0 0-1.255-1.98c.07-.109.141-.224.211-.327 1.12-1.667 2.118-2.602 3.358-2.602zm-10.201.553c1.265 0 2.058.791 2.675 1.446.307.327.737.871 1.234 1.579l-1.02 1.566c-.757 1.163-1.882 3.017-2.837 4.338-1.191 1.649-1.81 1.817-2.486 1.817-.524 0-1.038-.237-1.383-.794-.263-.426-.464-1.13-.464-2.046 0-2.221.63-4.535 1.66-6.088.454-.687.964-1.226 1.533-1.533a2.264 2.264 0 0 1 1.088-.285z"/></svg>`;
 
 /**
  * Model ids follow the OpenRouter convention (provider/model-slug). Prices are
@@ -199,13 +203,39 @@ const MODELS = [
     supportsReasoning: false,
     reasoningEffortKeys: [],
   },
+  {
+    providerSlug: "meta",
+    modelId: "meta/muse-spark-1.3-contributor",
+    name: "Muse Spark 1.3 Contributor",
+    label: "Muse Spark 1.3",
+    hint: "Agentic • 1M context",
+    description:
+      "Meta Muse Spark 1.3 Contributor — cost-efficient multimodal reasoning for agentic and coding workflows (verified via OpenRouter 2026-09-06). Prompts and outputs may be used to improve Meta's products.",
+    contextWindowTokens: 1_048_576,
+    maxInputTokens: undefined,
+    maxOutputTokens: 943_718,
+    inputPricePerMTokens: "0.10",
+    cachedInputPricePerMTokens: "0.002",
+    outputPricePerMTokens: "0.20",
+    sortOrder: 4,
+    iconSvg: META_ICON_SVG,
+    outputType: "text",
+    inputModalities: ["text", "image", "video", "file", "audio"],
+    outputModalities: ["text"],
+    supportsReasoning: true,
+    // Meta docs: minimal/low/medium/high/xhigh on all tiers; max is
+    // standard-tier only, so the contributor model tops out at xhigh.
+    reasoningEffortKeys: ["minimal", "low", "medium", "high", "xhigh"],
+  },
 ];
 
 const EFFORTS = [
-  { key: "low", label: "Low", description: "Minimal reasoning tokens, fastest response.", sortOrder: 0 },
-  { key: "medium", label: "Medium", description: "Balanced reasoning depth and latency.", sortOrder: 1 },
-  { key: "high", label: "High", description: "Deep reasoning for complex tasks.", sortOrder: 2 },
-  { key: "max", label: "Max", description: "Maximum reasoning depth, highest latency.", sortOrder: 3 },
+  { key: "minimal", label: "Minimal", description: "Shortest reasoning pass, fastest response.", sortOrder: 0 },
+  { key: "low", label: "Low", description: "Minimal reasoning tokens, fastest response.", sortOrder: 1 },
+  { key: "medium", label: "Medium", description: "Balanced reasoning depth and latency.", sortOrder: 2 },
+  { key: "high", label: "High", description: "Deep reasoning for complex tasks.", sortOrder: 3 },
+  { key: "xhigh", label: "Extra High", description: "Deeper reasoning beyond high (Meta xhigh).", sortOrder: 4 },
+  { key: "max", label: "Max", description: "Maximum reasoning depth, highest latency.", sortOrder: 5 },
 ];
 
 /** Canonical, prisma-ready shape of a ChatModel row used for diff + upsert. */

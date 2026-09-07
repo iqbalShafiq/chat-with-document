@@ -1,11 +1,21 @@
 import {
-  createChatTransport,
-  EventStreamHttpError,
   initialMessagesFromMemory,
   useChat,
 } from "@anvia/react";
-import type { UIAttachment, UIMessage, UIMessagePart } from "@anvia/react";
-import { ChatProvider, Composer, Thread } from "@anvia/react-ui";
+import type {
+  ClientStreamEvent,
+  ClientMetadataSchema,
+  UIAttachment,
+  UIMessage,
+  UIMessagePart,
+} from "@anvia/client";
+import { parseUIMessages } from "@anvia/client";
+import type { UseChatResult } from "@anvia/react";
+import {
+  ChatProvider,
+  ComposerPrimitive,
+  ThreadPrimitive,
+} from "@anvia/react-ui";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { AnimatedStatusText } from "#/components/chat/animated-status-text";
@@ -24,15 +34,15 @@ import {
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
 import { AppShell } from "#/components/layout/app-shell";
-import { DocChatMark } from "#/components/layout/doc-chat-mark";
+import { AnrealMark } from "#/components/layout/anreal-brand";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
-  decideApproval,
   deleteChatSession,
   fetchContextUsage,
   fetchRunStatus,
+  fetchInteractionStatus,
   fetchChatCapabilities,
   getOrCreateEmptyChatSession,
   getProject,
@@ -84,7 +94,7 @@ import {
   type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
-import { authClient, type SessionUser } from "#/lib/auth-client";
+import { consumeWorkspaceUser, getSessionUser } from "#/lib/auth-session";
 import {
   parseMessageCitations,
   validateCitationsAgainstSession,
@@ -94,8 +104,33 @@ import {
   readChatMessageMeta,
   withChatMessageMeta,
 } from "#/lib/chat/message-metadata";
+import {
+  createAnviaChatTransport,
+  isAuthFailure,
+  isRunActiveConflict,
+  requireChatReasoningEffort,
+  stopChatPreservingMessages,
+  type ChatClientMetadata,
+  type ChatRequestMetadata,
+} from "#/lib/chat/anvia-transport";
+import {
+  createInteractionResumeStorage,
+  discardChatResumeSnapshot,
+  peekPendingResumeInteractionIds,
+} from "#/lib/chat/interaction-resume-storage";
+import {
+  ChatDataSchemas,
+  ChatStreamMetadataSchema,
+  type ChatDataMap,
+} from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { failedTailTruncate } from "#/lib/chat/failed-tail";
+import {
+  blocksDestructiveSessionAction,
+  sessionFreshnessFromCount,
+  type SessionFreshness,
+} from "#/lib/chat/session-freshness";
 import {
   nextFlushableItem,
   pendingBeforeEditing,
@@ -158,25 +193,48 @@ import {
 
 const SESSIONS_PAGE_SIZE = 30;
 
+type ChatUIMessage = UIMessage<ChatClientMetadata, ChatDataMap>;
+type ChatTransport = ReturnType<typeof createAnviaChatTransport>;
+type ChatController = UseChatResult<ChatTransport>;
+type MemoryMessages = Parameters<typeof initialMessagesFromMemory>[0];
+
+const ChatClientMetadataSchema: ClientMetadataSchema<ChatClientMetadata> = {
+  safeParse(value) {
+    const streamMetadata = ChatStreamMetadataSchema.safeParse(value);
+    if (streamMetadata.success) return streamMetadata;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return { success: false, error: { message: "Invalid chat metadata" } };
+    }
+    return {
+      success: true,
+      data: readChatMessageMeta(value),
+    };
+  },
+};
+
+function parseMemoryMessages(value: unknown): ChatUIMessage[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Chat history must be an array of Anvia messages");
+  }
+  const memoryMessages = value as MemoryMessages;
+  return parseUIMessages(initialMessagesFromMemory(memoryMessages), {
+    metadataSchema: ChatClientMetadataSchema,
+    dataSchemas: ChatDataSchemas,
+  });
+}
+
 export const Route = createFileRoute("/")({
   component: Home,
   beforeLoad: async () => {
-    const session = await authClient.getSession();
-    if (!session.data?.user) {
+    const user = consumeWorkspaceUser() ?? (await getSessionUser());
+    if (!user) {
       throw redirect({
         to: "/login",
         search: { redirect: "/" },
         viewTransition: true,
       });
     }
-    return {
-      user: {
-        id: session.data.user.id,
-        email: session.data.user.email,
-        name: session.data.user.name,
-        image: session.data.user.image ?? null,
-      } satisfies SessionUser,
-    };
+    return { user };
   },
 });
 
@@ -195,7 +253,7 @@ function metadataKind(metadata: UIMessage["metadata"]): string | undefined {
 }
 
 /** Raw text of the most recent user message, for prefill after a failed run. */
-function failedUserMessageText(messages: UIMessage[]): string | null {
+function failedUserMessageText(messages: readonly UIMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role === "user") return getMessageRawText(message);
@@ -263,7 +321,7 @@ function Home() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(
+  const [initialMessages, setInitialMessages] = useState<ChatUIMessage[] | null>(
     null,
   );
   const [viewMode, setViewMode] = useState<WorkspaceViewMode>(
@@ -344,7 +402,7 @@ function Home() {
         if (!silent && (inProject || inStandalone)) {
           const activeInList = items.some((s) => s.sessionId === activeId);
           if (!activeInList) {
-            const empty = findEmptyNewChat(items);
+            const empty = findEmptyNewChat(items, activeRunsRef.current);
             if (empty) {
               setSessionId(empty.sessionId);
             } else if (items[0]) {
@@ -585,7 +643,7 @@ function Home() {
         if (!cancelled) {
           setInitialMessages(
             finalizeInterruptedTools(
-              initialMessagesFromMemory(data as never),
+              parseMemoryMessages(data),
             ),
           );
         }
@@ -674,7 +732,7 @@ function Home() {
 
     // Prefer client-visible empty draft first (fast path).
     if (viewMode === "standalone" || viewMode === "project-workspace") {
-      const empty = findEmptyNewChat(sessions);
+      const empty = findEmptyNewChat(sessions, activeRuns);
       if (empty) {
         if (empty.sessionId !== sessionId) {
           setSessionId(empty.sessionId);
@@ -769,7 +827,7 @@ function Home() {
           });
           if (page.items.length > 0) {
             // Prefer existing empty draft in this project, else most recent chat.
-            const empty = findEmptyNewChat(page.items);
+            const empty = findEmptyNewChat(page.items, activeRunsRef.current);
             const pick = empty ?? page.items[0]!;
             setSessionId(pick.sessionId);
             setSessions(page.items);
@@ -842,7 +900,7 @@ function Home() {
         const rest = sessionsRef.current.filter(
           (s) => s.sessionId !== targetSessionId,
         );
-        const empty = findEmptyNewChat(rest);
+        const empty = findEmptyNewChat(rest, activeRunsRef.current);
         const replacement = empty ?? rest[0] ?? null;
         if (replacement) {
           setSessionId(replacement.sessionId);
@@ -919,8 +977,13 @@ function Home() {
       return false;
     }
     const active = sessions.find((s) => s.sessionId === sessionId);
-    return active ? isEmptyNewChat(active) : activeSessionTitle === EMPTY_CHAT_TITLE;
-  }, [activeSessionTitle, sessionId, sessions, viewMode]);
+    const emptyDraft = active
+      ? isEmptyNewChat(active)
+      : activeSessionTitle === EMPTY_CHAT_TITLE;
+    // A draft with a stuck/active run is not a usable blank chat — keep
+    // New chat enabled so the user can escape to a fresh session.
+    return emptyDraft && !activeRuns.has(sessionId);
+  }, [activeRuns, activeSessionTitle, sessionId, sessions, viewMode]);
 
   const showChatRoom =
     workspaceReady &&
@@ -963,7 +1026,7 @@ function Home() {
             key="workspace-loading"
             className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
           >
-            <DocChatMark className="opacity-80" />
+            <AnrealMark className="opacity-80" />
             <div className="skeleton-shimmer h-4 w-40 rounded-full" />
             <p className="text-sm text-text-muted">Restoring workspace…</p>
           </div>
@@ -983,12 +1046,12 @@ function Home() {
         ) : null}
 
         {showChatRoom ? (
-          initialMessages === null ? (
+          !sessionId || initialMessages === null ? (
             <div
               key="chat-loading"
               className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
             >
-              <DocChatMark className="opacity-80" />
+              <AnrealMark className="opacity-80" />
               <div className="skeleton-shimmer h-4 w-40 rounded-full" />
               <p className="text-sm text-text-muted">Loading conversation…</p>
             </div>
@@ -1039,7 +1102,7 @@ function ChatSession({
 }: {
   sessionId: string;
   projectId?: string | null;
-  initialMessages: UIMessage[];
+  initialMessages: ChatUIMessage[];
   models: ModelInfo[];
   reasoningEfforts: ReasoningEffortInfo[];
   modelsStatus: "loading" | "success" | "error";
@@ -1051,18 +1114,20 @@ function ChatSession({
     actions: ImagePreviewContextActions | null,
   ) => void;
   /** Replaces the loaded conversation (fresh history after a stale dialog). */
-  onReloadMessages?: (messages: UIMessage[]) => void;
+  onReloadMessages?: (messages: ChatUIMessage[]) => void;
 }) {
-  const composerInputRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
-  const wasStreamingRef = useRef(false);
+  const wasActiveRunRef = useRef(false);
   const [ingestionItems, setIngestionItems] = useState<IngestionItem[]>([]);
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
   );
   const [sessionImages, setSessionImages] = useState<GeneratedImageMeta[]>([]);
   const [sessionImagesError, setSessionImagesError] = useState(false);
+  const [interactionReconcileVersion, setInteractionReconcileVersion] =
+    useState(0);
   const [activeContextImages, setActiveContextImages] = useState<
     GeneratedImageMeta[]
   >([]);
@@ -1089,20 +1154,25 @@ function ChatSession({
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
-  const [compaction, setCompaction] = useState<{
-    phase: "idle" | "start" | "complete" | "error";
-  }>({ phase: "idle" });
+  const [hydratedResumePolicy, setHydratedResumePolicy] = useState<{
+    modelId: string;
+    reasoningEffort: string | null;
+  } | null>(null);
   const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
     initialDeepResearchActivityState,
   );
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
-  const [contextUsageError, setContextUsageError] = useState(false);
   const [previousRunError, setPreviousRunError] = useState(false);
-  /** Latest model/effort for createRequest (avoids stale closures). */
+  /** Latest request policy for the v1 transport (avoids stale closures). */
   const selectedModelRef = useRef(selectedModel);
   const selectedReasoningEffortRef = useRef(selectedReasoningEffort);
+  /** Latest catalog for synchronous model-switch fallback (avoids stale closures). */
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const reasoningEffortsRef = useRef(reasoningEfforts);
+  reasoningEffortsRef.current = reasoningEfforts;
   const webSearchEnabledRef = useRef(webSearchEnabled);
   const deepResearchEnabledRef = useRef(deepResearchEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
@@ -1113,13 +1183,28 @@ function ChatSession({
   deepResearchEnabledRef.current = deepResearchEnabled;
   imageGenerationEnabledRef.current = imageGenerationEnabled;
   imageGenSettingsRef.current = imageGenSettings;
+  /** Last submitted turn's document subset for native interaction responses. */
+  const lastSubmittedDocumentIdsRef = useRef<string[]>(
+    (() => {
+      for (let index = initialMessages.length - 1; index >= 0; index -= 1) {
+        const message = initialMessages[index];
+        if (message?.role === "user") {
+          return documentIdsFromMetadata(message.metadata);
+        }
+      }
+      return [];
+    })(),
+  );
   /** Latest chat messages for stable event handlers (see handleChatEvent). */
-  const messagesRef = useRef<UIMessage[]>([]);
+  const messagesRef = useRef<readonly ChatUIMessage[]>([]);
   /** Latest chat controller for stable event handlers (see onError / stop). */
-  const chatRef = useRef<ReturnType<typeof useChat> | null>(null);
+  const chatRef = useRef<ChatController | null>(null);
+  /** useChat reports transport failures through onError instead of rejecting sendMessage. */
+  const chatRequestFailedRef = useRef(false);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
+  const resumedSessionRef = useRef<string | null>(null);
   const contextUsageVersionRef = useRef(0);
   /** Deferred composer prefill after a streamed run failure (editor is read-only while streaming). */
   const pendingFailedTextRef = useRef<string | null>(null);
@@ -1138,7 +1223,7 @@ function ChatSession({
   const pendingManualSubmitRef = useRef<{
     input: string;
     attachments: UIAttachment[];
-    chatController: ReturnType<typeof useChat>;
+    chatController: ChatController;
     clear: () => void;
   } | null>(null);
   const [editHydration, setEditHydration] = useState<{
@@ -1236,46 +1321,54 @@ function ChatSession({
 
   const chatTransport = useMemo(
     () =>
-      createChatTransport({
+      createAnviaChatTransport({
         endpoint: `${API_BASE}/api/chat`,
-        format: "jsonl",
-        init: { credentials: "include" },
-        body: (request) => JSON.stringify(request),
-        headers: { "content-type": "application/json" },
+        getRequestMetadata: (request): ChatRequestMetadata => {
+          if (request.type === "messages") {
+            const last = request.messages.at(-1);
+            if (last?.role === "user") {
+              lastSubmittedDocumentIdsRef.current = documentIdsFromMetadata(
+                last.metadata,
+              );
+            }
+          }
+          return {
+            sessionId,
+            documentIds: lastSubmittedDocumentIdsRef.current,
+            modelId: selectedModelRef.current,
+            reasoningEffort: requireChatReasoningEffort(
+              selectedReasoningEffortRef.current,
+            ),
+            webSearchEnabled: webSearchEnabledRef.current,
+            imageGenerationEnabled: imageGenerationEnabledRef.current,
+            deepResearchEnabled: deepResearchEnabledRef.current,
+            imageGenSettings: imageGenerationEnabledRef.current
+              ? imageGenSettingsRef.current
+              : null,
+          };
+        },
       }),
-    [],
+    [sessionId],
   );
 
-  /** Writes failed-run text into the composer editor (same selector as focusComposer). */
+  /** Writes failed-run text through the public v1 textarea composer contract. */
   const setComposerInputText = useCallback((text: string) => {
-    let attempts = 0;
-
-    const trySet = () => {
-      const editor = composerInputRef.current?.querySelector<HTMLElement>(
-        "[data-anvia-composer-editor]",
-      );
-      if (editor) {
-        editor.textContent = text;
-        editor.dispatchEvent(
-          new InputEvent("input", {
-            bubbles: true,
-            inputType: "insertText",
-            data: text,
-          }),
-        );
-        return;
-      }
-      if (attempts++ < 20) {
-        requestAnimationFrame(trySet);
-      }
-    };
-
-    trySet();
+    const textarea = composerInputRef.current;
+    if (!textarea) return;
+    textarea.value = text;
+    textarea.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text,
+      }),
+    );
   }, []);
 
   /** Fetch context usage once; shared by the polling effect and message_end. */
   const refreshContextUsage = useCallback(async () => {
     if (modelsStatusRef.current !== "success") return;
+    if (!selectedModelRef.current) return;
     const version = ++contextUsageVersionRef.current;
     try {
       const usage = await fetchContextUsage({
@@ -1285,68 +1378,37 @@ function ChatSession({
       });
       if (version !== contextUsageVersionRef.current) return;
       setContextUsage(usage);
-      setContextUsageError(false);
     } catch {
+      // Fresh chats and catalog races must not banner the composer.
       if (version === contextUsageVersionRef.current) {
-        setContextUsageError(true);
+        setContextUsage(null);
       }
     }
   }, [sessionId]);
 
   const handleChatEvent = useCallback(
-    (event: unknown) => {
-      if (!event || typeof event !== "object") return;
-      const record = event as Record<string, unknown>;
-      if (record.type === "compaction") {
-        const phase =
-          record.phase === "start"
-            ? "start"
-            : record.phase === "complete"
-              ? "complete"
-              : record.phase === "error"
-                ? "error"
-                : "idle";
-        setCompaction({ phase });
-        return;
-      }
-      if (record.type === "deep_research_progress") {
-        setDeepResearch((state) =>
-          reduceDeepResearchProgress(state, {
-            phase: record.phase,
-            message:
-              typeof record.message === "string"
-                ? record.message
-                : "Deep Research is running",
-            activities: record.activities,
-            stats: record.stats,
-          }),
-        );
-        return;
-      }
-      if (record.type === "message_end") {
-        setDeepResearch(resetDeepResearchActivity());
-        void refreshContextUsage();
-        return;
-      }
-      if (record.type === "queued_message_applied") {
-        const clientMessageId =
-          typeof record.clientMessageId === "string"
-            ? record.clientMessageId
-            : null;
-        if (clientMessageId) {
-          const item = queuedItemsRef.current.find(
-            (entry) => entry.id === clientMessageId,
-          );
-          if (item) {
+    (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
+      if (event.type === "data") {
+        switch (event.name) {
+          case "deepResearchProgress":
+            setDeepResearch((state) =>
+              reduceDeepResearchProgress(state, event.data),
+            );
+            return;
+          case "queuedMessageApplied": {
+            const item = queuedItemsRef.current.find(
+              (entry) => entry.id === event.data.clientMessageId,
+            );
+            if (!item) return;
             chatRef.current?.setMessages((current) => {
               const exists = current.some(
                 (message) =>
                   message.role === "user" &&
                   readChatMessageMeta(message.metadata).clientMessageId ===
-                    clientMessageId,
+                    event.data.clientMessageId,
               );
               if (exists) return current;
-              const parts: UIMessage["parts"] = [
+              const parts: UIMessagePart<ChatDataMap>[] = [
                 ...item.attachments.map((attachment) => ({
                   id: crypto.randomUUID(),
                   type: "attachment" as const,
@@ -1367,8 +1429,7 @@ function ChatSession({
                   role: "user",
                   parts,
                   metadata: withChatMessageMeta(undefined, {
-                    sessionId,
-                    clientMessageId,
+                    clientMessageId: event.data.clientMessageId,
                     createdAt: new Date().toISOString(),
                     documentIds: item.documentIds,
                     ...(item.contextSnippet
@@ -1378,96 +1439,75 @@ function ChatSession({
                 },
               ];
             });
-            queueActions.applyAck(clientMessageId);
-            if (item.attachments.length > 0) void refreshSessionImages();
+            queueActions.applyAck(event.data.clientMessageId);
+            if (event.data.attachmentCount > 0) {
+              void refreshSessionImages();
+            }
+            return;
           }
         }
         return;
       }
-      if (record.type === "error") {
-        const errorText =
-          record.error instanceof Error
-            ? record.error.message
-            : typeof record.error === "string"
-              ? record.error
-              : "The agent run failed";
-        setComposerError(`Run failed: ${errorText}`);
-        setQueueHold(true);
-        const failedText = failedUserMessageText(messagesRef.current);
-        if (failedText !== null) {
-          // The editor is read-only while streaming; apply once the stream ends.
-          pendingFailedTextRef.current = failedText;
-        }
+
+      switch (event.type) {
+        case "message_end":
+          setDeepResearch(resetDeepResearchActivity());
+          void refreshContextUsage();
+          return;
+        case "error":
+          setComposerError(`Run failed: ${event.error.message}`);
+          setQueueHold(true);
+          {
+            const failedText = failedUserMessageText(messagesRef.current);
+            if (failedText !== null) {
+              // The editor is read-only while streaming; apply once the stream ends.
+              pendingFailedTextRef.current = failedText;
+            }
+          }
+          return;
+        default:
+          return;
       }
     },
     [queueActions, refreshContextUsage, refreshSessionImages],
   );
 
+  const interactionResumeStorage = useMemo(
+    () => createInteractionResumeStorage(window.sessionStorage),
+    [],
+  );
+
   const chat = useChat({
     transport: chatTransport,
     initialMessages,
-        // Resume is driven explicitly by the run-status join effect: a stale
-        // snapshot must never replace the fresh history load (which carries
-        // compaction dividers / final messages).
-        resume: { key: sessionId, storage: "sessionStorage", auto: false },
-    createRequest: ({ coreMessages, uiMessages, resume }) => {
-      const last = uiMessages.at(-1);
-      const documentIds = documentIdsFromMetadata(last?.metadata);
-
-      return {
-        messages: coreMessages,
-        stream: true as const,
-        sessionId,
-        documentIds,
-        model: selectedModelRef.current,
-        reasoningEffort: selectedReasoningEffortRef.current,
-        webSearchEnabled: webSearchEnabledRef.current,
-        imageGenerationEnabled: imageGenerationEnabledRef.current,
-        deepResearchEnabled: deepResearchEnabledRef.current,
-        imageGenSettings: imageGenSettingsRef.current,
-        ...(resume ? { resume } : {}),
-      };
-    },
-    humanInput: {
-      // Custom decideApproval: defaultDecideApproval fetches without
-      // credentials, which 401s cross-origin (platform :3000 → API :3001).
-      // The api.ts helper sends credentials: "include", maps 401 →
-      // ApiAuthError, and carries optional grantScope/overrideArgs.
-      decideApproval: async (decision) => {
-        await decideApproval(decision);
-        // Server replies { ok: true } — not a ToolApproval. The stream event
-        // carries the resolved approval state, so nothing to return here.
-        return undefined;
-      },
-    },
+    // Resume is driven explicitly by the run-status join effect; the v1
+    // controller owns the version-3 snapshot and canonical request.
+    resume: { key: sessionId, storage: interactionResumeStorage, auto: false },
     onEvent: handleChatEvent,
     onError: (error) => {
+      chatRequestFailedRef.current = true;
       if (error instanceof ApiAuthError) {
         onAuthFailure();
         return;
       }
-      if (error instanceof EventStreamHttpError && error.response.status === 409) {
+      if (isAuthFailure(error)) {
+        onAuthFailure();
+        return;
+      }
+      if (isRunActiveConflict(error)) {
         // Another tab already holds the active-run lock for this session.
-        let runActive = true;
-        try {
-          const parsed: unknown = JSON.parse(error.body);
-          runActive =
-            typeof parsed === "object" &&
-            parsed !== null &&
-            (parsed as { code?: unknown }).code === "RUN_ACTIVE";
-        } catch {
-          // Unparseable body — fall back to the status check alone.
-        }
-        if (runActive) {
-          setComposerError(
-            "This session is already being processed in another tab.",
-          );
-          chatRef.current?.setMessages((current) => {
-            const last = current.at(-1);
-            if (!last || last.role !== "user") return current;
-            return current.slice(0, -1);
-          });
-        }
+        setComposerError(
+          "This session is already being processed in another tab.",
+        );
+        chatRef.current?.setMessages((current) => {
+          const last = current.at(-1);
+          if (!last || last.role !== "user") return current;
+          return current.slice(0, -1);
+        });
+        return;
+      }
+      if (error.name !== "AbortError") {
+        setComposerError("The chat request could not be completed.");
       }
     },
   });
@@ -1481,32 +1521,60 @@ function ChatSession({
 
   const resumeChatRef = useRef(chat.resume);
   resumeChatRef.current = chat.resume;
+  const stopInFlightRef = useRef(false);
 
-  /**
-   * Stop button: ask the worker to end the run (including any pending
-   * approval / clarification waiters), finalize in-flight tool cards so they
-   * do not stay forever-"Working", then reset the local chat controller so
-   * status returns to idle and human-input panels close. `chat.stop()` alone
-   * aborts the fetch but leaves pending approvals/clarifications open and
-   * leaves tool parts at `input-available`. Composer.Stop still calls
-   * `chat.stop()` after this — harmless double abort.
-   */
+  useEffect(() => {
+    if (chat.status !== "submitted" && chat.status !== "streaming") {
+      stopInFlightRef.current = false;
+    }
+  }, [chat.status]);
+
+  /** Stop the server run, abort the v1 stream, and finalize visible tool cards. */
   const handleStopRun = useCallback(() => {
+    if (stopInFlightRef.current) return;
     const current = chatRef.current;
     if (!current) return;
+    stopInFlightRef.current = true;
     const streamId = current.streamId;
-    if (streamId) {
-      void stopChatRun(streamId).catch(() => {
-        // best-effort: local reset still stops the client stream
-      });
-    }
-    current.reset(finalizeInterruptedTools(current.messages));
-    setQueueHold(true);
-  }, []);
+    void (async () => {
+      try {
+        if (streamId) await stopChatRun(streamId, sessionId);
+      } catch (error) {
+        setComposerError(
+          error instanceof Error ? error.message : "The chat run could not be stopped.",
+        );
+      } finally {
+        stopChatPreservingMessages(
+          {
+            messages: current.messages,
+            stop: () => current.stop(),
+            setMessages: (messages) => current.setMessages([...messages]),
+          },
+          (messages) => finalizeInterruptedTools([...messages]),
+        );
+        setQueueHold(true);
+      }
+    })();
+  }, [sessionId]);
 
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
     persistSelectedModel(model);
+    // Resolve the reasoning effort against the NEW model's supported set
+    // immediately, so no request (chat or context-usage) can carry the
+    // previous model's stale effort (e.g. max on the Meta contributor tier).
+    const nextModel = modelById(modelsRef.current, model);
+    if (nextModel) {
+      const next = resolveReasoningFallback(
+        selectedReasoningEffortRef.current,
+        nextModel.reasoningEfforts,
+        reasoningEffortsRef.current,
+      );
+      if (next !== selectedReasoningEffortRef.current) {
+        setSelectedReasoningEffort(next);
+        persistSelectedReasoningEffort(next);
+      }
+    }
   }, []);
 
   const handleReasoningChange = useCallback((effort: string | null) => {
@@ -1603,26 +1671,21 @@ function ChatSession({
   );
 
   const focusComposer = useCallback(() => {
-    let attempts = 0;
-
-    const tryFocus = () => {
-      const editor = composerInputRef.current?.querySelector<HTMLElement>(
-        "[data-anvia-composer-editor]",
-      );
-      if (editor) {
-        editor.focus();
-        return;
-      }
-      if (attempts++ < 20) {
-        requestAnimationFrame(tryFocus);
-      }
-    };
-
-    tryFocus();
+    composerInputRef.current?.focus();
   }, []);
 
+  const handleStarterPrompt = useCallback(
+    (prompt: string) => {
+      setComposerInputText(prompt);
+      focusComposer();
+    },
+    [focusComposer, setComposerInputText],
+  );
+
   useEffect(() => {
-    if (wasStreamingRef.current && chat.status !== "streaming") {
+    const activeRun =
+      chat.status === "submitted" || chat.status === "streaming";
+    if (wasActiveRunRef.current && !activeRun) {
       // Stamp createdAt + dual-write citations on the latest assistant turn.
       const sessionDocIds = new Set(sessionDocuments.map((d) => d.id));
       chat.setMessages((messages) => {
@@ -1672,7 +1735,7 @@ function ChatSession({
       }
       focusComposer();
     }
-    wasStreamingRef.current = chat.status === "streaming";
+    wasActiveRunRef.current = activeRun;
   }, [
     chat.setMessages,
     chat.status,
@@ -1697,9 +1760,7 @@ function ChatSession({
     setAttachmentErrors([]);
     setIsIngesting(false);
     setContextUsage(null);
-    setContextUsageError(false);
-    setCompaction({ phase: "idle" });
-    setDeepResearch({ phase: "idle", message: "" });
+    setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
     void refreshSessionDocuments();
     void refreshSessionImages();
@@ -1746,6 +1807,11 @@ function ChatSession({
   // change, resolve a supported fallback for the new model and persist both.
   useEffect(() => {
     if (!activeModel) return;
+    // Model and effort form one policy tuple in persisted interaction recipes.
+    // On reload React applies the stored model asynchronously; do not map the
+    // stored effort through the temporary default model in the intervening
+    // render or a pending interaction will resume with mismatched metadata.
+    if (activeModel.modelId !== readSelectedModel(models)) return;
     const base = reasoningInitializedRef.current
       ? selectedReasoningEffortRef.current
       : readSelectedReasoningEffort(activeModel.reasoningEfforts);
@@ -1759,7 +1825,19 @@ function ChatSession({
       setSelectedReasoningEffort(next);
       persistSelectedReasoningEffort(next);
     }
-  }, [activeModel, reasoningEfforts]);
+    setHydratedResumePolicy((current) =>
+      current?.modelId === activeModel.modelId &&
+      current.reasoningEffort === next
+        ? current
+        : { modelId: activeModel.modelId, reasoningEffort: next },
+    );
+  }, [activeModel, models, reasoningEfforts]);
+
+  const resumePolicyReady =
+    modelsStatus === "success" &&
+    activeModel !== null &&
+    hydratedResumePolicy?.modelId === selectedModel &&
+    hydratedResumePolicy.reasoningEffort === selectedReasoningEffort;
 
   // Poll context usage every 30s while the catalog is available.
   useEffect(() => {
@@ -1779,48 +1857,62 @@ function ChatSession({
   }, [selectedModel, selectedReasoningEffort, modelsStatus, refreshContextUsage]);
 
   // Rejoin a still-running run on load (closed-tab recovery) and surface a
-  // banner for a run that failed server-side. "missing" behaves as idle.
+  // banner for a run that failed server-side. The v1 continuation recipe
+  // includes the exact model/reasoning tuple, so never resume until the stored
+  // policy has been hydrated through the live catalog. "missing" is idle.
   useEffect(() => {
+    if (!resumePolicyReady || resumedSessionRef.current === sessionId) return;
     let cancelled = false;
     void (async () => {
+      let status: Awaited<ReturnType<typeof fetchRunStatus>> | null = null;
       try {
-        const status = await fetchRunStatus(sessionId);
-        if (cancelled) return;
-        if (status.status === "error") {
-          setPreviousRunError(true);
-        }
-        const key = `anvia:chat-resume:${sessionId}`;
-        if (status.status === "running" && status.streamId) {
-          const stored = sessionStorage.getItem(key);
-          if (!stored) {
-            sessionStorage.setItem(
-              key,
-              JSON.stringify({
-                version: 1,
-                streamId: status.streamId,
-                lastEventId: 0,
-                messages: messagesRef.current,
-              }),
-            );
-          }
-          // Join regardless of whether a state snapshot already exists
-          // (auto-resume is off; this is the only rejoin path).
-          void resumeChatRef.current();
-        } else {
-          // No active run: drop any leftover resume snapshot so it can never
-          // replace the fresh history load (e.g. compaction dividers) on a
-          // later mount.
-          sessionStorage.removeItem(key);
-        }
+        status = await fetchRunStatus(sessionId);
       } catch {
-        // ignore — resume state (if any) still handles rejoin
+        // Run status is advisory; the persisted v3 snapshot remains the
+        // authoritative browser-side input for controller restoration.
+      }
+      if (cancelled) return;
+      if (status?.status === "error") {
+        setPreviousRunError(true);
+      }
+      try {
+        // sessionStorage keeps a suspended approval after refresh. Redis may
+        // already have expired it — drop the snapshot so the card does not
+        // return as a live prompt.
+        const pendingIds = peekPendingResumeInteractionIds(
+          window.sessionStorage,
+          sessionId,
+        );
+        if (pendingIds.length > 0) {
+          const statuses = await Promise.all(
+            pendingIds.map((id) => fetchInteractionStatus(id)),
+          );
+          const anyLive = statuses.some((status) => status === "pending");
+          if (!anyLive) {
+            discardChatResumeSnapshot(window.sessionStorage, sessionId);
+            if (status?.status !== "running") return;
+          }
+        }
+        // A native suspended interaction is terminal from the worker's
+        // perspective but still resumable by the user. The custom storage
+        // retains that v3 snapshot, so always let the controller restore it.
+        await resumeChatRef.current();
+      } catch {
+        if (!cancelled) {
+          setComposerError(
+            status?.status === "running" && status.streamId
+              ? "This active run could not be resumed in this browser. Reload the session to recover it."
+              : "Saved run state could not be restored. Reload the session to retry.",
+          );
+        }
+      } finally {
+        if (!cancelled) resumedSessionRef.current = sessionId;
       }
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once per sessionId
-  }, [sessionId]);
+  }, [resumePolicyReady, sessionId]);
 
   // Prefill the composer from a persisted failed [user, assistant error] tail.
   useEffect(() => {
@@ -1842,7 +1934,9 @@ function ChatSession({
   // ─── Stale-session guard (freshness check before send) ───────────────────
   // The server memory is the source of truth; another window/device may have
   // appended messages. Compare persisted counts: stale ⟺ server has MORE
-  // messages than this view knows. Fail-open when the fetch fails.
+  // messages than this view knows. Destructive truncate/resubmit fails closed
+  // when freshness cannot be proven. Ordinary sends still notice stale views
+  // after the non-destructive append.
   const [staleDialog, setStaleDialog] = useState<{
     kind: "send" | "resubmit";
   } | null>(null);
@@ -1854,7 +1948,7 @@ function ChatSession({
     (
       input: string,
       attachments: UIAttachment[],
-      chat: ReturnType<typeof useChat>,
+      chat: ChatController,
       clear: () => void,
     ) => Promise<void>
   >(async () => {});
@@ -2131,6 +2225,21 @@ function ChatSession({
     ],
   );
 
+  /** Application-owned submit boundary for an already running v1 chat. */
+  const handleActiveComposerSubmit = useCallback(
+    async (input: string, attachments: UIAttachment[]) => {
+      const editing = queuedItemsRef.current.find(
+        (item) => item.status === "editing",
+      );
+      if (editing) {
+        await handleSubmitQueueEdit(input, attachments);
+        return;
+      }
+      await queueComposerDraft({ input, attachments });
+    },
+    [handleSubmitQueueEdit, queueComposerDraft],
+  );
+
   /** Abort a queue edit: back to pending, composer cleared, context restored. */
   const handleQueueCancelEdit = useCallback(
     (id: string) => {
@@ -2358,10 +2467,10 @@ function ChatSession({
 
       const contextSnippet = contextSnippetState.snippet;
 
+      chatRequestFailedRef.current = false;
       const sendPromise = chatRef.current!.sendMessage({
         text: input.text,
         metadata: withChatMessageMeta(undefined, {
-          sessionId,
           documentIds,
           attachedDocuments,
           createdAt: new Date().toISOString(),
@@ -2390,6 +2499,9 @@ function ChatSession({
         contextSnippetState.reset();
       }
       await sendPromise;
+      if (chatRequestFailedRef.current) {
+        throw new Error("The chat request could not be completed.");
+      }
 
       if (input.pinnedImageIds.length > 0) {
         await refreshActiveContext();
@@ -2416,7 +2528,7 @@ function ChatSession({
    * a fresh run (queue-held items wait for "Send now" / hold release).
    */
   useEffect(() => {
-    if (chat.status !== "idle") return;
+    if (chat.status !== "ready") return;
     if (!initialMessages) return;
     if (queueHold || autoFlushBusyRef.current) return;
     if (nextFlushableItem(queuedItemsRef.current) === null) return;
@@ -2493,38 +2605,72 @@ function ChatSession({
     sessionId,
   ]);
 
-  const isSessionStale = useCallback(async (): Promise<boolean> => {
+  const checkSessionFreshness = useCallback(async (): Promise<SessionFreshness> => {
     try {
       const state = await fetchSessionState(sessionId);
       const localCount = messagesRef.current.filter(
         (message) => message.role === "user" || message.role === "assistant",
       ).length;
-      return state.messageCount > localCount;
+      return sessionFreshnessFromCount(state.messageCount, localCount);
     } catch {
-      // Fail-open: an unreachable server must never block sending.
-      return false;
+      return "unknown";
     }
   }, [sessionId]);
 
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
-    try {
-      const data = await loadChatMessages(sessionId);
-      const fresh = finalizeInterruptedTools(
-        initialMessagesFromMemory(data as never),
-      );
-      onReloadMessages?.(fresh);
-      chatRef.current?.setMessages(fresh);
-    } catch {
-      // keep the current view on failure
-    }
+    const data = await loadChatMessages(sessionId);
+    const fresh = finalizeInterruptedTools(parseMemoryMessages(data));
+    onReloadMessages?.(fresh);
+    chatRef.current?.setMessages(fresh);
   }, [sessionId, onReloadMessages]);
+
+  /**
+   * A resumed interaction is a separate v3 stream. Once it settles, replace
+   * the optimistic suspended snapshot with authoritative native memory and
+   * refresh persisted image metadata. This keeps tool output/state attached
+   * to its original message without prompt/time-based reconciliation.
+   */
+  const requestSettledInteractionReconcile = useCallback(async () => {
+    setInteractionReconcileVersion((version) => version + 1);
+  }, []);
+
+  const reconciledInteractionVersionRef = useRef(0);
+  useEffect(() => {
+    if (chat.status !== "ready") return;
+    if (
+      interactionReconcileVersion <= reconciledInteractionVersionRef.current
+    ) {
+      return;
+    }
+    const version = interactionReconcileVersion;
+    reconciledInteractionVersionRef.current = version;
+    void (async () => {
+      try {
+        await reloadChatFromServer();
+        await refreshSessionImages();
+      } catch {
+        if (reconciledInteractionVersionRef.current === version) {
+          setComposerError(
+            "The completed interaction could not be synchronized. Reload the conversation.",
+          );
+        }
+      }
+    })();
+  }, [
+    chat.status,
+    interactionReconcileVersion,
+    refreshSessionImages,
+    reloadChatFromServer,
+  ]);
 
   const handleStaleReload = useCallback(() => {
     setStaleDialog(null);
     setEditingMessageId(null);
     setEditContextImages([]);
-    void reloadChatFromServer();
+    void reloadChatFromServer().catch(() => {
+      setComposerError("The conversation could not be reloaded.");
+    });
   }, [reloadChatFromServer]);
 
   /**
@@ -2546,7 +2692,10 @@ function ChatSession({
       if (!currentChat) {
         throw new Error("Chat is not ready");
       }
-      if (currentChat.status === "streaming") {
+      if (
+        currentChat.status === "submitted" ||
+        currentChat.status === "streaming"
+      ) {
         throw new Error("Wait for the current reply to finish");
       }
 
@@ -2567,9 +2716,16 @@ function ChatSession({
         throw new Error("Message cannot be empty");
       }
 
-      // Freshness guard: resubmitting from a stale view would truncate the
-      // newer messages added by another window/device — block until reload.
-      if (await isSessionStale()) {
+      // Freshness guard: resubmitting from a stale or unverified view would
+      // truncate newer messages added by another window/device.
+      const freshness = await checkSessionFreshness();
+      if (blocksDestructiveSessionAction(freshness)) {
+        if (freshness === "unknown") {
+          setComposerError(
+            "Could not verify this conversation is current. Reload and try again.",
+          );
+          return;
+        }
         setStaleDialog({ kind: "resubmit" });
         return;
       }
@@ -2579,6 +2735,11 @@ function ChatSession({
         mode: "exclude",
         memoryPosition: meta.memoryPosition,
         clientMessageId: meta.clientMessageId,
+        expectedPrefixMessageCount: currentChat.messages
+          .slice(0, index)
+          .filter(
+            (item) => item.role === "user" || item.role === "assistant",
+          ).length,
       });
 
       // The dropped run's tool parts leave chat.messages, so live image
@@ -2618,7 +2779,6 @@ function ChatSession({
       await currentChat.sendMessage({
         text: trimmed,
         metadata: withChatMessageMeta(undefined, {
-          sessionId,
           documentIds: meta.documentIds ?? [],
           createdAt: new Date().toISOString(),
           clientMessageId: createClientMessageId(),
@@ -2626,7 +2786,7 @@ function ChatSession({
         attachments: editAttachments,
       });
     },
-    [sessionId, refreshSessionImages, editContextImages, isSessionStale],
+    [sessionId, refreshSessionImages, editContextImages, checkSessionFreshness],
   );
 
   const handleRevert = useCallback(
@@ -2730,7 +2890,7 @@ function ChatSession({
 
   const handleStartEdit = useCallback(
     (message: UIMessage) => {
-      if (chat.status === "streaming") return;
+      if (chat.status === "submitted" || chat.status === "streaming") return;
       setEditingMessageId(message.id);
       setEditContextImages([]);
       void resolveEditContextImages(message).then(setEditContextImages);
@@ -2783,6 +2943,7 @@ function ChatSession({
     // user whether this draft joins the queue or sends immediately.
     if (
       !submitBypassRef.current &&
+      chatRef.current?.status !== "submitted" &&
       chatRef.current?.status !== "streaming" &&
       queuedItemsRef.current.length > 0
     ) {
@@ -2796,33 +2957,44 @@ function ChatSession({
       return;
     }
 
-    // Optimistic send: the user bubble appears the moment sendMessage is
-    // called below. The stale check runs in parallel and only surfaces a
-    // non-blocking notice afterwards (normal sends are non-destructive).
-    const stalePromise = isSessionStale();
-
     // Truncate-before-send: a persisted failed tail [user, assistant
-    // kind:"error"] would re-enter memory — drop it first.
+    // kind:"error"] would re-enter memory — drop it first. This delete is
+    // destructive, so freshness must be proven and truncate must commit
+    // before the retry prompt is sent.
     const messages = chatController.messages;
-    const last = messages.at(-1);
-    const secondLast = messages.at(-2);
-    if (
-      last?.role === "assistant" &&
-      metadataKind(last.metadata) === "error" &&
-      secondLast?.role === "user"
-    ) {
-      const userMeta = readChatMessageMeta(secondLast.metadata);
-      if (userMeta.clientMessageId) {
-        void truncateSessionMemory({
+    const failedTail = failedTailTruncate(messages);
+    if (failedTail) {
+      const freshness = await checkSessionFreshness();
+      if (blocksDestructiveSessionAction(freshness)) {
+        if (freshness === "unknown") {
+          setComposerError(
+            "Could not verify this conversation is current. Reload and try again.",
+          );
+          return;
+        }
+        setStaleDialog({ kind: "resubmit" });
+        return;
+      }
+      try {
+        await truncateSessionMemory({
           sessionId,
           mode: "exclude",
-          clientMessageId: userMeta.clientMessageId,
-        }).catch(() => {});
+          clientMessageId: failedTail.clientMessageId,
+          expectedPrefixMessageCount: failedTail.expectedPrefixMessageCount,
+        });
+      } catch (error) {
+        setComposerError(
+          error instanceof Error
+            ? error.message
+            : "Could not clear the failed message",
+        );
+        return;
       }
       chatController.setMessages(messages.slice(0, -2));
-      // The failed tail is gone from live parts — resync image history.
       void refreshSessionImages();
     }
+
+    const stalePromise = checkSessionFreshness();
 
     // Upload steps set composerError themselves before throwing; the catch
     // keeps the submit promise from rejecting (the composer awaits it).
@@ -2852,7 +3024,7 @@ function ChatSession({
     // Non-blocking freshness notice: the message was already sent (normal
     // sends are non-destructive); offer a reload so the view catches up
     // with the other window/device.
-    if (await stalePromise) {
+    if ((await stalePromise) === "stale") {
       setStaleDialog({ kind: "send" });
     }
   };
@@ -2890,30 +3062,28 @@ function ChatSession({
   }, []);
 
   return (
-    <ChatProvider controller={chat}>
+    <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
       {/*
-        Composer.Root wraps chat + right doc rail so attachments share context.
+        ComposerPrimitive.Root wraps chat + right doc rail so attachments share context.
         When docs exist, rail opens (272px = left sidebar) and pushes chat left.
       */}
-      <Composer.Root
+      <ComposerPrimitive.Root
         className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
         submitMessage={async ({
           input,
           attachments,
-          chat: chatController,
           clear,
         }) => {
           if (modelsStatus !== "success") return;
           const editing = queuedItemsRef.current.find(
             (item) => item.status === "editing",
           );
-          if (chatRef.current?.status === "streaming") {
-            if (editing) {
-              await handleSubmitQueueEdit(input, attachments);
-            } else {
-              await queueComposerDraft({ input, attachments });
-            }
+          if (
+            chatRef.current?.status === "submitted" ||
+            chatRef.current?.status === "streaming"
+          ) {
+            await handleActiveComposerSubmit(input, attachments);
             return;
           }
           // Idle + editing: the composer holds the recalled draft — commit it
@@ -2923,12 +3093,9 @@ function ChatSession({
             await handleSubmitQueueEdit(input, attachments);
             return;
           }
-          await submitComposerRef.current(
-            input,
-            attachments,
-            chatController,
-            clear,
-          );
+          const currentChat = chatRef.current;
+          if (!currentChat) return;
+          await submitComposerRef.current(input, attachments, currentChat, clear);
         }}
       >
         <div
@@ -2943,13 +3110,13 @@ function ChatSession({
         >
           {/* Center chat column — shrinks when right rail opens */}
           <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Thread.Root className="absolute inset-0 overflow-hidden">
+            <ThreadPrimitive.Root className="absolute inset-0 overflow-hidden">
               {/*
                 Full-bleed scroll: content passes under top bar + textfield.
                 Native scrollbar hidden; InsetScrollbar insets from top bar
                 and above the textfield (see --chat-composer-gap).
               */}
-              <Thread.Viewport
+              <ThreadPrimitive.Viewport
                 ref={chatViewportRef}
                 className="chat-scroll-bleed absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain"
                 autoScroll
@@ -2962,11 +3129,11 @@ function ChatSession({
                       "calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))",
                   }}
                 >
-                  <Thread.Empty className="flex min-h-0 flex-1 flex-col">
-                    <EmptyState />
-                  </Thread.Empty>
+                  <ThreadPrimitive.Empty className="flex min-h-0 flex-1 flex-col">
+                    <EmptyState onSelectPrompt={handleStarterPrompt} />
+                  </ThreadPrimitive.Empty>
 
-                  <Thread.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
+                  <ThreadPrimitive.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
 
                   {/*
                     Same-thread vs cross-message spacing:
@@ -2974,7 +3141,7 @@ function ChatSession({
                     - only jump to a message that *starts with answer text*: mt-4
                     - around user turns: mt-4
                   */}
-                  <Thread.Messages
+                  <ThreadPrimitive.Messages
                     className={[
                       "flex w-full min-w-0 flex-col",
                       "[&>*]:min-w-0",
@@ -3003,9 +3170,9 @@ function ChatSession({
                         onAddContext={handleAddContext}
                       />
                     )}
-                  </Thread.Messages>
+                  </ThreadPrimitive.Messages>
 
-                  <Thread.Loading className="mt-4 w-full text-sm text-text-muted">
+                  <ThreadPrimitive.Loading className="mt-4 w-full text-sm text-text-muted">
                     <AnimatedStatusText
                       label={
                         chat.status === "streaming"
@@ -3013,11 +3180,11 @@ function ChatSession({
                           : "Writing"
                       }
                     />
-                  </Thread.Loading>
+                  </ThreadPrimitive.Loading>
 
-                  <Thread.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
+                  <ThreadPrimitive.Error className="mt-4 w-full rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger" />
                 </div>
-              </Thread.Viewport>
+              </ThreadPrimitive.Viewport>
 
               <InsetScrollbar
                 scrollRef={chatViewportRef}
@@ -3037,11 +3204,11 @@ function ChatSession({
                 className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-3"
               >
                 <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
-                  <Thread.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
-                    <Thread.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                  <ThreadPrimitive.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
+                    <ThreadPrimitive.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
                       Latest
-                    </Thread.ScrollToBottom>
-                  </Thread.ViewportFooter>
+                    </ThreadPrimitive.ScrollToBottom>
+                  </ThreadPrimitive.ViewportFooter>
 
                   {previousRunError ? (
                     <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
@@ -3060,9 +3227,13 @@ function ChatSession({
                     </div>
                   ) : null}
 
-                  <ApprovalPanel />
+                  <ApprovalPanel
+                    onInteractionSettled={requestSettledInteractionReconcile}
+                  />
 
-                  <ClarificationPanel />
+                  <ClarificationPanel
+                    onInteractionSettled={requestSettledInteractionReconcile}
+                  />
 
                   <StaleSessionDialog
                     open={staleDialog !== null}
@@ -3102,6 +3273,7 @@ function ChatSession({
                     onModelChange={handleModelChange}
                     onReasoningChange={handleReasoningChange}
                     onStopRun={handleStopRun}
+                    onQueueSubmit={handleActiveComposerSubmit}
                     onLinkedDocuments={handleLinkedDocuments}
                     onAttachmentRejected={handleAttachmentRejected}
                     onDismissAttachmentError={handleDismissAttachmentError}
@@ -3110,9 +3282,7 @@ function ChatSession({
                     modelsStatus={modelsStatus}
                     modelsError={modelsError}
                     onRetryModels={modelsRetry}
-                    compaction={compaction}
                     contextUsage={contextUsage}
-                    contextUsageError={contextUsageError}
                     deepResearchEnabled={deepResearchEnabled}
                     deepResearchAvailable={
                       capabilities?.deepResearchAvailable ?? false
@@ -3149,7 +3319,7 @@ function ChatSession({
                   />
                 </div>
               </div>
-            </Thread.Root>
+            </ThreadPrimitive.Root>
           </div>
 
           {/* Right doc rail — same 272px + full height as left sidebar */}
@@ -3168,7 +3338,7 @@ function ChatSession({
             }}
           />
         </div>
-      </Composer.Root>
+      </ComposerPrimitive.Root>
       </CitationSessionProvider>
     </ChatProvider>
   );

@@ -24,12 +24,16 @@ async function openFreshChat(page: Page): Promise<void> {
     data: { projectId: null },
   });
   expect(draftResponse.ok()).toBe(true);
+  const { sessionId } = (await draftResponse.json()) as { sessionId: string };
   // Hard reload with fresh state so feature toggles (image gen, web search)
   // and composer state never leak between tests.
   await page.goto("/");
-  await page.evaluate(() => {
+  await page.evaluate((id) => {
     window.localStorage.clear();
-  });
+    window.localStorage.setItem("chat.sessionId", id);
+    window.localStorage.setItem("chat.lastStandaloneSessionId", id);
+    window.localStorage.setItem("chat.viewMode", "standalone");
+  }, sessionId);
   await page.reload();
   await expect(
     page.getByText("Ask anything about your documents"),
@@ -246,18 +250,14 @@ test("clarification wizard collects answers then generates the image", async ({
   await enableImageGeneration(page);
   await sendMessage(page, "buatkan gambar yang kurang jelas");
 
-  const wizard = page.getByRole("region", { name: "Clarification" });
+  const wizard = page.getByRole("region", { name: "Question" });
   await expect(wizard).toBeVisible({ timeout: 30_000 });
-  await expect(wizard.getByText("Pertanyaan 1 dari 2")).toBeVisible();
-  await expect(wizard.getByText("Recommended")).toBeVisible();
+  await expect(wizard.getByText("2 questions")).toBeVisible();
 
   await wizard.getByRole("radio", { name: /A minimalis/ }).click();
-  await wizard.getByRole("button", { name: "Next" }).click();
-
-  await expect(wizard.getByText("Pertanyaan 2 dari 2")).toBeVisible();
-  const skip = wizard.getByRole("button", { name: "Skip" });
-  await expect(skip).toBeVisible();
-  await skip.click();
+  await wizard
+    .getByRole("textbox", { name: "Detail tambahan apa yang harus digunakan?" })
+    .fill("Gunakan cahaya pagi yang lembut");
 
   await wizard.getByRole("button", { name: "Submit" }).click();
 
@@ -324,7 +324,7 @@ test("background removed sends transparent png params and the gallery lists the 
   expect(body.background).toBe("transparent");
   expect(body.output_format).toBe("png");
 
-  await page.getByRole("button", { name: /^Images/ }).click();
+  await page.getByRole("button", { name: /^Images \d+$/ }).click();
   const gallery = page.getByRole("dialog", { name: "Images" });
   await expect(gallery).toBeVisible();
   await expect(

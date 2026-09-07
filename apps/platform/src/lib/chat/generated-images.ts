@@ -1,4 +1,4 @@
-import type { UIMessage } from "@anvia/react";
+import type { UIMessage } from "@anvia/client";
 import type { GeneratedImageMeta } from "#/lib/api";
 
 export type CollectedGeneratedImage = {
@@ -148,7 +148,7 @@ export function collectGeneratedImages(
  * Collect generated images across an entire message list (session shape).
  */
 export function collectGeneratedImagesFromMessages(
-  messages: UIMessage[],
+  messages: readonly UIMessage[],
 ): CollectedGeneratedImage[] {
   return collectGeneratedImages(messages.flatMap((m) => m.parts));
 }
@@ -261,7 +261,7 @@ export function countRunningImageToolParts(
 }
 
 export function countRunningImageToolPartsFromMessages(
-  messages: UIMessage[],
+  messages: readonly UIMessage[],
 ): number {
   return countRunningImageToolParts(messages.flatMap((m) => m.parts));
 }

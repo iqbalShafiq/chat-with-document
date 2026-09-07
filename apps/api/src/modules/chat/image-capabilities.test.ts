@@ -2,56 +2,109 @@ import { describe, expect, it } from "vitest";
 import { parseImageCapabilities } from "./image-capabilities.js";
 
 describe("parseImageCapabilities", () => {
-  it("defaults to nMax 4 when the raw value is null", () => {
-    expect(parseImageCapabilities(null)).toEqual({ nMax: 4 });
+  it("fails closed when the raw value is null", () => {
+    expect(() => parseImageCapabilities(null)).toThrow(
+      "image capability catalog is invalid",
+    );
   });
 
-  it("defaults to nMax 4 for non-object values", () => {
-    expect(parseImageCapabilities("nope")).toEqual({ nMax: 4 });
-    expect(parseImageCapabilities([{ n: { max: 8 } }])).toEqual({ nMax: 4 });
+  it("fails closed for non-object values", () => {
+    expect(() => parseImageCapabilities("nope")).toThrow(
+      "image capability catalog is invalid",
+    );
+    expect(() => parseImageCapabilities([{ n: { max: 8 } }])).toThrow(
+      "image capability catalog is invalid",
+    );
   });
 
-  it("defaults to nMax 4 when n is missing or malformed", () => {
-    expect(parseImageCapabilities({})).toEqual({ nMax: 4 });
-    expect(parseImageCapabilities({ n: "5" })).toEqual({ nMax: 4 });
-    expect(parseImageCapabilities({ n: { min: 1 } })).toEqual({ nMax: 4 });
+  it("fails closed when n is missing or malformed", () => {
+    expect(() => parseImageCapabilities({})).toThrow(
+      "image capability catalog is invalid",
+    );
+    expect(() => parseImageCapabilities({ n: "5" })).toThrow(
+      "image capability catalog is invalid",
+    );
+    expect(() => parseImageCapabilities({ n: { min: 1 } })).toThrow(
+      "image capability catalog is invalid",
+    );
   });
 
   it("reads nMax from n.max", () => {
-    expect(parseImageCapabilities({ n: { min: 1, max: 8 } })).toEqual({
+    expect(
+      parseImageCapabilities({
+        n: { min: 1, max: 8 },
+        aspectRatios: ["1:1"],
+        sizes: ["1024x1024"],
+      }),
+    ).toEqual({
       nMax: 8,
+      aspectRatios: ["1:1"],
+      sizes: ["1024x1024"],
     });
   });
 
   it("floors fractional n.max and clamps at 1", () => {
-    expect(parseImageCapabilities({ n: { max: 2.7 } })).toEqual({ nMax: 2 });
-    expect(parseImageCapabilities({ n: { max: 0 } })).toEqual({ nMax: 1 });
+    expect(() =>
+      parseImageCapabilities({
+        n: { min: 1, max: 2.7 },
+        aspectRatios: ["1:1"],
+        sizes: ["1024x1024"],
+      }),
+    ).toThrow("image capability catalog is invalid");
+    expect(() =>
+      parseImageCapabilities({
+        n: { min: 1, max: 0 },
+        aspectRatios: ["1:1"],
+        sizes: ["1024x1024"],
+      }),
+    ).toThrow("image capability catalog is invalid");
   });
 
   it("keeps string arrays for background, aspectRatios, quality", () => {
     const parsed = parseImageCapabilities({
-      n: { max: 4 },
+      n: { min: 1, max: 4 },
       background: ["transparent"],
       aspectRatios: ["1:1", "16:9"],
       quality: ["low", "high"],
+      sizes: ["1024x1024"],
     });
     expect(parsed).toEqual({
       nMax: 4,
       background: ["transparent"],
       aspectRatios: ["1:1", "16:9"],
       quality: ["low", "high"],
+      sizes: ["1024x1024"],
     });
   });
 
-  it("filters non-strings out of capability arrays", () => {
-    const parsed = parseImageCapabilities({
-      aspectRatios: ["1:1", 42, null, "16:9"],
-    });
-    expect(parsed).toEqual({ nMax: 4, aspectRatios: ["1:1", "16:9"] });
+  it("fails closed when capability arrays contain non-strings", () => {
+    expect(() =>
+      parseImageCapabilities({
+        n: { min: 1, max: 4 },
+        aspectRatios: ["1:1", 42, null, "16:9"],
+        sizes: ["1024x1024"],
+      }),
+    ).toThrow("image capability catalog is invalid");
   });
 
-  it("omits empty capability arrays", () => {
-    const parsed = parseImageCapabilities({ background: [], quality: "high" });
-    expect(parsed).toEqual({ nMax: 4 });
+  it("fails closed when capability arrays are empty or absent", () => {
+    expect(() =>
+      parseImageCapabilities({
+        n: { min: 1, max: 4 },
+        background: [],
+        quality: "high",
+      }),
+    ).toThrow("image capability catalog is invalid");
+  });
+
+  it("fails closed for unknown catalog fields", () => {
+    expect(() =>
+      parseImageCapabilities({
+        n: { min: 1, max: 4 },
+        aspectRatios: ["1:1"],
+        sizes: ["1024x1024"],
+        unknown: true,
+      }),
+    ).toThrow("image capability catalog is invalid");
   });
 });

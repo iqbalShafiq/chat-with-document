@@ -1,279 +1,253 @@
+import type { ClientInteraction } from "@anvia/client";
+import type {
+  AgentToolQuestionRequest,
+  AgentInteractionResponse,
+} from "@anvia/core/agent/interactions";
 import { useChatContext } from "@anvia/react-ui";
+import { Check, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
-import { useEffect, useReducer, useState } from "react";
-import { useClarifications } from "#/hooks/use-clarifications";
-import { submitClarification } from "#/lib/api";
-import {
-  buildClarificationPayload,
-  canSubmit,
-  wizardReducer,
-  type WizardState,
-} from "#/lib/chat/clarification-wizard";
+  buildQuestionResponse,
+  stageThenRespond,
+} from "#/lib/chat/interaction-response";
 
-const INITIAL_WIZARD: WizardState = { step: 0, answers: {}, skipped: [] };
+type QuestionInteraction = ClientInteraction & {
+  request: AgentToolQuestionRequest;
+};
 
-/**
- * Glass clarification card rendered above the composer while the agent's
- * request_clarification tool waits for answers. Pending requests come from
- * the run's stream events via useClarifications (the approvals panel's data
- * source, mirrored); answers go straight to api.ts submitClarification.
- */
-export function ClarificationPanel() {
+function isQuestionInteraction(
+  interaction: ClientInteraction,
+): interaction is QuestionInteraction {
+  return interaction.request.type === "tool-question";
+}
+
+/** Native v1 question cards; one submission answers every required prompt. */
+export function ClarificationPanel({
+  onInteractionSettled,
+}: {
+  onInteractionSettled?: () => Promise<void>;
+}) {
   const chat = useChatContext();
-  const { pending, dismiss } = useClarifications(chat);
-  const [wizard, dispatch] = useReducer(wizardReducer, INITIAL_WIZARD);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
+  const pending = chat.interactions.pending.filter(isQuestionInteraction);
+  if (pending.length === 0) return null;
 
-  const active = pending[0];
+  return (
+    <div className="mb-2 flex w-full flex-col gap-2">
+      {pending.map((interaction) => (
+        <QuestionCard
+          key={interaction.request.id}
+          interaction={interaction}
+          respondingInteractions={chat.respondingInteractions}
+          respond={chat.respondToInteraction}
+          onInteractionSettled={onInteractionSettled}
+        />
+      ))}
+    </div>
+  );
+}
+
+function QuestionCard({
+  interaction,
+  respondingInteractions,
+  respond,
+  onInteractionSettled,
+}: {
+  interaction: QuestionInteraction;
+  respondingInteractions: ReadonlySet<string>;
+  respond: (input: {
+    interactionId: string;
+    response: AgentInteractionResponse;
+  }) => Promise<void>;
+  onInteractionSettled?: () => Promise<void>;
+}) {
+  const request = interaction.request;
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [validationAttempted, setValidationAttempted] = useState(false);
+  const inFlight = useRef(new Set<string>());
+  const responding = submitting || respondingInteractions.has(request.id);
 
   useEffect(() => {
-    dispatch({ type: "reset" });
+    setAnswers({});
     setSubmitting(false);
-    setSubmitError(false);
-  }, [active?.id]);
+    setSubmitError(null);
+    setValidationAttempted(false);
+  }, [request.id]);
 
-  if (!active) return null;
-
-  const questions = active.questions;
-  const lastStep = questions.length - 1;
-  const isLastStep = wizard.step >= lastStep;
-  const current = questions[Math.min(wizard.step, lastStep)];
-
-  const skipCurrent = () => {
-    if (current.optional !== true || submitting) return;
-    dispatch({ type: "skip", questionId: current.id });
-    if (!isLastStep) {
-      dispatch({ type: "next", questionsLength: questions.length });
-    }
+  const setAnswer = (questionId: string, value: string) => {
+    setAnswers((current) => ({ ...current, [questionId]: value }));
+    setSubmitError(null);
   };
 
   const submit = async () => {
-    if (submitting) return;
+    setValidationAttempted(true);
+    const hasMissingAnswer = request.questions.some(
+      (question) => (answers[question.id] ?? "").trim().length === 0,
+    );
+    if (responding || inFlight.current.has(request.id) || hasMissingAnswer) {
+      if (!responding && hasMissingAnswer) {
+        setSubmitError("Answer every question before submitting.");
+      }
+      return;
+    }
     setSubmitting(true);
-    setSubmitError(false);
+    setSubmitError(null);
     try {
-      const body = buildClarificationPayload(wizard, questions);
-      await submitClarification({ clarificationId: active.id, body });
-      dismiss(active.id);
-    } catch {
-      setSubmitError(true);
+      const response = buildQuestionResponse({
+        request,
+        answers: request.questions.map((question) => ({
+          questionId: question.id,
+          value: answers[question.id]!.trim(),
+        })),
+      });
+      await stageThenRespond({
+        interaction,
+        response,
+        respond,
+        respondingInteractions,
+        inFlight: inFlight.current,
+      });
+      await onInteractionSettled?.();
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Interaction response could not be sent. Try again.",
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleNext = () => {
-    dispatch({ type: "next", questionsLength: questions.length });
-  };
-
   return (
-    <div className="mb-2 w-full animate-fade-in">
-      <div
-        className="glass rounded-xl border border-accent/25 px-3 py-2.5"
-        role="region"
-        aria-label="Clarification"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 truncate text-xs font-semibold tracking-tight text-text">
-            {active.title ?? "Clarification needed"}
-          </p>
-          <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
-            {questions.length > 1
-              ? `Pertanyaan ${wizard.step + 1} dari ${questions.length}`
-              : "1 pertanyaan"}
-          </span>
-        </div>
-
-        <div className="mt-2 flex items-center gap-1.5">
-          {questions.map((question, index) => (
-            <span
-              key={question.id}
-              className={
-                index < wizard.step
-                  ? "h-1 w-5 rounded-full bg-accent/60 transition-colors"
-                  : index === wizard.step
-                    ? "h-1 w-5 rounded-full bg-accent"
-                    : "h-1 w-5 rounded-full bg-white/[0.1]"
-              }
-            />
-          ))}
-        </div>
-
-        <p className="mt-2.5 text-[12px] leading-relaxed text-text/90">
-          {current.question}
+    <div
+      className="glass rounded-xl border border-accent/25 px-3 py-2.5 animate-fade-in"
+      role="region"
+      aria-label="Question"
+      aria-busy={responding}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-semibold tracking-tight text-text">
+          Clarification needed
         </p>
-
-        {current.type === "single_choice" ? (
-          <div
-            role="radiogroup"
-            aria-label={current.question}
-            className="mt-2 flex flex-wrap gap-1.5"
-          >
-            {(current.options ?? []).map((option) => {
-              const selected = wizard.answers[current.id] === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={submitting}
-                  onClick={() =>
-                    dispatch({
-                      type: "answer",
-                      questionId: current.id,
-                      value: option.id,
-                    })
-                  }
-                  className={
-                    selected
-                      ? "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 text-[11px] font-medium text-accent transition duration-150 hover:bg-accent/15 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-                      : "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-                  }
-                >
-                  <span className="max-w-[180px] truncate">{option.label}</span>
-                  {option.recommended ? (
-                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-px text-[9px] font-semibold text-accent">
-                      <Sparkles className="size-2.5" strokeWidth={2} />
-                      Recommended
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {current.type === "multiple_choice" ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {(current.options ?? []).map((option) => {
-              const selected = (
-                (wizard.answers[current.id] as string[] | undefined) ?? []
-              ).includes(option.id);
-              const toggle = () => {
-                const currentValue = (
-                  (wizard.answers[current.id] as string[] | undefined) ?? []
-                ).slice();
-                const next = selected
-                  ? currentValue.filter((id) => id !== option.id)
-                  : [...currentValue, option.id];
-                dispatch({
-                  type: "answer",
-                  questionId: current.id,
-                  value: next,
-                });
-              };
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-pressed={selected}
-                  disabled={submitting}
-                  onClick={toggle}
-                  className={
-                    selected
-                      ? "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 text-[11px] font-medium text-accent transition duration-150 hover:bg-accent/15 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-                      : "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-                  }
-                >
-                  {selected ? (
-                    <Check className="size-3 shrink-0" strokeWidth={2.5} />
-                  ) : null}
-                  <span className="max-w-[180px] truncate">{option.label}</span>
-                  {option.recommended ? (
-                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-px text-[9px] font-semibold text-accent">
-                      <Sparkles className="size-2.5" strokeWidth={2} />
-                      Recommended
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {current.type === "free_text" ? (
-          <input
-            type="text"
-            value={(wizard.answers[current.id] as string | undefined) ?? ""}
-            onChange={(event) =>
-              dispatch({
-                type: "answer",
-                questionId: current.id,
-                value: event.target.value,
-              })
-            }
-            disabled={submitting}
-            placeholder={current.placeholder ?? "Type your answer…"}
-            aria-label={current.question}
-            className="mt-2 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] leading-relaxed text-text placeholder:text-text-faint outline-none ring-accent-ring focus:border-accent/40 focus:ring-2 disabled:opacity-40"
-          />
-        ) : null}
-
-        <div className="mt-2.5 flex items-center justify-between gap-1.5">
-          <button
-            type="button"
-            disabled={wizard.step === 0 || submitting}
-            onClick={() => dispatch({ type: "back" })}
-            className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-white/[0.06] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <ChevronLeft className="size-3.5" strokeWidth={2} />
-            Back
-          </button>
-
-          <div className="flex items-center gap-1.5">
-            {current.optional === true ? (
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={skipCurrent}
-                className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Skip
-              </button>
-            ) : null}
-
-            {isLastStep ? (
-              <button
-                type="button"
-                disabled={submitting || !canSubmit(wizard, questions)}
-                onClick={() => void submit()}
-                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {submitting ? (
-                  <Loader2 className="size-3 animate-spin" strokeWidth={2} />
-                ) : (
-                  <Check className="size-3" strokeWidth={2.5} />
-                )}
-                {submitting ? "Sending…" : "Submit"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={handleNext}
-                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next
-                <ChevronRight className="size-3.5" strokeWidth={2} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {submitError ? (
-          <p aria-live="polite" className="mt-1.5 text-[10px] text-danger">
-            Couldn't send your answers — try again.
-          </p>
-        ) : null}
+        <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
+          {request.questions.length} {request.questions.length === 1 ? "question" : "questions"}
+        </span>
       </div>
+
+      <div className="mt-2.5 flex flex-col gap-3">
+        {request.questions.map((question) => {
+          const value = answers[question.id] ?? "";
+          const fieldInvalid =
+            validationAttempted && value.trim().length === 0;
+          const promptId = questionDomId(request.id, question.id, "prompt");
+          const errorId = questionDomId(request.id, question.id, "error");
+          const describedBy = fieldInvalid
+            ? `${promptId} ${errorId}`
+            : promptId;
+          const showTextInput =
+            question.choices === undefined || question.allowCustom === true;
+          return (
+            <div key={question.id} className="flex flex-col gap-1.5">
+              <p id={promptId} className="text-[12px] leading-relaxed text-text/90">
+                {question.text}
+              </p>
+              {question.choices ? (
+                <div
+                  role="radiogroup"
+                  aria-labelledby={promptId}
+                  aria-required="true"
+                  aria-invalid={fieldInvalid || undefined}
+                  aria-describedby={describedBy}
+                  className="flex flex-wrap gap-1.5"
+                >
+                  {question.choices.map((choice) => {
+                    const selected = value === choice.value;
+                    return (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-describedby={promptId}
+                        disabled={responding}
+                        onClick={() => setAnswer(question.id, choice.value)}
+                        className={
+                          selected
+                            ? "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 text-[11px] font-medium text-accent transition duration-150 hover:bg-accent/15 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+                            : "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+                        }
+                      >
+                        {selected ? <Check className="size-3" strokeWidth={2.5} /> : null}
+                        <span className="max-w-[220px] truncate">{choice.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {showTextInput ? (
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(event) => setAnswer(question.id, event.target.value)}
+                  disabled={responding}
+                  aria-label={question.text}
+                  aria-required="true"
+                  aria-invalid={fieldInvalid || undefined}
+                  aria-describedby={describedBy}
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] leading-relaxed text-text placeholder:text-text-faint outline-none ring-accent-ring focus:border-accent/40 focus:ring-2 disabled:opacity-40"
+                />
+              ) : null}
+              {fieldInvalid ? (
+                <p id={errorId} role="alert" className="text-[10px] text-danger">
+                  Answer required.
+                </p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-end">
+        <button
+          type="button"
+          disabled={responding}
+          aria-describedby={submitError ? submitErrorId(request.id) : undefined}
+          onClick={() => void submit()}
+          className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-150 hover:bg-accent-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {submitting ? <Loader2 className="size-3 animate-spin" strokeWidth={2} /> : <Check className="size-3" strokeWidth={2.5} />}
+          {submitting ? "Sending…" : "Submit"}
+        </button>
+      </div>
+
+      {submitError ? (
+        <p
+          id={submitErrorId(request.id)}
+          role="alert"
+          aria-live="assertive"
+          className="mt-1.5 text-[10px] text-danger"
+        >
+          {submitError}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+function questionDomId(
+  interactionId: string,
+  questionId: string,
+  suffix: string,
+): string {
+  return `native-question-${domIdPart(interactionId)}-${domIdPart(questionId)}-${suffix}`;
+}
+
+function submitErrorId(interactionId: string): string {
+  return `native-question-${domIdPart(interactionId)}-submit-error`;
+}
+
+function domIdPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }

@@ -1,3 +1,6 @@
+import { isMemoryCompactionMessage } from "@anvia/core/memory";
+import { parseMessage, type Message } from "@anvia/core/completion";
+import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../../utils/prisma.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
 
@@ -11,6 +14,12 @@ export type TruncateMemoryInput = {
   memoryPosition?: number;
   /** Prefer for live messages stamped on send. */
   clientMessageId?: string;
+  /**
+   * Native user+assistant row count strictly before an optimistic prompt.
+   * Permits a no-op only when cancellation happened before Anvia persisted
+   * that prompt and the authoritative prefix is otherwise unchanged.
+   */
+  expectedPrefixMessageCount?: number;
 };
 
 export type TruncateMemoryResult = {
@@ -33,6 +42,15 @@ function clientMessageIdFromMessage(message: unknown): string | null {
     : null;
 }
 
+function parseStoredMessage(value: unknown): Message {
+  // Truncation is a destructive user operation. Keep the same strict v1
+  // parser as PrismaMemoryStore and fail closed if a row is malformed.
+  return parseMessage(value);
+}
+
+const staleTargetMessage =
+  "Could not resolve a current target message for truncate; reload the conversation and try again";
+
 /**
  * Truncate agent memory after a target message.
  * - include: keep the target row and everything before it
@@ -43,72 +61,152 @@ export async function truncateSessionMemory(
 ): Promise<TruncateMemoryResult> {
   const scopeKey = createDefaultMemoryScopeKey(input.sessionId, input.userId);
 
-  const session = await prisma.agentMemorySession.findUnique({
-    where: { scopeKey },
-    select: { id: true },
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      const session = await tx.agentMemorySession.findUnique({
+        where: { scopeKey },
+        select: { id: true },
+      });
 
-  if (!session) {
-    return {
-      ok: true,
-      deleted: 0,
-      keptThrough: -1,
-      resolvedPosition: null,
-    };
-  }
+      if (!session) {
+        return {
+          ok: true,
+          deleted: 0,
+          keptThrough: -1,
+          resolvedPosition: null,
+        };
+      }
 
-  let targetPosition: number | null = null;
+      const hasPosition =
+        typeof input.memoryPosition === "number" &&
+        Number.isSafeInteger(input.memoryPosition) &&
+        input.memoryPosition >= 0;
+      const clientMessageId =
+        typeof input.clientMessageId === "string" &&
+        input.clientMessageId.trim().length > 0
+          ? input.clientMessageId.trim()
+          : undefined;
+      const expectedPrefixMessageCount =
+        typeof input.expectedPrefixMessageCount === "number" &&
+        Number.isSafeInteger(input.expectedPrefixMessageCount) &&
+        input.expectedPrefixMessageCount >= 0
+          ? input.expectedPrefixMessageCount
+          : undefined;
 
-  if (
-    typeof input.memoryPosition === "number" &&
-    Number.isInteger(input.memoryPosition) &&
-    input.memoryPosition >= 0
-  ) {
-    targetPosition = input.memoryPosition;
-  } else if (
-    typeof input.clientMessageId === "string" &&
-    input.clientMessageId.trim().length > 0
-  ) {
-    const rows = await prisma.agentMemoryMessage.findMany({
-      where: { memorySessionId: session.id },
-      orderBy: { position: "asc" },
-      select: { position: true, message: true },
-    });
+      let target: { position: number; message: unknown } | undefined;
 
-    const match = rows.find(
-      (row) => clientMessageIdFromMessage(row.message) === input.clientMessageId,
-    );
-    targetPosition = match?.position ?? null;
-  }
+      if (hasPosition) {
+        // Never trust a stale UI position. Native compaction removes the old
+        // prefix and reuses the boundary position for its system summary; an
+        // existence check alone would therefore be unsafe.
+        target =
+          (await tx.agentMemoryMessage.findFirst({
+            where: {
+              memorySessionId: session.id,
+              position: input.memoryPosition,
+            },
+            select: { position: true, message: true },
+          })) ?? undefined;
 
-  if (targetPosition === null) {
-    throw new TruncateTargetNotFoundError(
-      "Could not resolve target message for truncate",
-    );
-  }
+        if (!target) {
+          throw new TruncateTargetNotFoundError(staleTargetMessage);
+        }
 
-  const keepThrough =
-    input.mode === "include" ? targetPosition : targetPosition - 1;
+        const parsed = parseStoredMessage(target.message);
+        if (isMemoryCompactionMessage(parsed)) {
+          throw new TruncateTargetNotFoundError(staleTargetMessage);
+        }
+        if (
+          clientMessageId !== undefined &&
+          clientMessageIdFromMessage(parsed) !== clientMessageId
+        ) {
+          throw new TruncateTargetNotFoundError(staleTargetMessage);
+        }
+      } else if (clientMessageId !== undefined) {
+        const rows = await tx.agentMemoryMessage.findMany({
+          where: {
+            memorySessionId: session.id,
+            AND: [
+              {
+                message: {
+                  path: ["metadata", "clientMessageId"],
+                  equals: clientMessageId,
+                },
+              },
+              { message: { path: ["role"], equals: "user" } },
+            ],
+          },
+          orderBy: { position: "asc" },
+          take: 2,
+          select: { position: true, message: true },
+        });
 
-  const result = await prisma.agentMemoryMessage.deleteMany({
-    where: {
-      memorySessionId: session.id,
-      position: { gt: keepThrough },
+        if (
+          rows.length === 0 &&
+          input.mode === "exclude" &&
+          expectedPrefixMessageCount !== undefined
+        ) {
+          const currentPrefixMessageCount =
+            await tx.agentMemoryMessage.count({
+              where: {
+                memorySessionId: session.id,
+                role: { in: ["user", "assistant"] },
+              },
+            });
+          if (currentPrefixMessageCount === expectedPrefixMessageCount) {
+            return {
+              ok: true,
+              deleted: 0,
+              keptThrough: -1,
+              resolvedPosition: null,
+            };
+          }
+        }
+
+        if (rows.length !== 1) {
+          throw new TruncateTargetNotFoundError(staleTargetMessage);
+        }
+        target = rows[0];
+        const parsed = parseStoredMessage(target.message);
+        if (isMemoryCompactionMessage(parsed)) {
+          throw new TruncateTargetNotFoundError(staleTargetMessage);
+        }
+      }
+
+      if (!target) {
+        throw new TruncateTargetNotFoundError(staleTargetMessage);
+      }
+
+      const targetPosition = target.position;
+      const keepThrough =
+        input.mode === "include" ? targetPosition : targetPosition - 1;
+
+      const result = await tx.agentMemoryMessage.deleteMany({
+        where: {
+          memorySessionId: session.id,
+          position: { gt: keepThrough },
+        },
+      });
+
+      // Touch session updatedAt so history list reorders predictably.
+      // Drop the 1.0.7 model-context checkpoint so snapshot() cannot skip
+      // canonical rows that this truncate just deleted.
+      await tx.agentMemorySession.update({
+        where: { id: session.id },
+        data: { updatedAt: new Date(), compactionState: Prisma.DbNull },
+      });
+
+      return {
+        ok: true,
+        deleted: result.count,
+        keptThrough: keepThrough,
+        resolvedPosition: targetPosition,
+      };
     },
-  });
-
-  // Touch session updatedAt so history list reorders predictably.
-  await prisma.agentMemorySession.update({
-    where: { id: session.id },
-    data: { updatedAt: new Date() },
-  });
-
-  return {
-    ok: true,
-    deleted: result.count,
-    keptThrough: keepThrough,
-    resolvedPosition: targetPosition,
-  };
+    // If native compaction wins the race, Prisma aborts this transaction
+    // instead of deleting rows after a target that no longer exists.
+    { isolationLevel: "Serializable" },
+  );
 }
 
 export class TruncateTargetNotFoundError extends Error {

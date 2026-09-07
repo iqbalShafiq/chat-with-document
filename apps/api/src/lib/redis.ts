@@ -36,6 +36,7 @@ export function getBullmqConnectionOptions(): RedisOptions {
 }
 
 let redis: Redis | null = null;
+let redisClosePromise: Promise<void> | null = null;
 
 /** Shared non-blocking client for ad-hoc Redis use in the API process. */
 export function getRedis() {
@@ -43,4 +44,19 @@ export function getRedis() {
     redis = new Redis(getBullmqConnectionOptions());
   }
   return redis;
+}
+
+/**
+ * Close the process-owned ad-hoc Redis client exactly once. BullMQ owns its
+ * duplicated connections and closes them through Worker.close(); this hook is
+ * only for the shared client used by stream, policy, and lease stores.
+ */
+export function closeRedis(): Promise<void> {
+  if (redisClosePromise) return redisClosePromise;
+  const client = redis;
+  if (!client) return Promise.resolve();
+  redisClosePromise = client.quit().then(() => undefined).finally(() => {
+    if (redis === client) redis = null;
+  });
+  return redisClosePromise;
 }

@@ -1,21 +1,37 @@
 import { describe, expect, it } from "vitest";
-import type { UIMessage, UIMessagePart } from "@anvia/react";
+import { parseUIMessage, type UIMessage, type UIMessagePart } from "@anvia/client";
 import { finalizeInterruptedTools } from "./finalize-interrupted-tools.js";
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
 
 function tool(
   state: ToolPart["state"],
-  overrides: Partial<ToolPart> = {},
+  overrides: Record<string, unknown> = {},
 ): ToolPart {
-  return {
+  const raw = {
     id: "part-1",
     type: "tool",
     toolName: "generate_image",
     toolCallId: "call-1",
-    state,
     ...overrides,
+    state,
+    ...(state === "input-streaming"
+      ? { input: overrides.input ?? "" }
+      : state === "input-available"
+        ? { input: overrides.input ?? {} }
+        : state === "output-available"
+          ? { input: overrides.input ?? {}, output: overrides.output ?? null }
+          : {
+              input: overrides.input ?? {},
+              error: overrides.error ?? { message: "tool failed" },
+            }),
   };
+  const parsed = parseUIMessage({ id: "message-1", role: "assistant", parts: [raw] });
+  const part = parsed.parts[0];
+  if (!part || part.type !== "tool") {
+    throw new Error("Expected Anvia client parser to return a tool part");
+  }
+  return part;
 }
 
 function assistant(parts: UIMessagePart[]): UIMessage {
@@ -42,10 +58,14 @@ describe("finalizeInterruptedTools", () => {
       (part): part is ToolPart => part.type === "tool",
     );
     expect(parts[0]?.state).toBe("error");
-    expect(parts[0]?.error?.message).toMatch(/stopped/i);
+    if (parts[0]?.state === "error") {
+      expect(parts[0].error.message).toMatch(/stopped/i);
+    }
     expect(parts[1]?.state).toBe("error");
     expect(parts[2]?.state).toBe("output-available");
-    expect(parts[2]?.output).toEqual({ ok: true });
+    if (parts[2]?.state === "output-available") {
+      expect(parts[2].output).toEqual({ ok: true });
+    }
   });
 
   it("returns the same array reference when nothing changes", () => {

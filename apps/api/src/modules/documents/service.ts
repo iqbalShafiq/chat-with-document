@@ -2,7 +2,7 @@ import { prisma } from "../../utils/prisma.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
 import { ensureChatSession } from "../chat/chat-session.js";
-import { deleteDocumentChunks, normalizePageImages } from "@assingment/agent";
+import { deleteDocumentChunks, normalizePageImages } from "@anreal/agent";
 import { deleteObject, getObjectBuffer } from "../../lib/r2.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;

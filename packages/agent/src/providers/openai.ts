@@ -1,4 +1,4 @@
-import type { CompletionModel } from "@anvia/core";
+import type { StreamingCompletionModel } from "@anvia/core/completion";
 import { OpenAIClient } from "@anvia/openai";
 
 /** Model ids are registered in the DB registry; any non-empty id is structurally valid. */
@@ -7,7 +7,7 @@ export type CompletionModelId = string;
 export const DEFAULT_COMPLETION_MODEL: CompletionModelId = "openai/gpt-5.6-luna";
 export const DEFAULT_COMPLETION_PROVIDER = "openai";
 
-export const REASONING_EFFORTS = ["low", "medium", "high", "max"] as const;
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
@@ -35,48 +35,45 @@ let openai: OpenAIClient | null = null;
 
 function getOpenAIClient(): OpenAIClient {
   openai ??= new OpenAIClient({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseUrl: process.env.OPENAI_BASE_URL,
-    completionApi: "responses",
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    ...(process.env.OPENAI_BASE_URL
+      ? { baseUrl: process.env.OPENAI_BASE_URL }
+      : {}),
   });
   return openai;
 }
 
 export function createCompletionModel(
   modelId: CompletionModelId = DEFAULT_COMPLETION_MODEL,
-): CompletionModel {
-  // GPT-5.6 Luna/Terra/Sol are not all in Anvia's known-name union yet.
-  return getOpenAIClient().completionModel(modelId) as CompletionModel;
+): StreamingCompletionModel {
+  // Meta's Muse Spark contributor tier returns encrypted-only reasoning on
+  // the Responses API with no reasoning deltas, which the Anvia stream
+  // accumulator rejects after the answer text already streamed. Chat
+  // Completions carries the same top-level reasoning_effort control and a
+  // stream shape this model satisfies (reasoning_details stay inert).
+  const api = modelId.startsWith("meta/") ? "chat" : "responses";
+  return getOpenAIClient().completionModel({ modelId, api });
 }
 
-/**
- * Wraps a model so every request carries the given reasoning effort, the same
- * mechanism createAgent uses (additionalParams -> provider reasoning params).
- */
-export function withReasoningEffort(
-  model: CompletionModel,
+/** Top-level Chat Completions reasoning control for Meta Muse models. */
+export function metaMuseReasoningEffort(
   effort: ReasoningEffort,
-): CompletionModel {
+): { reasoning_effort: ReasoningEffort } {
+  return { reasoning_effort: effort };
+}
+
+/** Strict OpenAI Responses options supplied at Agent construction time. */
+export function providerOptionsForReasoning(
+  effort: ReasoningEffort,
+): { reasoning: { effort: ReasoningEffort; summary: "auto" } } {
   return {
-    provider: model.provider,
-    defaultModel: model.defaultModel,
-    capabilities: model.capabilities,
-    ...(model.getModelInfo ? { getModelInfo: model.getModelInfo.bind(model) } : {}),
-    ...(model.traceRequest ? { traceRequest: model.traceRequest.bind(model) } : {}),
-    completion: async (request) =>
-      model.completion({
-        ...request,
-        additionalParams: {
-          ...((request.additionalParams as Record<string, unknown> | undefined) ?? {}),
-          reasoning: { effort, summary: "auto" },
-        },
-      }),
+    reasoning: { effort, summary: "auto" },
   };
 }
 
-let defaultModelValue: CompletionModel | null = null;
+let defaultModelValue: StreamingCompletionModel | null = null;
 
-export function defaultModel(): CompletionModel {
+export function defaultModel(): StreamingCompletionModel {
   defaultModelValue ??= createCompletionModel(DEFAULT_COMPLETION_MODEL);
   return defaultModelValue;
 }

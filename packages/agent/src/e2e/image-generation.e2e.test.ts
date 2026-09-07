@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Server } from "node:http";
 import type { TavilyClient } from "@tavily/core";
+import type {
+  ToolApprovalRequirement,
+  ToolRequiresApproval,
+} from "@anvia/core/tool";
 import {
   createImageGenerationTools,
   type GenerateImageResult,
@@ -13,7 +17,6 @@ import {
   createSaveGeneratedImageMock,
   createStubOpenRouterModel,
   startStubServer,
-  type ApprovalPolicy,
   type StubImageRequest,
 } from "./image-e2e-helpers.js";
 
@@ -55,7 +58,17 @@ function makeScope(
     sessionId: "session-1",
     projectId: null,
     resolveReference: async () => null,
-    capabilities: () => null,
+    capabilities: () => ({
+      nMax: 10,
+      aspectRatios: ["1:1", "2:3", "3:2", "auto"],
+      sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+      quality: ["auto", "low", "medium", "high"],
+      background: ["auto", "transparent", "opaque"],
+    }),
+    defaultSettings: {
+      modelId: "openai/gpt-5-image-mini",
+      aspectRatio: "1:1",
+    },
     ...overrides,
   };
   return { scope, saveGeneratedImage };
@@ -148,20 +161,38 @@ describe("approval gate (toggle OFF)", () => {
   it("requires approval when the toggle is off, and skips it once a grant exists", async () => {
     const { scope } = makeScope({ enabled: false });
     const generate = createImageGenerationTools(scope)[0]!;
-    const approval = generate.approval as ApprovalPolicy;
-    const context = approvalContext({ prompt: "a red panda" });
+    const requiresApproval = generate.requiresApproval as ToolRequiresApproval<{
+      prompt: string;
+    }>;
+    const args = { prompt: "a red panda" };
+    const context = approvalContext(args);
 
-    expect(await approval.when(context)).toBe(true);
-    expect(approval.reason({ args: { prompt: "a red panda" } })).toBe(
-      'The agent wants to generate an image: "a red panda"',
-    );
+    expect(requiresApproval).toBeTypeOf("function");
+    const requirement = await (
+      requiresApproval as (
+        args: { prompt: string },
+        approvalContextValue: typeof context,
+      ) => Promise<boolean | ToolApprovalRequirement>
+    )(args, context);
+    expect(requirement).toEqual({
+      reason: 'The agent wants to generate an image: "a red panda"',
+    });
 
     const granted = createImageGenerationTools({
       ...scope,
       hasGrant: () => true,
     });
-    const grantedApproval = granted[0]!.approval as ApprovalPolicy;
-    expect(await grantedApproval.when(context)).toBe(false);
+    const grantedApproval = granted[0]!
+      .requiresApproval as typeof requiresApproval;
+    expect(grantedApproval).toBeTypeOf("function");
+    expect(
+      await (
+        grantedApproval as (
+          args: { prompt: string },
+          approvalContextValue: typeof context,
+        ) => Promise<boolean | ToolApprovalRequirement>
+      )(args, context),
+    ).toBe(false);
   });
 });
 

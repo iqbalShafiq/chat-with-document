@@ -4,8 +4,10 @@ import { Worker } from "bullmq";
 import {
   buildDocumentSummary,
   chunkText,
+  closeQdrant,
+  closeTracing,
+  createEmbeddingModel,
   deleteDocumentChunks,
-  embeddingModel,
   firstLinesSummary,
   parseCsv,
   parseXlsx,
@@ -16,7 +18,7 @@ import {
   type DocumentPageImage,
   type OcrPageTable,
   type TabularSheet,
-} from "@assingment/agent";
+} from "@anreal/agent";
 import type { EmbeddedDocument } from "@anvia/core/embeddings";
 import { buildPageImageR2Key, getObjectBuffer, putObject } from "./lib/r2.js";
 import {
@@ -44,6 +46,37 @@ import {
   processChatRunJob,
   type ChatRunJobData,
 } from "./modules/chat/run-worker.js";
+import {
+  createMemoryValidationGate,
+  validateSanitizedMemoryStore,
+} from "./modules/chat/memory-sanitizer.js";
+import { closeContext7Mcp } from "./lib/context7-server.js";
+import { closeRedis } from "./lib/redis.js";
+import { getActiveRunRegistry } from "./modules/chat/run-worker.js";
+import { createWorkerShutdownCoordinator } from "./worker-lifecycle.js";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+function chatWorkerPidFile(): string {
+  return (
+    process.env.CHAT_WORKER_PID_FILE ??
+    join(tmpdir(), "anreal-worker.pid")
+  );
+}
+
+function publishWorkerPid(): void {
+  const file = chatWorkerPidFile();
+  writeFileSync(file, `${process.pid}\n`);
+  console.log(`[worker] pid ${process.pid} written to ${file}`);
+}
+
+let processEmbeddingModel: ReturnType<typeof createEmbeddingModel> | null = null;
+
+function getProcessEmbeddingModel(): ReturnType<typeof createEmbeddingModel> {
+  processEmbeddingModel ??= createEmbeddingModel();
+  return processEmbeddingModel;
+}
 
 console.log("[worker] boot");
 
@@ -175,7 +208,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
     const chunks = chunkText(page.rawMarkdown);
     if (chunks.length === 0) continue;
 
-    const vectors = await embeddingModel.embedTexts(
+    const vectors = await getProcessEmbeddingModel().embedTexts(
       chunks.map((chunk) => chunk.text),
     );
 
@@ -260,7 +293,9 @@ async function processTabularIngest(input: {
   await deleteDocumentChunks(documentId);
   const chunks = chunkText(markdown);
   if (chunks.length > 0) {
-    const vectors = await embeddingModel.embedTexts(chunks.map((c) => c.text));
+    const vectors = await getProcessEmbeddingModel().embedTexts(
+      chunks.map((c) => c.text),
+    );
     await upsertDocumentChunks(
       chunks.map((chunk, i) => ({
         id: `${documentId}:page0:${chunk.chunkIndex}`,
@@ -333,9 +368,9 @@ worker.on("error", (error) => {
   console.error("[worker] error", error);
 });
 
-if (profileConfig().enabled) {
-  const profileWorker = createProfileWorker();
+const profileWorker = profileConfig().enabled ? createProfileWorker() : null;
 
+if (profileWorker) {
   profileWorker.on("ready", () => {
     console.log(`[profile] ready on queue profile-summary`);
   });
@@ -366,6 +401,14 @@ if (profileConfig().enabled) {
 
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
 
+// Validate the Prisma memory adapter/delegates before the chat queue is
+// opened. Legacy v0 rows must be normalized offline; there is intentionally
+// no runtime compatibility parser here.
+const ensureMemoryStoreReady = createMemoryValidationGate(() =>
+  validateSanitizedMemoryStore(prisma),
+);
+await ensureMemoryStoreReady();
+
 const chatRunWorker = new Worker<ChatRunJobData>(
   CHAT_RUN_QUEUE,
   async (job) => {
@@ -384,16 +427,16 @@ const chatRunWorker = new Worker<ChatRunJobData>(
   },
 );
 
-chatRunWorker.on("ready", () =>
-  console.log(`[chat-run] ready on queue ${CHAT_RUN_QUEUE}`),
-);
+chatRunWorker.on("ready", () => {
+  console.log(`[chat-run] ready on queue ${CHAT_RUN_QUEUE}`);
+  publishWorkerPid();
+});
 
 chatRunWorker.on("failed", async (job, error) => {
   if (job?.data) {
     await failChatRun(job.data.streamId, error, {
       sessionId: job.data.sessionId,
       userId: job.data.userId,
-      promptMessage: job.data.promptMessage,
     });
   }
 });
@@ -401,3 +444,30 @@ chatRunWorker.on("failed", async (job, error) => {
 chatRunWorker.on("error", (error) =>
   console.error("[chat-run] worker error", error),
 );
+
+const shutdownCoordinator = createWorkerShutdownCoordinator({
+  activeRuns: getActiveRunRegistry(),
+  chatWorker: chatRunWorker,
+  documentWorker: worker,
+  profileWorker,
+  closeQdrant,
+  closeContext7: closeContext7Mcp,
+  closeTracing,
+  disconnectPrisma: () => prisma.$disconnect(),
+  closeRedis,
+  onFailure: (name, error) => console.error(`[worker] ${name} shutdown failed`, error),
+});
+
+function requestShutdown(signal: NodeJS.Signals): void {
+  console.log(`[worker] received ${signal}; shutting down`);
+  void shutdownCoordinator.request(signal).then(
+    () => process.exit(0),
+    (error) => {
+      console.error(`[worker] shutdown failed after ${signal}`, error);
+      process.exit(1);
+    },
+  );
+}
+
+process.once("SIGINT", () => requestShutdown("SIGINT"));
+process.once("SIGTERM", () => requestShutdown("SIGTERM"));

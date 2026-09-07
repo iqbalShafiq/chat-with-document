@@ -1,4 +1,4 @@
-import { ocrModel } from "../providers/mistral.js";
+import { createOcrModel } from "../providers/mistral.js";
 
 export interface OcrPageImage {
   id: string;
@@ -110,7 +110,7 @@ export async function runDocumentOcr(input: {
   filename: string;
   data: Uint8Array;
 }) {
-  const result = await ocrModel.ocr({
+  const result = await createOcrModel().ocr({
     source: {
       type: "bytes",
       data: input.data,

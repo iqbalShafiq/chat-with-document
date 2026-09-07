@@ -16,7 +16,13 @@ export type ClarificationRecord = {
   questions: Array<{ id: string; question: string; type: string }>;
 };
 
+export type BehaviorOutcome =
+  | { type: "response" }
+  | { type: "interaction"; interactionType: "tool-approval" | "tool-question" }
+  | { type: "blocked"; stage: "input" | "output"; reason: string };
+
 export type BehaviorTrace = {
+  outcome: BehaviorOutcome;
   output: string;
   toolCalls: ToolCallRecord[];
   approvals: ApprovalRecord[];

@@ -1,5 +1,5 @@
 import type { CompletionModel, Usage } from "@anvia/core";
-import { ExtractorBuilder } from "@anvia/core/extractor";
+import { extract } from "@anvia/core/extractor";
 import z from "zod";
 import { EMPTY_PROFILE_SECTIONS } from "./types.js";
 import type {
@@ -167,16 +167,17 @@ export async function summarizeProfileDelta(input: {
   reconsiderations?: Array<{ deletedSessionId: string; snapshot: string }>;
 }): Promise<{ sections: ProfileSections; usage: Usage }> {
   const text = buildProfileSummaryText(input);
-  const extractor = new ExtractorBuilder(input.model, profileSectionsSchema)
-    .instructions(PROFILE_SUMMARY_INSTRUCTIONS)
-    .retries(1)
-    .build();
-
-  const result = await extractor.extractWithUsage(text);
+  const result = await extract({
+    model: input.model,
+    text,
+    outputSchema: profileSectionsSchema,
+    instructions: PROFILE_SUMMARY_INSTRUCTIONS,
+    retries: { maxAttempts: 2 },
+  });
   return {
     sections: {
       ...EMPTY_PROFILE_SECTIONS,
-      ...result.data.sections,
+      ...result.output.sections,
     },
     usage: result.usage,
   };

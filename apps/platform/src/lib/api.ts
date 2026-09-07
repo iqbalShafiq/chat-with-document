@@ -1,16 +1,24 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
+import type { StageInteractionInput } from "#/lib/chat/interaction-response";
 
 const DEFAULT_API_PORT = 3001;
 
 /**
  * API origin for this page. Opening the UI at http://192.168.x.x:3000 talks to
  * http://192.168.x.x:3001 — localhost would point at the phone itself.
- * Override with VITE_API_BASE when the API is on a different host.
+ * Override with VITE_API_BASE when the API is on a different host/port.
+ * Otherwise the port comes from VITE_API_PORT in the shared root .env
+ * (kept in sync with the API's PORT; Vite only exposes VITE_* to the browser).
  */
-export function resolveApiBase(hostname?: string, protocol?: string): string {
-  if (hostname === undefined) {
-    const fromEnv = import.meta.env.VITE_API_BASE?.trim();
-    if (fromEnv) return fromEnv.replace(/\/+$/, "");
+export function resolveApiBase(
+  hostname?: string,
+  protocol?: string,
+  env?: { VITE_API_BASE?: string; VITE_API_PORT?: string },
+): string {
+  const viteEnv = env ?? import.meta.env;
+  const fromEnv = viteEnv.VITE_API_BASE?.trim();
+  if (fromEnv && (hostname === undefined || fromEnv.includes("://"))) {
+    return fromEnv.replace(/\/+$/, "");
   }
   const host =
     hostname ??
@@ -18,7 +26,8 @@ export function resolveApiBase(hostname?: string, protocol?: string): string {
   const proto =
     protocol ??
     (typeof window === "undefined" ? "http:" : window.location.protocol);
-  return `${proto}//${host}:${DEFAULT_API_PORT}`;
+  const port = viteEnv.VITE_API_PORT?.trim() || String(DEFAULT_API_PORT);
+  return `${proto}//${host}:${port}`;
 }
 
 export const API_BASE = resolveApiBase();
@@ -748,6 +757,7 @@ export type TruncateSessionMemoryInput = {
   mode: "include" | "exclude";
   memoryPosition?: number;
   clientMessageId?: string;
+  expectedPrefixMessageCount?: number;
 };
 
 export type TruncateSessionMemoryResult = {
@@ -768,6 +778,7 @@ export async function truncateSessionMemory(
       mode: input.mode,
       memoryPosition: input.memoryPosition,
       clientMessageId: input.clientMessageId,
+      expectedPrefixMessageCount: input.expectedPrefixMessageCount,
     }),
   });
 
@@ -1052,7 +1063,10 @@ export async function fetchSessionState(
   return data as SessionStateInfo;
 }
 
-export async function stopChatRun(streamId: string): Promise<void> {
+export async function stopChatRun(
+  streamId: string,
+  sessionId: string,
+): Promise<void> {
   const response = await apiFetch(`${API_BASE}/api/chat/stop`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -1064,6 +1078,18 @@ export async function stopChatRun(streamId: string): Promise<void> {
     } | null;
     throw new Error(body?.error ?? "Failed to stop chat run");
   }
+
+  // The stop endpoint records an authoritative cancellation request. Do not
+  // expose the composer as idle until the worker has closed the stream and
+  // released this exact session lease; otherwise an immediate regenerate can
+  // race the previous run and receive RUN_ACTIVE.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const status = await fetchRunStatus(sessionId);
+    if (status.streamId !== streamId || status.status !== "running") return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for the chat run to stop");
 }
 
 export type SteerMessageInput = {
@@ -1125,7 +1151,7 @@ export type WebCapabilities = {
   webSearchAvailable: boolean;
   deepResearchAvailable: boolean;
   imageGenerationAvailable: boolean;
-  context7Available: boolean;
+  context7Configured: boolean;
 };
 
 const capabilitiesPromises = new Map<string, Promise<WebCapabilities>>();
@@ -1160,51 +1186,170 @@ async function fetchChatCapabilitiesRemote(
     typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).deepResearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).imageGenerationAvailable !== "boolean" ||
-    typeof (data as WebCapabilities).context7Available !== "boolean"
+    typeof (data as WebCapabilities).context7Configured !== "boolean"
   ) {
     throw new Error("Unexpected capabilities response shape");
   }
   return data as WebCapabilities;
 }
 
-// ─── Approval decisions ──────────────────────────────────────────────────────
+// ─── Native interaction policy staging ─────────────────────────────────────
 
-export type DecideApprovalInput = {
-  approvalId: string;
-  approved: boolean;
-  reason?: string;
-  /** "session" persists a tool grant for the rest of the run; "once" (default) approves only the current call. */
-  grantScope?: "once" | "session";
-  /** UI-edited tool args staged for the tool's next call (e.g. image params). */
-  overrideArgs?: Record<string, unknown>;
-};
+const STAGE_OVERRIDE_KEYS = new Set([
+  "modelId",
+  "aspectRatio",
+  "quality",
+  "background",
+  "n",
+]);
 
-export async function decideApproval(
-  input: DecideApprovalInput,
+/** Whether a restored approval/clarification can still be answered. */
+export async function fetchInteractionStatus(
+  interactionId: string,
+): Promise<"pending" | "unavailable"> {
+  try {
+    const response = await apiFetch(
+      `${API_BASE}/api/chat/interactions/${encodeURIComponent(interactionId)}`,
+    );
+    if (!response.ok) return "unavailable";
+    const body: unknown = await response.json().catch(() => null);
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      (body as { status?: unknown }).status === "pending"
+    ) {
+      return "pending";
+    }
+    return "unavailable";
+  } catch (error) {
+    if (error instanceof ApiAuthError) throw error;
+    // Keep the card when the status check itself fails.
+    return "pending";
+  }
+}
+
+/**
+ * Stage application-owned policy for one native tool approval. The native
+ * response itself is sent by @anvia/react; this helper never answers it.
+ */
+export async function stageInteractionPolicy(
+  input: StageInteractionInput,
 ): Promise<void> {
+  if (!isValidStageInput(input)) {
+    throw new Error("Interaction policy request is invalid.");
+  }
+
   const response = await apiFetch(
-    `${API_BASE}/api/chat/approvals/${encodeURIComponent(input.approvalId)}/decision`,
+    `${API_BASE}/api/chat/interactions/${encodeURIComponent(input.interactionId)}/stage`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        approved: input.approved,
-        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        response: input.response,
         ...(input.grantScope !== undefined
           ? { grantScope: input.grantScope }
           : {}),
-        ...(input.overrideArgs && Object.keys(input.overrideArgs).length > 0
+        ...(input.overrideArgs !== undefined
           ? { overrideArgs: input.overrideArgs }
           : {}),
       }),
     },
   );
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "Failed to send approval decision");
+  if (response.ok) return;
+
+  const code = await safeResponseCode(response);
+  if (response.status === 404 || code === "INTERACTION_NOT_FOUND") {
+    throw new Error("This interaction is no longer available.");
   }
+  if (code === "INTERACTION_EXPIRED") {
+    throw new Error(
+      "This approval expired. Send a new message to continue.",
+    );
+  }
+  if (
+    response.status === 409 ||
+    code === "INTERACTION_STATE_CONFLICT" ||
+    code === "INTERACTION_POLICY_CONFLICT" ||
+    code === "INTERACTION_REPLAYED"
+  ) {
+    throw new Error("This interaction was already handled.");
+  }
+  if (
+    response.status === 503 ||
+    code === "INTERACTION_POLICY_UNAVAILABLE"
+  ) {
+    throw new Error("Interaction policy is temporarily unavailable.");
+  }
+  if (response.status === 400 || code === "INTERACTION_STAGE_INVALID") {
+    throw new Error("Interaction policy request is invalid.");
+  }
+  throw new Error("Interaction policy could not be staged.");
+}
+
+function isValidStageInput(value: unknown): value is StageInteractionInput {
+  if (!isRecord(value) || typeof value.interactionId !== "string") {
+    return false;
+  }
+  if (
+    value.interactionId.trim().length === 0 ||
+    value.interactionId.length > 256 ||
+    !isRecord(value.response) ||
+    value.response.type !== "tool-approval" ||
+    value.response.approved !== true
+  ) {
+    return false;
+  }
+  if (
+    value.response.reason !== undefined &&
+    (typeof value.response.reason !== "string" ||
+      value.response.reason.length > 500)
+  ) {
+    return false;
+  }
+  if (
+    value.grantScope !== undefined &&
+    value.grantScope !== "session"
+  ) {
+    return false;
+  }
+  if (value.overrideArgs !== undefined && !isValidStageOverride(value.overrideArgs)) {
+    return false;
+  }
+  return value.grantScope !== undefined || value.overrideArgs !== undefined;
+}
+
+function isValidStageOverride(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (
+    keys.length === 0 ||
+    !keys.includes("modelId") ||
+    keys.some((key) => !STAGE_OVERRIDE_KEYS.has(key))
+  ) {
+    return false;
+  }
+  return keys.every((key) => {
+    const item = value[key];
+    if (key === "n") {
+      return (
+        typeof item === "number" &&
+        Number.isInteger(item) &&
+        item >= 1 &&
+        item <= 10
+      );
+    }
+    return (
+      typeof item === "string" &&
+      item.trim().length > 0 &&
+      item.length <= 512
+    );
+  });
+}
+
+async function safeResponseCode(response: Response): Promise<string | undefined> {
+  const value: unknown = await response.json().catch(() => undefined);
+  if (!isRecord(value) || typeof value.code !== "string") return undefined;
+  return value.code;
 }
 
 // ─── Image generation ────────────────────────────────────────────────────────
@@ -1230,11 +1375,6 @@ export type GeneratedImageMeta = {
   source: string;
   sourceUrl: string | null;
   createdAt: string;
-};
-
-export type ClarificationResponseBody = {
-  answers: Record<string, string | string[]>;
-  skipped: string[];
 };
 
 export type ImageModelCapabilities = {
@@ -1544,6 +1684,7 @@ export async function fetchContextSnippet(
   const response = await apiFetch(
     `${API_BASE}/api/chat/${encodeURIComponent(sessionId)}/context-snippet`,
   );
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error("Failed to load context snippet");
   const body = (await response.json()) as { snippet?: unknown };
   const snippet = body.snippet;
@@ -1602,24 +1743,4 @@ export async function removeContextSnippet(input: {
     { method: "DELETE" },
   );
   if (!response.ok) throw new Error("Failed to remove context snippet");
-}
-
-export async function submitClarification(input: {
-  clarificationId: string;
-  body: ClarificationResponseBody;
-}): Promise<void> {
-  const response = await apiFetch(
-    `${API_BASE}/api/chat/clarifications/${encodeURIComponent(input.clarificationId)}/response`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input.body),
-    },
-  );
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "Failed to send clarification response");
-  }
 }

@@ -1,5 +1,5 @@
-import type { DatasetResolver, TabularSheet } from "@assingment/agent";
-import { extractMarkdownTables, sheetFromRows } from "@assingment/agent";
+import type { DatasetResolver, TabularSheet } from "@anreal/agent";
+import { extractMarkdownTables, sheetFromRows } from "@anreal/agent";
 import { Prisma } from "../../generated/prisma/client.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 
@@ -9,6 +9,8 @@ export type TabularResolverDeps = {
   userId: string;
   sessionId: string;
   projectId?: string | null;
+  /** Authenticated document scope frozen into a resumable run recipe. */
+  documentIds?: readonly string[];
   prisma: PrismaClient;
 };
 
@@ -16,6 +18,7 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
   const { userId, sessionId, projectId, prisma } = deps;
 
   async function linkedDocumentIds(): Promise<string[]> {
+    if (deps.documentIds !== undefined) return [...deps.documentIds];
     const rows = await prisma.documentSession.findMany({
       where: {
         sessionId,
@@ -46,6 +49,9 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
     },
 
     async resolveSheet(ref) {
+      if (deps.documentIds !== undefined && !deps.documentIds.includes(ref.documentId)) {
+        throw new Error("Dataset not found or empty");
+      }
       if (ref.type === "upload") {
         const doc = await prisma.document.findFirst({
           where: { id: ref.documentId, userId, ...(projectId ? { projectId } : {}) },

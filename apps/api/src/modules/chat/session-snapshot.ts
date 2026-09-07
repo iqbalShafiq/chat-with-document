@@ -1,6 +1,26 @@
+import type { Message } from "@anvia/core";
+
 /** Bounded snapshot of the session's user messages (profile reconsideration input). */
 export const SNAPSHOT_MAX_MESSAGES = 12;
 export const SNAPSHOT_MAX_CHARS = 8000;
+
+export type SessionSnapshotRow = {
+  createdAt: Date;
+  text: string | Message;
+};
+
+function textFromSnapshotValue(value: string | Message): string {
+  if (typeof value === "string") return value;
+  if (typeof value.content === "string") return value.content;
+  if (!Array.isArray(value.content)) return "";
+  return value.content
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        part.type === "text",
+    )
+    .map((part) => part.text)
+    .join(" ");
+}
 
 /** Clip to a UTF-16-unit budget, never splitting a surrogate pair. */
 function clipToUtf16Budget(text: string, budget: number): string {
@@ -14,12 +34,12 @@ function clipToUtf16Budget(text: string, budget: number): string {
 }
 
 export function buildSessionSnapshotText(
-  rows: Array<{ createdAt: Date; text: string }>,
+  rows: SessionSnapshotRow[],
 ): string {
   const candidates = rows
     .map((row) => ({
       createdAt: row.createdAt,
-      text: row.text.replace(/\s+/g, " ").trim(),
+      text: textFromSnapshotValue(row.text).replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.text.length > 0);
   const parts: string[] = [];

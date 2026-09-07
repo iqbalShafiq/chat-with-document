@@ -10,8 +10,6 @@ import {
   expandAssistantToolPanels,
   openFreshChat,
   sendMessage,
-  setModel,
-  setSwitch,
   uploadAndAsk,
   waitForRunDone,
   waitForStreaming,
@@ -31,49 +29,33 @@ function ensureMcpDir(): void {
 }
 async function saveEvidence(page: import("@playwright/test").Page, caseId: string): Promise<void> {
   ensureMcpDir();
-  await page.screenshot({ path: path.join(MCP_DIR, `${caseId}.png`), scale: "css" });
-  const bodyHtml = await page.evaluate(() => document.body.innerHTML);
-  const fullHtml = await page.content();
+  await page.screenshot({
+    path: path.join(MCP_DIR, `${caseId}.png`),
+    scale: "css",
+    mask: [page.locator("article"), page.locator("nav")],
+  });
   const hasTable = await page.locator('[aria-label="Data table"]').count();
   const hasBar = await page.locator('[role="img"][aria-label*="bar chart"]').count();
   const hasScatter = await page.locator('[role="img"][aria-label*="scatter"]').count();
-  const tableExcerpt = await page.locator('[aria-label="Data table"]').first().evaluate((el) => el.outerHTML.slice(0, 5000)).catch(() => "no DataTable");
-  const chartExcerpt = await page.locator('[role="img"]').first().evaluate((el) => el.outerHTML.slice(0, 5000)).catch(() => "no chart");
-  // Faithful YML-like excerpt containing actual DataTable/Chart markers
-  const yml = `# ${caseId} — genuine headed snapshot excerpt
-# contains [aria-label="Data table"] / [role="img"] markers
+  const chartCount = await page.locator('[role="img"]').count();
+  const yml = `# ${caseId} — redacted headed evidence
+# prompts, outputs, reasoning, tool arguments, and dataset contents are omitted
 # hasTable=${hasTable} hasBar=${hasBar} hasScatter=${hasScatter}
-# URL: ${page.url()}
-# DataTable excerpt:
-${tableExcerpt}
-# Chart excerpt:
-${chartExcerpt}
-# Body tail (last 8000 chars, includes DataTable/Chart):
-${bodyHtml.slice(-8000)}
-# --- Full HTML tail (last 2000 chars) ---
-${fullHtml.slice(-2000)}
+# path: ${new URL(page.url()).pathname}
+# chartCount=${chartCount}
 `;
   fs.writeFileSync(path.join(MCP_DIR, `${caseId}.yml`), yml, "utf8");
-  const consoleLog = `Case ${caseId} ${new Date().toISOString()}
-URL: ${page.url()}
-Title: ${await page.title()}
+  const consoleLog = `Case ${caseId}
+path=${new URL(page.url()).pathname}
 hasTable=${hasTable} hasBar=${hasBar} hasScatter=${hasScatter}
-Body excerpt tail:
-${bodyHtml.slice(-2000)}
+chartCount=${chartCount}
 `;
   fs.writeFileSync(path.join(MCP_DIR, `${caseId}.console.log`), consoleLog, "utf8");
-}
-
-async function enableDataAnalysis(page: import("@playwright/test").Page): Promise<void> {
-  await setSwitch(page, "Data analysis", true);
-  // Prefer deepseek flash for tabular cases per brief; harmless if model list doesn't contain the id.
-  await setModel(page, "deepseek/deepseek-v4-flash-0731").catch(() => {});
 }
 
 test("P1-C1: CSV upload -> read_dataset preview renders a DataTable", async ({ page }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "sales.csv",
@@ -87,7 +69,6 @@ test("P1-C1: CSV upload -> read_dataset preview renders a DataTable", async ({ p
 test("P1-C2: aggregate + bar chart", async ({ page }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "sales.csv",
@@ -102,7 +83,6 @@ test("P1-C2: aggregate + bar chart", async ({ page }) => {
 test("P1-C3: correlation + scatter chart", async ({ page }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "sales.csv",
@@ -116,7 +96,6 @@ test("P1-C3: correlation + scatter chart", async ({ page }) => {
 test("P1-C4: SQL query returns a table", async ({ page }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "sales.csv",
@@ -130,7 +109,6 @@ test("P1-C4: SQL query returns a table", async ({ page }) => {
 test("P1-C5: XLSX multi-sheet", async ({ page }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "multi-sheet.xlsx",
@@ -144,7 +122,6 @@ test("P1-C5: XLSX multi-sheet", async ({ page }) => {
 test("P1-C6: PDF table extraction", async ({ page }) => {
   test.setTimeout(420_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "table-rich.pdf",
@@ -170,7 +147,6 @@ test("P1-C8: chart/table renders mid-chat between user message and assistant tex
 }) => {
   test.setTimeout(360_000);
   await openFreshChat(page);
-  await enableDataAnalysis(page);
   await uploadAndAsk(
     page,
     "sales.csv",

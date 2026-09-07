@@ -8,6 +8,7 @@ import {
   openFreshChat,
   sendMessage,
   setSwitch,
+  waitForIdleComposer,
   waitForRunDone,
   waitForStreaming,
 } from "./helpers";
@@ -28,6 +29,7 @@ test("stream a short reply from the real model", async ({ page }) => {
 test("composer stays editable and queues a follow-up while streaming", async ({
   page,
 }) => {
+  test.setTimeout(360_000);
   await openFreshChat(page);
   await sendMessage(
     page,
@@ -35,7 +37,7 @@ test("composer stays editable and queues a follow-up while streaming", async ({
   );
   await waitForStreaming(page);
   const editor = page.locator("[data-anvia-composer-editor]");
-  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await expect(editor).toBeEditable();
   await editor.click();
   await editor.pressSequentially("After you finish, reply QUEUE_OK on its own line.", {
     delay: 8,
@@ -48,9 +50,9 @@ test("composer stays editable and queues a follow-up while streaming", async ({
   if (await queuedDock.isVisible().catch(() => false)) {
     await expect(queuedDock).toContainText("QUEUE_OK");
   }
-  await waitForRunDone(page);
+  await waitForIdleComposer(page, 300_000);
   await expect(page.getByText("QUEUE_OK").last()).toBeVisible({
-    timeout: 150_000,
+    timeout: 30_000,
   });
 });
 
@@ -69,7 +71,7 @@ test("web search with the toggle on uses live Tavily", async ({ page, request })
   const caps = await request.get(`${API_ORIGIN}/api/chat/capabilities`);
   expect(caps.ok()).toBe(true);
   const body = (await caps.json()) as { webSearchAvailable?: boolean };
-  test.skip(!body.webSearchAvailable, "TAVILY_API_KEY not available");
+  expect(body.webSearchAvailable, "real web-search capability is required").toBe(true);
 
   await openFreshChat(page);
   await setSwitch(page, "Web search", true);
@@ -89,7 +91,10 @@ test("image generation with the toggle on uses the live image API", async ({
   const caps = await request.get(`${API_ORIGIN}/api/chat/capabilities`);
   expect(caps.ok()).toBe(true);
   const body = (await caps.json()) as { imageGenerationAvailable?: boolean };
-  test.skip(!body.imageGenerationAvailable, "image generation not available");
+  expect(
+    body.imageGenerationAvailable,
+    "real image-generation capability is required",
+  ).toBe(true);
 
   await openFreshChat(page);
   await setSwitch(page, "Image generator", true);
