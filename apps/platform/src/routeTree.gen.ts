@@ -14,6 +14,7 @@ import { Route as WorkspaceRouteImport } from './routes/_workspace'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AuthRegisterRouteImport } from './routes/_auth/register'
 import { Route as WorkspaceIndexRouteImport } from './routes/_workspace/index'
+import { Route as ShareShareTokenRouteImport } from './routes/share.$shareToken'
 import { Route as WorkspaceChatSessionIdRouteImport } from './routes/_workspace/chat.$sessionId'
 import { Route as WorkspaceDocumentsIndexRouteImport } from './routes/_workspace/documents.index'
 import { Route as WorkspaceProjectsIndexRouteImport } from './routes/_workspace/projects.index'
@@ -42,6 +43,11 @@ const WorkspaceIndexRoute = WorkspaceIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkspaceRoute,
+} as any)
+const ShareShareTokenRoute = ShareShareTokenRouteImport.update({
+  id: '/share/$shareToken',
+  path: '/share/$shareToken',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceChatSessionIdRoute = WorkspaceChatSessionIdRouteImport.update({
   id: '/chat/$sessionId',
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof WorkspaceIndexRoute
   '/login': typeof AuthLoginRoute
   '/register': typeof AuthRegisterRoute
+  '/share/$shareToken': typeof ShareShareTokenRoute
   '/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
   '/documents/': typeof WorkspaceDocumentsIndexRoute
   '/projects/': typeof WorkspaceProjectsIndexRoute
@@ -85,6 +92,7 @@ export interface FileRoutesByTo {
   '/': typeof WorkspaceIndexRoute
   '/login': typeof AuthLoginRoute
   '/register': typeof AuthRegisterRoute
+  '/share/$shareToken': typeof ShareShareTokenRoute
   '/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
   '/documents': typeof WorkspaceDocumentsIndexRoute
   '/projects': typeof WorkspaceProjectsIndexRoute
@@ -97,6 +105,7 @@ export interface FileRoutesById {
   '/_workspace': typeof WorkspaceRouteWithChildren
   '/_auth/login': typeof AuthLoginRoute
   '/_auth/register': typeof AuthRegisterRoute
+  '/share/$shareToken': typeof ShareShareTokenRoute
   '/_workspace/': typeof WorkspaceIndexRoute
   '/_workspace/chat/$sessionId': typeof WorkspaceChatSessionIdRoute
   '/_workspace/documents/': typeof WorkspaceDocumentsIndexRoute
@@ -110,6 +119,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/register'
+    | '/share/$shareToken'
     | '/chat/$sessionId'
     | '/documents/'
     | '/projects/'
@@ -120,6 +130,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/register'
+    | '/share/$shareToken'
     | '/chat/$sessionId'
     | '/documents'
     | '/projects'
@@ -131,6 +142,7 @@ export interface FileRouteTypes {
     | '/_workspace'
     | '/_auth/login'
     | '/_auth/register'
+    | '/share/$shareToken'
     | '/_workspace/'
     | '/_workspace/chat/$sessionId'
     | '/_workspace/documents/'
@@ -142,6 +154,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthRoute: typeof AuthRouteWithChildren
   WorkspaceRoute: typeof WorkspaceRouteWithChildren
+  ShareShareTokenRoute: typeof ShareShareTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -180,6 +193,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof WorkspaceIndexRouteImport
       parentRoute: typeof WorkspaceRoute
+    }
+    '/share/$shareToken': {
+      id: '/share/$shareToken'
+      path: '/share/$shareToken'
+      fullPath: '/share/$shareToken'
+      preLoaderRoute: typeof ShareShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_workspace/chat/$sessionId': {
       id: '/_workspace/chat/$sessionId'
@@ -257,6 +277,7 @@ const WorkspaceRouteWithChildren = WorkspaceRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRouteWithChildren,
   WorkspaceRoute: WorkspaceRouteWithChildren,
+  ShareShareTokenRoute: ShareShareTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

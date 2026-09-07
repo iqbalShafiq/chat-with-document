@@ -43,20 +43,22 @@ export function useChatRouteData(input: {
             return;
           }
         }
-        const data = await loadChatMessages(sessionId);
+        // History load is authoritative for unknown ids: missing rows
+        // yield an empty array, so verify membership before rendering.
+        // Fork sessions seed memory directly, therefore they appear in
+        // the list; an id absent from the list with empty history is gone.
+        const [data, scoped] = await Promise.all([
+          loadChatMessages(sessionId),
+          listSessions({ limit: 100, projectId: projectId ?? undefined }).catch(
+            () => null,
+          ),
+        ]);
         if (cancelled) return;
         const messages = finalizeInterruptedTools(parseMemoryMessages(data));
-        if (messages.length === 0) {
-          const scoped = await listSessions({
-            limit: 100,
-            projectId: projectId ?? undefined,
-          }).catch(() => null);
-          if (cancelled) return;
-          const known = scoped?.items.some((s) => s.sessionId === sessionId);
-          if (!known) {
-            setStatus("missing");
-            return;
-          }
+        const known = scoped?.items.some((s) => s.sessionId === sessionId);
+        if (messages.length === 0 && !known) {
+          setStatus("missing");
+          return;
         }
         setMessages(messages);
         setStatus("ready");

@@ -153,9 +153,35 @@ model ChatSession {
   updatedAt DateTime @updatedAt
   /// When the user last opened/read this session (clears the sidebar unread marker).
   lastReadAt DateTime?
+  /// Frozen public copies of this session (see ChatShare). Cascade-deleted
+  /// with the session so no orphan public link survives its source chat.
+  shares    ChatShare[]
 
   @@index([userId, projectId, updatedAt])
   @@index([userId, updatedAt])
+}
+
+/// Frozen public snapshot of a chat session. A share is a point-in-time
+/// duplicate, not a live view: later edits/messages on the source session
+/// never update existing rows. Forked viewer sessions are fully independent
+/// copies and survive share revocation/deletion of the source session.
+model ChatShare {
+  id        String   @id @default(cuid())
+  /// Unguessable public token (never the session id).
+  token     String   @unique
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String
+  /// Point-in-time copy of the thread (Anvia memory messages JSON).
+  snapshot  Json
+  /// Denormalized for the public page header without parsing the snapshot.
+  title     String?
+  createdAt DateTime @default(now())
+  /// Set when the owner deactivates sharing for the session (all-or-nothing).
+  revokedAt DateTime?
+
+  @@index([sessionId, createdAt])
+  @@index([userId, createdAt])
 }
 
 // ─── User profiling (personalization layer; additive to AgentMemory*) ──────

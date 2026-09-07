@@ -40,6 +40,7 @@ export function ChatSidebar({
   onRetry,
   onRenameSession,
   onDeleteSession,
+  onShareSession,
   onRemoveSession,
   onCollapse,
   onCloseMobile,
@@ -68,6 +69,7 @@ export function ChatSidebar({
   onRetry: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
+  onShareSession?: (session: SessionSummary) => void;
   onRemoveSession: (sessionId: string) => void;
   /** Desktop: collapse sidebar. Hidden on mobile drawer. */
   onCollapse?: () => void;
@@ -306,6 +308,7 @@ export function ChatSidebar({
           onRetry={onRetry}
           onRenameSession={onRenameSession}
           onDeleteSession={onDeleteSession}
+          onShareSession={onShareSession}
           onRemoveSession={onRemoveSession}
         />
       </div>

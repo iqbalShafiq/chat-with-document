@@ -267,6 +267,100 @@ export async function deleteChatSession(
   return { deleted: true };
 }
 
+// ─── Public share links (frozen snapshots, all-or-nothing per session) ─────
+
+export type ShareLinkCreated = {
+  token: string;
+  urlPath: string;
+  sessionId: string;
+  title: string | null;
+  createdAt: string;
+};
+
+export type ShareStatus = {
+  sessionId: string;
+  active: boolean;
+};
+
+export type PublicShareSnapshot = {
+  token: string;
+  title: string | null;
+  createdAt: string;
+  ownerName: string | null;
+  messages: unknown;
+};
+
+/** Canonical browser URL for a share token (shareable, shown once). */
+export function shareUrl(token: string): string {
+  return `/share/${encodeURIComponent(token)}`;
+}
+
+/**
+ * Mint a new public link (frozen snapshot of current history). The token is
+ * shown once — the owner is never given a listing of past tokens.
+ */
+export async function createShareLink(
+  sessionId: string,
+): Promise<ShareLinkCreated> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to create share link");
+  }
+  return (await response.json()) as ShareLinkCreated;
+}
+
+/** Whether the session currently has at least one active public link. */
+export async function fetchShareStatus(
+  sessionId: string,
+): Promise<ShareStatus> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/status`,
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to load share status");
+  }
+  return (await response.json()) as ShareStatus;
+}
+
+/** Deactivate ALL public links of a session at once (no per-link list). */
+export async function deactivateShareLinks(
+  sessionId: string,
+): Promise<{ sessionId: string; revoked: number }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/deactivate`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to deactivate share links");
+  }
+  return (await response.json()) as { sessionId: string; revoked: number };
+}
+
+/**
+ * Read a public snapshot. No auth required — plain fetch (not apiFetch, so
+ * a missing/invalid token surfaces as data instead of an auth error).
+ */
+export async function fetchPublicShare(token: string): Promise<PublicShareSnapshot> {
+  const response = await fetch(
+    `${API_BASE}/api/shares/${encodeURIComponent(token)}`,
+    { credentials: "include" },
+  );
+  if (!response.ok) throw new Error("Shared link not found or no longer active");
+  return (await response.json()) as PublicShareSnapshot;
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type ProjectListItem = {

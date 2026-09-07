@@ -28,11 +28,13 @@ import {
   renameSession,
   type ProjectListItem,
 } from "#/lib/api";
+import { SharePopover } from "#/components/share/share-popover";
 import { applyWorkspaceTitle } from "#/lib/document-title";
 import {
   EMPTY_CHAT_TITLE,
   findEmptyNewChat,
   isEmptyNewChat,
+  type SessionSummary,
 } from "#/lib/session-history";
 import {
   clearStoredSessionId,
@@ -128,6 +130,10 @@ export function WorkspaceShell({
   const [projectError, setProjectError] = useState<string | null>(null);
   const [imageContextActions, setImageContextActions] =
     useState<ImagePreviewContextActions | null>(null);
+  const [shareTarget, setShareTarget] = useState<SessionSummary | null>(null);
+  const [sharedSessionIds, setSharedSessionIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
 
   const refreshRecentProjects = useCallback(async () => {
     try {
@@ -380,6 +386,32 @@ export function WorkspaceShell({
     [removeSession],
   );
 
+  const handleOpenShare = useCallback((session: SessionSummary) => {
+    setShareTarget(session);
+  }, []);
+
+  const handleCloseShare = useCallback(() => {
+    setShareTarget(null);
+  }, []);
+
+  const handleShareStatusChange = useCallback(
+    (sessionId: string, active: boolean) => {
+      setSharedSessionIds((current) => {
+        if (active === current.has(sessionId)) return current;
+        const next = new Set(current);
+        if (active) next.add(sessionId);
+        else next.delete(sessionId);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleShareActiveChat = useCallback(() => {
+    const active = sessions.find((s) => s.sessionId === activeSessionId);
+    if (active) setShareTarget(active);
+  }, [activeSessionId, sessions]);
+
   const sessionsContextValue = useMemo(
     () => ({ refreshQuiet, onImageContextActions: setImageContextActions }),
     [refreshQuiet],
@@ -409,7 +441,16 @@ export function WorkspaceShell({
           }}
           onRenameSession={handleRenameSession}
           onDeleteSession={handleDeleteSession}
+          onShareSession={handleOpenShare}
           onRemoveSession={handleRemoveSession}
+          showCopyLink={
+            viewMode === "standalone" || viewMode === "project-workspace"
+          }
+          showShare={
+            viewMode === "standalone" || viewMode === "project-workspace"
+          }
+          shareActive={sharedSessionIds.has(activeSessionId)}
+          onShare={handleShareActiveChat}
           viewMode={viewMode}
           recentProjects={recentProjects}
           activeProjectId={activeProjectId}
@@ -421,6 +462,16 @@ export function WorkspaceShell({
           {children}
         </AppShell>
       </ImagePreviewProvider>
+      {shareTarget ? (
+        <SharePopover
+          sessionId={shareTarget.sessionId}
+          sessionTitle={shareTarget.title?.trim() || EMPTY_CHAT_TITLE}
+          open
+          onClose={handleCloseShare}
+          onStatusChange={handleShareStatusChange}
+          onAuthFailure={handleAuthFailure}
+        />
+      ) : null}
     </WorkspaceSessionsContext.Provider>
   );
 }

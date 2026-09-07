@@ -75,6 +75,14 @@ import {
   touchChatSession,
 } from "./chat-session.js";
 import {
+  ChatShareNotFoundError,
+  createChatShare,
+  deactivateChatShares,
+  getPublicShareSnapshot,
+  hasActiveChatShare,
+} from "./chat-share.js";
+import { forkBodySchema, seedForkSession } from "./chat-fork.js";
+import {
   deleteChatSession,
   SessionRunActiveError,
 } from "./session-delete.js";
@@ -434,6 +442,84 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         return c.json({ error: error.message, code: error.code }, 404);
       }
       throw error;
+    }
+  })
+  .post("/sessions/:id/shares", async (c) => {
+    const user = c.get("user");
+    try {
+      const share = await createChatShare({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      return c.json(
+        {
+          token: share.token,
+          urlPath: share.urlPath,
+          sessionId: share.sessionId,
+          title: share.title,
+          createdAt: share.createdAt.toISOString(),
+        },
+        201,
+      );
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .get("/sessions/:id/shares/status", async (c) => {
+    const user = c.get("user");
+    try {
+      const active = await hasActiveChatShare(user.id, c.req.param("id"));
+      return c.json({ sessionId: c.req.param("id"), active });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .post("/sessions/:id/shares/deactivate", async (c) => {
+    const user = c.get("user");
+    try {
+      const result = await deactivateChatShares({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      return c.json({ sessionId: c.req.param("id"), ...result });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .post("/fork", async (c) => {
+    const user = c.get("user");
+    const parsed = forkBodySchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid fork request", code: "INVALID_FORK_REQUEST" },
+        400,
+      );
+    }
+    try {
+      const result = await seedForkSession({
+        userId: user.id,
+        body: parsed.data,
+      });
+      return c.json(result, 201);
+    } catch (error) {
+      return c.json(
+        {
+          error: error instanceof Error ? error.message : "Fork failed",
+          code: "FORK_FAILED",
+        },
+        404,
+      );
     }
   })
   .patch("/sessions/:id", async (c) => {

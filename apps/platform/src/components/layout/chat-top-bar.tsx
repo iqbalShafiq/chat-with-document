@@ -1,5 +1,8 @@
+import { useCallback, useState } from "react";
 import { AnrealMark } from "#/components/layout/anreal-brand";
-import { Menu, PanelLeftOpen, SquarePen } from "lucide-react";
+import { AutoDismissPopover } from "#/components/ui/auto-dismiss-popover";
+import { Check, Link2, Menu, PanelLeftOpen, SquarePen } from "lucide-react";
+import { copyToClipboard } from "#/lib/clipboard";
 
 export function ChatTopBar({
   title,
@@ -8,6 +11,10 @@ export function ChatTopBar({
   onToggleSidebar,
   onNewChat,
   newChatDisabled = false,
+  showCopyLink = false,
+  showShare = false,
+  shareActive = false,
+  onShare,
 }: {
   title: string;
   sidebarOpen: boolean;
@@ -15,9 +22,27 @@ export function ChatTopBar({
   onToggleSidebar: () => void;
   onNewChat: () => void;
   newChatDisabled?: boolean;
+  /** True inside a chat room (standalone / project-workspace). */
+  showCopyLink?: boolean;
+  /** True when the share popover is available for the active chat. */
+  showShare?: boolean;
+  shareActive?: boolean;
+  onShare?: () => void;
 }) {
   const showLeftControl = isMobile || !sidebarOpen;
   const showNewChat = isMobile || !sidebarOpen;
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+
+  const handleCopyLink = useCallback(async () => {
+    const ok = await copyToClipboard(window.location.href);
+    setCopyState(ok ? "copied" : "error");
+  }, []);
+
+  const handleCopyDismiss = useCallback(() => {
+    setCopyState("idle");
+  }, []);
 
   return (
     <header className="vt-topbar glass-top-bar absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-2.5 px-3 md:px-4">
@@ -61,6 +86,59 @@ export function ChatTopBar({
       >
         {title}
       </h1>
+
+      {showCopyLink || showShare ? (
+        <span className="relative inline-flex shrink-0 items-center gap-2">
+          {showShare ? (
+            <button
+              type="button"
+              onClick={onShare}
+              aria-label={shareActive ? "Sharing on — manage link" : "Share chat"}
+              title={shareActive ? "Sharing on — manage link" : "Share chat"}
+              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
+            >
+              <Link2 className="size-4" strokeWidth={1.75} />
+              {shareActive ? (
+                <span
+                  aria-hidden
+                  className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent"
+                />
+              ) : null}
+            </button>
+          ) : null}
+          {showCopyLink ? (
+            <span className="relative inline-flex">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopyLink();
+                }}
+                aria-label={copyState === "copied" ? "Link copied" : "Copy link"}
+                title={copyState === "copied" ? "Link copied" : "Copy link"}
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
+              >
+                {copyState === "copied" ? (
+                  <Check className="size-4 text-success" strokeWidth={1.75} />
+                ) : (
+                  <Link2 className="size-4" strokeWidth={1.75} />
+                )}
+              </button>
+              <AutoDismissPopover
+                open={copyState === "copied"}
+                onDismiss={handleCopyDismiss}
+              >
+                Link copied
+              </AutoDismissPopover>
+              <AutoDismissPopover
+                open={copyState === "error"}
+                onDismiss={handleCopyDismiss}
+              >
+                Copy failed
+              </AutoDismissPopover>
+            </span>
+          ) : null}
+        </span>
+      ) : null}
 
       {showNewChat ? (
         <button
