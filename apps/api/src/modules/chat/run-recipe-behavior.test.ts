@@ -9,6 +9,7 @@ import {
   CLARIFICATION_TOOL_DEFINITIONS,
   DATA_ANALYSIS_TOOL_DEFINITIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
+  DERIVED_TOOL_DEFINITIONS,
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
@@ -97,6 +98,7 @@ function recipe(overrides: Record<string, unknown> = {}) {
   const toolDefinitions = [
     ...DATA_ANALYSIS_TOOL_DEFINITIONS,
     ...TABULAR_TOOL_DEFINITIONS,
+    ...DERIVED_TOOL_DEFINITIONS,
     ...(value.documents.ids.length > 0 ? DOCUMENT_TOOL_DEFINITIONS : []),
     ...(capabilities.profilingEnabled ? PROFILE_TOOL_DEFINITIONS : []),
     ...(capabilities.webSearchAvailable ? WEB_SEARCH_TOOL_DEFINITIONS : []),

@@ -8,6 +8,7 @@ import {
   expandAssistantToolPanels,
   openFreshChat,
   sendMessage,
+  setSwitch,
   uploadAndAsk,
   waitForRunDone,
   waitForStreaming,
@@ -26,15 +27,10 @@ function ensureMcpDir(): void {
 }
 async function saveEvidence(page: import("@playwright/test").Page, caseId: string): Promise<void> {
   ensureMcpDir();
-  await page.screenshot({
-    path: path.join(MCP_DIR, `${caseId}.png`),
-    scale: "css",
-    mask: [page.locator("article"), page.locator("nav")],
-  });
   const hasTable = await page.locator('[aria-label="Data table"]').count();
   const hasBar = await page.locator('[role="img"][aria-label*="bar chart"]').count();
   const chartCount = await page.locator('[role="img"]').count();
-  const yml = `# ${caseId} — redacted headed evidence
+  const yml = `# ${caseId} — redacted headed evidence (no screenshots)
 # prompts, outputs, reasoning, tool arguments, and dataset contents are omitted
 # hasTable=${hasTable} hasBar=${hasBar}
 # path: ${new URL(page.url()).pathname}
@@ -84,6 +80,7 @@ test("P3-C2: derivation from uploaded CSV shows Olahan chip", async ({ page }) =
 test("P3-C3: public CSV download cites the source URL", async ({ page }) => {
   test.setTimeout(420_000);
   await openFreshChat(page);
+  await setSwitch(page, "Web search", true);
   await sendMessage(
     page,
     "Use fetch_dataset_from_url to download https://people.sc.fsu.edu/~jburkardt/data/csv/airtravel.csv " +
@@ -101,6 +98,7 @@ test("P3-C3: public CSV download cites the source URL", async ({ page }) => {
 test("P3-C4: non-CSV URL fails gracefully", async ({ page }) => {
   test.setTimeout(420_000);
   await openFreshChat(page);
+  await setSwitch(page, "Web search", true);
   await sendMessage(
     page,
     "Use fetch_dataset_from_url to download https://example.com/ (reason: testing error handling). " +

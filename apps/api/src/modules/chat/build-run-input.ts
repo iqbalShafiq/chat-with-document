@@ -772,6 +772,7 @@ export async function resolveChatAgentRecipe(
 
   const deepResearchAvailable = webSearchAvailable || hasActiveDocuments;
   if (deepResearchAvailable) instructions.push(DEEP_RESEARCH_INSTRUCTION);
+  instructions.push(DATASET_INSTRUCTION);
 
   const activeImageRows = await readActiveImages({
     userId: input.userId,
@@ -846,6 +847,7 @@ export async function resolveChatAgentRecipe(
   const toolDefinitions = [
     ...DATA_ANALYSIS_TOOL_DEFINITIONS,
     ...TABULAR_TOOL_DEFINITIONS,
+    ...DERIVED_TOOL_DEFINITIONS,
     ...(hasActiveDocuments ? DOCUMENT_TOOL_DEFINITIONS : []),
     ...(profilingEnabled ? PROFILE_TOOL_DEFINITIONS : []),
     ...(webSearchAvailable ? WEB_SEARCH_TOOL_DEFINITIONS : []),
@@ -1133,7 +1135,6 @@ export async function reconstructChatRunInput(input: {
       hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
     },
   });
-  instructions.push(DATASET_INSTRUCTION);
   const tools = [
     ...createDataAnalysisTools(),
     ...tabularTools,
