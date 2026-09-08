@@ -1,5 +1,5 @@
 import { AnrealMark } from "#/components/layout/anreal-brand";
-import { Menu, PanelLeftOpen, SquarePen } from "lucide-react";
+import { Menu, PanelLeftOpen, Share2, SquarePen } from "lucide-react";
 
 export function ChatTopBar({
   title,
@@ -8,6 +8,9 @@ export function ChatTopBar({
   onToggleSidebar,
   onNewChat,
   newChatDisabled = false,
+  showShare = false,
+  shareActive = false,
+  onShare,
 }: {
   title: string;
   sidebarOpen: boolean;
@@ -15,6 +18,10 @@ export function ChatTopBar({
   onToggleSidebar: () => void;
   onNewChat: () => void;
   newChatDisabled?: boolean;
+  /** True when the share popover is available for the active chat. */
+  showShare?: boolean;
+  shareActive?: boolean;
+  onShare?: () => void;
 }) {
   const showLeftControl = isMobile || !sidebarOpen;
   const showNewChat = isMobile || !sidebarOpen;
@@ -61,6 +68,26 @@ export function ChatTopBar({
       >
         {title}
       </h1>
+
+      {showShare ? (
+        <span className="relative inline-flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={onShare}
+            aria-label={shareActive ? "Sharing on — manage link" : "Share chat"}
+            title={shareActive ? "Sharing on — manage link" : "Share chat"}
+            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring animate-fade-in"
+          >
+            <Share2 className="size-4" strokeWidth={1.75} />
+            {shareActive ? (
+              <span
+                aria-hidden
+                className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent"
+              />
+            ) : null}
+          </button>
+        </span>
+      ) : null}
 
       {showNewChat ? (
         <button

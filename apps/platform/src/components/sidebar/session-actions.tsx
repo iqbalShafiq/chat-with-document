@@ -1,5 +1,5 @@
 import { useRef, useState, type RefObject } from "react";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import {
   DIALOG_PRIMARY_BUTTON_CLASS,
@@ -12,8 +12,8 @@ import { EMPTY_CHAT_TITLE, type SessionSummary } from "#/lib/session-history";
 
 /**
  * Per-row session actions: hover-revealed "⋯" button (always visible on the
- * active row), floating action menu (rename / delete), rename form dialog and
- * delete confirm dialog.
+ * active row), floating action menu (rename / share / delete), rename form
+ * dialog and delete confirm dialog.
  */
 export function SessionActionsMenu({
   session,
@@ -21,6 +21,7 @@ export function SessionActionsMenu({
   alwaysVisible = false,
   onRename,
   onDelete,
+  onShare,
   onRemoved,
   restoreFocusRef,
   anchorRef,
@@ -33,7 +34,9 @@ export function SessionActionsMenu({
   anchorRef?: RefObject<HTMLElement | null>;
   onRename: (sessionId: string, title: string) => Promise<void>;
   onDelete: (sessionId: string) => Promise<void>;
-  /** Called after the exit animation so the parent can drop the row. */
+  /** Open the Share popover for this row's session. */
+  onShare?: (session: SessionSummary) => void;
+  /** Called after the exit animation so the parent can drop them. */
   onRemoved: (sessionId: string) => void;
   restoreFocusRef?: RefObject<HTMLElement | null>;
 }) {
@@ -128,12 +131,25 @@ export function SessionActionsMenu({
           {
             id: "rename",
             label: "Rename",
+            description: "Give this chat a custom name",
             icon: <Pencil className="size-3.5" strokeWidth={1.75} />,
             onSelect: openRename,
           },
+          ...(onShare
+            ? [
+                {
+                  id: "share",
+                  label: "Share",
+                  description: "Create a public read-only link",
+                  icon: <Share2 className="size-3.5" strokeWidth={1.75} />,
+                  onSelect: () => onShare(session),
+                },
+              ]
+            : []),
           {
             id: "delete",
             label: "Delete",
+            description: "Permanently remove this chat",
             icon: <Trash2 className="size-3.5" strokeWidth={1.75} />,
             onSelect: () => {
               setDeleteError(null);

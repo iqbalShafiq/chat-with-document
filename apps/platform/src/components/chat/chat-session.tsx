@@ -16,7 +16,6 @@ import {
   ComposerPrimitive,
   ThreadPrimitive,
 } from "@anvia/react-ui";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { AnimatedStatusText } from "#/components/chat/animated-status-text";
 import { ApprovalPanel } from "#/components/chat/approval-panel";
@@ -33,27 +32,17 @@ import {
 } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
-import { AppShell } from "#/components/layout/app-shell";
-import { AnrealMark } from "#/components/layout/anreal-brand";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
   ApiAuthError,
-  deleteChatSession,
   fetchContextUsage,
   fetchRunStatus,
   fetchInteractionStatus,
   fetchChatCapabilities,
-  getOrCreateEmptyChatSession,
-  getProject,
-  listActiveRuns,
-  listProjects,
   listSessionDocuments,
-  listSessions,
-  markSessionRead,
   loadChatMessages,
-  openProject,
-  renameSession,
+  markSessionRead,
   stopChatRun,
   truncateSessionMemory,
   unlinkDocumentFromSession,
@@ -75,16 +64,12 @@ import {
   type GeneratedImageMeta,
   type ImageGenSettings,
   type ModelInfo,
-  type ProjectListItem,
   type ReasoningEffortInfo,
   type SessionDocument,
   type SteerMessageInput,
   type WebCapabilities,
 } from "#/lib/api";
-import { ProjectsBrowser } from "#/components/projects/projects-browser";
-import { DocumentsBrowser } from "#/components/documents/documents-browser";
-import { ImagePreviewProvider, type ImagePreviewContextActions } from "#/components/images/image-preview";
-import type { WorkspaceViewMode } from "#/components/sidebar/chat-sidebar";
+import { type ImagePreviewContextActions } from "#/components/images/image-preview";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
 import {
@@ -94,7 +79,6 @@ import {
   type GeneratedImageItem,
 } from "#/lib/chat/generated-images";
 import { ensureUploadableFile } from "#/lib/documents/upload-file";
-import { consumeWorkspaceUser, getSessionUser } from "#/lib/auth-session";
 import {
   parseMessageCitations,
   validateCitationsAgainstSession,
@@ -143,13 +127,6 @@ import {
   getMessageRawText,
 } from "#/lib/chat/message-text";
 import {
-  EMPTY_CHAT_TITLE,
-  findEmptyNewChat,
-  isEmptyNewChat,
-  sessionSummaryFromDraft,
-  type SessionSummary,
-} from "#/lib/session-history";
-import {
   initialDeepResearchActivityState,
   reduceDeepResearchProgress,
   resetDeepResearchActivity,
@@ -170,18 +147,7 @@ import {
   resolveReasoningFallback,
 } from "#/lib/chat/models";
 import { useContextSnippet } from "#/hooks/use-context-snippet";
-import { useModels } from "#/hooks/use-models";
 import { useQueuedMessages } from "#/hooks/use-queued-messages";
-import {
-  clearStoredSessionId,
-  clearWorkspaceProjectState,
-  persistLastStandaloneSessionId,
-  persistSessionId,
-  persistWorkspaceState,
-  readLastStandaloneSessionId,
-  readStoredSessionId,
-  readWorkspaceState,
-} from "#/lib/session-storage";
 import {
   useCallback,
   useEffect,
@@ -189,14 +155,54 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
-const SESSIONS_PAGE_SIZE = 30;
-
-type ChatUIMessage = UIMessage<ChatClientMetadata, ChatDataMap>;
+export type ChatUIMessage = UIMessage<ChatClientMetadata, ChatDataMap>;
 type ChatTransport = ReturnType<typeof createAnviaChatTransport>;
-type ChatController = UseChatResult<ChatTransport>;
+export type ChatController = UseChatResult<ChatTransport>;
 type MemoryMessages = Parameters<typeof initialMessagesFromMemory>[0];
+
+/** First submit from a deferred composer (share fork): fork first, then send. */
+export type DeferredComposerSubmitInput = {
+  text: string;
+  attachments: UIAttachment[];
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  imageGenerationEnabled: boolean;
+  imageGenSettings: ImageGenSettings;
+};
+
+/** Deferred composer error shown inside the normal composer shell. */
+export type DeferredComposerError = {
+  version: number;
+  message: string;
+};
+
+/** Draft carried across the share-fork room swap (same object, no ref needed). */
+export type ForkPendingDraft = {
+  draft: DeferredComposerSubmitInput;
+  flags: {
+    webSearchEnabled: boolean;
+    deepResearchEnabled: boolean;
+    imageGenerationEnabled: boolean;
+    imageGenSettings: ImageGenSettings;
+  };
+};
+
+/** Draft auto-sent once after mount through the normal pipeline. */
+export type InitialComposerDraft = {
+  text: string;
+  attachments?: UIAttachment[];
+};
+
+/** Feature toggles restored on mount (share fork handoff). */
+export type InitialFeatureFlags = {
+  webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
+  imageGenerationEnabled?: boolean;
+  imageGenSettings?: ImageGenSettings;
+};
 
 const ChatClientMetadataSchema: ClientMetadataSchema<ChatClientMetadata> = {
   safeParse(value) {
@@ -212,7 +218,7 @@ const ChatClientMetadataSchema: ClientMetadataSchema<ChatClientMetadata> = {
   },
 };
 
-function parseMemoryMessages(value: unknown): ChatUIMessage[] {
+export function parseMemoryMessages(value: unknown): ChatUIMessage[] {
   if (!Array.isArray(value)) {
     throw new Error("Chat history must be an array of Anvia messages");
   }
@@ -222,21 +228,6 @@ function parseMemoryMessages(value: unknown): ChatUIMessage[] {
     dataSchemas: ChatDataSchemas,
   });
 }
-
-export const Route = createFileRoute("/")({
-  component: Home,
-  beforeLoad: async () => {
-    const user = consumeWorkspaceUser() ?? (await getSessionUser());
-    if (!user) {
-      throw redirect({
-        to: "/login",
-        search: { redirect: "/" },
-        viewTransition: true,
-      });
-    }
-    return { user };
-  },
-});
 
 function documentIdsFromMetadata(metadata: UIMessage["metadata"]): string[] {
   return readChatMessageMeta(metadata).documentIds ?? [];
@@ -307,786 +298,7 @@ async function resolveAttachmentFile(attachment: UIAttachment) {
   throw new Error(`Unable to read attachment: ${attachment.name ?? attachment.id}`);
 }
 
-function Home() {
-  const { user } = Route.useRouteContext();
-  const navigate = useNavigate();
-  const initialWorkspace = useMemo(() => readWorkspaceState(), []);
-  const modelsState = useModels();
-  // Prefer stored id; empty means "resolve via list/draft" (never invent UUIDs).
-  const [sessionId, setSessionId] = useState(() => {
-    return readStoredSessionId() ?? "";
-  });
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [initialMessages, setInitialMessages] = useState<ChatUIMessage[] | null>(
-    null,
-  );
-  const [viewMode, setViewMode] = useState<WorkspaceViewMode>(
-    () => initialWorkspace.viewMode,
-  );
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(
-    () => initialWorkspace.activeProjectId,
-  );
-  const [activeProjectName, setActiveProjectName] = useState<string | null>(
-    () => initialWorkspace.activeProjectName,
-  );
-  const [recentProjects, setRecentProjects] = useState<ProjectListItem[]>([]);
-  const [workspaceReady, setWorkspaceReady] = useState(
-    () => initialWorkspace.viewMode !== "project-workspace",
-  );
-  const loadMoreLock = useRef(false);
-  // Always read latest sessionId inside async callbacks without re-creating loaders.
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
-  const viewModeRef = useRef(viewMode);
-  viewModeRef.current = viewMode;
-  const activeProjectIdRef = useRef(activeProjectId);
-  activeProjectIdRef.current = activeProjectId;
-  const [activeRuns, setActiveRuns] = useState<ReadonlySet<string>>(new Set());
-  const [imageContextActions, setImageContextActions] = useState<ImagePreviewContextActions | null>(null);
-  const activeRunsRef = useRef<ReadonlySet<string>>(new Set());
-  activeRunsRef.current = activeRuns;
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
-
-  const handleAuthFailure = useCallback(() => {
-    void navigate({
-      to: "/login",
-      search: { redirect: "/" },
-      viewTransition: true,
-    });
-  }, [navigate]);
-
-  const refreshRecentProjects = useCallback(async () => {
-    try {
-      const page = await listProjects({ limit: 5, sort: "lastOpenedAt" });
-      setRecentProjects(page.items);
-    } catch (error) {
-      if (error instanceof ApiAuthError) {
-        handleAuthFailure();
-        return;
-      }
-      console.error("[projects] failed to load recent", error);
-    }
-  }, [handleAuthFailure]);
-
-  const loadSessionsFirstPage = useCallback(
-    async (options?: { silent?: boolean }) => {
-      const { silent = false } = options ?? {};
-      const activeId = sessionIdRef.current;
-      const inProject = viewModeRef.current === "project-workspace";
-      const inStandalone = viewModeRef.current === "standalone";
-      const projectId = inProject ? activeProjectIdRef.current : null;
-      if (!silent) setSessionsLoading(true);
-      setSessionsError(null);
-      try {
-        const page = await listSessions({
-          limit: SESSIONS_PAGE_SIZE,
-          projectId: projectId ?? undefined,
-        });
-        // Never show an unread dot on the active session: a background
-        // refresh can land before the mark-read POST commits.
-        let items = page.items.map((session) =>
-          session.sessionId === sessionIdRef.current
-            ? { ...session, unread: false }
-            : session,
-        );
-        setNextCursor(page.nextCursor);
-
-        // In chat views: active session must belong to this list. Never invent
-        // phantom drafts (that stacked "New chat" when switching project↔all).
-        // Skipped on silent refreshes so a poll never switches the session.
-        if (!silent && (inProject || inStandalone)) {
-          const activeInList = items.some((s) => s.sessionId === activeId);
-          if (!activeInList) {
-            const empty = findEmptyNewChat(items, activeRunsRef.current);
-            if (empty) {
-              setSessionId(empty.sessionId);
-            } else if (items[0]) {
-              setSessionId(items[0].sessionId);
-            } else {
-              const draft = await getOrCreateEmptyChatSession({
-                projectId: inProject ? projectId : null,
-              });
-              const row = sessionSummaryFromDraft(draft);
-              items = [row];
-              setSessionId(draft.sessionId);
-              setNextCursor(null);
-            }
-          }
-        }
-
-        if (silent) {
-          // In-place merge: fetched page replaces/appends/drops the ids it
-          // covers, preserving items beyond the first page still in state.
-          setSessions((current) => {
-            const fetchedIds = new Set(items.map((s) => s.sessionId));
-            const extras = current.filter(
-              (s) => !fetchedIds.has(s.sessionId),
-            );
-            return [...items, ...extras];
-          });
-        } else {
-          setSessions(items);
-        }
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          handleAuthFailure();
-          return;
-        }
-        console.error("[sessions] failed to load", error);
-        if (!silent) setSessionsError("Could not load conversations");
-      } finally {
-        if (!silent) setSessionsLoading(false);
-      }
-    },
-    [handleAuthFailure],
-  );
-
-  // Sidebar status: which sessions have a running worker, and refresh the list
-  // so unread markers appear once a run completes in the background.
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const runs = await listActiveRuns();
-        if (cancelled) return;
-        const next = new Set(runs.map((run) => run.sessionId));
-        const changed =
-          next.size !== activeRunsRef.current.size ||
-          [...next].some((id) => !activeRunsRef.current.has(id));
-        setActiveRuns(next);
-        if (changed) {
-          await loadSessionsFirstPage({ silent: true });
-        }
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          handleAuthFailure();
-          return;
-        }
-        // Transient poll failure — keep the last known state.
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => {
-      void poll();
-    }, 10_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [loadSessionsFirstPage, handleAuthFailure]);
-
-  // Opening a session clears its unread marker (server + local list, so the
-  // dot does not reappear after navigating away before the next refetch).
-  useEffect(() => {
-    if (!sessionId) return;
-    setSessions((current) =>
-      current.map((s) =>
-        s.sessionId === sessionId ? { ...s, unread: false } : s,
-      ),
-    );
-    void markSessionRead(sessionId).catch(() => {});
-  }, [sessionId]);
-
-  const loadMoreSessions = useCallback(async () => {
-    if (!nextCursor || loadMoreLock.current || sessionsLoadingMore) return;
-    loadMoreLock.current = true;
-    setSessionsLoadingMore(true);
-    try {
-      const projectId =
-        viewModeRef.current === "project-workspace"
-          ? activeProjectIdRef.current
-          : null;
-      const page = await listSessions({
-        cursor: nextCursor,
-        limit: SESSIONS_PAGE_SIZE,
-        projectId: projectId ?? undefined,
-      });
-      setSessions((current) => {
-        const seen = new Set(current.map((s) => s.sessionId));
-        const appended = page.items.filter((s) => !seen.has(s.sessionId));
-        return [...current, ...appended];
-      });
-      setNextCursor(page.nextCursor);
-    } catch (error) {
-      console.error("[sessions] failed to load more", error);
-    } finally {
-      setSessionsLoadingMore(false);
-      loadMoreLock.current = false;
-    }
-  }, [nextCursor, sessionsLoadingMore]);
-
-  /** After a stream ends, refresh titles/order from the server only. */
-  const refreshSessionsQuiet = useCallback(async () => {
-    const projectId =
-      viewModeRef.current === "project-workspace"
-        ? activeProjectIdRef.current
-        : null;
-    try {
-      const page = await listSessions({
-        limit: SESSIONS_PAGE_SIZE,
-        projectId: projectId ?? undefined,
-      });
-      setSessions(page.items);
-      setNextCursor(page.nextCursor);
-      setSessionsError(null);
-    } catch (error) {
-      console.error("[sessions] quiet refresh failed", error);
-    }
-  }, []);
-
-  // Validate restored project workspace once on mount (B2).
-  useEffect(() => {
-    if (initialWorkspace.viewMode !== "project-workspace") {
-      return;
-    }
-    const projectId = initialWorkspace.activeProjectId;
-    if (!projectId) {
-      setViewMode("standalone");
-      setActiveProjectId(null);
-      setActiveProjectName(null);
-      clearWorkspaceProjectState();
-      setWorkspaceReady(true);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const project = await getProject(projectId);
-        if (cancelled) return;
-        setActiveProjectId(project.id);
-        setActiveProjectName(project.name);
-        setViewMode("project-workspace");
-        void openProject(project.id).catch(() => {
-          // lastOpenedAt touch is best-effort
-        });
-      } catch (error) {
-        if (cancelled) return;
-        console.error("[workspace] restore project failed", error);
-        setViewMode("standalone");
-        setActiveProjectId(null);
-        setActiveProjectName(null);
-        clearWorkspaceProjectState();
-        const lastStandalone = readLastStandaloneSessionId();
-        if (lastStandalone) {
-          setSessionId(lastStandalone);
-        } else {
-          try {
-            const draft = await getOrCreateEmptyChatSession({
-              projectId: null,
-            });
-            if (!cancelled) {
-              setSessionId(draft.sessionId);
-              persistLastStandaloneSessionId(draft.sessionId);
-            }
-          } catch {
-            // loadSessionsFirstPage will recover a draft
-          }
-        }
-      } finally {
-        if (!cancelled) setWorkspaceReady(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // Intentionally once on mount from stored workspace.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Persist workspace chrome for reload restore.
-  useEffect(() => {
-    persistWorkspaceState({
-      viewMode,
-      activeProjectId,
-      activeProjectName,
-    });
-  }, [viewMode, activeProjectId, activeProjectName]);
-
-  // Recent projects once on mount.
-  useEffect(() => {
-    void refreshRecentProjects();
-  }, [refreshRecentProjects]);
-
-  // Single driver for session list (avoids double-fetch on mount).
-  useEffect(() => {
-    if (!workspaceReady) return;
-    void loadSessionsFirstPage();
-  }, [viewMode, activeProjectId, loadSessionsFirstPage, workspaceReady]);
-
-  // Load messages whenever the active session changes (chat views only).
-  useEffect(() => {
-    if (!workspaceReady) return;
-    if (viewMode !== "standalone" && viewMode !== "project-workspace") {
-      return;
-    }
-    if (!sessionId) {
-      setInitialMessages([]);
-      return;
-    }
-    persistSessionId(sessionId);
-    if (viewMode === "standalone") {
-      persistLastStandaloneSessionId(sessionId);
-    }
-    let cancelled = false;
-    setInitialMessages(null);
-
-    void (async () => {
-      try {
-        const data = await loadChatMessages(sessionId);
-        if (!cancelled) {
-          setInitialMessages(
-            finalizeInterruptedTools(
-              parseMemoryMessages(data),
-            ),
-          );
-        }
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          handleAuthFailure();
-          return;
-        }
-        if (!cancelled) {
-          setInitialMessages([]);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [handleAuthFailure, sessionId, viewMode, workspaceReady]);
-
-  const enterStandaloneWorkspace = useCallback(
-    (nextSessionId?: string) => {
-      setActiveProjectId(null);
-      setActiveProjectName(null);
-      setViewMode("standalone");
-      clearWorkspaceProjectState();
-
-      if (nextSessionId) {
-        setSessionId(nextSessionId);
-        persistLastStandaloneSessionId(nextSessionId);
-        return;
-      }
-
-      const last = readLastStandaloneSessionId();
-      if (last) {
-        setSessionId(last);
-        return;
-      }
-
-      // No remembered standalone chat — open the single empty draft (no invent).
-      void (async () => {
-        try {
-          const draft = await getOrCreateEmptyChatSession({ projectId: null });
-          setSessionId(draft.sessionId);
-          persistLastStandaloneSessionId(draft.sessionId);
-          setSessions([sessionSummaryFromDraft(draft)]);
-          setNextCursor(null);
-        } catch (error) {
-          console.error("[sessions] open standalone draft failed", error);
-        }
-      })();
-    },
-    [],
-  );
-
-  const handleSelectSession = (nextSessionId: string) => {
-    if (
-      viewMode !== "standalone" &&
-      viewMode !== "project-workspace"
-    ) {
-      // Selecting a chat from browser views enters the matching mode.
-      if (activeProjectId) {
-        setViewMode("project-workspace");
-      } else {
-        setViewMode("standalone");
-      }
-    }
-    if (nextSessionId === sessionId && (viewMode === "standalone" || viewMode === "project-workspace")) {
-      return;
-    }
-    setSessionId(nextSessionId);
-    if (viewMode === "standalone" || viewMode === "projects-index" || viewMode === "documents-index") {
-      persistLastStandaloneSessionId(nextSessionId);
-    }
-    if (viewMode === "projects-index" || viewMode === "documents-index") {
-      // Prefer standalone when selecting from history while browsing.
-      setActiveProjectId(null);
-      setActiveProjectName(null);
-      setViewMode("standalone");
-    }
-  };
-
-  const handleNewSession = () => {
-    const inProject =
-      viewMode === "project-workspace" && Boolean(activeProjectId);
-    const projectId = inProject ? activeProjectId : null;
-
-    // Prefer client-visible empty draft first (fast path).
-    if (viewMode === "standalone" || viewMode === "project-workspace") {
-      const empty = findEmptyNewChat(sessions, activeRuns);
-      if (empty) {
-        if (empty.sessionId !== sessionId) {
-          setSessionId(empty.sessionId);
-          if (!inProject) persistLastStandaloneSessionId(empty.sessionId);
-        }
-        return;
-      }
-    }
-
-    // Server is source of truth: one empty draft per scope; prunes duplicates.
-    void (async () => {
-      try {
-        if (!inProject && viewMode !== "standalone") {
-          setActiveProjectId(null);
-          setActiveProjectName(null);
-          setViewMode("standalone");
-        }
-        const draft = await getOrCreateEmptyChatSession({ projectId });
-        setSessionId(draft.sessionId);
-        if (!inProject) {
-          persistLastStandaloneSessionId(draft.sessionId);
-        }
-        setSessionsError(null);
-        void loadSessionsFirstPage();
-      } catch (error) {
-        console.error("[sessions] open empty draft failed", error);
-        setSessionsError(
-          error instanceof Error
-            ? error.message
-            : "Could not open a new chat",
-        );
-      }
-    })();
-  };
-
-  const handleOpenAllChats = useCallback(() => {
-    if (viewModeRef.current === "standalone") {
-      // Already in all-chats; keep current session.
-      return;
-    }
-    // Leaving a project chat: restore last standalone (or single empty draft).
-    enterStandaloneWorkspace();
-  }, [enterStandaloneWorkspace]);
-
-  const handleOpenProjects = () => {
-    if (viewMode === "standalone") {
-      persistLastStandaloneSessionId(sessionId);
-    }
-    setViewMode("projects-index");
-  };
-
-  const handleOpenDocuments = () => {
-    if (viewMode === "standalone") {
-      persistLastStandaloneSessionId(sessionId);
-    }
-    setViewMode("documents-index");
-  };
-
-  const handleProjectDeleted = useCallback(
-    (projectId: string) => {
-      void refreshRecentProjects();
-      if (activeProjectIdRef.current === projectId) {
-        enterStandaloneWorkspace();
-      }
-    },
-    [enterStandaloneWorkspace, refreshRecentProjects],
-  );
-
-  const handleOpenProject = useCallback(
-    (project: ProjectListItem) => {
-      if (viewModeRef.current === "standalone") {
-        persistLastStandaloneSessionId(sessionIdRef.current);
-      }
-      setActiveProjectId(project.id);
-      setActiveProjectName(project.name);
-      setViewMode("project-workspace");
-      setSessionsError(null);
-      void openProject(project.id)
-        .then((opened) => {
-          setActiveProjectName(opened.name);
-          void refreshRecentProjects();
-        })
-        .catch((error) => {
-          console.error("[projects] open failed", error);
-        });
-
-      void (async () => {
-        try {
-          const page = await listSessions({
-            limit: SESSIONS_PAGE_SIZE,
-            projectId: project.id,
-          });
-          if (page.items.length > 0) {
-            // Prefer existing empty draft in this project, else most recent chat.
-            const empty = findEmptyNewChat(page.items, activeRunsRef.current);
-            const pick = empty ?? page.items[0]!;
-            setSessionId(pick.sessionId);
-            setSessions(page.items);
-            setNextCursor(page.nextCursor);
-          } else {
-            // Exactly one empty draft for the project (server reuses/prunes).
-            const draft = await getOrCreateEmptyChatSession({
-              projectId: project.id,
-            });
-            setSessionId(draft.sessionId);
-            setSessions([sessionSummaryFromDraft(draft)]);
-            setNextCursor(null);
-          }
-        } catch (error) {
-          console.error("[projects] load project chats failed", error);
-          setSessionsError(
-            error instanceof Error
-              ? error.message
-              : "Could not open project chats",
-          );
-          setSessions([]);
-          setNextCursor(null);
-          setViewMode("projects-index");
-          setActiveProjectId(null);
-          setActiveProjectName(null);
-        }
-      })();
-    },
-    [refreshRecentProjects],
-  );
-
-  const handleRenameSession = useCallback(
-    async (targetSessionId: string, title: string) => {
-      try {
-        const renamed = await renameSession(targetSessionId, title);
-        setSessions((current) =>
-          current.map((s) =>
-            s.sessionId === targetSessionId ? { ...s, title: renamed.title } : s,
-          ),
-        );
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          handleAuthFailure();
-          return;
-        }
-        throw error;
-      }
-    },
-    [handleAuthFailure],
-  );
-
-  const handleDeleteSession = useCallback(
-    async (targetSessionId: string) => {
-      try {
-        await deleteChatSession(targetSessionId);
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          handleAuthFailure();
-          return;
-        }
-        // Surfaced by the confirm dialog (e.g. "still processing").
-        throw error;
-      }
-
-      if (
-        sessionIdRef.current === targetSessionId &&
-        (viewModeRef.current === "standalone" ||
-          viewModeRef.current === "project-workspace")
-      ) {
-        const rest = sessionsRef.current.filter(
-          (s) => s.sessionId !== targetSessionId,
-        );
-        const empty = findEmptyNewChat(rest, activeRunsRef.current);
-        const replacement = empty ?? rest[0] ?? null;
-        if (replacement) {
-          setSessionId(replacement.sessionId);
-          if (viewModeRef.current === "standalone") {
-            persistLastStandaloneSessionId(replacement.sessionId);
-          }
-        } else {
-          const projectId =
-            viewModeRef.current === "project-workspace"
-              ? activeProjectIdRef.current
-              : null;
-          try {
-            const draft = await getOrCreateEmptyChatSession({ projectId });
-            setSessionId(draft.sessionId);
-            if (!projectId) persistLastStandaloneSessionId(draft.sessionId);
-          } catch (error) {
-            console.error("[sessions] draft after delete failed", error);
-            // Recover: the next list load will create a fresh draft.
-            setSessionId("");
-            void loadSessionsFirstPage();
-          }
-        }
-      }
-
-      setActiveRuns((current) => {
-        if (!current.has(targetSessionId)) return current;
-        const next = new Set(current);
-        next.delete(targetSessionId);
-        return next;
-      });
-
-      // Browser views keep no chat selection; clear a stale deleted id so it
-      // does not linger in state/storage (the next list load self-heals).
-      if (
-        sessionIdRef.current === targetSessionId &&
-        viewModeRef.current !== "standalone" &&
-        viewModeRef.current !== "project-workspace"
-      ) {
-        setSessionId("");
-        clearStoredSessionId();
-      }
-    },
-    [handleAuthFailure],
-  );
-
-  const handleRemoveSession = useCallback((targetSessionId: string) => {
-    setSessions((current) =>
-      current.filter((s) => s.sessionId !== targetSessionId),
-    );
-  }, []);
-
-  const activeSessionTitle = useMemo(() => {
-    return (
-      sessions.find((s) => s.sessionId === sessionId)?.title?.trim() ||
-      EMPTY_CHAT_TITLE
-    );
-  }, [sessionId, sessions]);
-
-  const activeTitle = useMemo(() => {
-    if (viewMode === "projects-index") return "Projects";
-    if (viewMode === "documents-index") return "Documents";
-    if (viewMode === "project-workspace" && activeProjectName) {
-      return `${activeProjectName} · ${activeSessionTitle}`;
-    }
-    return activeSessionTitle;
-  }, [activeProjectName, activeSessionTitle, viewMode]);
-
-  /**
-   * Disable New chat only when already viewing an empty draft.
-   * From a filled chat, New chat reuses another empty draft or creates one.
-   */
-  const newChatDisabled = useMemo(() => {
-    if (viewMode !== "standalone" && viewMode !== "project-workspace") {
-      return false;
-    }
-    const active = sessions.find((s) => s.sessionId === sessionId);
-    const emptyDraft = active
-      ? isEmptyNewChat(active)
-      : activeSessionTitle === EMPTY_CHAT_TITLE;
-    // A draft with a stuck/active run is not a usable blank chat — keep
-    // New chat enabled so the user can escape to a fresh session.
-    return emptyDraft && !activeRuns.has(sessionId);
-  }, [activeRuns, activeSessionTitle, sessionId, sessions, viewMode]);
-
-  const showChatRoom =
-    workspaceReady &&
-    (viewMode === "standalone" || viewMode === "project-workspace");
-
-  return (
-    <ImagePreviewProvider actions={imageContextActions}>
-      <AppShell
-        user={user}
-        sessions={sessions}
-        activeSessionId={sessionId}
-        activeRuns={activeRuns}
-        activeTitle={activeTitle}
-        sessionsLoading={sessionsLoading || !workspaceReady}
-        sessionsLoadingMore={sessionsLoadingMore}
-        sessionsError={sessionsError}
-        hasMoreSessions={Boolean(nextCursor)}
-        onSelectSession={handleSelectSession}
-        onNewChat={handleNewSession}
-        newChatDisabled={newChatDisabled}
-        onLoadMoreSessions={() => {
-          void loadMoreSessions();
-        }}
-        onRetrySessions={() => {
-          void loadSessionsFirstPage();
-        }}
-        onRenameSession={handleRenameSession}
-        onDeleteSession={handleDeleteSession}
-        onRemoveSession={handleRemoveSession}
-        viewMode={viewMode}
-        recentProjects={recentProjects}
-        activeProjectId={activeProjectId}
-        onOpenAllChats={handleOpenAllChats}
-        onOpenProjects={handleOpenProjects}
-        onOpenDocuments={handleOpenDocuments}
-        onOpenRecentProject={handleOpenProject}
-      >
-        {!workspaceReady ? (
-          <div
-            key="workspace-loading"
-            className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
-          >
-            <AnrealMark className="opacity-80" />
-            <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-            <p className="text-sm text-text-muted">Restoring workspace…</p>
-          </div>
-        ) : null}
-
-        {workspaceReady && viewMode === "projects-index" ? (
-          <ProjectsBrowser
-            key="workspace-projects"
-            activeProjectId={activeProjectId}
-            onOpenProject={handleOpenProject}
-            onProjectDeleted={handleProjectDeleted}
-          />
-        ) : null}
-
-        {workspaceReady && viewMode === "documents-index" ? (
-          <DocumentsBrowser key="workspace-documents" />
-        ) : null}
-
-        {showChatRoom ? (
-          !sessionId || initialMessages === null ? (
-            <div
-              key="chat-loading"
-              className="flex flex-1 flex-col items-center justify-center gap-3 animate-fade-up"
-            >
-              <AnrealMark className="opacity-80" />
-              <div className="skeleton-shimmer h-4 w-40 rounded-full" />
-              <p className="text-sm text-text-muted">Loading conversation…</p>
-            </div>
-          ) : (
-            <div
-              key={`chat-shell-${activeProjectId ?? "standalone"}:${sessionId}`}
-              className="flex min-h-0 flex-1 flex-col animate-fade-up"
-            >
-              <ChatSession
-                sessionId={sessionId}
-                projectId={
-                  viewMode === "project-workspace" ? activeProjectId : null
-                }
-                initialMessages={initialMessages}
-                models={modelsState.models}
-                reasoningEfforts={modelsState.reasoningEfforts}
-                modelsStatus={modelsState.status}
-                modelsError={modelsState.error}
-                modelsRetry={modelsState.retry}
-                onStreamSettled={() => {
-                  void refreshSessionsQuiet();
-                }}
-                onAuthFailure={handleAuthFailure}
-                onImageContextActions={setImageContextActions}
-                onReloadMessages={(messages) => setInitialMessages(messages)}
-              />
-            </div>
-          )
-        ) : null}
-      </AppShell>
-    </ImagePreviewProvider>
-  );
-}
-
-function ChatSession({
+export function ChatSession({
   sessionId,
   projectId,
   initialMessages,
@@ -1099,6 +311,14 @@ function ChatSession({
   onAuthFailure,
   onImageContextActions,
   onReloadMessages,
+  readOnly = false,
+  threadTopSlot,
+  composerTopSlot,
+  deferredComposerLocked = false,
+  deferredComposerError = null,
+  onDeferredComposerSubmit,
+  initialComposerDraft = null,
+  initialFeatureFlags = null,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -1115,11 +335,49 @@ function ChatSession({
   ) => void;
   /** Replaces the loaded conversation (fresh history after a stale dialog). */
   onReloadMessages?: (messages: ChatUIMessage[]) => void;
+  /** Frozen share view: thread renders but never sends, edits, or uploads. */
+  readOnly?: boolean;
+  /** Rendered at the top of the thread scroll (share snapshot header…). */
+  threadTopSlot?: ReactNode;
+  /** Rendered above the composer (share provenance chip, auth CTA…). */
+  composerTopSlot?: ReactNode;
+  /**
+   * Deferred composer (share fork, pre-fork): the normal composer renders and
+   * stays editable, but sends route through onDeferredComposerSubmit. While
+   * the fork is in flight the field shows the forking state without a second
+   * textarea.
+   */
+  deferredComposerLocked?: boolean;
+  /** Deferred fork failure, rendered inside the normal composer shell. */
+  deferredComposerError?: DeferredComposerError | null;
+  /**
+   * First submit is deferred to the owner: fork the share snapshot into the
+   * viewer's own session, swap this room onto it, then send there. Only the
+   * owning share route provides this; normal chat rooms always send directly.
+   * The owner handles the whole handoff, so this room never sends itself.
+   */
+  onDeferredComposerSubmit?: (
+    draft: DeferredComposerSubmitInput,
+  ) => Promise<void>;
+  /** Auto-sent once after mount through the normal pipeline (share fork handoff). */
+  initialComposerDraft?: InitialComposerDraft | string | null;
+  /** Feature toggles pre-selected before the first send (share fork handoff). */
+  initialFeatureFlags?: InitialFeatureFlags | null;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
   const wasActiveRunRef = useRef(false);
+  /**
+   * Deferred share composer (pre-fork): the thread stays frozen like an
+   * anonymous snapshot, but the normal composer below stays live. The first
+   * Send routes through onDeferredComposerSubmit (fork + room swap) instead
+   * of sending from this room.
+   */
+  const deferredPreFork = Boolean(onDeferredComposerSubmit);
+  const threadFrozen = readOnly || deferredPreFork;
+  const composerReadOnly = readOnly && !deferredPreFork;
+  const sessionScopeDisabled = readOnly || deferredPreFork;
   const [ingestionItems, setIngestionItems] = useState<IngestionItem[]>([]);
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
@@ -1253,13 +511,14 @@ function ChatSession({
   }, []);
 
   const refreshSessionDocuments = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     try {
       const documents = await listSessionDocuments(sessionId);
       setSessionDocuments(documents);
     } catch {
       // Keep the previous list if refresh fails.
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   /**
    * Session image history. Refetched on mount, after regenerate/truncate, and
@@ -1268,6 +527,7 @@ function ChatSession({
    */
   const sessionImagesVersionRef = useRef(0);
   const refreshSessionImages = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     const version = ++sessionImagesVersionRef.current;
     try {
       const images = await fetchSessionImages(sessionId);
@@ -1282,7 +542,7 @@ function ChatSession({
         setSessionImagesError(true);
       }
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const sessionDocumentIds = useMemo(
     () => new Set(sessionDocuments.map((doc) => doc.id)),
@@ -1367,7 +627,7 @@ function ChatSession({
 
   /** Fetch context usage once; shared by the polling effect and message_end. */
   const refreshContextUsage = useCallback(async () => {
-    if (modelsStatusRef.current !== "success") return;
+    if (sessionScopeDisabled || modelsStatusRef.current !== "success") return;
     if (!selectedModelRef.current) return;
     const version = ++contextUsageVersionRef.current;
     try {
@@ -1384,7 +644,7 @@ function ChatSession({
         setContextUsage(null);
       }
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const handleChatEvent = useCallback(
     (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
@@ -1555,7 +815,7 @@ function ChatSession({
         setQueueHold(true);
       }
     })();
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
@@ -1589,6 +849,7 @@ function ChatSession({
    */
   const activeContextVersionRef = useRef(0);
   const refreshActiveContext = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     const version = ++activeContextVersionRef.current;
     try {
       const images = await fetchSessionImageContexts(sessionId);
@@ -1597,7 +858,7 @@ function ChatSession({
     } catch {
       // keep previous list on failure
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const contextSnippetState = useContextSnippet(sessionId);
 
@@ -1682,6 +943,46 @@ function ChatSession({
     [focusComposer, setComposerInputText],
   );
 
+  function normalizeInitialDraft(
+    draft: InitialComposerDraft | string | null | undefined,
+  ): { text: string; attachments: UIAttachment[] } | null {
+    if (!draft) return null;
+    if (typeof draft === "string") {
+      return draft.trim() ? { text: draft, attachments: [] } : null;
+    }
+    return draft.text.trim()
+      ? { text: draft.text, attachments: draft.attachments ?? [] }
+      : null;
+  }
+
+  const initialDraftRef = useRef(initialComposerDraft);
+  const initialFlagsRef = useRef(initialFeatureFlags ?? null);
+  useEffect(() => {
+    const draft = normalizeInitialDraft(initialDraftRef.current);
+    initialDraftRef.current = null;
+    const flags = initialFlagsRef.current;
+    initialFlagsRef.current = null;
+    if (flags) {
+      if (typeof flags.webSearchEnabled === "boolean") {
+        setWebSearchEnabled(flags.webSearchEnabled);
+      }
+      if (typeof flags.deepResearchEnabled === "boolean") {
+        setDeepResearchEnabled(flags.deepResearchEnabled);
+      }
+      if (typeof flags.imageGenerationEnabled === "boolean") {
+        setImageGenerationEnabled(flags.imageGenerationEnabled);
+      }
+      if (flags.imageGenSettings) {
+        setImageGenSettings(flags.imageGenSettings);
+        persistImageGenSettings(flags.imageGenSettings);
+      }
+    }
+    if (!draft || modelsStatus !== "success") return;
+    const controller = chatRef.current;
+    if (!controller || controller.status === "submitted" || controller.status === "streaming") return;
+    void submitComposerRef.current(draft.text, draft.attachments, controller, () => {});
+  }, [modelsStatus, sessionId]);
+
   useEffect(() => {
     const activeRun =
       chat.status === "submitted" || chat.status === "streaming";
@@ -1748,7 +1049,7 @@ function ChatSession({
 
   useEffect(() => {
     focusComposer();
-  }, [focusComposer]);
+  }, [focusComposer, sessionId]);
 
   useEffect(() => {
     setSessionDocuments([]);
@@ -1762,10 +1063,12 @@ function ChatSession({
     setContextUsage(null);
     setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
+    if (sessionScopeDisabled) return;
     void refreshSessionDocuments();
     void refreshSessionImages();
     void refreshActiveContext();
   }, [
+    sessionScopeDisabled,
     refreshSessionDocuments,
     refreshSessionImages,
     refreshActiveContext,
@@ -1774,12 +1077,13 @@ function ChatSession({
   // Capability fetch is session-aware so document-only Deep Research can be
   // enabled even when this deployment has no web-search key.
   useEffect(() => {
+    if (sessionScopeDisabled) return;
     void fetchChatCapabilities(sessionId)
       .then(setCapabilities)
       .catch(() => {
         // capabilities stay null; toggles render as unavailable
       });
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   useEffect(() => {
     setEditingMessageId(null);
@@ -1841,27 +1145,27 @@ function ChatSession({
 
   // Poll context usage every 30s while the catalog is available.
   useEffect(() => {
-    if (modelsStatus !== "success") return;
+    if (sessionScopeDisabled || modelsStatus !== "success") return;
     void refreshContextUsage();
     const timer = window.setInterval(() => {
       void refreshContextUsage();
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [modelsStatus, refreshContextUsage]);
+  }, [modelsStatus, sessionScopeDisabled, refreshContextUsage]);
 
   // Refetch context usage whenever the selected model / effort changes so the
   // ring and popover always reflect the ACTIVE model's window and ratio.
   useEffect(() => {
-    if (modelsStatus !== "success") return;
+    if (sessionScopeDisabled || modelsStatus !== "success") return;
     void refreshContextUsage();
-  }, [selectedModel, selectedReasoningEffort, modelsStatus, refreshContextUsage]);
+  }, [selectedModel, selectedReasoningEffort, modelsStatus, sessionScopeDisabled, refreshContextUsage]);
 
   // Rejoin a still-running run on load (closed-tab recovery) and surface a
   // banner for a run that failed server-side. The v1 continuation recipe
   // includes the exact model/reasoning tuple, so never resume until the stored
   // policy has been hydrated through the live catalog. "missing" is idle.
   useEffect(() => {
-    if (!resumePolicyReady || resumedSessionRef.current === sessionId) return;
+    if (sessionScopeDisabled || !resumePolicyReady || resumedSessionRef.current === sessionId) return;
     let cancelled = false;
     void (async () => {
       let status: Awaited<ReturnType<typeof fetchRunStatus>> | null = null;
@@ -1912,7 +1216,7 @@ function ChatSession({
     return () => {
       cancelled = true;
     };
-  }, [resumePolicyReady, sessionId]);
+  }, [sessionScopeDisabled, resumePolicyReady, sessionId]);
 
   // Prefill the composer from a persisted failed [user, assistant error] tail.
   useEffect(() => {
@@ -1950,6 +1254,7 @@ function ChatSession({
       attachments: UIAttachment[],
       chat: ChatController,
       clear: () => void,
+      options?: { skipQueueConflictGate?: boolean },
     ) => Promise<void>
   >(async () => {});
 
@@ -2615,7 +1920,7 @@ function ChatSession({
     } catch {
       return "unknown";
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
@@ -2932,6 +2237,7 @@ function ChatSession({
     attachments,
     chatController,
     clear,
+    options,
   ) => {
     setComposerError(null);
     const trimmed = input.trim();
@@ -2942,6 +2248,7 @@ function ChatSession({
     // (auto-flush drains it unless held), so the queue is paused: ask the
     // user whether this draft joins the queue or sends immediately.
     if (
+      !options?.skipQueueConflictGate &&
       !submitBypassRef.current &&
       chatRef.current?.status !== "submitted" &&
       chatRef.current?.status !== "streaming" &&
@@ -3055,6 +2362,7 @@ function ChatSession({
         pending.attachments,
         pending.chatController,
         pending.clear,
+        { skipQueueConflictGate: true },
       );
     } finally {
       submitBypassRef.current = false;
@@ -3076,6 +2384,21 @@ function ChatSession({
           clear,
         }) => {
           if (modelsStatus !== "success") return;
+          // Deferred share composer (pre-fork): the normal field already
+          // collected input + full composer state (model, effort, features,
+          // attachments). The owner forks and swaps rooms; this room sends
+          // nothing itself so the draft is never duplicated.
+          if (onDeferredComposerSubmit) {
+            await onDeferredComposerSubmit({
+              text: input,
+              attachments,
+              webSearchEnabled,
+              deepResearchEnabled,
+              imageGenerationEnabled,
+              imageGenSettings: imageGenerationEnabled ? imageGenSettings : {},
+            });
+            return;
+          }
           const editing = queuedItemsRef.current.find(
             (item) => item.status === "editing",
           );
@@ -3135,6 +2458,8 @@ function ChatSession({
 
                   <ThreadPrimitive.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
 
+                  {threadTopSlot}
+
                   {/*
                     Same-thread vs cross-message spacing:
                     - activity chain (tool↔reasoning, any message split): tight mt-1
@@ -3157,17 +2482,24 @@ function ChatSession({
                         message={message}
                         chatStatus={chat.status}
                         lastMessageId={chat.messages.at(-1)?.id}
-                        editingMessageId={editingMessageId}
-                        onStartEdit={handleStartEdit}
-                        onCancelEdit={handleCancelEdit}
-                        onSubmitEdit={handleSubmitEdit}
-                        onRevert={handleRevert}
+                        editingMessageId={threadFrozen ? null : editingMessageId}
+                        onStartEdit={threadFrozen ? () => {} : handleStartEdit}
+                        onCancelEdit={threadFrozen ? () => {} : handleCancelEdit}
+                        onSubmitEdit={
+                          threadFrozen ? async () => {} : handleSubmitEdit
+                        }
+                        onRevert={threadFrozen ? async () => {} : handleRevert}
                         generationInfo={generationInfoMap.get(message.id)}
                         editContextImages={editContextImages}
                         editAvailableImages={editAvailableImages}
                         onEditContextAdd={handleEditContextAdd}
                         onEditContextRemove={handleEditContextRemove}
-                        onAddContext={handleAddContext}
+                        onAddContext={
+                          threadFrozen
+                            ? () => Promise.resolve(false)
+                            : handleAddContext
+                        }
+                        readOnly={threadFrozen}
                       />
                     )}
                   </ThreadPrimitive.Messages>
@@ -3259,6 +2591,10 @@ function ChatSession({
                     </div>
                   ) : null}
 
+                  {composerTopSlot ? (
+                    <div className="mb-2">{composerTopSlot}</div>
+                  ) : null}
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -3316,6 +2652,17 @@ function ChatSession({
                     editHydration={editHydration}
                     clearComposerSignal={clearComposerSignal}
                     suppressOptimisticClear={autoFlushPreserveRef}
+                    readOnly={composerReadOnly}
+                    locked={deferredComposerLocked}
+                    lockedLabel="Starting your copy…"
+                    externalError={
+                      deferredComposerError
+                        ? {
+                            key: deferredComposerError.version,
+                            message: deferredComposerError.message,
+                          }
+                        : null
+                    }
                   />
                 </div>
               </div>

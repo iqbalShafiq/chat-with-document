@@ -267,6 +267,155 @@ export async function deleteChatSession(
   return { deleted: true };
 }
 
+// ─── Public share links (frozen snapshots, all-or-nothing per session) ─────
+
+export type ShareLinkCreated = {
+  token: string;
+  urlPath: string;
+  sessionId: string;
+  title: string | null;
+  createdAt: string;
+};
+
+export type ShareStatus = {
+  sessionId: string;
+  active: boolean;
+};
+
+export type PublicShareSnapshot = {
+  token: string;
+  title: string | null;
+  createdAt: string;
+  ownerName: string | null;
+  messages: unknown;
+};
+
+/** Canonical browser URL for a share token. */
+export function shareUrl(token: string): string {
+  return `/share/${encodeURIComponent(token)}`;
+}
+
+/**
+ * Mint a new public link (frozen snapshot of current history). Only the
+ * newest active link is shown — older tokens stay valid but are replaced
+ * on display (latest wins).
+ */
+export async function createShareLink(
+  sessionId: string,
+): Promise<ShareLinkCreated> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to create share link");
+  }
+  return (await response.json()) as ShareLinkCreated;
+}
+
+export type LatestShareLink = {
+  token: string;
+  urlPath: string;
+  sessionId: string;
+  title: string | null;
+  createdAt: string;
+} | null;
+
+/**
+ * Newest active public link of a session, or null when none exists.
+ * The topbar Copy button always copies this token (latest wins).
+ */
+export async function fetchLatestShareLink(
+  sessionId: string,
+): Promise<LatestShareLink> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/latest`,
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to load share link");
+  }
+  return (await response.json()) as Exclude<LatestShareLink, null>;
+}
+
+/** Whether the session currently has at least one active public link. */
+export async function fetchShareStatus(
+  sessionId: string,
+): Promise<ShareStatus> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/status`,
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to load share status");
+  }
+  return (await response.json()) as ShareStatus;
+}
+
+/** Deactivate ALL public links of a session at once (no per-link list). */
+export async function deactivateShareLinks(
+  sessionId: string,
+): Promise<{ sessionId: string; revoked: number }> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}/shares/deactivate`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Failed to deactivate share links");
+  }
+  return (await response.json()) as { sessionId: string; revoked: number };
+}
+
+/**
+ * Read a public snapshot. No auth required — plain fetch (not apiFetch, so
+ * a missing/invalid token surfaces as data instead of an auth error).
+ */
+export async function fetchPublicShare(token: string): Promise<PublicShareSnapshot> {
+  const response = await fetch(
+    `${API_BASE}/api/shares/${encodeURIComponent(token)}`,
+    { credentials: "include" },
+  );
+  if (!response.ok) throw new Error("Shared link not found or no longer active");
+  return (await response.json()) as PublicShareSnapshot;
+}
+
+export type ForkShareResult = {
+  sessionId: string;
+  seededMessages: number;
+};
+
+/**
+ * Fork a frozen share snapshot into the viewer's own session. The snapshot
+ * is read server-side from the token — the client never supplies history —
+ * so the fork always matches the shared link. Only the history is seeded;
+ * the first follow-up streams afterwards through the standard chat pipeline.
+ */
+export async function forkShareSnapshot(token: string): Promise<ForkShareResult> {
+  const response = await apiFetch(`${API_BASE}/api/chat/fork`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Could not start your copy");
+  }
+  return (await response.json()) as ForkShareResult;
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type ProjectListItem = {

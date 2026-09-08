@@ -18,6 +18,7 @@ export function SessionHistoryList({
   onRetry,
   onRenameSession,
   onDeleteSession,
+  onShareSession,
   onRemoveSession,
   /** Top padding for the first date label (e.g. when Recent projects is above). */
   firstGroupTopPad = "pt-1",
@@ -34,6 +35,7 @@ export function SessionHistoryList({
   onRetry: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
+  onShareSession?: (session: SessionSummary) => void;
   onRemoveSession: (sessionId: string) => void;
   firstGroupTopPad?: string;
 }) {
@@ -245,6 +247,7 @@ export function SessionHistoryList({
                       anchorRef={rowAnchorRef(session.sessionId)}
                       onRename={onRenameSession}
                       onDelete={onDeleteSession}
+                      onShare={onShareSession}
                       onRemoved={handleRemoved}
                     />
                   </div>

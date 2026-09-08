@@ -143,6 +143,25 @@ export function sessionSummaryFromDraft(draft: {
   };
 }
 
+/**
+ * True when a frozen share link no longer matches the live chat.
+ * Share links are point-in-time snapshots, so any chat activity after the
+ * link was minted means the link is stale and should be regenerated.
+ */
+export function isShareLinkStale(input: {
+  /** ISO timestamp of the newest active link (null when none exists). */
+  linkCreatedAt?: string | null;
+  /** ISO timestamp of the chat's latest activity. */
+  sessionUpdatedAt?: string | null;
+}): boolean {
+  const { linkCreatedAt, sessionUpdatedAt } = input;
+  if (!linkCreatedAt || !sessionUpdatedAt) return false;
+  const linkTime = new Date(linkCreatedAt).getTime();
+  const sessionTime = new Date(sessionUpdatedAt).getTime();
+  if (Number.isNaN(linkTime) || Number.isNaN(sessionTime)) return false;
+  return sessionTime > linkTime;
+}
+
 /** Relative time for project cards (e.g. "2 min ago", "Yesterday"). */
 export function formatRelativeUpdatedAt(
   iso: string,

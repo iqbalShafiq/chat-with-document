@@ -67,6 +67,7 @@ import {
   type ImageResolveDeps,
 } from "./image-resolve.js";
 import {
+  createDeletedSessionMemoryGuard,
   createNonVisionMemoryProxy,
   createSanitizedMemoryStore,
 } from "./memory-sanitizer.js";
@@ -249,8 +250,7 @@ export type ChatRunInput = {
  * Client message id of the run's prompt (used for fact provenance). Falls back
  * to null for legacy clients that do not stamp the metadata.
  */
-function promptClientMessageId(promptMessage: Message | undefined): string | null {
-  const metadata =
+function promptClientMessageId(promptMessage: Message | undefined): string | null {  const metadata =
     promptMessage && typeof promptMessage.metadata === "object"
       ? (promptMessage.metadata as Record<string, unknown>)
       : undefined;
@@ -616,6 +616,7 @@ export type ChatRunReconstructionRuntime = {
   createAgent?: typeof createAgent;
   createCompletionModel?: typeof createCompletionModel;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
+  sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
 };
 
 /**
@@ -1012,7 +1013,20 @@ export async function reconstructChatRunInput(input: {
   const makeAgent = runtime?.createAgent ?? createAgent;
   const makeCompletionModel =
     runtime?.createCompletionModel ?? createCompletionModel;
+  const sessionExists = runtime?.sessionExists ??
+    (async (scopeSessionId: string, scopeUserId: string) =>
+      Boolean(
+        await prisma.chatSession.findFirst({
+          where: { id: scopeSessionId, userId: scopeUserId },
+          select: { id: true },
+        }),
+      ));
   const memory = runtime?.createMemoryStore?.(prisma) ?? createSanitizedMemoryStore(prisma);
+  const guardedMemory = createDeletedSessionMemoryGuard(memory, {
+    sessionId,
+    userId,
+    sessionExists,
+  });
 
   // Model capability gate: text-only models (e.g. DeepSeek) 404 on image
   // content replayed from memory. For those runs, wrap the memory store so
@@ -1020,8 +1034,8 @@ export async function reconstructChatRunInput(input: {
   // run still sees the images), and register the view_image helper tool so
   // the model can still understand images via a cheap vision chat model.
   const runMemory = modelAcceptsImage
-    ? memory
-    : createNonVisionMemoryProxy(memory);
+    ? guardedMemory
+    : createNonVisionMemoryProxy(guardedMemory);
 
   const compactorModel = makeCompletionModel(model);
   const nativeMemoryCompactor = createSummaryMemoryCompactor({

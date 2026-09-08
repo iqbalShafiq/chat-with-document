@@ -75,8 +75,16 @@ import {
   touchChatSession,
 } from "./chat-session.js";
 import {
+  ChatShareNotFoundError,
+  createChatShare,
+  deactivateChatShares,
+  getLatestActiveChatShare,
+  getPublicShareSnapshot,
+  hasActiveChatShare,
+} from "./chat-share.js";
+import { forkBodySchema, seedForkSession } from "./chat-fork.js";
+import {
   deleteChatSession,
-  SessionRunActiveError,
 } from "./session-delete.js";
 import {
   getContextSnippetStore,
@@ -436,6 +444,114 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       throw error;
     }
   })
+  .post("/sessions/:id/shares", async (c) => {
+    const user = c.get("user");
+    try {
+      const share = await createChatShare({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      return c.json(
+        {
+          token: share.token,
+          urlPath: share.urlPath,
+          sessionId: share.sessionId,
+          title: share.title,
+          createdAt: share.createdAt.toISOString(),
+        },
+        201,
+      );
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .get("/sessions/:id/shares/status", async (c) => {
+    const user = c.get("user");
+    try {
+      const active = await hasActiveChatShare(user.id, c.req.param("id"));
+      return c.json({ sessionId: c.req.param("id"), active });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .get("/sessions/:id/shares/latest", async (c) => {
+    const user = c.get("user");
+    try {
+      const latest = await getLatestActiveChatShare({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      if (!latest) {
+        return c.json(
+          { error: "No active share link", code: "CHAT_SHARE_NOT_FOUND" },
+          404,
+        );
+      }
+      return c.json({
+        token: latest.token,
+        urlPath: `/share/${latest.token}`,
+        sessionId: latest.sessionId,
+        title: latest.title,
+        createdAt: latest.createdAt.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .post("/sessions/:id/shares/deactivate", async (c) => {
+    const user = c.get("user");
+    try {
+      const result = await deactivateChatShares({
+        userId: user.id,
+        sessionId: c.req.param("id"),
+      });
+      return c.json({ sessionId: c.req.param("id"), ...result });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
+    }
+  })
+  .post("/fork", async (c) => {
+    const user = c.get("user");
+    const parsed = forkBodySchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json(
+        { error: "Invalid fork request", code: "INVALID_FORK_REQUEST" },
+        400,
+      );
+    }
+    try {
+      const result = await seedForkSession({
+        userId: user.id,
+        token: parsed.data.token,
+      });
+      return c.json(result, 201);
+    } catch (error) {
+      if (error instanceof ChatShareNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      return c.json(
+        {
+          error: error instanceof Error ? error.message : "Fork failed",
+          code: "FORK_FAILED",
+        },
+        400,
+      );
+    }
+  })
   .patch("/sessions/:id", async (c) => {
     const user = c.get("user");
     const body = (await c.req.json().catch(() => null)) as Record<
@@ -487,9 +603,6 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     } catch (error) {
       if (error instanceof ChatSessionNotFoundError) {
         return c.json({ error: error.message, code: error.code }, 404);
-      }
-      if (error instanceof SessionRunActiveError) {
-        return c.json({ error: error.message, code: error.code }, 409);
       }
       throw error;
     }

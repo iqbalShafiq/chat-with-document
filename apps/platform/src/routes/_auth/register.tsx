@@ -3,6 +3,7 @@ import {
   Link,
   redirect,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { useState } from "react";
 import {
@@ -12,6 +13,7 @@ import {
 } from "#/components/auth/auth-form-fields";
 import { AuthFormPanel } from "#/components/auth/auth-shell";
 import { authClient } from "#/lib/auth-client";
+import { navigateToHref, parseRedirectSearch } from "#/lib/auth-redirect";
 import {
   beginWorkspaceHandoff,
   getSessionUser,
@@ -21,16 +23,19 @@ import { clearSessionOnAuth } from "#/lib/session-storage";
 
 export const Route = createFileRoute("/_auth/register")({
   component: RegisterPage,
-  beforeLoad: async () => {
+  validateSearch: parseRedirectSearch,
+  beforeLoad: async ({ search }) => {
     const user = await getSessionUser();
     if (user) {
-      throw redirect({ to: "/", viewTransition: true });
+      throw redirect({ to: search.redirect ?? "/", viewTransition: true });
     }
   },
 });
 
 function RegisterPage() {
   const navigate = useNavigate();
+  const router = useRouter();
+  const { redirect: redirectHref } = Route.useSearch();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -98,6 +103,10 @@ function RegisterPage() {
         clearSessionOnAuth();
       }
       // Stay busy until AuthShell swaps in the handoff / view transition.
+      if (redirectHref) {
+        navigateToHref(router, redirectHref);
+        return;
+      }
       await navigate({ to: "/", viewTransition: true });
     } catch {
       setFormError("Could not register. Check your connection and try again.");

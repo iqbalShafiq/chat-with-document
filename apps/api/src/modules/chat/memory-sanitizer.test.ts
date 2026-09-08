@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createDeletedSessionMemoryGuard,
   createMemoryValidationGate,
   createNonVisionMemoryProxy,
   createSanitizedMemoryStore,
@@ -653,6 +654,74 @@ describe("createMemoryValidationGate", () => {
     await Promise.all([ensureReady(), ensureReady(), ensureReady()]);
 
     expect(validate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("createDeletedSessionMemoryGuard", () => {
+  function guardDeps(exists: boolean) {
+    const append = vi.fn(async () => undefined);
+    const recordError = vi.fn(async () => undefined);
+    const replacePrefix = vi.fn(async () => ({ status: "committed" as const }));
+    const inner = {
+      inspector: {},
+      compaction: {
+        snapshot: async () => ({ revision: "r1", messages: [] as Message[] }),
+        replacePrefix,
+      },
+      load: async () => [] as Message[],
+      append,
+      clear: async () => undefined,
+      recordError,
+    } as unknown as MemoryStore;
+    const guard = createDeletedSessionMemoryGuard(inner, {
+      sessionId: "session-1",
+      userId: "user-1",
+      sessionExists: async () => exists,
+    });
+    return { guard, append, recordError, replacePrefix };
+  }
+
+  it("passes appends through while the session still exists", async () => {
+    const { guard, append } = guardDeps(true);
+
+    await guard.append({
+      scope: { sessionId: "session-1", userId: "user-1" },
+      runId: "run-1",
+      turn: 1,
+      messages: [],
+    });
+
+    expect(append).toHaveBeenCalledOnce();
+  });
+
+  it("drops appends, error rows, and compaction checkpoints after delete", async () => {
+    const { guard, append, recordError, replacePrefix } = guardDeps(false);
+
+    await guard.append({
+      scope: { sessionId: "session-1", userId: "user-1" },
+      runId: "run-1",
+      turn: 1,
+      messages: [],
+    });
+    await guard.recordError?.({
+      scope: { sessionId: "session-1", userId: "user-1" },
+      runId: "run-1",
+      error: new Error("late failure"),
+      messages: [],
+    });
+
+    expect(append).not.toHaveBeenCalled();
+    expect(recordError).not.toHaveBeenCalled();
+    await expect(
+      guard.compaction?.replacePrefix({
+        scope: { sessionId: "session-1", userId: "user-1" },
+        revision: "r1",
+        messageCount: 1,
+        replacement: {} as never,
+        runId: "run-1",
+      }),
+    ).resolves.toEqual({ status: "conflict" });
+    expect(replacePrefix).not.toHaveBeenCalled();
   });
 });
 

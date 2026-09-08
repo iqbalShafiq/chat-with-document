@@ -27,14 +27,7 @@ async function openFreshChat(page: Page): Promise<void> {
   const { sessionId } = (await draftResponse.json()) as { sessionId: string };
   // Hard reload with fresh state so feature toggles (image gen, web search)
   // and composer state never leak between tests.
-  await page.goto("/");
-  await page.evaluate((id) => {
-    window.localStorage.clear();
-    window.localStorage.setItem("chat.sessionId", id);
-    window.localStorage.setItem("chat.lastStandaloneSessionId", id);
-    window.localStorage.setItem("chat.viewMode", "standalone");
-  }, sessionId);
-  await page.reload();
+  await page.goto(`/chat/${encodeURIComponent(sessionId)}`);
   await expect(
     page.getByText("Ask anything about your documents"),
   ).toBeVisible({ timeout: 30_000 });

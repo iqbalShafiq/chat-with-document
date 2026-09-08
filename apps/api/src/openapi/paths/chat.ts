@@ -216,7 +216,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Permanently delete a chat session",
       description:
-        "Cascade-deletes the session and its memory. Requires `confirm=true` (query). Returns `409 SESSION_RUN_ACTIVE` if a run is still settling.",
+        "Cascade-deletes the session and its memory. Requires `confirm=true` (query). A run that is still processing is stopped first — delete never fails for an active run.",
       security: bearerOrCookie,
       parameters: [
         {
@@ -258,9 +258,285 @@ export const chatPaths = {
         }),
         "401": unauthorized,
         "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
-        "409": conflict({
-          error: "Session is still processing; try again in a moment",
-          code: "SESSION_RUN_ACTIVE",
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/shares": {
+    post: {
+      operationId: "createChatShare",
+      tags: ["Chat"],
+      summary: "Mint a frozen public share link",
+      description:
+        "Snapshots the session's current history under a fresh unguessable token. Each call creates a new link; old links are never updated. The token is shown once — there is no listing.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "201": jsonResponse(
+          "Share link created.",
+          {
+            type: "object",
+            required: ["token", "urlPath", "sessionId"],
+            properties: {
+              token: { type: "string" },
+              urlPath: { type: "string" },
+              sessionId: { type: "string", format: "uuid" },
+              title: { type: ["string", "null"] },
+              createdAt: { type: "string", format: "date-time" },
+            },
+          },
+          {
+            default: {
+              summary: "Created",
+              value: {
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                urlPath: "/share/mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                sessionId: SESSION_ID_EXAMPLE,
+                title: "Q3 revenue notes",
+                createdAt: ISO_EXAMPLE,
+              },
+            },
+          },
+        ),
+        "401": unauthorized,
+        "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/shares/status": {
+    get: {
+      operationId: "getChatShareStatus",
+      tags: ["Chat"],
+      summary: "Check whether a session has active share links",
+      description:
+        "Boolean status only — never returns tokens (past links are never viewable again).",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Share status.",
+          {
+            type: "object",
+            required: ["sessionId", "active"],
+            properties: {
+              sessionId: { type: "string", format: "uuid" },
+              active: { type: "boolean" },
+            },
+          },
+          {
+            default: {
+              summary: "Active",
+              value: { sessionId: SESSION_ID_EXAMPLE, active: true },
+            },
+          },
+        ),
+        "401": unauthorized,
+        "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/shares/latest": {
+    get: {
+      operationId: "getLatestChatShare",
+      tags: ["Chat"],
+      summary: "Get the newest active share link",
+      description:
+        "Returns the most recently created active link (latest wins). 404 when the session has no active link — the topbar Copy button stays disabled then.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Newest active link.",
+          {
+            type: "object",
+            required: ["token", "urlPath", "sessionId"],
+            properties: {
+              token: { type: "string" },
+              urlPath: { type: "string" },
+              sessionId: { type: "string", format: "uuid" },
+              title: { type: ["string", "null"] },
+              createdAt: { type: "string", format: "date-time" },
+            },
+          },
+          {
+            default: {
+              summary: "Latest",
+              value: {
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                urlPath: "/share/mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                sessionId: SESSION_ID_EXAMPLE,
+                title: "Q3 revenue notes",
+                createdAt: ISO_EXAMPLE,
+              },
+            },
+          },
+        ),
+        "401": unauthorized,
+        "404": notFound({ error: "No active share link" }),
+      },
+    },
+  },
+  "/api/chat/sessions/{id}/shares/deactivate": {
+    post: {
+      operationId: "deactivateChatShares",
+      tags: ["Chat"],
+      summary: "Deactivate all share links of a session",
+      description:
+        "Revokes every active link of the session at once. There is no per-link revoke and no link listing.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Links deactivated.",
+          {
+            type: "object",
+            required: ["sessionId", "revoked"],
+            properties: {
+              sessionId: { type: "string", format: "uuid" },
+              revoked: { type: "integer", minimum: 0 },
+            },
+          },
+          {
+            default: {
+              summary: "Deactivated",
+              value: { sessionId: SESSION_ID_EXAMPLE, revoked: 2 },
+            },
+          },
+        ),
+        "401": unauthorized,
+        "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
+      },
+    },
+  },
+  "/api/chat/fork": {
+    post: {
+      operationId: "forkSharedChat",
+      tags: ["Chat"],
+      summary: "Fork a frozen share snapshot into the viewer's own session",
+      description:
+        "Seeds the frozen snapshot (read server-side from the token) into a new viewer-owned session. Send the first follow-up through the standard chat pipeline afterwards. The fork is fully independent — later revoke/delete of the source never touches it.",
+      security: bearerOrCookie,
+      requestBody: {
+        required: true,
+        content: jsonSchema(
+          {
+            type: "object",
+            required: ["token"],
+            properties: {
+              token: { type: "string" },
+            },
+          },
+          {
+            default: {
+              summary: "Fork",
+              value: {
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+              },
+            },
+          },
+        ),
+      },
+      responses: {
+        "201": jsonResponse(
+          "Fork seeded.",
+          {
+            type: "object",
+            required: ["sessionId", "seededMessages"],
+            properties: {
+              sessionId: { type: "string", format: "uuid" },
+              seededMessages: { type: "integer", minimum: 0 },
+            },
+          },
+          {
+            default: {
+              summary: "Seeded",
+              value: { sessionId: SESSION_ID_EXAMPLE, seededMessages: 2 },
+            },
+          },
+        ),
+        "400": badRequest({ error: "Invalid fork request" }),
+        "401": unauthorized,
+        "404": notFound({ error: "Shared link not found or no longer active" }),
+      },
+    },
+  },
+  "/api/shares/{token}": {
+    get: {
+      operationId: "getPublicShare",
+      tags: ["Chat"],
+      summary: "Read a public share snapshot (no auth)",
+      description:
+        "Returns the frozen thread snapshot for an active token. Revoked tokens and deleted source sessions yield 404.",
+      parameters: [
+        {
+          name: "token",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          example: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+        },
+      ],
+      responses: {
+        "200": jsonResponse(
+          "Share snapshot.",
+          {
+            type: "object",
+            required: ["token", "messages"],
+            properties: {
+              token: { type: "string" },
+              title: { type: ["string", "null"] },
+              createdAt: { type: "string", format: "date-time" },
+              ownerName: { type: ["string", "null"] },
+              messages: {},
+            },
+          },
+          {
+            default: {
+              summary: "Snapshot",
+              value: {
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
+                title: "Q3 revenue notes",
+                createdAt: ISO_EXAMPLE,
+                ownerName: "Ana",
+                messages: [],
+              },
+            },
+          },
+        ),
+        "404": notFound({
+          error: "Shared link not found or no longer active",
+          code: "CHAT_SHARE_NOT_FOUND",
         }),
       },
     },

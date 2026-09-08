@@ -67,7 +67,6 @@ import type { ChatSessionRow } from "./chat-session.js";
 import { getChatRunQueue } from "./run-queue.js";
 import {
   deleteChatSession,
-  SessionRunActiveError,
   stopActiveRunForSession,
 } from "./session-delete.js";
 
@@ -193,7 +192,7 @@ describe("stopActiveRunForSession", () => {
     expect(fakes.redisDel).not.toHaveBeenCalled();
   });
 
-  it("throws SessionRunActiveError when the lock is never released", async () => {
+  it("abandons the lock when the worker never settles so delete succeeds", async () => {
     vi.useFakeTimers();
     fakes.redisGet.mockResolvedValue(STREAM_ID);
     fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
@@ -205,12 +204,18 @@ describe("stopActiveRunForSession", () => {
     });
 
     const promise = stopActiveRunForSession(USER_ID, SESSION_ID);
-    const assertion = expect(promise).rejects.toThrow(SessionRunActiveError);
     // Let the chain reach the first poll sleep, then blow through the 12s
     // settle deadline with fake timers (real RUN_SETTLE_TIMEOUT_MS preserved).
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(12_001);
-    await assertion;
+    await expect(promise).resolves.toBe(true);
+
+    // The stream is closed and the stale lock released instead of throwing.
+    expect(fakes.storeClose).toHaveBeenCalledWith({
+      streamId: STREAM_ID,
+      status: "error",
+    });
+    expect(fakes.redisDel).toHaveBeenCalledWith(RUN_KEY);
   });
 
   it("removes a waiting job and releases the lock without waiting", async () => {
@@ -321,20 +326,23 @@ describe("deleteChatSession", () => {
     expect(enqueueProfileReconsideration).not.toHaveBeenCalled();
   });
 
-  it("throws SessionRunActiveError when the run is re-acquired before the delete", async () => {
+  it("cleans up a re-acquired lock and still deletes the session", async () => {
     vi.mocked(getChatSession).mockResolvedValue(chatSessionRow());
     // stopActiveRunForSession sees no lock; the relock check (after the
     // snapshot capture) finds one — a stale second tab started a new run.
     fakes.redisGet.mockResolvedValueOnce(null).mockResolvedValue(STREAM_ID);
+    fakes.storeStatus.mockResolvedValue({ status: "running", lastEventId: 0 });
+    fakes.queueGetJob.mockResolvedValue(null);
     vi.mocked(prisma.agentMemorySession.findUnique).mockResolvedValue({
       id: "memory-1",
     } as never);
 
-    await expect(deleteChatSession(USER_ID, SESSION_ID)).rejects.toThrow(
-      SessionRunActiveError,
-    );
+    await expect(deleteChatSession(USER_ID, SESSION_ID)).resolves.toEqual({
+      deleted: true,
+      hadActiveRun: false,
+    });
 
-    expect(deleteChatSessionsHard).not.toHaveBeenCalled();
-    expect(enqueueProfileReconsideration).not.toHaveBeenCalled();
+    expect(fakes.redisDel).toHaveBeenCalledWith(RUN_KEY);
+    expect(deleteChatSessionsHard).toHaveBeenCalledWith(USER_ID, [SESSION_ID]);
   });
 });

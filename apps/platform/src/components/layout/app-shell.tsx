@@ -38,10 +38,14 @@ export function AppShell({
   onSelectSession,
   onNewChat,
   newChatDisabled = false,
+  showShare = false,
+  shareActive = false,
+  onShare,
   onLoadMoreSessions,
   onRetrySessions,
   onRenameSession,
   onDeleteSession,
+  onShareSession,
   onRemoveSession,
   viewMode,
   recentProjects,
@@ -65,10 +69,14 @@ export function AppShell({
   onSelectSession: (sessionId: string) => void;
   onNewChat: () => void;
   newChatDisabled?: boolean;
+  showShare?: boolean;
+  shareActive?: boolean;
+  onShare?: () => void;
   onLoadMoreSessions: () => void;
   onRetrySessions: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
   onDeleteSession: (sessionId: string) => Promise<void>;
+  onShareSession?: (session: SessionSummary) => void;
   onRemoveSession: (sessionId: string) => void;
   viewMode: WorkspaceViewMode;
   recentProjects: ProjectListItem[];
@@ -120,6 +128,7 @@ export function AppShell({
     onRetry: onRetrySessions,
     onRenameSession,
     onDeleteSession,
+    onShareSession,
     onRemoveSession,
     viewMode,
     recentProjects,
@@ -178,6 +187,9 @@ export function AppShell({
             onToggleSidebar={toggleSidebar}
             onNewChat={onNewChat}
             newChatDisabled={newChatDisabled}
+            showShare={showShare}
+            shareActive={shareActive}
+            onShare={onShare}
           />
           <main className="relative flex min-h-0 flex-1 flex-col">
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
