@@ -33,6 +33,8 @@ const TOOL_LABELS: Record<string, string> = {
   analyze_dataset: "Analyzing data",
   query_dataset_sql: "Querying data (SQL)",
   extract_document_tables: "Extracting tables",
+  create_dataset: "Creating dataset",
+  fetch_dataset_from_url: "Fetching dataset from URL",
   view_image: "Viewing image",
   request_clarification: "Asking for clarification",
   "resolve-library-id": "Looking up library",

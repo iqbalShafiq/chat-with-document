@@ -36,7 +36,7 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
       if (ids.length === 0) return [];
       const docs = await prisma.document.findMany({
         where: { id: { in: ids }, tabularData: { not: Prisma.DbNull } },
-        select: { id: true, filename: true, tabularData: true },
+        select: { id: true, filename: true, tabularData: true, origin: true, parentDocumentId: true, originUrl: true },
       });
       return docs.map((doc) => {
         const sheets = ((doc.tabularData as TabularData | null)?.sheets ?? []).map((s) => ({
@@ -44,7 +44,16 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
           columns: s.columns,
           rowCount: s.rows.length,
         }));
-        return { documentId: doc.id, filename: doc.filename, sheets };
+        return {
+          documentId: doc.id,
+          filename: doc.filename,
+          sheets,
+          provenance: {
+            origin: doc.origin ?? "upload",
+            parentDocumentId: doc.parentDocumentId ?? null,
+            originUrl: doc.originUrl ?? null,
+          },
+        };
       });
     },
 

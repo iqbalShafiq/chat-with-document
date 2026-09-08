@@ -67,8 +67,20 @@ describe("Deep Research server wiring", () => {
     const input = source("./build-run-input.ts");
 
     expect(input).toMatch(
-      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.createDataAnalysisTools\(\),\s*\.\.\.tabularTools,/s,
+      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.createDataAnalysisTools\(\),\s*\.\.\.tabularTools,\s*\.\.\.derivedTools,/s,
     );
+  });
+
+  it("gives the nested researcher the dataset instruction and derived tools before the parent seal", () => {
+    const input = source("./build-run-input.ts");
+
+    expect(input).toContain("createDerivedDatasetTools");
+    expect(input).toContain("DERIVED_TOOL_DEFINITIONS");
+    expect(input).toContain("DATASET_INSTRUCTION");
+    const derivedPush = input.indexOf("...derivedTools");
+    const seal = input.indexOf("sealRetrievalAfterDeepResearch(");
+    expect(derivedPush).toBeGreaterThan(-1);
+    expect(seal).toBeGreaterThan(derivedPush);
   });
 
   it("seals parent retrieval after Deep Research starts without wrapping nested tools", () => {

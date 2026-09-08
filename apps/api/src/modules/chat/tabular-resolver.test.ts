@@ -116,4 +116,34 @@ describe("tabular resolver", () => {
     expect(sheet.columns[0]!.name).toBe("a");
     expect(sheet.rows[0]).toEqual([1, 2]);
   });
+
+  it("resolves a derived document created mid-run within the same scope", async () => {
+    const prisma = prismaMock({
+      document: {
+        findMany: async () => [
+          {
+            id: "d-derived",
+            filename: "[derived] ringkas.csv",
+            tabularData: { sheets: [{ name: "ringkas", columns: [], rows: [] }] },
+            origin: "created",
+            parentDocumentId: "d1",
+            originUrl: null,
+          },
+        ],
+        findFirst: async () => ({
+          id: "d-derived",
+          tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
+        }),
+      },
+      documentSession: { findMany: async () => [{ documentId: "d-derived" }] },
+    });
+    const resolver = createTabularResolver({ userId: "u1", sessionId: "s1", projectId: null, prisma });
+    const uploads = await resolver.listUploads();
+    expect(uploads[0]).toMatchObject({
+      documentId: "d-derived",
+      provenance: { origin: "created", parentDocumentId: "d1", originUrl: null },
+    });
+    const sheet = await resolver.resolveSheet({ type: "upload", documentId: "d-derived" });
+    expect(sheet.name).toBe("ringkas");
+  });
 });

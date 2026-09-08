@@ -8,12 +8,19 @@ import {
   type ToolDefinition,
 } from "../static-definition.js";
 
+export type UploadProvenance = {
+  origin: string;
+  parentDocumentId: string | null;
+  originUrl: string | null;
+};
+
 export interface DatasetResolver {
   listUploads(): Promise<
     Array<{
       documentId: string;
       filename: string;
       sheets: Array<{ name: string; columns: Array<{ name: string; type: string }>; rowCount: number }>;
+      provenance?: UploadProvenance;
     }>
   >;
   resolveSheet(ref: { type: "upload"; documentId: string; sheet?: string } | { type: "document_table"; documentId: string; pageIndex: number; tableIndex: number }): Promise<TabularSheet>;
@@ -75,13 +82,13 @@ const queryDatasetSqlInput = z.object({
 const readDatasetSpec = {
   name: "read_dataset",
   description:
-    "Inspect a tabular dataset (CSV/XLSX upload or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing.",
+    "Inspect a tabular dataset (CSV/XLSX upload, an agent-created [derived]/[synthetic] document, a [downloaded] URL document, or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing, and to verify a create_dataset/fetch_dataset_from_url result is ready.",
   inputSchema: readDatasetInput,
 } as const;
 const analyzeDatasetSpec = {
   name: "analyze_dataset",
   description:
-    "Run a deterministic data-analysis operation on a dataset: profile (per-column stats + histogram), aggregate (groupBy + sum/mean/count/min/max/median + bar chart), filter, sort, top_n, correlation between two numeric columns (scatter), or trend (line). Returns structured results and a chart spec the UI renders.",
+    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile (per-column stats + histogram), aggregate (groupBy + sum/mean/count/min/max/median + bar chart), filter, sort, top_n, correlation between two numeric columns (scatter), or trend (line). Returns structured results and a chart spec the UI renders.",
   inputSchema: analyzeDatasetInput,
 } as const;
 const queryDatasetSqlSpec = {

@@ -854,6 +854,64 @@ function formatExtractDocumentTablesOutput(output: unknown): FormattedSection {
   };
 }
 
+function formatCreateDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const filename = asString(record.filename) ?? "dataset";
+  const rowCount = asNumber(record.rowCount) ?? 0;
+  const origin = asString(record.origin) ?? "created";
+  const fields: FormattedField[] = [
+    { label: "Origin", value: origin },
+    { label: "Status", value: asString(record.status) ?? "queued" },
+  ];
+  const parent = asString(record.parentDocumentId);
+  if (parent) fields.push({ label: "Derived from", value: shortId(parent) });
+  return {
+    title: "Result",
+    summary: `Dataset created: ${filename} · ${rowCount} rows`,
+    fields,
+  };
+}
+
+function formatFetchDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const filename = asString(record.filename) ?? "dataset";
+  const originUrl = asString(record.originUrl);
+  return {
+    title: "Result",
+    summary: `Dataset downloaded: ${filename}`,
+    fields: [
+      { label: "Origin", value: "fetched" },
+      ...(originUrl ? [{ label: "Source URL", value: originUrl }] : []),
+      { label: "Status", value: asString(record.status) ?? "queued" },
+    ],
+  };
+}
+
+function extractDatasetChart(output: unknown): { chart: unknown; documentId: string | null } | null {
+  if (typeof output !== "string") return null;
+  const match = /```dataset-chart\s*\n([\s\S]*?)```/.exec(output);
+  if (!match) return null;
+  try {
+    const parsed: unknown = JSON.parse(match[1] ?? "");
+    if (!isRecord(parsed) || !isRecord(parsed.chart)) return null;
+    const documentId = asString(parsed.documentId);
+    return { chart: parsed.chart, documentId };
+  } catch {
+    return null;
+  }
+}
+
+function formatDeepResearchOutput(output: unknown): FormattedSection {
+  const chartBlock = extractDatasetChart(output);
+  const text = typeof output === "string" ? output : "";
+  const firstLine = text.split("\n").map((line) => line.trim()).find((line) => line.length > 0);
+  return {
+    title: "Result",
+    summary: firstLine ? truncate(firstLine, 160) : "Deep Research report is ready",
+    ...(chartBlock ? { chart: chartBlock.chart } : {}),
+  };
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -921,6 +979,12 @@ export function formatToolOutput(
       return formatQueryDatasetSqlOutput(output);
     case "extract_document_tables":
       return formatExtractDocumentTablesOutput(output);
+    case "create_dataset":
+      return formatCreateDatasetOutput(output);
+    case "fetch_dataset_from_url":
+      return formatFetchDatasetOutput(output);
+    case "deep_research":
+      return formatDeepResearchOutput(output);
     default:
       return formatGenericOutput(output);
   }

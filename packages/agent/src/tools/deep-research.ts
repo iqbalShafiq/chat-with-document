@@ -103,6 +103,8 @@ const ACTIVITY_METADATA: Record<
   read_dataset: { kind: "analysis", label: "Reading the dataset" },
   analyze_dataset: { kind: "analysis", label: "Analyzing the dataset" },
   query_dataset_sql: { kind: "analysis", label: "Querying the dataset" },
+  create_dataset: { kind: "analysis", label: "Creating a derived dataset" },
+  fetch_dataset_from_url: { kind: "retrieval", label: "Fetching a dataset from URL" },
   descriptive_stats: {
     kind: "analysis",
     label: "Computing descriptive statistics",
@@ -230,6 +232,7 @@ export function buildDeepResearchPrompt(prompt: string, maxSearches: number): st
     "Return a concise report with methods, findings, limitations, and a verification note.",
     "When a claim is grounded in a tool result, preserve the source details and cite it with [[cite:N]].",
     "If you emit any [[cite:N]] marker, append exactly one ```citations JSON block using the existing citation contract.",
+    "When your research produced a dataset chart (via analyze_dataset on an upload, derived, or downloaded document), append one ```dataset-chart JSON block per chart with { documentId, operation, chart } where chart is the exact chart object from the analyze_dataset result. Never invent chart numbers; only forward chart objects returned by the tool.",
     "Never invent document ids, page indices, URLs, or snippets. If evidence is missing, say so.",
   ].join("\n");
 }

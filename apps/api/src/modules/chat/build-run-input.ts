@@ -20,9 +20,11 @@ import {
   createRememberUserProfileTool,
   createSqlJsRunner,
   createTabularAnalysisTools,
+  createDerivedDatasetTools,
   createTavilyClient,
   createWebSearchTools,
   deepResearchLimits,
+  DATASET_INSTRUCTION,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   buildImageGenerationInstruction,
@@ -34,6 +36,7 @@ import {
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  DERIVED_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
@@ -57,6 +60,7 @@ import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
 import { createTabularResolver } from "./tabular-resolver.js";
+import { createDerivedDatasetWriter } from "./derived-dataset-writer.js";
 import { getImageStore } from "../images/service.js";
 import {
   formatContextSnippetBlock,
@@ -1122,9 +1126,14 @@ export async function reconstructChatRunInput(input: {
     }),
     sqlRunner: createSqlJsRunner(),
   });
+  const derivedTools = createDerivedDatasetTools({
+    writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+  });
+  instructions.push(DATASET_INSTRUCTION);
   const tools = [
     ...createDataAnalysisTools(),
     ...tabularTools,
+    ...derivedTools,
     ...documentTools,
     ...(profileTool ? [profileTool] : []),
   ];
@@ -1196,6 +1205,7 @@ export async function reconstructChatRunInput(input: {
         ...researchWebTools,
         ...createDataAnalysisTools(),
         ...tabularTools,
+        ...derivedTools,
       ],
       recipe.budgets.deepResearchMaxSearches,
       onDeepResearchProgress,
@@ -1208,7 +1218,8 @@ export async function reconstructChatRunInput(input: {
         | undefined,
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
-      ...(catalogInstruction ? [catalogInstruction] : []),
+        DATASET_INSTRUCTION,
+        ...(catalogInstruction ? [catalogInstruction] : []),
         ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
       ],
       additionalContext: contextBlocks,
