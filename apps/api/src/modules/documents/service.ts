@@ -261,6 +261,157 @@ export async function createDocumentUpload(input: {
   };
 }
 
+export type DerivedDocumentOrigin = "created" | "fetched";
+
+const DERIVED_FILENAME_PREFIX: Record<DerivedDocumentOrigin, string> = {
+  created: "[derived] ",
+  fetched: "[downloaded] ",
+};
+
+export function prefixDerivedFilename(filename: string, origin: DerivedDocumentOrigin, synthetic: boolean): string {
+  if (origin === "created" && synthetic) return `[synthetic] ${filename}`;
+  return `${DERIVED_FILENAME_PREFIX[origin]}${filename}`;
+}
+
+export async function createDerivedDocument(input: {
+  userId: string;
+  sessionId: string;
+  filename: string;
+  mimeType: string;
+  data: Uint8Array;
+  origin: DerivedDocumentOrigin;
+  parentDocumentId?: string | null;
+  originUrl?: string | null;
+  sourceNote?: string | null;
+  synthetic?: boolean;
+  projectId?: string | null;
+}) {
+  if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
+    throw new Error("Unsupported file type");
+  }
+  if (input.data.byteLength > MAX_FILE_BYTES) {
+    throw new Error(`${input.filename} exceeds 10MB limit`);
+  }
+  if (input.data.byteLength === 0) {
+    throw new Error("File is empty");
+  }
+
+  const clientProjectId =
+    typeof input.projectId === "string" && input.projectId.trim()
+      ? input.projectId.trim()
+      : null;
+
+  const existingChat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+
+  let projectId: string | null;
+  if (existingChat) {
+    if (
+      clientProjectId !== null &&
+      clientProjectId !== existingChat.projectId
+    ) {
+      throw new DocumentProjectMismatchError();
+    }
+    projectId = existingChat.projectId;
+  } else {
+    const session = await ensureChatSession({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      projectId: clientProjectId,
+    });
+    projectId = session.projectId;
+  }
+
+  let parentDocumentId: string | null = null;
+  if (input.parentDocumentId) {
+    const parent = await prisma.document.findFirst({
+      where: {
+        id: input.parentDocumentId,
+        userId: input.userId,
+        status: "ready",
+        ...(projectId ? { projectId } : { projectId: null }),
+      },
+      select: { id: true, tabularData: true },
+    });
+    if (!parent || !parent.tabularData) {
+      throw new Error("Parent dataset not found or not ready in this session");
+    }
+    parentDocumentId = parent.id;
+  }
+
+  const filename = prefixDerivedFilename(input.filename, input.origin, input.synthetic === true);
+  const storage = await getUserStorageUsage(input.userId);
+  if (storage.usedBytes + input.data.byteLength > storage.maxBytes) {
+    throw new DocumentStorageQuotaError({
+      usedBytes: storage.usedBytes,
+      maxBytes: storage.maxBytes,
+      fileBytes: input.data.byteLength,
+    });
+  }
+
+  const document = await prisma.document.create({
+    data: {
+      userId: input.userId,
+      sessionId: input.sessionId,
+      projectId,
+      filename,
+      mimeType: input.mimeType,
+      sizeBytes: input.data.byteLength,
+      r2Key: "",
+      status: "uploading",
+      origin: input.origin,
+      parentDocumentId,
+      originUrl: input.originUrl ?? null,
+      sourceNote: input.sourceNote ?? null,
+      sessionLinks: {
+        create: {
+          sessionId: input.sessionId,
+          userId: input.userId,
+        },
+      },
+    },
+  });
+
+  const r2Key = buildDocumentR2Key(
+    input.userId,
+    input.sessionId,
+    document.id,
+    filename,
+  );
+
+  await putObject(r2Key, input.data, input.mimeType);
+
+  await prisma.document.update({
+    where: { id: document.id },
+    data: { r2Key, status: "queued" },
+  });
+
+  await getDocumentIngestQueue().add(
+    "ingest",
+    {
+      documentId: document.id,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      r2Key,
+      filename,
+      mimeType: input.mimeType,
+    },
+    { jobId: document.id },
+  );
+
+  return {
+    id: document.id,
+    filename: document.filename,
+    status: "queued" as const,
+    sizeBytes: document.sizeBytes,
+    origin: input.origin,
+    parentDocumentId,
+    originUrl: input.originUrl ?? null,
+  };
+}
+
 export async function getDocumentStatus(input: {
   userId: string;
   sessionId?: string;
