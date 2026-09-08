@@ -4,7 +4,7 @@ import { assertFetchableUrl, fetchTabularUrl } from "./fetch-csv.js";
 function response(body: string, init: { status?: number; headers?: Record<string, string> } = {}): Response {
   return new Response(body, {
     status: init.status ?? 200,
-    headers: init.headers,
+    ...(init.headers ? { headers: init.headers } : {}),
   });
 }
 

@@ -479,6 +479,9 @@ export async function resolveActiveDocuments(input: {
           sizeBytes: true,
           mimeType: true,
           pageCount: true,
+          origin: true,
+          parentDocumentId: true,
+          originUrl: true,
         },
       },
     },
@@ -513,6 +516,9 @@ export type UserDocumentLibraryItem = {
   originSessionId: string;
   projectId: string | null;
   projectName: string | null;
+  origin: string;
+  parentDocumentId: string | null;
+  originUrl: string | null;
 };
 
 export type UserDocumentLibraryPage = {
@@ -605,6 +611,9 @@ export async function listUserDocuments(input: {
       createdAt: true,
       sessionId: true,
       projectId: true,
+      origin: true,
+      parentDocumentId: true,
+      originUrl: true,
       project: { select: { name: true } },
     },
   });
@@ -625,6 +634,9 @@ export async function listUserDocuments(input: {
       originSessionId: doc.sessionId,
       projectId: doc.projectId,
       projectName: doc.project?.name ?? null,
+      origin: doc.origin ?? "upload",
+      parentDocumentId: doc.parentDocumentId ?? null,
+      originUrl: doc.originUrl ?? null,
     })),
     nextCursor:
       hasMore && last

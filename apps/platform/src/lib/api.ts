@@ -691,6 +691,9 @@ export interface SessionDocument {
   sizeBytes?: number;
   mimeType?: string;
   pageCount?: number;
+  origin?: string | null;
+  parentDocumentId?: string | null;
+  originUrl?: string | null;
 }
 
 export type UserLibraryDocument = {
@@ -704,6 +707,9 @@ export type UserLibraryDocument = {
   originSessionId: string;
   projectId?: string | null;
   projectName?: string | null;
+  origin?: string | null;
+  parentDocumentId?: string | null;
+  originUrl?: string | null;
 };
 
 export type UserLibraryPage = {

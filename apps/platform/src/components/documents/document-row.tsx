@@ -5,6 +5,7 @@ export type DocumentRowProps = {
   filename: string;
   summary?: string | null;
   meta?: string | null;
+  badge?: ReactNode;
   focused?: boolean;
   selected?: boolean;
   onClick?: () => void;
@@ -28,6 +29,7 @@ export function DocumentRow({
   filename,
   summary,
   meta,
+  badge,
   focused = false,
   selected = false,
   onClick,
@@ -71,7 +73,10 @@ export function DocumentRow({
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="min-w-0 truncate font-medium leading-snug">{filename}</p>
+        <p className="flex min-w-0 items-center gap-1.5 font-medium leading-snug">
+          <span className="min-w-0 truncate">{filename}</span>
+          {badge}
+        </p>
         {meta ? (
           <p className="mt-0.5 text-[10px] text-text-faint">{meta}</p>
         ) : null}
@@ -98,7 +103,10 @@ export function DocumentRow({
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="min-w-0 truncate font-medium leading-snug">{filename}</p>
+        <p className="flex min-w-0 items-center gap-1.5 font-medium leading-snug">
+          <span className="min-w-0 truncate">{filename}</span>
+          {badge}
+        </p>
         {meta ? (
           <p className="mt-0.5 text-[10px] text-text-faint">{meta}</p>
         ) : null}

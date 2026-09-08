@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, FileText, FolderKanban, Search, Trash2 } from "lucide-react";
 import { DocumentPreviewModal } from "#/components/documents/document-preview-modal";
 import { DocumentRow } from "#/components/documents/document-row";
+import { ProvenanceBadge, provenanceTitle } from "#/components/documents/provenance-badge";
 import { WorkspaceMainPane } from "#/components/layout/workspace-main-pane";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
@@ -30,6 +31,7 @@ export function DocumentsBrowser() {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [selectedProjectId, setSelectedProjectId] = useState(ALL_PROJECTS);
+  const [hideDerived, setHideDerived] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [items, setItems] = useState<UserLibraryDocument[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -174,7 +176,7 @@ const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const groups = useMemo((): Group[] => {
     const map = new Map<string, Group>();
     for (const doc of items) {
-      const key = doc.projectId ?? "__standalone__";
+      if (hideDerived && doc.origin !== undefined && doc.origin !== null && doc.origin !== "upload") continue;      const key = doc.projectId ?? "__standalone__";
       const label = doc.projectName?.trim() || "Standalone";
       const group = map.get(key);
       if (group) {
@@ -189,7 +191,7 @@ const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
       if (b.key === "__standalone__") return -1;
       return a.label.localeCompare(b.label);
     });
-  }, [items]);
+  }, [items, hideDerived]);
 
   return (
     <>
@@ -232,6 +234,15 @@ const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
               })),
             ]}
           />
+          <label className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm text-text-muted ring-1 ring-white/[0.08]">
+            <input
+              type="checkbox"
+              checked={hideDerived}
+              onChange={(event) => setHideDerived(event.target.checked)}
+              className="size-4 accent-amber-500"
+            />
+            Hide derived
+          </label>
         </div>
 
         {error ? (
@@ -296,6 +307,12 @@ const lastDeleteTriggerRef = useRef<HTMLButtonElement | null>(null);
                           layout="card"
                           filename={doc.filename}
                           summary={doc.firstPageSummary}
+                          badge={
+                            <ProvenanceBadge
+                              origin={doc.origin}
+                              title={provenanceTitle({ origin: doc.origin, originUrl: doc.originUrl })}
+                            />
+                          }
                           meta={`${formatBytes(doc.sizeBytes)}${
                             doc.pageCount
                               ? ` · ${doc.pageCount} page${doc.pageCount === 1 ? "" : "s"}`

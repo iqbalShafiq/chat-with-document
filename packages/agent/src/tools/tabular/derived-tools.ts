@@ -19,6 +19,8 @@ import { fetchTabularUrl } from "./fetch-csv.js";
 import { sheetFromRows, toCsvText } from "./parse-csv.js";
 import type { CellValue } from "./types.js";
 
+export type DerivedDocumentOrigin = "created" | "fetched";
+
 export type DerivedDocumentResult = {
   documentId: string;
   filename: string;
@@ -138,7 +140,7 @@ function filenameFromUrl(url: string, fallback: string): string {
 
 export function createDerivedDatasetTools(deps: {
   writer: DerivedDocumentWriter;
-  fetchFn?: typeof fetch;
+  fetchFn?: typeof fetch | undefined;
 }): AnyTool[] {
   const createDataset = createTool({
     ...createDatasetSpec,

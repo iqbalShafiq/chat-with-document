@@ -7,9 +7,9 @@ export type FetchTabularResult = {
 };
 
 export type FetchTabularDeps = {
-  fetchFn?: typeof fetch;
-  maxBytes?: number;
-  timeoutMs?: number;
+  fetchFn?: typeof fetch | undefined;
+  maxBytes?: number | undefined;
+  timeoutMs?: number | undefined;
 };
 
 function isBlockedHost(hostname: string): boolean {

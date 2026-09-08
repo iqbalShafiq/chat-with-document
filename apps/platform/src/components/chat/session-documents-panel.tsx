@@ -5,6 +5,7 @@ import { useCitationSessionOptional } from "#/components/chat/citation-session-c
 import { CollapsibleDocumentSection } from "#/components/collapsible-document-section";
 import { ComposerAttachmentChip } from "#/components/composer-attachment";
 import { DocumentRow } from "#/components/documents/document-row";
+import { ProvenanceBadge, provenanceTitle } from "#/components/documents/provenance-badge";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { IngestionStatusPill } from "#/components/ingestion-status-pill";
 import type { CitedDocumentSummary } from "#/lib/documents/cited-documents";
@@ -307,6 +308,15 @@ export function SessionDocumentsPanel({
                       <DocumentRow
                         filename={doc.filename}
                         summary={doc.firstPageSummary}
+                        badge={
+                          <ProvenanceBadge
+                            origin={doc.origin}
+                            title={provenanceTitle({
+                              origin: doc.origin,
+                              originUrl: doc.originUrl,
+                            })}
+                          />
+                        }
                         data-document-id={doc.id}
                         title={`Preview ${doc.filename}`}
                         onClick={() =>
