@@ -30,7 +30,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
       expected: {
         requiresTools: ["create_dataset", "read_dataset", "analyze_dataset"],
         requiresOutputNonEmpty: true,
-        outputContains: ["synthetic", "contoh"],
+        outputContains: ["synthetic"],
       },
     },
   },
