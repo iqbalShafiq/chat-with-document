@@ -196,6 +196,7 @@ function QuestionCard({
                   aria-required="true"
                   aria-invalid={fieldInvalid || undefined}
                   aria-describedby={describedBy}
+                  placeholder="Type your answer…"
                   className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] leading-relaxed text-text placeholder:text-text-faint outline-none ring-accent-ring focus:border-accent/40 focus:ring-2 disabled:opacity-40"
                 />
               ) : null}
