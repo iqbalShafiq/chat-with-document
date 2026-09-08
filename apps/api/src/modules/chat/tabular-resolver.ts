@@ -64,8 +64,14 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
       if (ref.type === "upload") {
         const doc = await prisma.document.findFirst({
           where: { id: ref.documentId, userId, ...(projectId ? { projectId } : {}) },
-          select: { tabularData: true },
+          select: { tabularData: true, status: true, filename: true },
         });
+        if (!doc) throw new Error("Dataset not found or empty");
+        if (doc.status !== "ready") {
+          throw new Error(
+            `Dataset "${doc.filename}" is not ready yet (status: ${doc.status}). Wait for ingest to finish, then call read_dataset again.`,
+          );
+        }
         const sheets = (doc?.tabularData as TabularData | null)?.sheets ?? [];
         if (ref.sheet) {
           const match = sheets.find((s) => s.name === ref.sheet);

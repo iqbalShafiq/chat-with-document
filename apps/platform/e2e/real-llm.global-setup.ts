@@ -12,7 +12,8 @@ const SIGN_UP_URL = `${API_ORIGIN}/api/auth/sign-up/email`;
 const MODELS_URL = `${API_ORIGIN}/api/models`;
 const PASSWORD = "password123";
 const REQUIRED_BASE_URL = "https://openrouter.ai/api/v1";
-const REQUIRED_MODEL = "deepseek/deepseek-v4-flash-0731";
+const REQUIRED_MODEL = "meta/muse-spark-1.3-contributor";
+const REQUIRED_EFFORT = "high";
 
 export function assertRealLlmEnv(env: NodeJS.ProcessEnv = process.env): void {
   const base = (env.OPENAI_BASE_URL ?? "").replace(/\/+$/, "");
@@ -118,9 +119,9 @@ async function assertRequiredModel(cookieValue: string): Promise<void> {
   const model = body.models?.find(
     (candidate) => candidate.modelId === REQUIRED_MODEL,
   );
-  if (!model || !model.reasoningEfforts?.includes("max")) {
+  if (!model || !model.reasoningEfforts?.includes(REQUIRED_EFFORT)) {
     throw new Error(
-      `model catalog must expose ${REQUIRED_MODEL} with reasoning effort max`,
+      `model catalog must expose ${REQUIRED_MODEL} with reasoning effort ${REQUIRED_EFFORT}`,
     );
   }
 }

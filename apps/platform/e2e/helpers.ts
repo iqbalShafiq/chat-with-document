@@ -6,8 +6,8 @@ import { expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 export const API_ORIGIN = "http://localhost:3001";
-export const REAL_LLM_MODEL = "deepseek/deepseek-v4-flash-0731";
-export const REAL_LLM_REASONING_EFFORT = "max";
+export const REAL_LLM_MODEL = "meta/muse-spark-1.3-contributor";
+export const REAL_LLM_REASONING_EFFORT = "high";
 
 export function fixturePath(name: string): string {
   return fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));

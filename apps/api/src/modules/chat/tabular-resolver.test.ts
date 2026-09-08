@@ -73,6 +73,7 @@ describe("tabular resolver", () => {
           id: "d1",
           filename: "sales.csv",
           mimeType: "text/csv",
+          status: "ready",
           tabularData: {
             sheets: [
               {
@@ -132,6 +133,8 @@ describe("tabular resolver", () => {
         ],
         findFirst: async () => ({
           id: "d-derived",
+          filename: "[derived] ringkas.csv",
+          status: "ready",
           tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
         }),
       },
@@ -145,5 +148,16 @@ describe("tabular resolver", () => {
     });
     const sheet = await resolver.resolveSheet({ type: "upload", documentId: "d-derived" });
     expect(sheet.name).toBe("ringkas");
+  });
+
+  it("reports a not-ready dataset distinctly from a missing one", async () => {
+    const prisma = prismaMock({
+      document: {
+        findFirst: async () => ({ id: "d-new", filename: "[synthetic] x.csv", status: "queued", tabularData: null }),
+      },
+      documentSession: { findMany: async () => [] },
+    });
+    const resolver = createTabularResolver({ userId: "u1", sessionId: "s1", projectId: null, prisma });
+    await expect(resolver.resolveSheet({ type: "upload", documentId: "d-new" })).rejects.toThrow("not ready yet");
   });
 });
