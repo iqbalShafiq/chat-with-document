@@ -1128,6 +1128,10 @@ export async function reconstructChatRunInput(input: {
   });
   const derivedTools = createDerivedDatasetTools({
     writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+    webFetchGate: {
+      enabled: webSearchEnabled,
+      hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+    },
   });
   instructions.push(DATASET_INSTRUCTION);
   const tools = [
@@ -1199,13 +1203,19 @@ export async function reconstructChatRunInput(input: {
             grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         })
       : [];
+    // Researcher copy: the parent deep_research approval owns this run, so the
+    // fetch gate is pre-approved here exactly like the research web tools.
+    const researchDerivedTools = createDerivedDatasetTools({
+      writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+      webFetchGate: { enabled: true },
+    });
     const researchTools = boundDeepResearchTools(
       [
         ...documentTools,
         ...researchWebTools,
         ...createDataAnalysisTools(),
         ...tabularTools,
-        ...derivedTools,
+        ...researchDerivedTools,
       ],
       recipe.budgets.deepResearchMaxSearches,
       onDeepResearchProgress,

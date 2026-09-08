@@ -141,6 +141,10 @@ function filenameFromUrl(url: string, fallback: string): string {
 export function createDerivedDatasetTools(deps: {
   writer: DerivedDocumentWriter;
   fetchFn?: typeof fetch | undefined;
+  webFetchGate?: {
+    enabled: boolean;
+    hasGrant?: (toolName: "web_search" | "web_fetch") => Promise<boolean> | boolean;
+  };
 }): AnyTool[] {
   const createDataset = createTool({
     ...createDatasetSpec,
@@ -174,7 +178,20 @@ export function createDerivedDatasetTools(deps: {
   const fetchDataset = createTool({
     ...fetchDatasetSpec,
     outputSchema: z.json(),
-    requiresApproval: async (args: { reason: string }, _context: unknown) => ({ reason: args.reason }),
+    // Reuses the web-search approval gate (keputusan final #2): when the
+    // session web toggle is on (or a grant exists), no approval is needed;
+    // otherwise the run suspends with the caller's reason, like web_fetch.
+    requiresApproval: async (args: { reason: string }, _context: unknown) => {
+      const gate = deps.webFetchGate;
+      if (!gate) return { reason: args.reason };
+      if (gate.enabled) return false;
+      try {
+        if (await gate.hasGrant?.("web_fetch")) return false;
+      } catch {
+        return { reason: args.reason };
+      }
+      return { reason: args.reason };
+    },
     execute: async ({ url, name, reason }) => {
       const fetched = await fetchTabularUrl(url, { fetchFn: deps.fetchFn, maxBytes: MAX_FETCH_BYTES, timeoutMs: FETCH_TIMEOUT_MS });
       const isXlsxMagic = fetched.bytes.length >= 2 && fetched.bytes[0] === 0x50 && fetched.bytes[1] === 0x4b;

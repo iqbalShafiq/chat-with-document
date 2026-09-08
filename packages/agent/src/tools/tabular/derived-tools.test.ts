@@ -68,10 +68,19 @@ describe("fetch_dataset_from_url", () => {
     expect(writer.calls).toHaveLength(0);
   });
 
-  it("requires approval with the caller reason", async () => {
+  it("requires approval with the caller reason when the gate is closed", async () => {
     const writer = makeWriter();
     const tools = createDerivedDatasetTools({ writer, fetchFn: vi.fn() as never });
     const tool = tools.find((t) => t.name === "fetch_dataset_from_url")!;
-    expect(typeof tool.requiresApproval).toBe("function");
+    const requiresApproval = tool.requiresApproval as (args: { reason: string }, context: unknown) => Promise<false | { reason: string }>;
+    await expect(requiresApproval({ reason: "need data" }, {})).resolves.toEqual({ reason: "need data" });
+  });
+
+  it("bypasses approval when the web gate is enabled", async () => {
+    const writer = makeWriter();
+    const tools = createDerivedDatasetTools({ writer, fetchFn: vi.fn() as never, webFetchGate: { enabled: true } });
+    const tool = tools.find((t) => t.name === "fetch_dataset_from_url")!;
+    const requiresApproval = tool.requiresApproval as (args: { reason: string }, context: unknown) => Promise<false | { reason: string }>;
+    await expect(requiresApproval({ reason: "need data" }, {})).resolves.toBe(false);
   });
 });
