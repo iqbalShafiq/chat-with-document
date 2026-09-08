@@ -131,6 +131,7 @@ export function SessionActionsMenu({
           {
             id: "rename",
             label: "Rename",
+            description: "Give this chat a custom name",
             icon: <Pencil className="size-3.5" strokeWidth={1.75} />,
             onSelect: openRename,
           },
@@ -148,6 +149,7 @@ export function SessionActionsMenu({
           {
             id: "delete",
             label: "Delete",
+            description: "Permanently remove this chat",
             icon: <Trash2 className="size-3.5" strokeWidth={1.75} />,
             onSelect: () => {
               setDeleteError(null);

@@ -560,6 +560,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         }
         return deps.reconstruct({
           recipe: parsed.recipe,
+          runtime: { sessionExists: deps.sessionExists },
           grantHelpers: {
             hasGrant: (toolName) => policyRegistry.hasToolGrant(parsed.sessionId, toolName),
             takeToolOverride: async (toolName) => {

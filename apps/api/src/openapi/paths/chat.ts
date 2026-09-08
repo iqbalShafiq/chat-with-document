@@ -216,7 +216,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Permanently delete a chat session",
       description:
-        "Cascade-deletes the session and its memory. Requires `confirm=true` (query). Returns `409 SESSION_RUN_ACTIVE` if a run is still settling.",
+        "Cascade-deletes the session and its memory. Requires `confirm=true` (query). A run that is still processing is stopped first — delete never fails for an active run.",
       security: bearerOrCookie,
       parameters: [
         {
@@ -258,10 +258,6 @@ export const chatPaths = {
         }),
         "401": unauthorized,
         "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
-        "409": conflict({
-          error: "Session is still processing; try again in a moment",
-          code: "SESSION_RUN_ACTIVE",
-        }),
       },
     },
   },

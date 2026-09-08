@@ -17,14 +17,6 @@ import {
 import { extractTextFromMessageJson } from "./session-list.js";
 import { buildSessionSnapshotText } from "./session-snapshot.js";
 
-export class SessionRunActiveError extends Error {
-  readonly code = "SESSION_RUN_ACTIVE";
-  constructor(message = "Session is still processing; try again in a moment") {
-    super(message);
-    this.name = "SessionRunActiveError";
-  }
-}
-
 const RUN_SETTLE_TIMEOUT_MS = 12000;
 const RUN_SETTLE_POLL_MS = 400;
 /** Enqueue happens milliseconds after the lock; two empty polls are enough. */
@@ -107,9 +99,10 @@ async function tryRemoveQueuedJob(job: QueueJob): Promise<boolean> {
 /**
  * Ask the worker to end the run (stop flag + native stream cancellation),
  * then wait for the active-run lock to be released. Queued jobs are removed
- * immediately so a stuck/waiting worker cannot pin the session. Throws
- * SessionRunActiveError when an *active* worker does not settle in time —
- * delete must NOT race a live memory upsert that could resurrect the row.
+ * immediately so a stuck/waiting worker cannot pin the session. Returns true
+ * when a running stream was stopped. When the worker never settles, the
+ * lock is abandoned and the worker is left to notice the missing session —
+ * delete never fails with 409 for an active run.
  */
 export async function stopActiveRunForSession(
   userId: string,
@@ -169,13 +162,12 @@ export async function stopActiveRunForSession(
   const leftover = await redis.get(ACTIVE_RUN_KEY(sessionId));
   if (!leftover) return true;
 
-  const leftoverJob = await findChatRunJob(leftover);
-  const leftoverState = leftoverJob ? await leftoverJob.getState() : "unknown";
-  if (leftoverState !== "active") {
-    await abandonLockedRun(sessionId, leftover);
-    return true;
-  }
-  throw new SessionRunActiveError();
+  // The worker never settled within the window. Abandon the lock anyway so
+  // delete always succeeds: abandonLockedRun closes the stream, and the
+  // worker's session-exists guard stops a live memory append from
+  // recreating the session afterwards.
+  await abandonLockedRun(sessionId, leftover);
+  return true;
 }
 
 async function captureSessionSnapshot(
@@ -204,7 +196,8 @@ async function captureSessionSnapshot(
 /**
  * Delete a chat session for the user:
  * 1. ownership check (404),
- * 2. stop an active run if any (stop flag → poll lock release; 409 on timeout),
+ * 2. stop an active run if any (stop flag → poll lock release; the lock is
+ *    abandoned on timeout so delete never fails for a running session),
  * 3. capture a bounded message snapshot (before rows vanish),
  * 4. hard delete,
  * 5. best-effort enqueue profile reconsideration (user + project scopes).
@@ -222,11 +215,15 @@ export async function deleteChatSession(
     : "";
 
   // The snapshot reads (10-100ms) leave a window where a stale second tab can
-  // re-acquire the lock and start a new run, whose worker would resurrect the
-  // session via the memory store's upsert. Re-check immediately before the
-  // hard delete; the worker-side existence guard covers the final window.
+  // re-acquire the lock and start a new run. Keep deleting anyway: the queued
+  // job for the new run is removed below when possible, and the worker-side
+  // existence guard stops a live run from recreating the session afterwards.
   const relocked = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
-  if (relocked) throw new SessionRunActiveError();
+  if (relocked) {
+    const relockJob = await findChatRunJob(relocked);
+    if (relockJob) await tryRemoveQueuedJob(relockJob).catch(() => false);
+    await abandonLockedRun(sessionId, relocked);
+  }
 
   await deleteChatSessionsHard(userId, [sessionId]);
 

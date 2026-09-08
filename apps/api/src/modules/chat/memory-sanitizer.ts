@@ -238,3 +238,46 @@ export async function validateSanitizedMemoryStore(
 ): Promise<void> {
   await createSanitizedMemoryStore(prisma).validate();
 }
+
+/**
+ * Guard a run's memory store against a mid-run session delete. After the
+ * delete hard-removes ChatSession + AgentMemory rows, a still-running worker
+ * must neither resurrect memory rows via append/recordError nor re-checkpoint
+ * compaction state. Loads stay untouched: the worker already fetched history.
+ */
+export function createDeletedSessionMemoryGuard(
+  inner: MemoryStore,
+  input: {
+    sessionId: string;
+    userId: string;
+    sessionExists: (sessionId: string, userId: string) => Promise<boolean>;
+  },
+): MemoryStore {
+  const deleted = async (): Promise<boolean> =>
+    !(await input.sessionExists(input.sessionId, input.userId));
+  const guard: MemoryStore = {
+    inspector: inner.inspector,
+    compaction: inner.compaction
+      ? {
+          snapshot: (options) => inner.compaction!.snapshot(options),
+          replacePrefix: async (options) => {
+            if (await deleted()) return { status: "conflict" };
+            return inner.compaction!.replacePrefix(options);
+          },
+        }
+      : undefined,
+    load: (options) => inner.load(options),
+    append: async (options) => {
+      if (await deleted()) return;
+      await inner.append(options);
+    },
+    clear: (options) => inner.clear(options),
+  };
+  if (inner.recordError) {
+    guard.recordError = async (options) => {
+      if (await deleted()) return;
+      await inner.recordError!(options);
+    };
+  }
+  return guard;
+}

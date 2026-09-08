@@ -85,7 +85,6 @@ import {
 import { forkBodySchema, seedForkSession } from "./chat-fork.js";
 import {
   deleteChatSession,
-  SessionRunActiveError,
 } from "./session-delete.js";
 import {
   getContextSnippetStore,
@@ -601,9 +600,6 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     } catch (error) {
       if (error instanceof ChatSessionNotFoundError) {
         return c.json({ error: error.message, code: error.code }, 404);
-      }
-      if (error instanceof SessionRunActiveError) {
-        return c.json({ error: error.message, code: error.code }, 409);
       }
       throw error;
     }
