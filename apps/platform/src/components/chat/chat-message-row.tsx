@@ -107,6 +107,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onEditContextAdd,
   onEditContextRemove,
   onAddContext,
+  readOnly = false,
 }: {
   message: UIMessage;
   chatStatus: UseChatStatus;
@@ -128,6 +129,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
     text: string,
     sourceRole: ContextSnippetSourceRole,
   ) => Promise<boolean>;
+  /** Frozen share snapshot: bubbles render without edit/revert/add-as-context. */
+  readOnly?: boolean;
 }) {
   const message = messageProp;
   const messageKind = readChatMessageMeta(message.metadata).kind;
@@ -162,12 +165,14 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   const [editWidthPx, setEditWidthPx] = useState<number | null>(null);
   const intermediate = isIntermediateStepMessage(message);
   const startsWithActivity = messageStartsWithActivity(message);
-  const showActions = shouldShowMessageActions(
-    message,
-    generationInfo?.isGenerationEnd ?? true,
-    chatStatus,
-    lastMessageId,
-  );
+  const showActions =
+    !readOnly &&
+    shouldShowMessageActions(
+      message,
+      generationInfo?.isGenerationEnd ?? true,
+      chatStatus,
+      lastMessageId,
+    );
   const isEditing =
     message.role === "user" && editingMessageId === message.id;
 
@@ -267,7 +272,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           )}
         </MessagePrimitive.Content>
 
-        {message.role === "user" || message.role === "assistant" ? (
+        {readOnly ? null : message.role === "user" ||
+          message.role === "assistant" ? (
           <MessageSelectionToolbar
             containerRef={contentRef}
             role={message.role === "user" ? "user" : "assistant"}

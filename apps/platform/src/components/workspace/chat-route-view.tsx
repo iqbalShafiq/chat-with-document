@@ -6,6 +6,7 @@ import { SessionNotFound } from "#/components/workspace/workspace-not-found";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { useModels } from "#/hooks/use-models";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
 import {
   ApiAuthError,
   listSessions,
@@ -93,6 +94,9 @@ export function ChatRouteView(input: {
   const modelsState = useModels();
   const sessionsContext = useWorkspaceSessionsContext();
   const route = useChatRouteData(input);
+  // One-shot share-fork handoff: consumed once on mount so refresh/back
+  // never re-sends the same first message.
+  const [shareForkHandoff] = useState(() => consumeShareForkDraft(input.sessionId));
 
   if (route.status === "missing") {
     return <SessionNotFound projectId={input.projectId} />;
@@ -126,6 +130,21 @@ export function ChatRouteView(input: {
         onAuthFailure={input.onAuthFailure}
         onImageContextActions={sessionsContext.onImageContextActions}
         onReloadMessages={(messages) => route.setMessages(messages)}
+        initialComposerDraft={
+          shareForkHandoff
+            ? { text: shareForkHandoff.text, attachments: shareForkHandoff.attachments }
+            : null
+        }
+        initialFeatureFlags={
+          shareForkHandoff
+            ? {
+                webSearchEnabled: shareForkHandoff.webSearchEnabled,
+                deepResearchEnabled: shareForkHandoff.deepResearchEnabled,
+                imageGenerationEnabled: shareForkHandoff.imageGenerationEnabled,
+                imageGenSettings: shareForkHandoff.imageGenSettings,
+              }
+            : null
+        }
       />
     </div>
   );

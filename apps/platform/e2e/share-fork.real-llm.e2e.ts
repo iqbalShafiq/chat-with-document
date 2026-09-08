@@ -102,25 +102,31 @@ test("real-LLM fork: muse-spark minimal seeds, shares, and forks", async ({
   const { urlPath } = (await created.json()) as { urlPath: string };
 
   await page.goto(urlPath);
-  const followUp = page.getByPlaceholder(/follow-up/i);
+  await expect(
+    page.getByText("Shared chat snapshot"),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByText("Your first send forks this snapshot"),
+  ).toBeVisible({ timeout: 30_000 });
+  const followUp = page.locator("[data-anvia-composer-editor]");
   await expect(followUp).toBeVisible({ timeout: 30_000 });
   await followUp.click();
   await followUp.pressSequentially(
     `Reply with exactly the token FORK_COPY_OK_${stamp} and nothing else.`,
     { delay: 5 },
   );
-  await page.getByRole("button", { name: /send as my copy/i }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  // Fork handoff navigates to the viewer's own room, where the same draft
+  // auto-sends through the normal pipeline.
   await expect(page).toHaveURL(/\/chat\/[A-Za-z0-9_-]+/, {
     timeout: 60_000,
   });
   const forkUrl = new URL(page.url());
   expect(forkUrl.pathname).not.toContain(sessionId);
 
-  // The fork seeds the follow-up as the first user message and the worker
-  // answers it with the live transport: wait for the run to settle, then
-  // assert the real model echoed the token (proves real LLM, not stub).
-  // NOTE: the fork page's composer is intentionally empty — the follow-up
-  // was already sent from the share page — so never click Send here.
+  // The fork's draft auto-sent and the worker answers with the live
+  // transport: wait for the run to settle, then assert the real model
+  // echoed the token (proves real LLM, not stub).
   const forkEditor = page.locator("[data-anvia-composer-editor]");
   await expect(forkEditor).toBeVisible({ timeout: 60_000 });
   const forkSend = page.getByRole("button", { name: "Send", exact: true });
@@ -136,7 +142,7 @@ test("real-LLM fork: muse-spark minimal seeds, shares, and forks", async ({
   // The shared snapshot stays frozen: the fork's first message never appears.
   await page.goto(urlPath);
   await expect(
-    page.getByRole("heading", { name: `fork-real-${stamp}` }),
+    page.getByText("Shared chat snapshot"),
   ).toBeVisible({ timeout: 30_000 });
   await expect(
     page.getByText(`FORK_COPY_OK_${stamp}`),

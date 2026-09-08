@@ -1,12 +1,14 @@
 /**
  * Public share-link E2E (stub LLM, no real key):
- * generate → anonymous read → login fork → deactivate → delete cascade.
+ * generate → anonymous read → signed-in fork → deactivate → delete cascade.
  *
  * Share semantics under test (frozen snapshot, latest-link display,
  * all-or-nothing deactivate, independent forks):
- * - the token works without auth and shows the frozen thread;
- * - sending as a signed-in viewer forks into THEIR session and navigates
- *   to /chat/<newId> without changing the shared snapshot;
+ * - the token works without auth and shows the frozen thread in the exact
+ *   chat room (bubbles) with a read-only composer + login/register CTA;
+ * - the first send as a signed-in viewer forks server-side, navigates to the
+ *   viewer's own `/chat/<newId>` room, and auto-sends there through the
+ *   normal pipeline (AI reacts in place) without changing the snapshot;
  * - deactivating turns every link of the session off at once;
  * - deleting the source session removes its links but forked sessions live on.
  */
@@ -88,23 +90,28 @@ test.describe("public share links", () => {
     await page.context().clearCookies();
     await page.goto(urlPath);
     await expect(
-      page.getByRole("heading", { name: `share-src-${stamp}` }),
+      page.getByText("Shared chat snapshot"),
     ).toBeVisible({ timeout: 30_000 });
-    // No workspace sidebar on the public page.
-    await expect(page.locator("aside")).toHaveCount(0);
-    // Anonymous: login/register CTA at the bottom, no composer.
+    // Same chat room as authenticated chats: read-only composer shell plus
+    // the snapshot banner, but no workspace sidebar. The right documents
+    // rail mounts inside the same room shell (its empty state is an aside),
+    // so only assert the login/register CTA and the disabled composer.
+    await expect(
+      page.locator("[data-anvia-composer-editor]"),
+    ).toHaveCount(1);
+    await expect(
+      page.locator("[data-anvia-composer-editor]"),
+    ).toBeDisabled();
+    // Anonymous: login/register CTA above the composer.
     await expect(
       page.getByRole("link", { name: /log in/i }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: /sign up/i }).first(),
     ).toBeVisible();
-    await expect(
-      page.locator("[data-anvia-composer-editor]"),
-    ).toHaveCount(0);
   });
 
-  test("signed-in send forks an independent copy", async ({ page }) => {
+  test("signed-in first send navigates to the fork and AI reacts there", async ({ page }) => {
     const stamp = Date.now();
     const sessionId = await seedChat(
       page,
@@ -114,23 +121,45 @@ test.describe("public share links", () => {
     const { urlPath } = await generateLink(page.request, sessionId);
 
     await page.goto(urlPath);
-    const followUp = page.getByPlaceholder(/follow-up/i);
+    await expect(
+      page.getByText("Shared chat snapshot"),
+    ).toBeVisible({ timeout: 30_000 });
+    // Normal composer with a text-only notice chip above it: the full
+    // model/attach/feature row stays live, including the real Send button.
+    await expect(
+      page.getByText("Your first send forks this snapshot"),
+    ).toBeVisible({ timeout: 30_000 });
+    const followUp = page.locator("[data-anvia-composer-editor]");
     await expect(followUp).toBeVisible({ timeout: 30_000 });
     await followUp.click();
     await followUp.pressSequentially("what about the second part?", {
       delay: 5,
     });
-    await page.getByRole("button", { name: /send as my copy/i }).click();
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    // Fork handoff: smooth SPA navigation to the viewer's own room, where
+    // the same draft auto-sends through the normal pipeline.
     await expect(page).toHaveURL(/\/chat\/[A-Za-z0-9_-]+/, {
       timeout: 30_000,
     });
     const forkId = page.url().split("/chat/")[1]!.split(/[?#]/)[0]!;
     expect(forkId).not.toBe(sessionId);
+    // The forked room shows the normal workspace chrome plus the forked
+    // history, the first user bubble, and the live AI run to completion.
+    await expect(page.locator("aside").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("what about the second part?").first()).toBeVisible({
+      timeout: 30_000,
+    });
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    const stop = page.getByRole("button", { name: "Stop" });
+    await stop
+      .waitFor({ state: "visible", timeout: 30_000 })
+      .catch(() => undefined);
+    await expect(send).toBeVisible({ timeout: 120_000 });
 
     // The shared snapshot is unchanged by the fork's first message.
     await page.goto(urlPath);
     await expect(
-      page.getByRole("heading", { name: `share-fork-${stamp}` }),
+      page.getByText("Shared chat snapshot"),
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("what about the second part?")).toHaveCount(
       0,
@@ -173,15 +202,20 @@ test.describe("public share links", () => {
     const { urlPath } = await generateLink(page.request, sessionId);
 
     await page.goto(urlPath);
-    const followUp = page.getByPlaceholder(/follow-up/i);
+    const followUp = page.locator("[data-anvia-composer-editor]");
     await expect(followUp).toBeVisible({ timeout: 30_000 });
     await followUp.click();
     await followUp.pressSequentially("fork before delete", { delay: 5 });
-    await page.getByRole("button", { name: /send as my copy/i }).click();
+    await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page).toHaveURL(/\/chat\/[A-Za-z0-9_-]+/, {
       timeout: 30_000,
     });
-    const forkId = page.url().split("/chat/")[1]!.split(/[?#]/)[0]!;
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    const stop = page.getByRole("button", { name: "Stop" });
+    await stop
+      .waitFor({ state: "visible", timeout: 30_000 })
+      .catch(() => undefined);
+    await expect(send).toBeVisible({ timeout: 120_000 });
 
     const deleted = await page.request.delete(
       `${API_ORIGIN}/api/chat/sessions/${sessionId}?confirm=true`,
@@ -190,10 +224,6 @@ test.describe("public share links", () => {
 
     await page.goto(urlPath);
     await expect(page.getByRole("heading", { name: /not found/i })).toBeVisible({
-      timeout: 30_000,
-    });
-    await page.goto(`/chat/${forkId}`);
-    await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible({
       timeout: 30_000,
     });
   });

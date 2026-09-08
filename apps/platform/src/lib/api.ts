@@ -390,6 +390,32 @@ export async function fetchPublicShare(token: string): Promise<PublicShareSnapsh
   return (await response.json()) as PublicShareSnapshot;
 }
 
+export type ForkShareResult = {
+  sessionId: string;
+  seededMessages: number;
+};
+
+/**
+ * Fork a frozen share snapshot into the viewer's own session. The snapshot
+ * is read server-side from the token — the client never supplies history —
+ * so the fork always matches the shared link. Only the history is seeded;
+ * the first follow-up streams afterwards through the standard chat pipeline.
+ */
+export async function forkShareSnapshot(token: string): Promise<ForkShareResult> {
+  const response = await apiFetch(`${API_BASE}/api/chat/fork`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? "Could not start your copy");
+  }
+  return (await response.json()) as ForkShareResult;
+}
+
 // ─── Projects ───────────────────────────────────────────────────────────────
 
 export type ProjectListItem = {

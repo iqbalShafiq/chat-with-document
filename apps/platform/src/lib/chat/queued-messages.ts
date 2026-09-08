@@ -1,4 +1,5 @@
 import type { UIAttachment } from "@anvia/client";
+import type { ImageGenSettings } from "#/lib/api";
 
 export type QueuedContextSnippet = {
   text: string;
@@ -253,4 +254,151 @@ export function chunkIds<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+export const SHARE_FORK_DRAFT_PREFIX = "chat.share-fork-draft.";
+
+export function shareForkDraftKey(sessionId: string): string {
+  return `${SHARE_FORK_DRAFT_PREFIX}${sessionId}`;
+}
+
+export type ShareForkDraftAttachment = Pick<
+  UIAttachment,
+  "id" | "type" | "name" | "mediaType" | "data" | "url" | "text"
+>;
+
+export type ShareForkDraft = {
+  version: 1;
+  text: string;
+  attachments: ShareForkDraftAttachment[];
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  imageGenerationEnabled: boolean;
+  imageGenSettings: ImageGenSettings;
+};
+
+function isShareForkAttachment(value: unknown): value is ShareForkDraftAttachment {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    (record.type === "image" ||
+      record.type === "document" ||
+      record.type === "file") &&
+    (record.name === undefined || typeof record.name === "string") &&
+    (record.mediaType === undefined || typeof record.mediaType === "string") &&
+    (record.data === undefined || typeof record.data === "string") &&
+    (record.url === undefined || typeof record.url === "string") &&
+    (record.text === undefined || typeof record.text === "string")
+  );
+}
+
+function isShareForkDraft(value: unknown): value is ShareForkDraft {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const settings = record.imageGenSettings;
+  return (
+    record.version === 1 &&
+    typeof record.text === "string" &&
+    Array.isArray(record.attachments) &&
+    record.attachments.every(isShareForkAttachment) &&
+    typeof record.webSearchEnabled === "boolean" &&
+    typeof record.deepResearchEnabled === "boolean" &&
+    typeof record.imageGenerationEnabled === "boolean" &&
+    typeof settings === "object" &&
+    settings !== null &&
+    !Array.isArray(settings)
+  );
+}
+
+function sanitizeImageGenSettings(value: unknown): ImageGenSettings {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  const settings: ImageGenSettings = {};
+  if (typeof record.modelId === "string") settings.modelId = record.modelId;
+  if (typeof record.aspectRatio === "string") {
+    settings.aspectRatio = record.aspectRatio;
+  }
+  if (typeof record.quality === "string") settings.quality = record.quality;
+  if (typeof record.background === "string") {
+    settings.background = record.background;
+  }
+  if (typeof record.n === "number" && Number.isSafeInteger(record.n)) {
+    settings.n = record.n;
+  }
+  return settings;
+}
+
+/**
+ * One-shot handoff for the share-fork first send: the share page stores the
+ * exact composer draft (text + attachments + feature toggles), navigates to
+ * the viewer's own `/chat/<newId>` room, and that room consumes + auto-sends
+ * it once through the standard pipeline. Same-tab navigation only; a stale
+ * entry is consumed once and dropped, never re-sent.
+ */
+export function queueShareForkDraft(
+  sessionId: string,
+  input: {
+    text: string;
+    attachments: UIAttachment[];
+    webSearchEnabled: boolean;
+    deepResearchEnabled: boolean;
+    imageGenerationEnabled: boolean;
+    imageGenSettings: ImageGenSettings;
+  },
+): void {
+  const payload: ShareForkDraft = {
+    version: 1,
+    text: input.text,
+    attachments: input.attachments.map((attachment) => ({
+      id: attachment.id,
+      type: attachment.type,
+      ...(attachment.name !== undefined ? { name: attachment.name } : {}),
+      ...(attachment.mediaType !== undefined
+        ? { mediaType: attachment.mediaType }
+        : {}),
+      ...(attachment.data !== undefined ? { data: attachment.data } : {}),
+      ...(attachment.url !== undefined ? { url: attachment.url } : {}),
+      ...(attachment.text !== undefined ? { text: attachment.text } : {}),
+    })),
+    webSearchEnabled: input.webSearchEnabled,
+    deepResearchEnabled: input.deepResearchEnabled,
+    imageGenerationEnabled: input.imageGenerationEnabled,
+    imageGenSettings: sanitizeImageGenSettings(input.imageGenSettings),
+  };
+  try {
+    sessionStorage.setItem(shareForkDraftKey(sessionId), JSON.stringify(payload));
+  } catch {
+    // Storage unavailable — the target room renders without a handoff draft.
+  }
+}
+
+/** Consume (read + delete) the one-shot share-fork draft for a session. */
+export function consumeShareForkDraft(sessionId: string): ShareForkDraft | null {
+  const key = shareForkDraftKey(sessionId);
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(key);
+    sessionStorage.removeItem(key);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isShareForkDraft(parsed)) return null;
+    if (!parsed.text.trim() && parsed.attachments.length === 0) return null;
+    return {
+      ...parsed,
+      imageGenSettings: sanitizeImageGenSettings(parsed.imageGenSettings),
+    };
+  } catch {
+    return null;
+  }
 }

@@ -443,38 +443,25 @@ export const chatPaths = {
     post: {
       operationId: "forkSharedChat",
       tags: ["Chat"],
-      summary: "Seed a viewer's fork session from a share snapshot",
+      summary: "Fork a frozen share snapshot into the viewer's own session",
       description:
-        "Writes the frozen snapshot messages plus the first follow-up into a viewer-owned session. The fork is fully independent — later revoke/delete of the source never touches it.",
+        "Seeds the frozen snapshot (read server-side from the token) into a new viewer-owned session. Send the first follow-up through the standard chat pipeline afterwards. The fork is fully independent — later revoke/delete of the source never touches it.",
       security: bearerOrCookie,
       requestBody: {
         required: true,
         content: jsonSchema(
           {
             type: "object",
-            required: ["sessionId", "forkedFrom", "messages", "firstMessage"],
+            required: ["token"],
             properties: {
-              sessionId: { type: "string", format: "uuid" },
-              forkedFrom: {
-                type: "object",
-                required: ["token", "title"],
-                properties: {
-                  token: { type: "string" },
-                  title: { type: "string" },
-                },
-              },
-              messages: { type: "array", maxItems: 40 },
-              firstMessage: { type: "string", minLength: 1, maxLength: 32000 },
+              token: { type: "string" },
             },
           },
           {
             default: {
               summary: "Fork",
               value: {
-                sessionId: SESSION_ID_EXAMPLE,
-                forkedFrom: { token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM", title: "Q3 revenue notes" },
-                messages: [],
-                firstMessage: "What about the second part?",
+                token: "mA8xQ2vRn4kT7wZ9pL3sVd6fH8jK0nM",
               },
             },
           },
@@ -488,19 +475,19 @@ export const chatPaths = {
             required: ["sessionId", "seededMessages"],
             properties: {
               sessionId: { type: "string", format: "uuid" },
-              seededMessages: { type: "integer", minimum: 1 },
+              seededMessages: { type: "integer", minimum: 0 },
             },
           },
           {
             default: {
               summary: "Seeded",
-              value: { sessionId: SESSION_ID_EXAMPLE, seededMessages: 3 },
+              value: { sessionId: SESSION_ID_EXAMPLE, seededMessages: 2 },
             },
           },
         ),
         "400": badRequest({ error: "Invalid fork request" }),
         "401": unauthorized,
-        "404": notFound({ error: "Fork target session not found" }),
+        "404": notFound({ error: "Shared link not found or no longer active" }),
       },
     },
   },

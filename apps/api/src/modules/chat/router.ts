@@ -536,16 +536,19 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     try {
       const result = await seedForkSession({
         userId: user.id,
-        body: parsed.data,
+        token: parsed.data.token,
       });
       return c.json(result, 201);
     } catch (error) {
+      if (error instanceof ChatShareNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
       return c.json(
         {
           error: error instanceof Error ? error.message : "Fork failed",
           code: "FORK_FAILED",
         },
-        404,
+        400,
       );
     }
   })

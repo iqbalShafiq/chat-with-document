@@ -4,15 +4,18 @@ import {
   applyQueuedAck,
   cancelQueuedEdit,
   chunkIds,
+  consumeShareForkDraft,
   finishQueuedEdit,
   markQueuedItemsInflight,
   nextFlushableItem,
   pendingBeforeEditing,
+  queueShareForkDraft,
   queueStorageKey,
   readQueue,
   removeQueuedItem,
   reorderQueuedItem,
   revertInflightItems,
+  shareForkDraftKey,
   startQueuedEdit,
   writeQueue,
   type QueuedDraft,
@@ -20,23 +23,39 @@ import {
 } from "./queued-messages.js";
 
 function createStorage(initial: Record<string, string> = {}) {
-  const store = new Map(Object.entries(initial));
+  const local = new Map(Object.entries(initial));
+  const session = new Map<string, string>();
   const storage = {
-    getItem: (key: string) => store.get(key) ?? null,
+    getItem: (key: string) => local.get(key) ?? null,
     setItem: (key: string, value: string) => {
-      store.set(key, value);
+      local.set(key, value);
     },
     removeItem: (key: string) => {
-      store.delete(key);
+      local.delete(key);
     },
-    clear: () => store.clear(),
-    key: (index: number) => [...store.keys()][index] ?? null,
+    clear: () => local.clear(),
+    key: (index: number) => [...local.keys()][index] ?? null,
     get length() {
-      return store.size;
+      return local.size;
+    },
+  };
+  const sessionStorage = {
+    getItem: (key: string) => session.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      session.set(key, value);
+    },
+    removeItem: (key: string) => {
+      session.delete(key);
+    },
+    clear: () => session.clear(),
+    key: (index: number) => [...session.keys()][index] ?? null,
+    get length() {
+      return session.size;
     },
   };
   vi.stubGlobal("localStorage", storage);
-  return { store, storage };
+  vi.stubGlobal("sessionStorage", sessionStorage);
+  return { store: local, storage, sessionStore: session };
 }
 
 afterEach(() => {
@@ -208,5 +227,40 @@ describe("mutations", () => {
   it("chunkIds with a non-positive size returns empty", () => {
     expect(chunkIds(["a", "b"], 0)).toEqual([]);
     expect(chunkIds(["a", "b"], -1)).toEqual([]);
+  });
+});
+
+describe("share fork handoff draft", () => {
+  it("round-trips a one-shot draft and consumes it exactly once", () => {
+    createStorage();
+    queueShareForkDraft("fork-1", {
+      text: "what about the second part?",
+      attachments: [],
+      webSearchEnabled: true,
+      deepResearchEnabled: false,
+      imageGenerationEnabled: false,
+      imageGenSettings: { modelId: "img-model" },
+    });
+    const first = consumeShareForkDraft("fork-1");
+    expect(first?.text).toBe("what about the second part?");
+    expect(first?.webSearchEnabled).toBe(true);
+    expect(first?.imageGenSettings).toEqual({ modelId: "img-model" });
+    expect(consumeShareForkDraft("fork-1")).toBeNull();
+  });
+
+  it("drops empty, corrupt, and cross-session drafts without re-sending", () => {
+    const { sessionStore } = createStorage();
+    queueShareForkDraft("fork-1", {
+      text: "   ",
+      attachments: [],
+      webSearchEnabled: false,
+      deepResearchEnabled: false,
+      imageGenerationEnabled: false,
+      imageGenSettings: {},
+    });
+    expect(consumeShareForkDraft("fork-1")).toBeNull();
+    sessionStore.set(shareForkDraftKey("fork-2"), "{corrupt");
+    expect(consumeShareForkDraft("fork-2")).toBeNull();
+    expect(consumeShareForkDraft("other-session")).toBeNull();
   });
 });

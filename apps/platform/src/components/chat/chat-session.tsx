@@ -155,12 +155,54 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
 export type ChatUIMessage = UIMessage<ChatClientMetadata, ChatDataMap>;
 type ChatTransport = ReturnType<typeof createAnviaChatTransport>;
 export type ChatController = UseChatResult<ChatTransport>;
 type MemoryMessages = Parameters<typeof initialMessagesFromMemory>[0];
+
+/** First submit from a deferred composer (share fork): fork first, then send. */
+export type DeferredComposerSubmitInput = {
+  text: string;
+  attachments: UIAttachment[];
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  imageGenerationEnabled: boolean;
+  imageGenSettings: ImageGenSettings;
+};
+
+/** Deferred composer error shown inside the normal composer shell. */
+export type DeferredComposerError = {
+  version: number;
+  message: string;
+};
+
+/** Draft carried across the share-fork room swap (same object, no ref needed). */
+export type ForkPendingDraft = {
+  draft: DeferredComposerSubmitInput;
+  flags: {
+    webSearchEnabled: boolean;
+    deepResearchEnabled: boolean;
+    imageGenerationEnabled: boolean;
+    imageGenSettings: ImageGenSettings;
+  };
+};
+
+/** Draft auto-sent once after mount through the normal pipeline. */
+export type InitialComposerDraft = {
+  text: string;
+  attachments?: UIAttachment[];
+};
+
+/** Feature toggles restored on mount (share fork handoff). */
+export type InitialFeatureFlags = {
+  webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
+  imageGenerationEnabled?: boolean;
+  imageGenSettings?: ImageGenSettings;
+};
 
 const ChatClientMetadataSchema: ClientMetadataSchema<ChatClientMetadata> = {
   safeParse(value) {
@@ -269,6 +311,14 @@ export function ChatSession({
   onAuthFailure,
   onImageContextActions,
   onReloadMessages,
+  readOnly = false,
+  threadTopSlot,
+  composerTopSlot,
+  deferredComposerLocked = false,
+  deferredComposerError = null,
+  onDeferredComposerSubmit,
+  initialComposerDraft = null,
+  initialFeatureFlags = null,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -285,11 +335,49 @@ export function ChatSession({
   ) => void;
   /** Replaces the loaded conversation (fresh history after a stale dialog). */
   onReloadMessages?: (messages: ChatUIMessage[]) => void;
+  /** Frozen share view: thread renders but never sends, edits, or uploads. */
+  readOnly?: boolean;
+  /** Rendered at the top of the thread scroll (share snapshot header…). */
+  threadTopSlot?: ReactNode;
+  /** Rendered above the composer (share provenance chip, auth CTA…). */
+  composerTopSlot?: ReactNode;
+  /**
+   * Deferred composer (share fork, pre-fork): the normal composer renders and
+   * stays editable, but sends route through onDeferredComposerSubmit. While
+   * the fork is in flight the field shows the forking state without a second
+   * textarea.
+   */
+  deferredComposerLocked?: boolean;
+  /** Deferred fork failure, rendered inside the normal composer shell. */
+  deferredComposerError?: DeferredComposerError | null;
+  /**
+   * First submit is deferred to the owner: fork the share snapshot into the
+   * viewer's own session, swap this room onto it, then send there. Only the
+   * owning share route provides this; normal chat rooms always send directly.
+   * The owner handles the whole handoff, so this room never sends itself.
+   */
+  onDeferredComposerSubmit?: (
+    draft: DeferredComposerSubmitInput,
+  ) => Promise<void>;
+  /** Auto-sent once after mount through the normal pipeline (share fork handoff). */
+  initialComposerDraft?: InitialComposerDraft | string | null;
+  /** Feature toggles pre-selected before the first send (share fork handoff). */
+  initialFeatureFlags?: InitialFeatureFlags | null;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
   const wasActiveRunRef = useRef(false);
+  /**
+   * Deferred share composer (pre-fork): the thread stays frozen like an
+   * anonymous snapshot, but the normal composer below stays live. The first
+   * Send routes through onDeferredComposerSubmit (fork + room swap) instead
+   * of sending from this room.
+   */
+  const deferredPreFork = Boolean(onDeferredComposerSubmit);
+  const threadFrozen = readOnly || deferredPreFork;
+  const composerReadOnly = readOnly && !deferredPreFork;
+  const sessionScopeDisabled = readOnly || deferredPreFork;
   const [ingestionItems, setIngestionItems] = useState<IngestionItem[]>([]);
   const [sessionDocuments, setSessionDocuments] = useState<SessionDocument[]>(
     [],
@@ -423,13 +511,14 @@ export function ChatSession({
   }, []);
 
   const refreshSessionDocuments = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     try {
       const documents = await listSessionDocuments(sessionId);
       setSessionDocuments(documents);
     } catch {
       // Keep the previous list if refresh fails.
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   /**
    * Session image history. Refetched on mount, after regenerate/truncate, and
@@ -438,6 +527,7 @@ export function ChatSession({
    */
   const sessionImagesVersionRef = useRef(0);
   const refreshSessionImages = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     const version = ++sessionImagesVersionRef.current;
     try {
       const images = await fetchSessionImages(sessionId);
@@ -452,7 +542,7 @@ export function ChatSession({
         setSessionImagesError(true);
       }
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const sessionDocumentIds = useMemo(
     () => new Set(sessionDocuments.map((doc) => doc.id)),
@@ -537,7 +627,7 @@ export function ChatSession({
 
   /** Fetch context usage once; shared by the polling effect and message_end. */
   const refreshContextUsage = useCallback(async () => {
-    if (modelsStatusRef.current !== "success") return;
+    if (sessionScopeDisabled || modelsStatusRef.current !== "success") return;
     if (!selectedModelRef.current) return;
     const version = ++contextUsageVersionRef.current;
     try {
@@ -554,7 +644,7 @@ export function ChatSession({
         setContextUsage(null);
       }
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const handleChatEvent = useCallback(
     (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
@@ -725,7 +815,7 @@ export function ChatSession({
         setQueueHold(true);
       }
     })();
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const handleModelChange = useCallback((model: string) => {
     setSelectedModel(model);
@@ -759,6 +849,7 @@ export function ChatSession({
    */
   const activeContextVersionRef = useRef(0);
   const refreshActiveContext = useCallback(async () => {
+    if (sessionScopeDisabled) return;
     const version = ++activeContextVersionRef.current;
     try {
       const images = await fetchSessionImageContexts(sessionId);
@@ -767,7 +858,7 @@ export function ChatSession({
     } catch {
       // keep previous list on failure
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   const contextSnippetState = useContextSnippet(sessionId);
 
@@ -852,6 +943,46 @@ export function ChatSession({
     [focusComposer, setComposerInputText],
   );
 
+  function normalizeInitialDraft(
+    draft: InitialComposerDraft | string | null | undefined,
+  ): { text: string; attachments: UIAttachment[] } | null {
+    if (!draft) return null;
+    if (typeof draft === "string") {
+      return draft.trim() ? { text: draft, attachments: [] } : null;
+    }
+    return draft.text.trim()
+      ? { text: draft.text, attachments: draft.attachments ?? [] }
+      : null;
+  }
+
+  const initialDraftRef = useRef(initialComposerDraft);
+  const initialFlagsRef = useRef(initialFeatureFlags ?? null);
+  useEffect(() => {
+    const draft = normalizeInitialDraft(initialDraftRef.current);
+    initialDraftRef.current = null;
+    const flags = initialFlagsRef.current;
+    initialFlagsRef.current = null;
+    if (flags) {
+      if (typeof flags.webSearchEnabled === "boolean") {
+        setWebSearchEnabled(flags.webSearchEnabled);
+      }
+      if (typeof flags.deepResearchEnabled === "boolean") {
+        setDeepResearchEnabled(flags.deepResearchEnabled);
+      }
+      if (typeof flags.imageGenerationEnabled === "boolean") {
+        setImageGenerationEnabled(flags.imageGenerationEnabled);
+      }
+      if (flags.imageGenSettings) {
+        setImageGenSettings(flags.imageGenSettings);
+        persistImageGenSettings(flags.imageGenSettings);
+      }
+    }
+    if (!draft || modelsStatus !== "success") return;
+    const controller = chatRef.current;
+    if (!controller || controller.status === "submitted" || controller.status === "streaming") return;
+    void submitComposerRef.current(draft.text, draft.attachments, controller, () => {});
+  }, [modelsStatus, sessionId]);
+
   useEffect(() => {
     const activeRun =
       chat.status === "submitted" || chat.status === "streaming";
@@ -918,7 +1049,7 @@ export function ChatSession({
 
   useEffect(() => {
     focusComposer();
-  }, [focusComposer]);
+  }, [focusComposer, sessionId]);
 
   useEffect(() => {
     setSessionDocuments([]);
@@ -932,10 +1063,12 @@ export function ChatSession({
     setContextUsage(null);
     setDeepResearch(resetDeepResearchActivity());
     setPreviousRunError(false);
+    if (sessionScopeDisabled) return;
     void refreshSessionDocuments();
     void refreshSessionImages();
     void refreshActiveContext();
   }, [
+    sessionScopeDisabled,
     refreshSessionDocuments,
     refreshSessionImages,
     refreshActiveContext,
@@ -944,12 +1077,13 @@ export function ChatSession({
   // Capability fetch is session-aware so document-only Deep Research can be
   // enabled even when this deployment has no web-search key.
   useEffect(() => {
+    if (sessionScopeDisabled) return;
     void fetchChatCapabilities(sessionId)
       .then(setCapabilities)
       .catch(() => {
         // capabilities stay null; toggles render as unavailable
       });
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   useEffect(() => {
     setEditingMessageId(null);
@@ -1011,27 +1145,27 @@ export function ChatSession({
 
   // Poll context usage every 30s while the catalog is available.
   useEffect(() => {
-    if (modelsStatus !== "success") return;
+    if (sessionScopeDisabled || modelsStatus !== "success") return;
     void refreshContextUsage();
     const timer = window.setInterval(() => {
       void refreshContextUsage();
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [modelsStatus, refreshContextUsage]);
+  }, [modelsStatus, sessionScopeDisabled, refreshContextUsage]);
 
   // Refetch context usage whenever the selected model / effort changes so the
   // ring and popover always reflect the ACTIVE model's window and ratio.
   useEffect(() => {
-    if (modelsStatus !== "success") return;
+    if (sessionScopeDisabled || modelsStatus !== "success") return;
     void refreshContextUsage();
-  }, [selectedModel, selectedReasoningEffort, modelsStatus, refreshContextUsage]);
+  }, [selectedModel, selectedReasoningEffort, modelsStatus, sessionScopeDisabled, refreshContextUsage]);
 
   // Rejoin a still-running run on load (closed-tab recovery) and surface a
   // banner for a run that failed server-side. The v1 continuation recipe
   // includes the exact model/reasoning tuple, so never resume until the stored
   // policy has been hydrated through the live catalog. "missing" is idle.
   useEffect(() => {
-    if (!resumePolicyReady || resumedSessionRef.current === sessionId) return;
+    if (sessionScopeDisabled || !resumePolicyReady || resumedSessionRef.current === sessionId) return;
     let cancelled = false;
     void (async () => {
       let status: Awaited<ReturnType<typeof fetchRunStatus>> | null = null;
@@ -1082,7 +1216,7 @@ export function ChatSession({
     return () => {
       cancelled = true;
     };
-  }, [resumePolicyReady, sessionId]);
+  }, [sessionScopeDisabled, resumePolicyReady, sessionId]);
 
   // Prefill the composer from a persisted failed [user, assistant error] tail.
   useEffect(() => {
@@ -1120,6 +1254,7 @@ export function ChatSession({
       attachments: UIAttachment[],
       chat: ChatController,
       clear: () => void,
+      options?: { skipQueueConflictGate?: boolean },
     ) => Promise<void>
   >(async () => {});
 
@@ -1785,7 +1920,7 @@ export function ChatSession({
     } catch {
       return "unknown";
     }
-  }, [sessionId]);
+  }, [sessionScopeDisabled, sessionId]);
 
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
@@ -2102,6 +2237,7 @@ export function ChatSession({
     attachments,
     chatController,
     clear,
+    options,
   ) => {
     setComposerError(null);
     const trimmed = input.trim();
@@ -2112,6 +2248,7 @@ export function ChatSession({
     // (auto-flush drains it unless held), so the queue is paused: ask the
     // user whether this draft joins the queue or sends immediately.
     if (
+      !options?.skipQueueConflictGate &&
       !submitBypassRef.current &&
       chatRef.current?.status !== "submitted" &&
       chatRef.current?.status !== "streaming" &&
@@ -2225,6 +2362,7 @@ export function ChatSession({
         pending.attachments,
         pending.chatController,
         pending.clear,
+        { skipQueueConflictGate: true },
       );
     } finally {
       submitBypassRef.current = false;
@@ -2246,6 +2384,21 @@ export function ChatSession({
           clear,
         }) => {
           if (modelsStatus !== "success") return;
+          // Deferred share composer (pre-fork): the normal field already
+          // collected input + full composer state (model, effort, features,
+          // attachments). The owner forks and swaps rooms; this room sends
+          // nothing itself so the draft is never duplicated.
+          if (onDeferredComposerSubmit) {
+            await onDeferredComposerSubmit({
+              text: input,
+              attachments,
+              webSearchEnabled,
+              deepResearchEnabled,
+              imageGenerationEnabled,
+              imageGenSettings: imageGenerationEnabled ? imageGenSettings : {},
+            });
+            return;
+          }
           const editing = queuedItemsRef.current.find(
             (item) => item.status === "editing",
           );
@@ -2305,6 +2458,8 @@ export function ChatSession({
 
                   <ThreadPrimitive.Suggestions className="mb-4 flex w-full flex-wrap gap-2" />
 
+                  {threadTopSlot}
+
                   {/*
                     Same-thread vs cross-message spacing:
                     - activity chain (tool↔reasoning, any message split): tight mt-1
@@ -2327,17 +2482,24 @@ export function ChatSession({
                         message={message}
                         chatStatus={chat.status}
                         lastMessageId={chat.messages.at(-1)?.id}
-                        editingMessageId={editingMessageId}
-                        onStartEdit={handleStartEdit}
-                        onCancelEdit={handleCancelEdit}
-                        onSubmitEdit={handleSubmitEdit}
-                        onRevert={handleRevert}
+                        editingMessageId={threadFrozen ? null : editingMessageId}
+                        onStartEdit={threadFrozen ? () => {} : handleStartEdit}
+                        onCancelEdit={threadFrozen ? () => {} : handleCancelEdit}
+                        onSubmitEdit={
+                          threadFrozen ? async () => {} : handleSubmitEdit
+                        }
+                        onRevert={threadFrozen ? async () => {} : handleRevert}
                         generationInfo={generationInfoMap.get(message.id)}
                         editContextImages={editContextImages}
                         editAvailableImages={editAvailableImages}
                         onEditContextAdd={handleEditContextAdd}
                         onEditContextRemove={handleEditContextRemove}
-                        onAddContext={handleAddContext}
+                        onAddContext={
+                          threadFrozen
+                            ? () => Promise.resolve(false)
+                            : handleAddContext
+                        }
+                        readOnly={threadFrozen}
                       />
                     )}
                   </ThreadPrimitive.Messages>
@@ -2429,6 +2591,10 @@ export function ChatSession({
                     </div>
                   ) : null}
 
+                  {composerTopSlot ? (
+                    <div className="mb-2">{composerTopSlot}</div>
+                  ) : null}
+
                   <ChatComposer
                     sessionId={sessionId}
                     projectId={projectId}
@@ -2486,6 +2652,17 @@ export function ChatSession({
                     editHydration={editHydration}
                     clearComposerSignal={clearComposerSignal}
                     suppressOptimisticClear={autoFlushPreserveRef}
+                    readOnly={composerReadOnly}
+                    locked={deferredComposerLocked}
+                    lockedLabel="Starting your copy…"
+                    externalError={
+                      deferredComposerError
+                        ? {
+                            key: deferredComposerError.version,
+                            message: deferredComposerError.message,
+                          }
+                        : null
+                    }
                   />
                 </div>
               </div>

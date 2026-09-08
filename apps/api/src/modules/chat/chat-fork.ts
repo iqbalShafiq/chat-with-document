@@ -3,34 +3,12 @@ import { parseMessage } from "@anvia/core";
 import { z } from "zod";
 
 import { prisma } from "../../utils/prisma.js";
+import { ChatShareNotFoundError } from "./chat-share.js";
 import { createDefaultMemoryScopeKey } from "./memory-scope.js";
-
-const forkedFromSchema = z
-  .object({
-    token: z.string().min(1).max(256),
-    title: z.string().max(200),
-  })
-  .strict();
-
-const textPartSchema = z
-  .object({ type: z.literal("text"), text: z.string().max(32000) })
-  .catchall(z.unknown());
-
-const forkMessageSchema = z
-  .object({
-    id: z.string().optional(),
-    role: z.enum(["user", "assistant"]),
-    content: z.string().max(32000).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-  })
-  .catchall(z.unknown());
 
 export const forkBodySchema = z
   .object({
-    sessionId: z.string().uuid(),
-    forkedFrom: forkedFromSchema,
-    messages: z.array(forkMessageSchema).max(40),
-    firstMessage: z.string().trim().min(1).max(32000),
+    token: z.string().trim().min(1).max(256),
   })
   .strict();
 
@@ -41,48 +19,61 @@ export type ForkResult = {
   seededMessages: number;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
- * Seed a viewer's fork session from a frozen share snapshot. The fork is a
- * fully independent session (own ChatSession row + own memory scope): later
- * revoke/delete of the source share never touches it. Provenance is stored
- * as frozen text metadata, not a live link.
+ * Fork a frozen share snapshot into the viewer's own session. The snapshot
+ * is read server-side from the share token — the client never supplies
+ * history — so a fork always matches the shared link. The fork is fully
+ * independent: later revoke/delete of the source never touches it.
+ * Provenance is stored as frozen text metadata, not a live link.
  *
  * Memory write uses the same Anvia memory-session/message tables the chat
- * pipeline owns; the first user message is persisted immediately so the
- * session is non-empty even if the viewer never sends a second turn.
+ * pipeline owns. Only the frozen history is seeded here; the viewer's first
+ * follow-up streams later through the standard chat pipeline so model
+ * selection, send smoothness, and AI reaction stay identical to a normal
+ * chat.
  */
 export async function seedForkSession(input: {
   userId: string;
-  body: ForkBody;
+  token: string;
 }): Promise<ForkResult> {
-  const session = await prisma.chatSession.findFirst({
-    where: { id: input.body.sessionId, userId: input.userId },
-    select: { id: true, title: true },
+  const token = input.token.trim();
+  if (!token) throw new ChatShareNotFoundError();
+
+  const share = await prisma.chatShare.findUnique({
+    where: { token },
+    include: {
+      session: { select: { id: true, title: true } },
+    },
   });
-  if (!session) {
-    throw new Error("Fork target session not found");
+  if (!share || share.revokedAt || !share.session) {
+    throw new ChatShareNotFoundError();
   }
+  const title = share.title ?? share.session.title ?? "Shared chat";
+  const snapshot = Array.isArray(share.snapshot) ? share.snapshot : [];
 
-  if (!session.title) {
-    const title = `Fork of ${input.body.forkedFrom.title}`.slice(0, 48);
-    await prisma.chatSession.update({
-      where: { id: session.id },
-      data: { title },
-    });
-  }
+  const sessionId = crypto.randomUUID();
+  await prisma.chatSession.create({
+    data: {
+      id: sessionId,
+      userId: input.userId,
+      projectId: null,
+      title: `Fork of ${title}`.slice(0, 48),
+    },
+  });
 
-  const scopeKey = createDefaultMemoryScopeKey(session.id, input.userId);
+  const scopeKey = createDefaultMemoryScopeKey(sessionId, input.userId);
   const memorySession = await prisma.agentMemorySession.upsert({
     where: { scopeKey },
     create: {
       scopeKey,
-      sessionId: session.id,
+      sessionId,
       userId: input.userId,
       metadata: {
-        forkedFrom: {
-          token: input.body.forkedFrom.token,
-          title: input.body.forkedFrom.title,
-        },
+        forkedFrom: { token, title },
       },
     },
     update: {},
@@ -91,60 +82,46 @@ export async function seedForkSession(input: {
 
   let position = 0;
   let turn = 0;
-  const runId = `fork-${input.body.forkedFrom.token.slice(0, 12)}`;
+  const runId = `fork-${token.slice(0, 12)}`;
   const toJson = (value: unknown): Prisma.InputJsonValue =>
     JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   // Validate through the same strict v1 message schema readers use, so a
-  // forked session always loads (unknown shapes throw here, not on every
-  // later history read). Stored rows use completion `content` (string or
-  // content parts) — never UI `parts`.
-  const textOf = (message: {
-    content?: string;
-    parts?: Array<{ text?: string }>;
-  }): string => {
-    if (typeof message.content === "string") return message.content;
-    const texts = (message.parts ?? [])
-      .map((part) => (typeof part.text === "string" ? part.text : ""))
-      .join("");
-    return texts;
-  };
+  // forked session always loads. Stored rows use completion `content`
+  // (string or content parts) — never UI `parts`.
   const toMessageJson = (value: unknown): Prisma.InputJsonValue =>
     toJson(parseMessage(value));
-  const seedRows = input.body.messages.map((message) => {
-    const text = textOf(message).slice(0, 32000);
-    if (!text.trim()) return null;
-    const content = textPartSchema.safeParse({ type: "text", text }).success
-      ? [{ type: "text", text }]
-      : text;
-    return {
-      memorySessionId: memorySession.id,
-      runId,
-      turn: turn++,
-      role: message.role,
-      message: toMessageJson({
-        role: message.role,
-        content,
-        ...(message.metadata ? { metadata: message.metadata } : {}),
-      }),
-      position: position++,
-    };
-  });
-  const seeded = seedRows.filter(
-    (row): row is NonNullable<typeof row> => row !== null,
-  );
-  seeded.push({
-    memorySessionId: memorySession.id,
-    runId,
-    turn: turn++,
-    role: "user",
-    message: toMessageJson({
-      role: "user",
-      content: input.body.firstMessage,
-    }),
-    position: position++,
+  const seedRows = snapshot.flatMap((message) => {
+    if (!isRecord(message)) return [];
+    let stored: unknown = null;
+    try {
+      stored = parseMessage(message);
+    } catch {
+      return [];
+    }
+    const role = (stored as { role?: unknown }).role;
+    if (
+      role !== "user" &&
+      role !== "assistant" &&
+      role !== "tool" &&
+      role !== "system"
+    ) {
+      return [];
+    }
+    return [
+      {
+        memorySessionId: memorySession.id,
+        runId,
+        turn: turn++,
+        role,
+        message: toJson(stored),
+        position: position++,
+      },
+    ];
   });
 
-  await prisma.agentMemoryMessage.createMany({ data: seeded });
+  if (seedRows.length > 0) {
+    await prisma.agentMemoryMessage.createMany({ data: seedRows });
+  }
 
-  return { sessionId: session.id, seededMessages: seeded.length };
+  return { sessionId, seededMessages: seedRows.length };
 }

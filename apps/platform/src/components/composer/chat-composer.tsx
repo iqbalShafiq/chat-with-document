@@ -94,6 +94,10 @@ export function ChatComposer({
   editHydration = null,
   clearComposerSignal = null,
   suppressOptimisticClear = null,
+  readOnly = false,
+  locked = false,
+  lockedLabel,
+  externalError = null,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -161,14 +165,25 @@ export function ChatComposer({
   clearComposerSignal?: { version: number } | null;
   /** When true at stream start, skip the optimistic composer clear (auto-flush). */
   suppressOptimisticClear?: RefObject<boolean> | null;
+  /** Frozen share view: field and controls render disabled. */
+  readOnly?: boolean;
+  /**
+   * Deferred submit in flight (share fork): the normal field keeps its draft
+   * but sends nothing until the owner swaps the room onto the fork.
+   */
+  locked?: boolean;
+  /** Label announced on the field while locked (defaults to processing). */
+  lockedLabel?: string;
+  /** Owner-scoped error rendered inside the normal composer shell. */
+  externalError?: { key: number; message: string } | null;
 }) {
   const active = isActiveComposerStatus(chatStatus);
-  const busy = isIngesting || active;
+  const busy = isIngesting || active || locked;
   const modelsReady =
     modelsStatus === "success" &&
     models.length > 0 &&
     models.some((item) => item.modelId === model);
-  const modelsUnavailable = !modelsReady;
+  const modelsUnavailable = !modelsReady || readOnly;
   // Exit animation state for the context chip: the remove action is deferred
   // ~180ms so the fade-out can play before the snippet unmounts.
   const [removingContext, setRemovingContext] = useState(false);
@@ -185,12 +200,15 @@ export function ChatComposer({
     (attachment) => isImageAttachmentLike(attachment),
   );
 
-  const placeholderText =
-    active
-      ? "The agent is generating…"
-      : isIngesting
-        ? "Processing document…"
-        : "Ask about your documents…";
+  const placeholderText = locked
+    ? (lockedLabel ?? "Processing…")
+    : readOnly
+      ? "This is a frozen shared copy — log in to continue it as your own chat."
+      : active
+        ? "The agent is generating…"
+        : isIngesting
+          ? "Processing document…"
+          : "Ask about your documents…";
 
   const submitQueueDraft = useCallback(async () => {
     if (
@@ -263,7 +281,7 @@ export function ChatComposer({
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
-      {modelsStatus === "error" ? (
+      {!readOnly && modelsStatus === "error" ? (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
           <span className="min-w-0 truncate">
             Model list is unavailable: {modelsError}
@@ -302,6 +320,16 @@ export function ChatComposer({
               </button>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {externalError ? (
+        <div
+          key={externalError.key}
+          className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in"
+          role="alert"
+        >
+          {externalError.message}
         </div>
       ) : null}
 
@@ -409,11 +437,7 @@ export function ChatComposer({
           minRows={1}
           maxRows={4}
           placeholder={placeholderText}
-          disabled={
-            isIngesting ||
-            modelsUnavailable ||
-            chatStatus === "waiting"
-          }
+          disabled={locked || readOnly || isIngesting || modelsUnavailable || chatStatus === "waiting"}
           onKeyDown={(event) => {
             if (
               event.defaultPrevented ||
@@ -453,7 +477,7 @@ export function ChatComposer({
               reasoningEfforts={reasoningEfforts}
               model={model}
               reasoningEffort={reasoningEffort}
-              disabled={busy || modelsUnavailable}
+              disabled={locked || readOnly || busy || modelsUnavailable}
               onModelChange={onModelChange}
               onReasoningChange={onReasoningChange}
             />
@@ -469,7 +493,7 @@ export function ChatComposer({
               sessionId={sessionId}
               projectId={projectId}
               activeDocumentIds={activeDocumentIds}
-              disabled={isIngesting || modelsUnavailable}
+              disabled={locked || readOnly || isIngesting || modelsUnavailable}
               onLinkedDocuments={onLinkedDocuments}
               onRejectedFiles={onAttachmentRejected}
             />
@@ -481,6 +505,7 @@ export function ChatComposer({
                 title="Add to queue"
                 aria-busy={queueSubmitting}
                 disabled={
+                  locked ||
                   isIngesting ||
                   !modelsReady ||
                   onQueueSubmit === undefined ||
@@ -511,7 +536,7 @@ export function ChatComposer({
               <ComposerPrimitive.Submit
                 aria-label={isIngesting ? "Processing document" : "Send"}
                 title={isIngesting ? "Processing document" : "Send"}
-                disabled={isIngesting || !modelsReady}
+                disabled={locked || isIngesting || !modelsReady}
                 className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-hover active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ArrowUp className="size-4" strokeWidth={2.25} />
