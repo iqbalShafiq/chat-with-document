@@ -120,7 +120,10 @@ const TABULAR_EMPTY_INSTRUCTION =
   "Do not call read_dataset, analyze_dataset, query_dataset_sql, or extract_document_tables — " +
   "answer from general knowledge or say the dataset is missing.)";
 
-function createStubTabularResolver(hasDocuments: boolean): DatasetResolver {
+function createStubTabularResolver(
+  hasDocuments: boolean,
+  derivedSheets?: Map<string, import("../tools/tabular/types.js").TabularSheet>,
+): DatasetResolver {
   if (!hasDocuments) {
     return {
       async listUploads() {
@@ -152,8 +155,9 @@ function createStubTabularResolver(hasDocuments: boolean): DatasetResolver {
     },
     async resolveSheet(ref) {
       if (ref.type === "document_table") return DOCUMENT_TABLE_SHEET;
-      if (ref.type === "upload" && (ref.documentId === "doc-derived-new" || ref.documentId === "doc-derived-url")) {
-        return STUB_DERIVED_SHEET;
+      if (ref.type === "upload") {
+        const derived = derivedSheets?.get(ref.documentId);
+        if (derived) return derived;
       }
       return TABULAR_FIXTURE_SHEET;
     },
@@ -222,16 +226,32 @@ const STUB_DERIVED_SHEET: TabularSheet = {
 };
 
 function createStubDerivedWriter(hasDocuments: boolean) {
-  return {
+  const sheets = new Map<string, import("../tools/tabular/types.js").TabularSheet>();
+  const writer = {
+    sheets,
     createDerived: async (input: {
       filename: string;
       origin: "created" | "fetched";
+      data?: Uint8Array;
     }) => {
       if (!hasDocuments && input.origin === "created" && input.filename.includes("parent")) {
         throw new Error("Parent dataset not found or not ready in this session");
       }
+      const documentId = input.origin === "fetched" ? "doc-derived-url" : "doc-derived-new";
+      if (input.data) {
+        try {
+          const { parseCsv, sheetFromRows } = await import("../tools/tabular/parse-csv.js");
+          const text = new TextDecoder().decode(input.data);
+          if (text.includes(",") || text.includes("\n")) {
+            sheets.set(documentId, sheetFromRows("derived", parseCsv(text)));
+          }
+        } catch {
+          // Fall back to the fixture sheet below.
+        }
+      }
+      if (!sheets.has(documentId)) sheets.set(documentId, STUB_DERIVED_SHEET);
       return {
-        documentId: input.origin === "fetched" ? "doc-derived-url" : "doc-derived-new",
+        documentId,
         filename: input.filename,
         origin: input.origin,
         status: "queued",
@@ -239,6 +259,7 @@ function createStubDerivedWriter(hasDocuments: boolean) {
     },
     countDerived: async () => 0,
   };
+  return writer;
 }
 
 function createStubDatasetFetch(): typeof fetch {
@@ -279,18 +300,19 @@ export function buildEvalTools(
   // Tabular tools are always registered (mirrors build-run-input.ts which wires
   // them unconditionally); the stub resolver returns empty/error when no dataset
   // is linked so the "abstain" case can be scored without crashes.
+  // Derived dataset tools use an in-memory writer in eval: create/fetch return
+  // a stub document id whose sheet round-trips the submitted bytes, so the
+  // create -> read -> analyze flow can be scored without prisma/R2/ingest.
+  const stubDerivedWriter = createStubDerivedWriter(Boolean(sessionConfig.hasDocuments));
   const tabularTools = createTabularAnalysisTools({
-      resolver: createStubTabularResolver(Boolean(sessionConfig.hasDocuments)),
-      sqlRunner: createStubSqlRunner() as never,
-    });
+    resolver: createStubTabularResolver(Boolean(sessionConfig.hasDocuments), stubDerivedWriter.sheets),
+    sqlRunner: createStubSqlRunner() as never,
+  });
   tools.push(...tabularTools);
   instructions.push(sessionConfig.hasDocuments ? TABULAR_CATALOG_INSTRUCTION : TABULAR_EMPTY_INSTRUCTION);
 
-  // Derived dataset tools use an in-memory writer in eval: create/fetch return
-  // a stub document id whose sheet resolves like a ready upload, so the
-  // create -> read -> analyze flow can be scored without prisma/R2/ingest.
   const derivedTools = createDerivedDatasetTools({
-    writer: createStubDerivedWriter(Boolean(sessionConfig.hasDocuments)),
+    writer: stubDerivedWriter,
     fetchFn: createStubDatasetFetch(),
   });
   tools.push(...derivedTools);
