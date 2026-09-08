@@ -1,0 +1,11 @@
+export const MAX_DERIVED_ROWS = 5_000;
+export const MAX_DERIVED_COLUMNS = 30;
+export const MAX_DERIVED_HARD_COLUMNS = 100;
+export const MAX_DERIVED_CELL_CHARS = 500;
+export const MAX_DERIVED_PER_SESSION = 20;
+export const MAX_DERIVED_NAME_CHARS = 80;
+export const MAX_SOURCE_NOTE_CHARS = 500;
+export const MAX_FETCH_BYTES = 5 * 1024 * 1024;
+export const FETCH_TIMEOUT_MS = 15_000;
+export const FETCH_MAX_REDIRECTS = 3;
+export const DERIVED_PREVIEW_ROWS = 5;

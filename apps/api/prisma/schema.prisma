@@ -247,6 +247,14 @@ model Document {
   firstPageSummary String            @default("") @db.Text
   /// Structured tabular data for CSV/XLSX: { sheets: TabularSheet[] }.
   tabularData      Json?
+  /// Provenance: "upload" (user upload) | "created" (agent create_dataset) | "fetched" (agent fetch_dataset_from_url).
+  origin           String            @default("upload")
+  /// For origin "created": source Document id this was derived from, if any.
+  parentDocumentId String?
+  /// For origin "fetched": final URL after redirects. For web-derived "created": source URL.
+  originUrl        String?
+  /// Free-form provenance note (e.g. "synthetic example", source + access date).
+  sourceNote       String?           @db.Text
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   pages            DocumentPage[]
@@ -259,6 +267,7 @@ model Document {
   @@index([userId, status, createdAt])
   @@index([userId, projectId, createdAt])
   @@index([userId, projectId, status, createdAt])
+  @@index([userId, origin, createdAt])
 }
 
 /// Many-to-many: a user document can be active in multiple chat sessions.
