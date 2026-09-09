@@ -10,6 +10,8 @@ import {
   MAX_DERIVED_HARD_COLUMNS,
   MAX_DERIVED_NAME_CHARS,
   MAX_DERIVED_ROWS,
+  DATASET_WAIT_ATTEMPTS,
+  DATASET_WAIT_INTERVAL_MS,
 } from "./limits.js";
 import {
   createStaticToolDefinition,
@@ -22,6 +24,10 @@ export type UploadProvenance = {
   originUrl: string | null;
 };
 
+export type DatasetReadiness =
+  | { ready: true }
+  | { ready: false; status: string; filename: string };
+
 export interface DatasetResolver {
   listUploads(): Promise<
     Array<{
@@ -32,6 +38,7 @@ export interface DatasetResolver {
     }>
   >;
   resolveSheet(ref: { type: "upload"; documentId: string; sheet?: string } | { type: "document_table"; documentId: string; pageIndex: number; tableIndex: number }): Promise<TabularSheet>;
+  getDatasetReadiness?(ref: { type: "upload"; documentId: string } | { type: "document_table"; documentId: string; pageIndex: number; tableIndex: number }): Promise<DatasetReadiness>;
   listDocumentTables(): Promise<
     Array<{
       documentId: string;
@@ -105,7 +112,7 @@ const queryDatasetSqlInput = z.object({
 const readDatasetSpec = {
   name: "read_dataset",
   description:
-    "Inspect a tabular dataset (CSV/XLSX upload, an agent-created [derived]/[synthetic] document, a [downloaded] URL document, or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing, and to verify a create_dataset/fetch_dataset_from_url result is ready.",
+    "Inspect a tabular dataset (CSV/XLSX upload, an agent-created [derived]/[synthetic] document, a [downloaded] URL document, or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing. When the document is still queued/processing, read_dataset waits briefly for readiness; if it reports still-pending, wait and call it once more with the same documentId — never create the dataset again.",
   inputSchema: readDatasetInput,
 } as const;
 const analyzeDatasetSpec = {
@@ -139,6 +146,7 @@ export type TabularToolDeps = {
   sqlRunner: SqlRunner;
   limits?: { maxRows?: number };
   derived?: { writer: DerivedDocumentWriter };
+  wait?: { attempts?: number; intervalMs?: number };
 };
 
 function validateSaveAsName(name: string): string {
@@ -228,6 +236,42 @@ function parentOf(ref: DatasetRef): string {
   return ref.documentId;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveSheetReady(
+  resolver: DatasetResolver,
+  source: DatasetRef,
+  attempts = DATASET_WAIT_ATTEMPTS,
+  intervalMs = DATASET_WAIT_INTERVAL_MS,
+): Promise<TabularSheet> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await resolver.resolveSheet(source);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const readiness = typeof resolver.getDatasetReadiness === "function"
+        ? await resolver.getDatasetReadiness(source).catch(() => null)
+        : null;
+      const pending = readiness && !readiness.ready
+        ? readiness
+        : /not ready yet|status: (queued|uploading|ocr_processing|embedding_processing)/.test(message)
+          ? { ready: false as const, status: "processing", filename: "" }
+          : null;
+      if (!pending || attempt >= attempts) {
+        if (pending) {
+          throw new Error(
+            `Dataset is still ${pending.status} after waiting. Do NOT create it again — call read_dataset once more later with the same documentId.`,
+          );
+        }
+        throw error;
+      }
+      await sleep(intervalMs);
+    }
+  }
+}
+
 export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const { resolver, sqlRunner, limits } = deps;
   const resolvedLimits = limits?.maxRows === undefined ? undefined : { maxRows: limits.maxRows };
@@ -236,7 +280,12 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     ...readDatasetSpec,
     outputSchema: jsonOutputSchema,
     execute: async ({ source }) => {
-      const sheet = await resolver.resolveSheet(source);
+      const sheet = await resolveSheetReady(
+        resolver,
+        source,
+        deps.wait?.attempts ?? DATASET_WAIT_ATTEMPTS,
+        deps.wait?.intervalMs ?? DATASET_WAIT_INTERVAL_MS,
+      );
       return {
         name: sheet.name,
         rowCount: sheet.rows.length,

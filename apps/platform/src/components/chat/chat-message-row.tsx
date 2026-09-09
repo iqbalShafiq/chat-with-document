@@ -15,6 +15,7 @@ import { useImagePreview } from "#/components/images/image-preview";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
+import { parseToolValue } from "#/components/tool-io-format";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
@@ -443,6 +444,22 @@ function ChatMessageParts({
     return byFirst;
   }, [imageRuns]);
 
+  const chartIndexForPart = useMemo(() => {
+    const byPart = new Map<Extract<UIMessagePart, { type: "tool" }>, number>();
+    let counter = 0;
+    for (const part of message.parts) {
+      if (typeof part !== "object" || part === null) continue;
+      const p = part as { type?: unknown; state?: unknown; output?: unknown };
+      if (p.type !== "tool" || p.state !== "output-available") continue;
+      const parsed = parseToolValue(p.output);
+      if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).chart !== undefined) {
+        counter += 1;
+        byPart.set(part as Extract<UIMessagePart, { type: "tool" }>, counter);
+      }
+    }
+    return byPart;
+  }, [message.parts]);
+
   // Consecutive user image attachments (pinned image context) render as one
   // horizontal scrollable strip instead of separate blocks.
   const attachmentImageRuns = useMemo(() => {
@@ -513,7 +530,7 @@ function ChatMessageParts({
           ];
           return (
             <MessagePrimitive.Part className="min-w-0 max-w-full">
-              <ToolActivityPanel part={part} />
+              <ToolActivityPanel part={part} chartIndex={chartIndexForPart.get(part)} />
               {isRunStart && uniqueRunImages.length > 0 ? (
                 uniqueRunImages.length > 1 ? (
                   <GeneratedImageStrip images={uniqueRunImages} />

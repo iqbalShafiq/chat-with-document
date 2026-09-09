@@ -342,6 +342,20 @@ export async function createDerivedDocument(input: {
   }
 
   const filename = prefixDerivedFilename(input.filename, input.origin, input.synthetic === true);
+  const duplicate = await prisma.document.findFirst({
+    where: {
+      userId: input.userId,
+      sessionId: input.sessionId,
+      filename,
+      status: { not: "ready" },
+    },
+    select: { id: true, status: true },
+  });
+  if (duplicate) {
+    throw new Error(
+      `A derived document named "${filename}" is already ${duplicate.status} (id ${duplicate.id}). Do not create it again — call read_dataset with that documentId and wait for readiness.`,
+    );
+  }
   const storage = await getUserStorageUsage(input.userId);
   if (storage.usedBytes + input.data.byteLength > storage.maxBytes) {
     throw new DocumentStorageQuotaError({

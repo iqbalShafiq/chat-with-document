@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CitationChip } from "#/components/chat/citation-chip";
+import { ChartEmbed, chartAltToIndex } from "#/components/data/chart-embed";
 import { DocumentImage } from "#/components/images/document-image";
 import { useMessageCitations } from "#/components/chat/message-citation-context";
 import { rehypeUnwrapImages } from "#/lib/markdown/unwrap-images";
@@ -155,9 +156,11 @@ function buildMarkdownComponents(
       </pre>
     ),
     code: ChatCode,
-    img: ({ src, alt, node: _node }) => (
-      <DocumentImage src={src ?? ""} alt={alt ?? ""} />
-    ),
+    img: ({ src, alt, node: _node }) => {
+      const chartIndex = chartAltToIndex(alt);
+      if (chartIndex !== null) return <ChartEmbed index={chartIndex} />;
+      return <DocumentImage src={src ?? ""} alt={alt ?? ""} />;
+    },
   };
 }
 

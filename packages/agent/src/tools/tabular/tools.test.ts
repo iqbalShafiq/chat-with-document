@@ -159,4 +159,37 @@ describe("tabular tools", () => {
       operation: { op: "stats", column: "harga" },
     })).rejects.toThrow('Available columns: "region", "revenue"');
   });
+
+  it("read_dataset waits briefly for a queued document, then reads it", async () => {
+    let calls = 0;
+    const resolver: DatasetResolver = {
+      ...makeResolver(),
+      resolveSheet: async () => {
+        calls += 1;
+        if (calls < 3) throw new Error('Dataset "x.csv" is not ready yet (status: queued). Wait for ingest to finish, then call read_dataset again.');
+        return SHEET;
+      },
+      getDatasetReadiness: async () => (calls < 3
+        ? { ready: false as const, status: "queued", filename: "x.csv" }
+        : { ready: true as const }),
+    };
+    const [tool] = createTabularAnalysisTools({ resolver, sqlRunner: vi.fn() as never, wait: { attempts: 5, intervalMs: 1 } });
+    const out = await tool!.call({ source: { type: "upload", documentId: "d1" } });
+    expect(strictJson(out)).toMatchObject({ name: "sales" });
+    expect(calls).toBe(3);
+  });
+
+  it("read_dataset reports still-pending instead of duplicating work", async () => {
+    const resolver: DatasetResolver = {
+      ...makeResolver(),
+      resolveSheet: async () => {
+        throw new Error('Dataset "x.csv" is not ready yet (status: embedding_processing). Wait for ingest to finish, then call read_dataset again.');
+      },
+      getDatasetReadiness: async () => ({ ready: false as const, status: "embedding_processing", filename: "x.csv" }),
+    };
+    const [tool] = createTabularAnalysisTools({ resolver, sqlRunner: vi.fn() as never, wait: { attempts: 3, intervalMs: 1 } });
+    await expect(tool!.call({ source: { type: "upload", documentId: "d1" } })).rejects.toThrow(
+      "Do NOT create it again — call read_dataset once more later with the same documentId",
+    );
+  });
 });

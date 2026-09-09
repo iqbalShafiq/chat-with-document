@@ -57,6 +57,18 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
       });
     },
 
+    async getDatasetReadiness(ref) {
+      const doc = await prisma.document.findFirst({
+        where: { id: ref.documentId, userId, ...(projectId ? { projectId } : {}) },
+        select: { status: true, filename: true },
+      });
+      if (!doc) return { ready: false as const, status: "missing", filename: "" };
+      if (doc.status !== "ready") {
+        return { ready: false as const, status: doc.status, filename: doc.filename };
+      }
+      return { ready: true as const };
+    },
+
     async resolveSheet(ref) {
       if (deps.documentIds !== undefined && !deps.documentIds.includes(ref.documentId)) {
         // Derived/fetched documents created mid-run are not in the frozen id

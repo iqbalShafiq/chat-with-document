@@ -78,7 +78,7 @@ function TableFromSection({ table }: { table: unknown }) {
   );
 }
 
-function ToolSectionView({ section }: { section: FormattedSection }) {
+function ToolSectionView({ section, chartIndex }: { section: FormattedSection; chartIndex?: number }) {
   const hasFields = (section.fields?.length ?? 0) > 0;
   const hasItems = (section.items?.length ?? 0) > 0;
 
@@ -129,6 +129,11 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
       ) : null}
       {section.chart !== undefined ? <ChartFromSection chart={section.chart} /> : null}
       {section.table !== undefined ? <TableFromSection table={section.table} /> : null}
+      {section.chart !== undefined && chartIndex !== undefined ? (
+        <p className="text-[11px] text-text-faint">
+          Embed in the answer with <code className="chat-md-inline-code">![chart:{chartIndex}]()</code>
+        </p>
+      ) : null}
       {section.imageLoading ? (
         <div
           className="flex items-center gap-2.5"
@@ -198,7 +203,7 @@ function ToolResultImages({ output }: { output: unknown }) {
 }
 
 /** Flat collapsible tool step — no card chrome. */
-export function ToolActivityPanel({ part }: { part: ToolPart }) {
+export function ToolActivityPanel({ part, chartIndex }: { part: ToolPart; chartIndex?: number }) {
   const label = getToolActivityLabel(part);
   const isRunning =
     part.state === "input-streaming" || part.state === "input-available";
@@ -328,7 +333,7 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           }`}
         >
           <ToolSectionView section={requestSection} />
-          <ToolSectionView section={resultSection} />
+          <ToolSectionView section={resultSection} chartIndex={chartIndex} />
           {isDone && !isMessageImageToolName(part.toolName) ? (
             <ToolResultImages output={parseToolValue(part.output)} />
           ) : null}

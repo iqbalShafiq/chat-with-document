@@ -65,3 +65,13 @@ export function parseTableDto(value: unknown): TableDto | null {
   if (columns.length === 0) return null;
   return { columns, rows };
 }
+
+export const CHART_EMBED_PATTERN = /!\[chart:(\d+)\]\(\)/g;
+
+export function chartEmbedIndex(alt: string | null | undefined): number | null {
+  if (!alt) return null;
+  const match = /^chart:(\d+)$/.exec(alt.trim());
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}

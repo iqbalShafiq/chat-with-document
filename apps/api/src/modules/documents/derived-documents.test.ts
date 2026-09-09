@@ -85,6 +85,20 @@ describe("createDerivedDocument", () => {
     expect(prismaMock.document.create).not.toHaveBeenCalled();
   });
 
+  it("refuses a duplicate name that is still queued", async () => {
+    prismaMock.document.findFirst.mockResolvedValueOnce({ id: "d-old", status: "queued" });
+    await expect(
+      createDerivedDocument({
+        ...BASE,
+        filename: "ringkas.csv",
+        mimeType: "text/csv",
+        data: new Uint8Array([1, 2, 3]),
+        origin: "created",
+      }),
+    ).rejects.toThrow("Do not create it again — call read_dataset");
+    expect(prismaMock.document.create).not.toHaveBeenCalled();
+  });
+
   it("rejects empty and oversized payloads", async () => {
     await expect(
       createDerivedDocument({ ...BASE, filename: "e.csv", mimeType: "text/csv", data: new Uint8Array([]), origin: "created" }),

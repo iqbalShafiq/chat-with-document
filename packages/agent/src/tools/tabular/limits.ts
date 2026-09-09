@@ -9,3 +9,5 @@ export const MAX_FETCH_BYTES = 5 * 1024 * 1024;
 export const FETCH_TIMEOUT_MS = 15_000;
 export const FETCH_MAX_REDIRECTS = 3;
 export const DERIVED_PREVIEW_ROWS = 5;
+export const DATASET_WAIT_INTERVAL_MS = 1_000;
+export const DATASET_WAIT_ATTEMPTS = 20;
