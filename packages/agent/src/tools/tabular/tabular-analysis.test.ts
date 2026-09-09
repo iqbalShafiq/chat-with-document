@@ -74,4 +74,51 @@ describe("runAnalysis", () => {
     const result = runAnalysis(sheet, { op: "profile", column: "x" });
     expect(result.summary.toLowerCase()).toContain("no usable data");
   });
+
+  it("computes stats for one numeric column", () => {
+    const result = runAnalysis(SHEET, { op: "stats", column: "revenue" });
+    expect(result.operation).toBe("stats");
+    expect(result.chart).toBeUndefined();
+    expect(result.summary).toContain("count=4");
+    expect(result.summary).toContain("mean=125");
+    expect(result.summary).toContain("median=125");
+  });
+
+  it("fits a regression with R² and a scatter chart", () => {
+    const sheet: TabularSheet = {
+      name: "xy",
+      columns: [
+        { name: "x", type: "number" },
+        { name: "y", type: "number" },
+      ],
+      rows: [
+        [1, 2],
+        [2, 4],
+        [3, 6],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "regression", x: "x", y: "y", predictFor: [4] });
+    expect(result.operation).toBe("regression");
+    expect(result.summary).toContain("R² = 1.0000");
+    expect(result.chart?.kind).toBe("scatter");
+  });
+
+  it("pairs rows for correlation instead of misaligning columns", () => {
+    const sheet: TabularSheet = {
+      name: "paired",
+      columns: [
+        { name: "x", type: "number" },
+        { name: "y", type: "number" },
+      ],
+      rows: [
+        [1, 2],
+        [null, 4],
+        [3, null],
+        [4, 8],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "correlation", x: "x", y: "y" });
+    expect(result.chart?.kind).toBe("scatter");
+    expect(result.summary).toMatch(/r = 1\.0000/);
+  });
 });

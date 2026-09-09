@@ -10,7 +10,6 @@ import {
   createChunkSearchService,
   createClarificationTool,
   createCompletionModel,
-  createDataAnalysisTools,
   boundDeepResearchTools,
   createDeepResearchCompletionGuard,
   createDocumentTools,
@@ -30,7 +29,6 @@ import {
   buildImageGenerationInstruction,
   BASE_INSTRUCTIONS,
   CLARIFICATION_TOOL_DEFINITIONS,
-  DATA_ANALYSIS_TOOL_DEFINITIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
@@ -845,7 +843,6 @@ export async function resolveChatAgentRecipe(
       : []),
   ];
   const toolDefinitions = [
-    ...DATA_ANALYSIS_TOOL_DEFINITIONS,
     ...TABULAR_TOOL_DEFINITIONS,
     ...DERIVED_TOOL_DEFINITIONS,
     ...(hasActiveDocuments ? DOCUMENT_TOOL_DEFINITIONS : []),
@@ -1136,7 +1133,6 @@ export async function reconstructChatRunInput(input: {
     },
   });
   const tools = [
-    ...createDataAnalysisTools(),
     ...tabularTools,
     ...derivedTools,
     ...documentTools,
@@ -1214,7 +1210,6 @@ export async function reconstructChatRunInput(input: {
       [
         ...documentTools,
         ...researchWebTools,
-        ...createDataAnalysisTools(),
         ...tabularTools,
         ...researchDerivedTools,
       ],

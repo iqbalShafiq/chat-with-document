@@ -105,12 +105,6 @@ const ACTIVITY_METADATA: Record<
   query_dataset_sql: { kind: "analysis", label: "Querying the dataset" },
   create_dataset: { kind: "analysis", label: "Creating a derived dataset" },
   fetch_dataset_from_url: { kind: "retrieval", label: "Fetching a dataset from URL" },
-  descriptive_stats: {
-    kind: "analysis",
-    label: "Computing descriptive statistics",
-  },
-  pearson_correlation: { kind: "analysis", label: "Computing correlation" },
-  linear_regression: { kind: "analysis", label: "Fitting regression" },
 };
 
 const deepResearchInput = z.object({

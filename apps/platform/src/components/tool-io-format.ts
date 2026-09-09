@@ -313,170 +313,6 @@ function formatFindDocumentsOutput(output: unknown): FormattedSection {
   };
 }
 
-function formatDescriptiveStatsInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const values = asArray(record.values).filter(
-    (v): v is number => typeof v === "number" && Number.isFinite(v),
-  );
-  const fields: FormattedField[] = [
-    { label: "Values", value: countLabel(values.length, "number") },
-  ];
-
-  if (values.length > 0) {
-    fields.push({
-      label: "Range",
-      value: `${formatNumber(Math.min(...values))} – ${formatNumber(Math.max(...values))}`,
-    });
-  }
-
-  return { title: "Request", fields };
-}
-
-function formatDescriptiveStatsOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-  const keys: Array<[string, string]> = [
-    ["count", "Count"],
-    ["mean", "Mean"],
-    ["median", "Median"],
-    ["min", "Min"],
-    ["max", "Max"],
-    ["range", "Range"],
-    ["stdDev", "Std. deviation"],
-    ["variance", "Variance"],
-    ["q1", "Q1"],
-    ["q3", "Q3"],
-    ["iqr", "IQR"],
-    ["skewness", "Skewness"],
-  ];
-
-  for (const [key, label] of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      fields.push({ label, value: formatNumber(value) });
-    } else if (value === null && key === "skewness") {
-      fields.push({ label, value: "n/a" });
-    }
-  }
-
-  const mode = record.mode;
-  if (Array.isArray(mode) && mode.length > 0) {
-    fields.push({
-      label: "Mode",
-      value: mode
-        .filter((v): v is number => typeof v === "number")
-        .map((v) => formatNumber(v))
-        .join(", "),
-    });
-  } else if (mode === null) {
-    fields.push({ label: "Mode", value: "none" });
-  }
-
-  return {
-    title: "Result",
-    summary: "Descriptive statistics",
-    fields,
-  };
-}
-
-function formatPearsonInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const x = asArray(record.x);
-  const y = asArray(record.y);
-  return {
-    title: "Request",
-    fields: [
-      { label: "Series X", value: countLabel(x.length, "value") },
-      { label: "Series Y", value: countLabel(y.length, "value") },
-    ],
-  };
-}
-
-function formatPearsonOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-
-  const correlation = asNumber(record.correlation);
-  if (correlation !== null) {
-    fields.push({ label: "Correlation (r)", value: formatNumber(correlation) });
-  }
-
-  const direction = asString(record.direction);
-  if (direction) fields.push({ label: "Direction", value: humanizeKey(direction) });
-
-  const strength = asString(record.strength);
-  if (strength) fields.push({ label: "Strength", value: humanizeKey(strength) });
-
-  const rSquared = asNumber(record.rSquared);
-  if (rSquared !== null) fields.push({ label: "R²", value: formatNumber(rSquared) });
-
-  const n = asNumber(record.n);
-  if (n !== null) fields.push({ label: "Pairs", value: String(n) });
-
-  return {
-    title: "Result",
-    summary: "Pearson correlation",
-    fields,
-  };
-}
-
-function formatLinearRegressionInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const x = asArray(record.x);
-  const predictFor = asArray(record.predictFor);
-  const fields: FormattedField[] = [
-    { label: "Observations", value: countLabel(x.length, "point") },
-  ];
-  if (predictFor.length > 0) {
-    fields.push({
-      label: "Predictions",
-      value: countLabel(predictFor.length, "value"),
-    });
-  }
-  return { title: "Request", fields };
-}
-
-function formatLinearRegressionOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-
-  const equation = asString(record.equation);
-  if (equation) fields.push({ label: "Equation", value: equation });
-
-  const slope = asNumber(record.slope);
-  if (slope !== null) fields.push({ label: "Slope", value: formatNumber(slope) });
-
-  const intercept = asNumber(record.intercept);
-  if (intercept !== null) {
-    fields.push({ label: "Intercept", value: formatNumber(intercept) });
-  }
-
-  const rSquared = asNumber(record.rSquared);
-  if (rSquared !== null) fields.push({ label: "R²", value: formatNumber(rSquared) });
-
-  const residualStdDev = asNumber(record.residualStdDev);
-  if (residualStdDev !== null) {
-    fields.push({
-      label: "Residual std. dev.",
-      value: formatNumber(residualStdDev),
-    });
-  }
-
-  const predictions = asArray(record.predictions);
-  if (predictions.length > 0) {
-    fields.push({
-      label: "Predictions",
-      value: countLabel(predictions.length, "value"),
-    });
-  }
-
-  return {
-    title: "Result",
-    summary: "Linear regression",
-    fields,
-  };
-}
-
 function formatGenericInput(input: unknown): FormattedSection {
   if (input === undefined) {
     return {
@@ -923,12 +759,6 @@ export function formatToolInput(
       return formatGetDocumentNextPageInput(input);
     case "find_documents":
       return formatFindDocumentsInput(input);
-    case "descriptive_stats":
-      return formatDescriptiveStatsInput(input);
-    case "pearson_correlation":
-      return formatPearsonInput(input);
-    case "linear_regression":
-      return formatLinearRegressionInput(input);
     case "get_document_page_images":
       return formatGetDocumentPageImagesInput(input);
     case "web_search":
@@ -955,12 +785,6 @@ export function formatToolOutput(
       return formatGetDocumentNextPageOutput(output);
     case "find_documents":
       return formatFindDocumentsOutput(output);
-    case "descriptive_stats":
-      return formatDescriptiveStatsOutput(output);
-    case "pearson_correlation":
-      return formatPearsonOutput(output);
-    case "linear_regression":
-      return formatLinearRegressionOutput(output);
     case "get_document_page_images":
       return formatGetDocumentPageImagesOutput(output);
     case "web_search":

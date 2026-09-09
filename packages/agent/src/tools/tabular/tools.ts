@@ -64,6 +64,8 @@ const operationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("top_n"), column: z.string(), n: z.number().int() }),
   z.object({ op: z.literal("correlation"), x: z.string(), y: z.string() }),
   z.object({ op: z.literal("trend"), x: z.string(), y: z.string() }),
+  z.object({ op: z.literal("stats"), column: z.string() }),
+  z.object({ op: z.literal("regression"), x: z.string(), y: z.string(), predictFor: z.array(z.number().finite()).optional() }),
 ]) as z.ZodType<AnalysisOperation>;
 const jsonOutputSchema = z.json();
 
@@ -88,7 +90,7 @@ const readDatasetSpec = {
 const analyzeDatasetSpec = {
   name: "analyze_dataset",
   description:
-    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile (per-column stats + histogram), aggregate (groupBy + sum/mean/count/min/max/median + bar chart), filter, sort, top_n, correlation between two numeric columns (scatter), or trend (line). Returns structured results and a chart spec the UI renders.",
+    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile, aggregate, filter, sort, top_n, correlation, trend, stats (full descriptive statistics for one numeric column), or regression (linear fit with R² and optional predictions). The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Returns structured results and a chart spec the UI renders.",
   inputSchema: analyzeDatasetInput,
 } as const;
 const queryDatasetSqlSpec = {

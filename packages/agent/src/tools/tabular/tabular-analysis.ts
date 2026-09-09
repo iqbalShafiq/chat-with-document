@@ -1,4 +1,4 @@
-import { pearsonCorrelation } from "../data-analysis.js";
+import { mean as seriesMean, mode as seriesMode, pearsonCorrelation, quantileSorted, sampleStdDev, sampleVariance } from "../data-analysis.js";
 import type { CellValue, ColumnType, TabularColumn, TabularSheet } from "./types.js";
 import type { ChartSpec } from "./chart-spec.js";
 
@@ -13,7 +13,9 @@ export type AnalysisOperation =
   | { op: "sort"; column: string; order: "asc" | "desc" }
   | { op: "top_n"; column: string; n: number }
   | { op: "correlation"; x: string; y: string }
-  | { op: "trend"; x: string; y: string };
+  | { op: "trend"; x: string; y: string }
+  | { op: "stats"; column: string }
+  | { op: "regression"; x: string; y: string; predictFor?: number[] };
 
 export type AnalysisResult = {
   operation: string;
@@ -35,6 +37,101 @@ function numericValues(sheet: TabularSheet, name: string): number[] {
   return sheet.rows
     .map((row) => row[index])
     .filter((v): v is number => typeof v === "number");
+}
+
+function pairedNumericValues(sheet: TabularSheet, x: string, y: string): { x: number[]; y: number[] } {
+  const xi = columnIndex(sheet, x);
+  const yi = columnIndex(sheet, y);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const row of sheet.rows) {
+    const xv = row[xi];
+    const yv = row[yi];
+    if (typeof xv === "number" && typeof yv === "number") {
+      xs.push(xv);
+      ys.push(yv);
+    }
+  }
+  return { x: xs, y: ys };
+}
+
+export function describeNumericColumn(column: string, values: number[]): Record<string, number | number[] | null> {
+  const sorted = [...values].sort((a, b) => a - b);
+  const avg = seriesMean(values);
+  const variance = sampleVariance(values, avg);
+  const stdDev = Math.sqrt(variance);
+  const min = sorted[0]!;
+  const max = sorted[sorted.length - 1]!;
+  const q1 = quantileSorted(sorted, 0.25);
+  const q3 = quantileSorted(sorted, 0.75);
+  let skewness: number | null = null;
+  if (values.length >= 3 && stdDev > 0) {
+    const n = values.length;
+    const m3 = values.reduce((sum, value) => sum + (value - avg) ** 3, 0) / n;
+    skewness = (Math.sqrt(n * (n - 1)) / (n - 2)) * (m3 / stdDev ** 3);
+  }
+  return {
+    count: values.length,
+    mean: avg,
+    median: quantileSorted(sorted, 0.5),
+    mode: seriesMode(values),
+    min,
+    max,
+    range: max - min,
+    q1,
+    q3,
+    iqr: q3 - q1,
+    variance,
+    stdDev,
+    skewness,
+  };
+}
+
+export function fitLinearRegression(x: number[], y: number[], predictFor: number[] = []): {
+  n: number;
+  equation: string;
+  slope: number;
+  intercept: number;
+  rSquared: number;
+  residualStdDev: number;
+  residualMean: number;
+  predictions: { x: number; yHat: number }[];
+} {
+  if (x.length !== y.length) {
+    throw new Error(`Series must have the same length (got ${x.length} and ${y.length})`);
+  }
+  if (x.length < 2) {
+    throw new Error("Linear regression requires at least 2 observations");
+  }
+  const meanX = seriesMean(x);
+  const meanY = seriesMean(y);
+  let ssxx = 0;
+  let ssxy = 0;
+  let ssyy = 0;
+  for (let i = 0; i < x.length; i++) {
+    const dx = x[i]! - meanX;
+    const dy = y[i]! - meanY;
+    ssxx += dx * dx;
+    ssxy += dx * dy;
+    ssyy += dy * dy;
+  }
+  if (ssxx === 0) {
+    throw new Error("Cannot fit regression when all x values are identical");
+  }
+  const slope = ssxy / ssxx;
+  const intercept = meanY - slope * meanX;
+  const rSquared = ssyy === 0 ? 1 : (ssxy * ssxy) / (ssxx * ssyy);
+  const residuals = y.map((value, index) => value - (slope * x[index]! + intercept));
+  return {
+    n: x.length,
+    equation: `y = ${slope} * x + ${intercept}`,
+    slope,
+    intercept,
+    rSquared,
+    residualStdDev: sampleStdDev(residuals),
+    residualMean: seriesMean(residuals),
+    predictions: predictFor.map((value) => ({ x: value, yHat: slope * value + intercept })),
+  };
 }
 
 function median(values: number[]): number {
@@ -125,13 +222,45 @@ export function runAnalysis(
       };
     }
     case "correlation": {
-      const x = numericValues(sheet, operation.x);
-      const y = numericValues(sheet, operation.y);
+      const { x, y } = pairedNumericValues(sheet, operation.x, operation.y);
+      if (x.length < 2) {
+        return { operation: "correlation", summary: `Not enough paired numeric data in "${operation.x}" and "${operation.y}"` };
+      }
       const r = pearsonCorrelation(x, y);
       return {
         operation: "correlation",
         summary: `r = ${r.toFixed(4)} (${r >= 0 ? "positive" : "negative"}, ${Math.abs(r) >= 0.7 ? "strong" : Math.abs(r) >= 0.4 ? "moderate" : "weak"})`,
         chart: { kind: "scatter", points: x.map((xi, i) => ({ x: xi, y: y[i]! })), xLabel: operation.x, yLabel: operation.y },
+      };
+    }
+    case "stats": {
+      const values = numericValues(sheet, operation.column);
+      if (values.length === 0) {
+        return { operation: "stats", summary: `No usable data in column "${operation.column}" (all values non-numeric or empty)` };
+      }
+      const stats = describeNumericColumn(operation.column, values);
+      const entries = Object.entries(stats).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : String(value)}`);
+      return {
+        operation: "stats",
+        summary: `${operation.column}: ${entries.join(", ")}`,
+      };
+    }
+    case "regression": {
+      const { x, y } = pairedNumericValues(sheet, operation.x, operation.y);
+      if (x.length < 2) {
+        return { operation: "regression", summary: `Not enough paired numeric data in "${operation.x}" and "${operation.y}"` };
+      }
+      const fit = fitLinearRegression(x, y, operation.predictFor ?? []);
+      const sorted = x.map((xi, i) => ({ x: xi, y: y[i]! })).sort((a, b) => a.x - b.x);
+      return {
+        operation: "regression",
+        summary: `${fit.equation} · R² = ${fit.rSquared.toFixed(4)} (n=${fit.n})`,
+        chart: {
+          kind: "scatter",
+          points: sorted,
+          xLabel: operation.x,
+          yLabel: operation.y,
+        },
       };
     }
     case "trend": {

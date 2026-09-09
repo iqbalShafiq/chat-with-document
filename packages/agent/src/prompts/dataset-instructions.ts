@@ -8,5 +8,6 @@ export const DATASET_INSTRUCTION = [
   "After create_dataset or fetch_dataset_from_url: the new document is queued, so read_dataset verification (which also confirms readiness) is REQUIRED before analyze_dataset.",
   "When an existing dataset already answers the question: do NOT create a duplicate derivation, analyze it directly.",
   "With no source and no example request: stay out of the analysis tools and answer from context.",
+  "analyze_dataset is the only analysis entrypoint: stats, regression, correlation, and every other numeric computation run against dataset columns. Never analyze pasted numbers directly — put them in a dataset first via create_dataset (with a sourceNote when they come from the web) and verify with read_dataset.",
   "Deep Research reports: cite derived or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
 ].join("\n");

@@ -63,12 +63,13 @@ describe("Deep Research server wiring", () => {
     expect(openapi).not.toContain('"context7Available"');
   });
 
-  it("gives the nested researcher the default data-analysis tools", () => {
+  it("gives the nested researcher the tabular and derived dataset tools", () => {
     const input = source("./build-run-input.ts");
 
     expect(input).toMatch(
-      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.createDataAnalysisTools\(\),\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,/s,
+      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,/s,
     );
+    expect(input).not.toContain("...createDataAnalysisTools(),");
   });
 
   it("gives the nested researcher the dataset instruction and derived tools before the parent seal", () => {

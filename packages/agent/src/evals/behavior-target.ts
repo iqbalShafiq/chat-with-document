@@ -51,7 +51,6 @@ import type { BehaviorTrace, EvalCaseInput, SessionConfig } from "./types.js";
 import { createTabularAnalysisTools, type DatasetResolver } from "../tools/tabular/tools.js";
 import { createDerivedDatasetTools } from "../tools/tabular/derived-tools.js";
 import { DATASET_INSTRUCTION } from "../prompts/dataset-instructions.js";
-import { createDataAnalysisTools } from "../tools/data-analysis.js";
 import type { TabularSheet } from "../tools/tabular/types.js";
 import { assertReadOnlySql } from "../tools/tabular/sql.js";
 
@@ -335,7 +334,6 @@ export function buildEvalTools(
         ...documentTools,
         ...tabularTools,
         ...derivedTools,
-        ...createDataAnalysisTools(),
         ...createWebSearchTools({
           tavilyClient: createStubTavilyClient(),
           enabled: true,

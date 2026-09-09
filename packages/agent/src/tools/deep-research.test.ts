@@ -555,7 +555,7 @@ describe("boundDeepResearchTools", () => {
     const wrapped = boundDeepResearchTools(
       [
         {
-          name: "descriptive_stats",
+          name: "analyze_dataset",
           definition: vi.fn(),
           call: vi.fn(async () => {
             throw new Error("analysis failed");
