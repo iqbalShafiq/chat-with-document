@@ -128,3 +128,22 @@ test("P3-C5: create_chart draws a titled multi-series bar chart", async ({ page 
   await expect(page.locator("article").last()).toContainText(/Sales by region/i);
   await saveEvidence(page, "P3-C5");
 });
+
+test("P3-C6: chart embeds inline in the answer and create is not duplicated", async ({ page }) => {
+  test.setTimeout(420_000);
+  await openFreshChat(page);
+  await sendMessage(
+    page,
+    "Use create_dataset once to make a small synthetic sales example " +
+      "(columns category and sales, 3 rows), then read it, then chart it with analyze_dataset aggregate. " +
+      "Put the chart in the middle of the answer with ![chart:1]() between two paragraphs. " +
+      "Create the dataset exactly once even if reading takes a moment.",
+  );
+  await waitForStreaming(page);
+  await waitForRunDone(page, 360_000);
+  await expandAssistantToolPanels(page);
+  const article = page.locator("article").last();
+  await expect(article.locator(BAR_CHART)).toBeVisible();
+  await expect(article).toContainText(/synthetic/i);
+  await saveEvidence(page, "P3-C6");
+});
