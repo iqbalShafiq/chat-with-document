@@ -21,8 +21,9 @@ describe("DataChart", () => {
         { name: "s1", values: [1] },
         { name: "s2", values: [2] },
       ],
-    }) as { legend?: unknown; series?: Array<{ name?: string }> };
+    }) as { legend?: { itemGap?: number }; series?: Array<{ name?: string }> };
     expect(option.legend).toBeDefined();
+    expect(option.legend?.itemGap).toBeGreaterThan(0);
     expect(option.series?.map((s) => s.name)).toEqual(["s1", "s2"]);
   });
 

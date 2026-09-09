@@ -78,7 +78,7 @@ export function buildChartOption(spec: ChartSpec): EChartsCoreOption {
         color: PALETTE,
         title,
         tooltip: { ...tooltip, axisPointer: { type: "shadow" } },
-        legend: multi ? { type: "scroll", bottom: 0, textStyle: baseText, icon: "roundRect" } : undefined,
+        legend: multi ? { type: "scroll", bottom: 0, textStyle: baseText, icon: "roundRect", itemGap: 16, padding: [8, 0, 0, 0] } : undefined,
         grid: { left: 8, right: 12, top: spec.title ? 36 : 16, bottom: multi ? 32 : 12, containLabel: true },
         xAxis: {
           type: "category",
@@ -164,7 +164,7 @@ export function buildChartOption(spec: ChartSpec): EChartsCoreOption {
         color: PALETTE,
         title,
         tooltip,
-        legend: { type: "scroll", bottom: 0, textStyle: baseText, icon: "circle" },
+        legend: { type: "scroll", bottom: 0, textStyle: baseText, icon: "circle", itemGap: 16, padding: [8, 0, 0, 0] },
         series: [
           {
             type: "pie",
