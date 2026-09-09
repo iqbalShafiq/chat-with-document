@@ -74,6 +74,10 @@ const operationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("trend"), x: z.string(), y: z.string() }),
   z.object({ op: z.literal("stats"), column: z.string() }),
   z.object({ op: z.literal("regression"), x: z.string(), y: z.string(), predictFor: z.array(z.number().finite()).optional() }),
+  z.object({ op: z.literal("correlation_matrix"), columns: z.array(z.string()).optional() }),
+  z.object({ op: z.literal("multiple_regression"), y: z.string(), xs: z.array(z.string()).min(1).max(10) }),
+  z.object({ op: z.literal("ttest"), column: z.string(), groupBy: z.string(), groupA: z.string(), groupB: z.string() }),
+  z.object({ op: z.literal("anova"), column: z.string(), groupBy: z.string() }),
   z.object({ op: z.literal("outliers"), column: z.string(), method: z.enum(["iqr", "zscore"]).optional(), threshold: z.number().finite().optional() }),
   z.object({ op: z.literal("crosstab"), x: z.string(), y: z.string(), metric: z.enum(["count", "sum", "mean"]).optional(), valueColumn: z.string().optional() }),
 ]) as z.ZodType<AnalysisOperation>;
@@ -107,7 +111,7 @@ const readDatasetSpec = {
 const analyzeDatasetSpec = {
   name: "analyze_dataset",
   description:
-    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile (per-column or categorical), aggregate (multi-metric), filter, sort, top_n (optionally grouped), correlation, trend (numeric or ISO dates), stats, regression, outliers (IQR/z-score), or crosstab. The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Pass saveAs {name} to persist the result table as a new derived document for further chaining. Returns structured results and a chart spec the UI renders.",
+    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile (per-column or categorical), aggregate (multi-metric), filter, sort, top_n (optionally grouped), correlation, correlation_matrix, trend (numeric or ISO dates), stats, regression, multiple_regression, ttest (Welch), anova (one-way), outliers (IQR/z-score), or crosstab. The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Pass saveAs {name} to persist the result table as a new derived document for further chaining. Returns structured results and a chart spec the UI renders.",
   inputSchema: analyzeDatasetInput,
 } as const;
 const queryDatasetSqlSpec = {

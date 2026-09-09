@@ -197,8 +197,7 @@ describe("runAnalysis", () => {
     expect(result.summary).toContain("1 outlier");
   });
 
-  it("builds a count crosstab", () => {
-    const sheet: TabularSheet = {
+  it("builds a count crosstab", () => {    const sheet: TabularSheet = {
       name: "ct",
       columns: [
         { name: "region", type: "string" },
@@ -216,5 +215,91 @@ describe("runAnalysis", () => {
       ["east", 2, 0],
       ["west", 0, 1],
     ]);
+  });
+
+  it("builds a correlation matrix with unit diagonal", () => {
+    const sheet: TabularSheet = {
+      name: "m",
+      columns: [
+        { name: "a", type: "number" },
+        { name: "b", type: "number" },
+        { name: "label", type: "string" },
+      ],
+      rows: [
+        [1, 2, "x"],
+        [2, 4, "y"],
+        [3, 6, "z"],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "correlation_matrix" });
+    expect(result.result?.columns.map((c) => c.name)).toEqual(["column", "a", "b"]);
+    expect(result.result?.rows).toEqual([
+      ["a", 1, 1],
+      ["b", 1, 1],
+    ]);
+  });
+
+  it("fits multiple regression on an exact plane", () => {
+    const sheet: TabularSheet = {
+      name: "mr",
+      columns: [
+        { name: "x1", type: "number" },
+        { name: "x2", type: "number" },
+        { name: "y", type: "number" },
+      ],
+      rows: [
+        [1, 0, 3],
+        [0, 1, 5],
+        [1, 1, 7],
+        [2, 1, 9],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "multiple_regression", y: "y", xs: ["x1", "x2"] });
+    expect(result.summary).toContain("R² = 1.0000");
+    expect(result.summary).toContain("x1=2.0000");
+    expect(result.summary).toContain("x2=4.0000");
+  });
+
+  it("runs Welch t-test on separated groups", () => {
+    const sheet: TabularSheet = {
+      name: "t",
+      columns: [
+        { name: "group", type: "string" },
+        { name: "value", type: "number" },
+      ],
+      rows: [
+        ["a", 10],
+        ["a", 12],
+        ["a", 11],
+        ["b", 20],
+        ["b", 22],
+        ["b", 21],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "ttest", column: "value", groupBy: "group", groupA: "a", groupB: "b" });
+    expect(result.summary).toContain("t=-12.247");
+    expect(result.summary).toContain("p=0.0005");
+    expect(result.summary).toContain("significant at α=0.05");
+  });
+
+  it("runs one-way ANOVA on separated groups", () => {
+    const sheet: TabularSheet = {
+      name: "av",
+      columns: [
+        { name: "group", type: "string" },
+        { name: "value", type: "number" },
+      ],
+      rows: [
+        ["a", 10],
+        ["a", 11],
+        ["b", 20],
+        ["b", 21],
+        ["c", 30],
+        ["c", 31],
+      ],
+    };
+    const result = runAnalysis(sheet, { op: "anova", column: "value", groupBy: "group" });
+    expect(result.summary).toContain("F=400.000");
+    expect(result.summary).toContain("significant at α=0.05");
   });
 });

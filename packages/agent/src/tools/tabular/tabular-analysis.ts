@@ -16,6 +16,10 @@ export type AnalysisOperation =
   | { op: "trend"; x: string; y: string }
   | { op: "stats"; column: string }
   | { op: "regression"; x: string; y: string; predictFor?: number[] }
+  | { op: "correlation_matrix"; columns?: string[] }
+  | { op: "multiple_regression"; y: string; xs: string[] }
+  | { op: "ttest"; column: string; groupBy: string; groupA: string; groupB: string }
+  | { op: "anova"; column: string; groupBy: string }
   | { op: "outliers"; column: string; method?: "iqr" | "zscore"; threshold?: number }
   | { op: "crosstab"; x: string; y: string; metric?: "count" | "sum" | "mean"; valueColumn?: string };
 
@@ -147,6 +151,207 @@ function median(values: number[]): number {
     : sorted[mid]!;
 }
 
+function normalCdf(z: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const approx = 1 - (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-(z * z) / 2) * poly;
+  return z >= 0 ? approx : 1 - approx;
+}
+
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const MAX_ITER = 200;
+  const EPS = 3e-12;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < 1e-30) d = 1e-30;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= MAX_ITER; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = 1 + aa / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = 1 + aa / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < EPS) break;
+  }
+  return h;
+}
+
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const logBeta = lgamma(a + b) - lgamma(a) - lgamma(b);
+  if (x < (a + 1) / (a + b + 2)) {
+    const front = Math.exp(a * Math.log(x) + b * Math.log(1 - x) - logBeta) / a;
+    return front * betaContinuedFraction(a, b, x);
+  }
+  const front = Math.exp(b * Math.log(1 - x) + a * Math.log(x) - logBeta) / b;
+  return 1 - front * betaContinuedFraction(b, a, 1 - x);
+}
+
+function lgamma(z: number): number {
+  const coeff = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+    -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
+    1.5056327351493116e-7,
+  ];
+  if (z < 0.5) {
+    return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+  }
+  z -= 1;
+  let x = coeff[0]!;
+  for (let i = 1; i < 9; i++) {
+    x += coeff[i]! / (z + i);
+  }
+  const t = z + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+function tCdf(t: number, df: number): number {
+  if (df <= 0) throw new Error("Degrees of freedom must be positive");
+  if (t === 0) return 0.5;
+  const x = df / (df + t * t);
+  const ib = regularizedBeta(x, df / 2, 0.5);
+  return t > 0 ? 1 - 0.5 * ib : 0.5 * ib;
+}
+
+function fCdf(f: number, d1: number, d2: number): number {
+  if (f <= 0) return 0;
+  const x = (d1 * f) / (d1 * f + d2);
+  return regularizedBeta(x, d1 / 2, d2 / 2);
+}
+
+function solveLinearSystem(a: number[][], b: number[]): number[] {
+  const n = b.length;
+  const m = a.map((row, i) => [...row, b[i]!]);
+  for (let col = 0; col < n; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(m[row]![col]!) > Math.abs(m[pivot]![col]!)) pivot = row;
+    }
+    if (Math.abs(m[pivot]![col]!) < 1e-12) {
+      throw new Error("Predictors are collinear; cannot fit multiple regression");
+    }
+    [m[col], m[pivot]] = [m[pivot]!, m[col]!];
+    const divisor = m[col]![col]!;
+    for (let j = col; j <= n; j++) m[col]![j]! /= divisor;
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const factor = m[row]![col]!;
+      for (let j = col; j <= n; j++) m[row]![j]! -= factor * m[col]![j]!;
+    }
+  }
+  return m.map((row) => row[n]!);
+}
+
+export function welchTTest(a: number[], b: number[]): {
+  n1: number;
+  n2: number;
+  mean1: number;
+  mean2: number;
+  difference: number;
+  tStatistic: number;
+  degreesOfFreedom: number;
+  pValue: number;
+} {
+  if (a.length < 2 || b.length < 2) {
+    throw new Error("t-test needs at least 2 observations per group");
+  }
+  const mean1 = seriesMean(a);
+  const mean2 = seriesMean(b);
+  const v1 = sampleVariance(a, mean1);
+  const v2 = sampleVariance(b, mean2);
+  const se = Math.sqrt(v1 / a.length + v2 / b.length);
+  if (!(se > 0)) throw new Error("t-test is undefined when both groups have zero variance");
+  const t = (mean1 - mean2) / se;
+  const df =
+    (v1 / a.length + v2 / b.length) ** 2 /
+    ((v1 / a.length) ** 2 / (a.length - 1) + (v2 / b.length) ** 2 / (b.length - 1));
+  return {
+    n1: a.length,
+    n2: b.length,
+    mean1,
+    mean2,
+    difference: mean1 - mean2,
+    tStatistic: t,
+    degreesOfFreedom: df,
+    pValue: 2 * (1 - tCdf(Math.abs(t), df)),
+  };
+}
+
+export function oneWayAnova(groups: { name: string; values: number[] }[]): {
+  groups: number;
+  totalN: number;
+  fStatistic: number;
+  dfBetween: number;
+  dfWithin: number;
+  pValue: number;
+} {
+  const usable = groups.filter((g) => g.values.length > 0);
+  if (usable.length < 2) throw new Error("ANOVA needs at least 2 non-empty groups");
+  const all = usable.flatMap((g) => g.values);
+  const grandMean = seriesMean(all);
+  let ssBetween = 0;
+  let ssWithin = 0;
+  for (const group of usable) {
+    const gm = seriesMean(group.values);
+    ssBetween += group.values.length * (gm - grandMean) ** 2;
+    ssWithin += group.values.reduce((sum, v) => sum + (v - gm) ** 2, 0);
+  }
+  const dfBetween = usable.length - 1;
+  const dfWithin = all.length - usable.length;
+  if (dfWithin <= 0) throw new Error("ANOVA needs more observations than groups");
+  if (ssWithin === 0) {
+    return { groups: usable.length, totalN: all.length, fStatistic: Number.POSITIVE_INFINITY, dfBetween, dfWithin, pValue: 0 };
+  }
+  const f = (ssBetween / dfBetween) / (ssWithin / dfWithin);
+  return { groups: usable.length, totalN: all.length, fStatistic: f, dfBetween, dfWithin, pValue: 1 - fCdf(f, dfBetween, dfWithin) };
+}
+
+export function multipleRegression(y: number[], xs: number[][], featureNames: string[]): {
+  n: number;
+  intercept: number;
+  coefficients: { name: string; value: number }[];
+  rSquared: number;
+  adjustedRSquared: number;
+} {
+  if (xs.length === 0) throw new Error("Multiple regression needs at least one predictor");
+  const n = y.length;
+  if (xs.some((col) => col.length !== n)) throw new Error("Predictors must match the response length");
+  if (n <= xs.length) throw new Error("Multiple regression needs more observations than predictors");
+  const design = y.map((_, i) => [1, ...xs.map((col) => col[i]!)]);
+  const p = xs.length;
+  const xtx = design[0]!.map((_, j) => design[0]!.map((__, k) => design.reduce((sum, row) => sum + row[j]! * row[k]!, 0)));
+  const xty = design[0]!.map((_, j) => design.reduce((sum, row, i) => sum + row[j]! * y[i]!, 0));
+  const beta = solveLinearSystem(xtx, xty);
+  const yHat = design.map((row) => row.reduce((sum, v, j) => sum + v * beta[j]!, 0));
+  const meanY = seriesMean(y);
+  const ssTot = y.reduce((sum, v) => sum + (v - meanY) ** 2, 0);
+  const ssRes = y.reduce((sum, v, i) => sum + (v - yHat[i]!) ** 2, 0);
+  const rSquared = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+  return {
+    n,
+    intercept: beta[0]!,
+    coefficients: featureNames.map((name, i) => ({ name, value: beta[i + 1]! })),
+    rSquared,
+    adjustedRSquared: 1 - ((1 - rSquared) * (n - 1)) / (n - p - 1),
+  };
+}
+
 function table(
   columns: TabularColumn[],
   rows: CellValue[][],
@@ -265,6 +470,103 @@ export function runAnalysis(
           xLabel: operation.x,
           yLabel: operation.y,
         },
+      };
+    }
+    case "correlation_matrix": {
+      const requested = operation.columns ?? sheet.columns.map((c) => c.name);
+      const numericColumns = requested
+        .filter((name) => sheet.columns.some((c) => c.name === name))
+        .filter((name) => numericValues(sheet, name).length >= 2);
+      if (numericColumns.length < 2) {
+        throw new Error(`correlation_matrix needs at least 2 numeric columns. Available columns: ${sheet.columns.map((c) => `"${c.name}"`).join(", ")}.`);
+      }
+      if (numericColumns.length > 20) {
+        throw new Error(`Too many numeric columns (${numericColumns.length} > 20). Pass columns to narrow it down.`);
+      }
+      const cell = (a: string, b: string): CellValue => {
+        if (a === b) return 1;
+        const { x, y } = pairedNumericValues(sheet, a, b);
+        if (x.length < 2) return null;
+        try {
+          return Math.round(pearsonCorrelation(x, y) * 10000) / 10000;
+        } catch {
+          return null;
+        }
+      };
+      return {
+        operation: "correlation_matrix",
+        summary: `correlation matrix over ${numericColumns.length} columns`,
+        result: table(
+          [{ name: "column", type: "string" }, ...numericColumns.map((name) => ({ name, type: "number" as const }))],
+          numericColumns.map((a) => [a, ...numericColumns.map((b) => cell(a, b))]),
+          limits,
+        ),
+      };
+    }
+    case "multiple_regression": {
+      const yIndex = columnIndex(sheet, operation.y);
+      const xIndexes = operation.xs.map((name) => columnIndex(sheet, name));
+      const y: number[] = [];
+      const xs: number[][] = xIndexes.map(() => []);
+      for (const row of sheet.rows) {
+        const yv = row[yIndex];
+        const xv = xIndexes.map((i) => row[i]);
+        if (typeof yv === "number" && xv.every((v): v is number => typeof v === "number")) {
+          y.push(yv);
+          xv.forEach((v, j) => xs[j]!.push(v));
+        }
+      }
+      if (y.length <= operation.xs.length) {
+        return { operation: "multiple_regression", summary: `Not enough complete rows in "${operation.y}" and [${operation.xs.join(", ")}] (need more rows than predictors)` };
+      }
+      const fit = multipleRegression(y, xs, operation.xs);
+      const terms = [`intercept=${fit.intercept.toFixed(4)}`, ...fit.coefficients.map((c) => `${c.name}=${c.value.toFixed(4)}`)];
+      return {
+        operation: "multiple_regression",
+        summary: `${operation.y} = ${terms.join(" + ")} · R² = ${fit.rSquared.toFixed(4)}, adjusted R² = ${fit.adjustedRSquared.toFixed(4)} (n=${fit.n})`,
+      };
+    }
+    case "ttest": {
+      const groupIndex = columnIndex(sheet, operation.groupBy);
+      const valueIndex = columnIndex(sheet, operation.column);
+      const collect = (label: string): number[] =>
+        sheet.rows
+          .filter((row) => String(row[groupIndex] ?? "") === label)
+          .map((row) => row[valueIndex])
+          .filter((v): v is number => typeof v === "number");
+      const a = collect(operation.groupA);
+      const b = collect(operation.groupB);
+      if (a.length < 2 || b.length < 2) {
+        return { operation: "ttest", summary: `Not enough data: "${operation.groupA}" has ${a.length} values, "${operation.groupB}" has ${b.length} values (need ≥ 2 each)` };
+      }
+      const result = welchTTest(a, b);
+      const significant = result.pValue < 0.05 ? "significant at α=0.05" : "not significant at α=0.05";
+      return {
+        operation: "ttest",
+        summary: `${operation.column}: ${operation.groupA} (mean=${result.mean1.toFixed(2)}, n=${result.n1}) vs ${operation.groupB} (mean=${result.mean2.toFixed(2)}, n=${result.n2}): t=${result.tStatistic.toFixed(3)}, df=${result.degreesOfFreedom.toFixed(1)}, p=${result.pValue.toFixed(4)} (${significant})`,
+      };
+    }
+    case "anova": {
+      const groupIndex = columnIndex(sheet, operation.groupBy);
+      const valueIndex = columnIndex(sheet, operation.column);
+      const buckets = new Map<string, number[]>();
+      for (const row of sheet.rows) {
+        const label = String(row[groupIndex] ?? "(empty)");
+        const v = row[valueIndex];
+        if (typeof v !== "number") continue;
+        const bucket = buckets.get(label) ?? [];
+        bucket.push(v);
+        buckets.set(label, bucket);
+      }
+      const groups = [...buckets.entries()].map(([name, values]) => ({ name, values }));
+      if (groups.length < 2) {
+        return { operation: "anova", summary: `Not enough groups in "${operation.groupBy}" for ANOVA` };
+      }
+      const result = oneWayAnova(groups);
+      const significant = result.pValue < 0.05 ? "significant at α=0.05" : "not significant at α=0.05";
+      return {
+        operation: "anova",
+        summary: `${operation.column} across ${result.groups} groups of "${operation.groupBy}" (n=${result.totalN}): F=${Number.isFinite(result.fStatistic) ? result.fStatistic.toFixed(3) : "∞"}, df=(${result.dfBetween}, ${result.dfWithin}), p=${result.pValue.toFixed(4)} (${significant})`,
       };
     }
     case "trend": {
