@@ -49,6 +49,10 @@ export function createSqlJsRunner(): SqlRunner {
         stmt.reset();
       }
       stmt.free();
+      // The tool description promises `t` as a stable alias for the sheet.
+      if (sheet.name.toLowerCase() !== "t") {
+        db.exec(`CREATE TEMP VIEW "t" AS SELECT * FROM ${tableName}`);
+      }
       const wrapped = `SELECT * FROM (${query.replace(/;\s*$/, "")}) AS q LIMIT ${maxRows}`;
       const results = db.exec(wrapped);
       const first = results[0];
