@@ -68,14 +68,14 @@ const fetchDatasetInput = z.object({
 const createDatasetSpec = {
   name: "create_dataset",
   description:
-    "Create a new CSV document from values you already hold: a synthetic example the user asked for, numbers copied from web_search/web_fetch results, a table the user pasted in chat, or a derivation (filter/summary/transform) of an existing session/project CSV you read via read_dataset. Do NOT use it when an existing dataset already answers the question — analyze that directly. Do NOT invent factual data and present it as real. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset.",
+    "Create a new CSV document from values you already hold: a synthetic example the user asked for, numbers copied from web_search/web_fetch results, a table the user pasted in chat, or a derivation (filter/summary/transform) of an existing session/project CSV you read via read_dataset. Do NOT use it when an existing dataset already answers the question — analyze that directly. Do NOT invent factual data and present it as real. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset. Never claim the dataset is ready, and never describe its rows, verification, or chart, until read_dataset and analyze_dataset have actually returned.",
   inputSchema: createDatasetInput,
 } as const;
 
 const fetchDatasetSpec = {
   name: "fetch_dataset_from_url",
   description:
-    "Download a public CSV/XLSX file from an http(s) URL into the session library (e.g. a link from web_search, data.gov, GitHub raw, or a published Google Sheet CSV). Prefer this over copying thousands of rows by hand into create_dataset. Only direct file links work; for HTML pages use web_fetch and then create_dataset. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset.",
+    "Download a public CSV/XLSX file from an http(s) URL into the session library (e.g. a link from web_search, data.gov, GitHub raw, or a published Google Sheet CSV). Prefer this over copying thousands of rows by hand into create_dataset. Only direct file links work; for HTML pages use web_fetch and then create_dataset. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset. Never claim the download succeeded, and never describe its rows or chart, until the tools have actually returned.",
   inputSchema: fetchDatasetInput,
 } as const;
 

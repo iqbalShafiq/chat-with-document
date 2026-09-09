@@ -25,6 +25,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         "(name 'contoh-penjualan', columns category and sales, 3 rows: kopi/120, teh/90, susu/150), " +
         "then verify it with read_dataset using source {type:'upload', documentId:'doc-derived-new'}, " +
         "then chart it with analyze_dataset (aggregate groupBy category, sum of sales). " +
+        "Call each tool in order and only describe results the tools actually returned. " +
         "Label the answer as a synthetic example.",
       sessionConfig: { ...autoApprove },
       expected: {
@@ -42,6 +43,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         "Build a derived summary with create_dataset (name 'ringkas-region', columns region and revenue, " +
         "rows East/3400 and West/800) and pass derivedFrom {documentId:'doc-sales-csv'}. " +
         "Then verify with read_dataset on documentId 'doc-derived-new' and chart with analyze_dataset aggregate. " +
+        "Call each tool in order and only describe results the tools actually returned. " +
         "Mention the parent file in the answer.",
       sessionConfig: { ...autoApprove },
       expected: {
