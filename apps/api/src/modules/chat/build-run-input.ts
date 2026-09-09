@@ -1115,18 +1115,22 @@ export async function reconstructChatRunInput(input: {
 
   const instructions = [...recipe.instructionFragments];
   const contextBlocks = [...profileContext];
+  const derivedWriter = createDerivedDatasetWriter({ userId, sessionId, projectId, prisma });
+  const tabularResolver = createTabularResolver({
+    userId,
+    sessionId,
+    projectId,
+    documentIds: recipe.documents.ids,
+    prisma,
+  });
   const tabularTools = createTabularAnalysisTools({
-    resolver: createTabularResolver({
-      userId,
-      sessionId,
-      projectId,
-      documentIds: recipe.documents.ids,
-      prisma,
-    }),
+    resolver: tabularResolver,
     sqlRunner: createSqlJsRunner(),
+    derived: { writer: derivedWriter },
   });
   const derivedTools = createDerivedDatasetTools({
-    writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+    writer: derivedWriter,
+    resolver: tabularResolver,
     webFetchGate: {
       enabled: webSearchEnabled,
       hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
@@ -1204,6 +1208,7 @@ export async function reconstructChatRunInput(input: {
     // fetch gate is pre-approved here exactly like the research web tools.
     const researchDerivedTools = createDerivedDatasetTools({
       writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+      resolver: tabularResolver,
       webFetchGate: { enabled: true },
     });
     const researchTools = boundDeepResearchTools(

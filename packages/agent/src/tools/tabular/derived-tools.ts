@@ -17,7 +17,8 @@ import {
 } from "./limits.js";
 import { fetchTabularUrl } from "./fetch-csv.js";
 import { sheetFromRows, toCsvText } from "./parse-csv.js";
-import type { CellValue } from "./types.js";
+import type { CellValue, DatasetRef, TabularSheet } from "./types.js";
+import type { DatasetResolver } from "./tools.js";
 
 export type DerivedDocumentOrigin = "created" | "fetched";
 
@@ -47,10 +48,15 @@ const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const createDatasetInput = z.object({
   name: z.string().trim().min(1).max(MAX_DERIVED_NAME_CHARS)
     .describe("Base filename for the new CSV (without prefix; the server adds [derived]/[synthetic])"),
-  columns: z.array(z.string()).min(1).max(MAX_DERIVED_HARD_COLUMNS)
-    .describe("Column names; must be unique after trimming"),
-  rows: z.array(z.array(cellSchema)).min(1).max(MAX_DERIVED_ROWS)
-    .describe("Table rows; every row must have exactly columns.length cells"),
+  columns: z.array(z.string()).min(1).max(MAX_DERIVED_HARD_COLUMNS).optional()
+    .describe("Column names; required unless cloneFrom is used"),
+  rows: z.array(z.array(cellSchema)).min(1).max(MAX_DERIVED_ROWS).optional()
+    .describe("Table rows; required unless cloneFrom is used"),
+  cloneFrom: z.object({
+    type: z.literal("upload"),
+    documentId: z.string().min(1),
+    sheet: z.string().optional(),
+  }).describe("Clone an existing dataset server-side without retyping values (exclusive with columns/rows)").optional() as z.ZodType<DatasetRef | undefined>,
   derivedFrom: z.object({ documentId: z.string().min(1) }).optional()
     .describe("REQUIRED when deriving from an existing session/project CSV: the source document id"),
   sourceNote: z.string().trim().max(MAX_SOURCE_NOTE_CHARS).optional()
@@ -68,7 +74,7 @@ const fetchDatasetInput = z.object({
 const createDatasetSpec = {
   name: "create_dataset",
   description:
-    "Create a new CSV document from values you already hold: a synthetic example the user asked for, numbers copied from web_search/web_fetch results, a table the user pasted in chat, or a derivation (filter/summary/transform) of an existing session/project CSV you read via read_dataset. Do NOT use it when an existing dataset already answers the question — analyze that directly. Do NOT invent factual data and present it as real. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset. Never claim the dataset is ready, and never describe its rows, verification, or chart, until read_dataset and analyze_dataset have actually returned.",
+    "Create a new CSV document from values you already hold: a synthetic example the user asked for, numbers copied from web_search/web_fetch results, a table the user pasted in chat, or a derivation (filter/summary/transform) of an existing session/project CSV you read via read_dataset. Pass cloneFrom {source} to copy an existing dataset server-side without retyping values (exclusive with columns/rows). Do NOT use it when an existing dataset already answers the question — analyze that directly. Do NOT invent factual data and present it as real. Output is a queued document: call read_dataset on the returned documentId to verify it is ready before analyze_dataset. Never claim the dataset is ready, and never describe its rows, verification, or chart, until read_dataset and analyze_dataset have actually returned.",
   inputSchema: createDatasetInput,
 } as const;
 
@@ -90,8 +96,22 @@ function toText(cell: CellValue): string {
   return String(cell);
 }
 
-function validateCreateInput(input: z.infer<typeof createDatasetInput>): { columns: string[]; rawRows: string[][] } {
-  const columns = input.columns.map((c) => c.trim());
+function validateCreateInput(input: {
+  columns?: string[] | undefined;
+  rows: (string | number | boolean | null)[][] | undefined;
+  cloneFrom?: DatasetRef | undefined;
+}): { columns: string[]; rawRows: string[][] } {
+  if (input.cloneFrom) {
+    throw new Error("cloneFrom must be resolved server-side before validation.");
+  }
+  const columns = (input.columns ?? []).map((c) => c.trim());
+  const rows = input.rows ?? [];
+  if (columns.length === 0) {
+    throw new Error("columns is required unless cloneFrom is used.");
+  }
+  if (rows.length === 0) {
+    throw new Error("rows is required unless cloneFrom is used.");
+  }
   if (columns.some((c) => c === "")) {
     throw new Error("Column names must be non-empty. Rename blank columns (e.g. col3) and retry.");
   }
@@ -105,7 +125,7 @@ function validateCreateInput(input: z.infer<typeof createDatasetInput>): { colum
     throw new Error(`Too many columns (${columns.length} > ${MAX_DERIVED_COLUMNS}). Narrow the table or upload a file instead.`);
   }
   const rawRows: string[][] = [];
-  input.rows.forEach((row, index) => {
+  rows.forEach((row, index) => {
     if (row.length !== columns.length) {
       throw new Error(`Row ${index + 1} has ${row.length} cells but ${columns.length} columns. Fix the row and retry.`);
     }
@@ -140,6 +160,7 @@ function filenameFromUrl(url: string, fallback: string): string {
 
 export function createDerivedDatasetTools(deps: {
   writer: DerivedDocumentWriter;
+  resolver?: DatasetResolver | undefined;
   fetchFn?: typeof fetch | undefined;
   webFetchGate?: {
     enabled: boolean;
@@ -149,18 +170,37 @@ export function createDerivedDatasetTools(deps: {
   const createDataset = createTool({
     ...createDatasetSpec,
     outputSchema: z.json(),
-    execute: async ({ name, columns, rows, derivedFrom, sourceNote }) => {
-      const { columns: cleanColumns, rawRows } = validateCreateInput({ name, columns, rows, derivedFrom, sourceNote });
-      const sheet = sheetFromRows("dataset", [cleanColumns, ...rawRows]);
+    execute: async ({ name, columns, rows, cloneFrom, derivedFrom, sourceNote }) => {
+      if (cloneFrom && (columns !== undefined || rows !== undefined)) {
+        throw new Error("cloneFrom is exclusive with columns/rows. Use one or the other.");
+      }
+      let sheet: TabularSheet;
+      let parentDocumentId: string | null = derivedFrom?.documentId ?? null;
+      if (cloneFrom) {
+        if (!deps.resolver) {
+          throw new Error("Cloning datasets is not available in this session. Provide columns/rows instead.");
+        }
+        sheet = await deps.resolver.resolveSheet(cloneFrom);
+        if (sheet.columns.length > MAX_DERIVED_COLUMNS) {
+          throw new Error(`Source has ${sheet.columns.length} columns (max ${MAX_DERIVED_COLUMNS}). Narrow it first with analyze_dataset.`);
+        }
+        if (sheet.rows.length > MAX_DERIVED_ROWS) {
+          throw new Error(`Source has ${sheet.rows.length} rows (max ${MAX_DERIVED_ROWS}). Filter it first with analyze_dataset.`);
+        }
+        parentDocumentId = parentDocumentId ?? cloneFrom.documentId;
+      } else {
+        const { columns: cleanColumns, rawRows } = validateCreateInput({ columns, rows, cloneFrom });
+        sheet = sheetFromRows("dataset", [cleanColumns, ...rawRows]);
+      }
       const csv = toCsvText({ ...sheet, name });
       const created = await deps.writer.createDerived({
         filename: `${name}.csv`,
         mimeType: "text/csv",
         data: new TextEncoder().encode(csv),
         origin: "created",
-        parentDocumentId: derivedFrom?.documentId ?? null,
-        sourceNote: sourceNote?.trim() ? sourceNote.trim() : derivedFrom ? `derived from ${derivedFrom.documentId}` : "synthetic example",
-        synthetic: !derivedFrom && !sourceNote?.trim(),
+        parentDocumentId,
+        sourceNote: sourceNote?.trim() ? sourceNote.trim() : parentDocumentId ? `derived from ${parentDocumentId}` : "synthetic example",
+        synthetic: !parentDocumentId && !sourceNote?.trim(),
       });
       return {
         documentId: created.documentId,

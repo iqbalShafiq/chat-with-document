@@ -303,15 +303,18 @@ export function buildEvalTools(
   // a stub document id whose sheet round-trips the submitted bytes, so the
   // create -> read -> analyze flow can be scored without prisma/R2/ingest.
   const stubDerivedWriter = createStubDerivedWriter(Boolean(sessionConfig.hasDocuments));
+  const stubResolver = createStubTabularResolver(Boolean(sessionConfig.hasDocuments), stubDerivedWriter.sheets);
   const tabularTools = createTabularAnalysisTools({
-    resolver: createStubTabularResolver(Boolean(sessionConfig.hasDocuments), stubDerivedWriter.sheets),
+    resolver: stubResolver,
     sqlRunner: createStubSqlRunner() as never,
+    derived: { writer: stubDerivedWriter },
   });
   tools.push(...tabularTools);
   instructions.push(sessionConfig.hasDocuments ? TABULAR_CATALOG_INSTRUCTION : TABULAR_EMPTY_INSTRUCTION);
 
   const derivedTools = createDerivedDatasetTools({
     writer: stubDerivedWriter,
+    resolver: stubResolver,
     fetchFn: createStubDatasetFetch(),
   });
   tools.push(...derivedTools);

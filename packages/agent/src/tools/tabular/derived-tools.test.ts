@@ -42,6 +42,44 @@ describe("create_dataset", () => {
     await expect(tool!.call({ name: "a", columns: ["x"], rows: [["1", "2"]] })).rejects.toThrow("has 2 cells but 1 columns");
     expect(writer.calls).toHaveLength(0);
   });
+
+  it("clones a dataset server-side without retyping values", async () => {
+    const writer = makeWriter();
+    const sheet = {
+      name: "sales",
+      columns: [
+        { name: "region", type: "string" as const },
+        { name: "revenue", type: "number" as const },
+      ],
+      rows: [["east", 100]],
+    };
+    const [tool] = createDerivedDatasetTools({
+      writer,
+      resolver: {
+        listUploads: async () => [],
+        resolveSheet: async () => sheet,
+        listDocumentTables: async () => [],
+      },
+    });
+    const out = strictJson(await tool!.call({
+      name: "salinan",
+      cloneFrom: { type: "upload", documentId: "d1" },
+    }));
+    expect(out).toMatchObject({ documentId: "d-new", origin: "created", rowCount: 1 });
+    expect(writer.calls).toHaveLength(1);
+  });
+
+  it("rejects cloneFrom combined with columns/rows", async () => {
+    const writer = makeWriter();
+    const [tool] = createDerivedDatasetTools({ writer });
+    await expect(tool!.call({
+      name: "a",
+      columns: ["x"],
+      rows: [["1"]],
+      cloneFrom: { type: "upload", documentId: "d1" },
+    })).rejects.toThrow("exclusive");
+    expect(writer.calls).toHaveLength(0);
+  });
 });
 
 describe("fetch_dataset_from_url", () => {

@@ -2,7 +2,15 @@ import { createTool, type AnyTool } from "@anvia/core";
 import { z } from "zod";
 import { runAnalysis, type AnalysisOperation } from "./tabular-analysis.js";
 import type { SqlRunner } from "./sql.js";
-import type { DatasetRef, TabularSheet } from "./types.js";
+import type { DatasetRef, TabularColumn, TabularSheet } from "./types.js";
+import type { DerivedDocumentWriter } from "./derived-tools.js";
+import { sheetFromRows, toCsvText } from "./parse-csv.js";
+import {
+  MAX_DERIVED_COLUMNS,
+  MAX_DERIVED_HARD_COLUMNS,
+  MAX_DERIVED_NAME_CHARS,
+  MAX_DERIVED_ROWS,
+} from "./limits.js";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
@@ -69,16 +77,23 @@ const operationSchema = z.discriminatedUnion("op", [
 ]) as z.ZodType<AnalysisOperation>;
 const jsonOutputSchema = z.json();
 
+const saveAsSchema = z.object({
+  name: z.string().trim().min(1).max(MAX_DERIVED_NAME_CHARS)
+    .describe("Base filename for the saved result CSV (without prefix)"),
+}).describe("Save this result as a new derived document instead of only returning it");
+
 const readDatasetInput = z.object({
   source: sourceSchema.describe("Which dataset to inspect"),
 });
 const analyzeDatasetInput = z.object({
   source: sourceSchema,
   operation: operationSchema,
+  saveAs: saveAsSchema.optional(),
 });
 const queryDatasetSqlInput = z.object({
   source: sourceSchema,
   query: z.string().min(1).describe("Read-only SQL SELECT query"),
+  saveAs: saveAsSchema.optional(),
 });
 
 const readDatasetSpec = {
@@ -90,13 +105,13 @@ const readDatasetSpec = {
 const analyzeDatasetSpec = {
   name: "analyze_dataset",
   description:
-    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile, aggregate, filter, sort, top_n, correlation, trend, stats (full descriptive statistics for one numeric column), or regression (linear fit with R² and optional predictions). The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Returns structured results and a chart spec the UI renders.",
+    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile, aggregate, filter, sort, top_n, correlation, trend, stats (full descriptive statistics for one numeric column), or regression (linear fit with R² and optional predictions). The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Pass saveAs {name} to persist the result table as a new derived document for further chaining. Returns structured results and a chart spec the UI renders.",
   inputSchema: analyzeDatasetInput,
 } as const;
 const queryDatasetSqlSpec = {
   name: "query_dataset_sql",
   description:
-    "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts.",
+    "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts. Pass saveAs {name} to persist the result as a new derived document for further chaining.",
   inputSchema: queryDatasetSqlInput,
 } as const;
 const extractDocumentTablesSpec = {
@@ -117,7 +132,95 @@ export type TabularToolDeps = {
   resolver: DatasetResolver;
   sqlRunner: SqlRunner;
   limits?: { maxRows?: number };
+  derived?: { writer: DerivedDocumentWriter };
 };
+
+function validateSaveAsName(name: string): string {
+  const clean = name.trim();
+  if (!clean) throw new Error("saveAs.name must be non-empty.");
+  return clean;
+}
+
+function sheetFromAnalysisResult(name: string, result: { columns: TabularColumn[]; rows: (string | number | boolean | null)[][] }): TabularSheet {
+  if (result.columns.length === 0) throw new Error("Result has no columns to save.");
+  if (result.columns.length > MAX_DERIVED_COLUMNS) {
+    throw new Error(`Result has ${result.columns.length} columns (max ${MAX_DERIVED_COLUMNS}). Narrow the query first.`);
+  }
+  if (result.rows.length === 0) throw new Error("Result has no rows to save.");
+  if (result.rows.length > MAX_DERIVED_ROWS) {
+    throw new Error(`Result has ${result.rows.length} rows (max ${MAX_DERIVED_ROWS}). Narrow the query first.`);
+  }
+  return { name, columns: result.columns, rows: result.rows };
+}
+
+function inferCellType(values: (string | number | boolean | null)[]): TabularColumn["type"] {
+  let sawBoolean = false;
+  for (const value of values) {
+    if (value === null) continue;
+    if (typeof value === "number") return "number";
+    if (typeof value === "boolean") {
+      sawBoolean = true;
+      continue;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") continue;
+      if (!Number.isFinite(Number(trimmed))) return "string";
+      continue;
+    }
+    return "string";
+  }
+  return sawBoolean ? "boolean" : "string";
+}
+
+function sheetFromSqlResult(
+  name: string,
+  source: TabularSheet,
+  result: { columns: string[]; rows: (string | number | null)[][] },
+): TabularSheet {
+  if (result.columns.length === 0) throw new Error("Result has no columns to save.");
+  if (result.columns.length > MAX_DERIVED_COLUMNS) {
+    throw new Error(`Result has ${result.columns.length} columns (max ${MAX_DERIVED_COLUMNS}). Narrow the query first.`);
+  }
+  if (result.rows.length === 0) throw new Error("Result has no rows to save.");
+  if (result.rows.length > MAX_DERIVED_ROWS) {
+    throw new Error(`Result has ${result.rows.length} rows (max ${MAX_DERIVED_ROWS}). Narrow the query first.`);
+  }
+  const sourceTypes = new Map(source.columns.map((c) => [c.name.toLowerCase(), c.type] as const));
+  const columns: TabularColumn[] = result.columns.map((col, i) => {
+    const fromSource = sourceTypes.get(col.toLowerCase());
+    if (fromSource) return { name: col, type: fromSource };
+    const columnValues = result.rows.map((row) => (row[i] ?? null) as string | number | boolean | null);
+    return { name: col || `col${i + 1}`, type: inferCellType(columnValues) };
+  });
+  return { name, columns, rows: result.rows as TabularSheet["rows"] };
+}
+
+async function saveResultSheet(
+  derived: { writer: DerivedDocumentWriter } | undefined,
+  sheet: TabularSheet,
+  saveAs: { name: string },
+  parentDocumentId: string | null,
+): Promise<{ documentId: string; filename: string; origin: "created"; status: string }> {
+  if (!derived) {
+    throw new Error("Saving results is not available in this session. Return the result without saveAs.");
+  }
+  const name = validateSaveAsName(saveAs.name);
+  const csv = toCsvText({ ...sheet, name });
+  const created = await derived.writer.createDerived({
+    filename: `${name}.csv`,
+    mimeType: "text/csv",
+    data: new TextEncoder().encode(csv),
+    origin: "created",
+    parentDocumentId,
+    sourceNote: parentDocumentId ? `saved ${sheet.name} result derived from ${parentDocumentId}` : `saved ${sheet.name} result`,
+  });
+  return { documentId: created.documentId, filename: created.filename, origin: "created", status: created.status };
+}
+
+function parentOf(ref: DatasetRef): string {
+  return ref.documentId;
+}
 
 export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const { resolver, sqlRunner, limits } = deps;
@@ -140,20 +243,37 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const analyzeDataset = createTool({
     ...analyzeDatasetSpec,
     outputSchema: jsonOutputSchema,
-    execute: async ({ source, operation }) => {
+    execute: async ({ source, operation, saveAs }) => {
       const sheet = await resolver.resolveSheet(source);
-      return jsonOutputSchema.parse(
-        runAnalysis(sheet, operation, resolvedLimits),
+      const analysis = runAnalysis(sheet, operation, resolvedLimits);
+      if (!saveAs) return jsonOutputSchema.parse(analysis);
+      if (!analysis.result) {
+        throw new Error("This operation returns no table to save. Use an operation with a result (aggregate, filter, sort, top_n) or save a SQL query instead.");
+      }
+      const saved = await saveResultSheet(
+        deps.derived,
+        sheetFromAnalysisResult(saveAs.name, analysis.result),
+        saveAs,
+        parentOf(source),
       );
+      return jsonOutputSchema.parse({ ...analysis, saved });
     },
   });
 
   const queryDatasetSql = createTool({
     ...queryDatasetSqlSpec,
     outputSchema: jsonOutputSchema,
-    execute: async ({ source, query }) => {
+    execute: async ({ source, query, saveAs }) => {
       const sheet = await resolver.resolveSheet(source);
-      return sqlRunner(sheet, query, limits);
+      const sqlResult = await sqlRunner(sheet, query, limits);
+      if (!saveAs) return sqlResult;
+      const saved = await saveResultSheet(
+        deps.derived,
+        sheetFromSqlResult(saveAs.name, sheet, sqlResult),
+        saveAs,
+        parentOf(source),
+      );
+      return { ...sqlResult, saved };
     },
   });
 
