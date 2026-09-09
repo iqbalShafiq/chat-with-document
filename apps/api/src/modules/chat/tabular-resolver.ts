@@ -59,7 +59,20 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
 
     async resolveSheet(ref) {
       if (deps.documentIds !== undefined && !deps.documentIds.includes(ref.documentId)) {
-        throw new Error("Dataset not found or empty");
+        // Derived/fetched documents created mid-run are not in the frozen id
+        // list. Admit them when they belong to this user+session scope (and
+        // project corpus) and carry agent provenance; anything else stays out.
+        const ownDerived = await prisma.document.findFirst({
+          where: {
+            id: ref.documentId,
+            userId,
+            sessionId,
+            origin: { in: ["created", "fetched"] },
+            ...(projectId ? { projectId } : { projectId: null }),
+          },
+          select: { id: true },
+        });
+        if (!ownDerived) throw new Error("Dataset not found or empty");
       }
       if (ref.type === "upload") {
         const doc = await prisma.document.findFirst({

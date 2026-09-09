@@ -41,14 +41,20 @@ describe("tabular resolver", () => {
   });
 
   it("rejects a sheet outside the frozen document scope", async () => {
-    const documentLookup = async () => ({
-      id: "d-other",
-      filename: "other.csv",
-      mimeType: "text/csv",
-      tabularData: {
-        sheets: [{ name: "sheet", columns: [], rows: [] }],
-      },
-    });
+    const documentLookup = async (args: { where: Record<string, unknown> }) => {
+      // Gate for mid-run derived documents: d-other is a plain upload from
+      // another session, so it must not pass.
+      if (args.where.origin !== undefined) return null;
+      return {
+        id: "d-other",
+        filename: "other.csv",
+        mimeType: "text/csv",
+        status: "ready",
+        tabularData: {
+          sheets: [{ name: "sheet", columns: [], rows: [] }],
+        },
+      };
+    };
     const prisma = prismaMock({
       document: { findFirst: documentLookup },
       documentSession: { findMany: async () => [] },
@@ -131,16 +137,25 @@ describe("tabular resolver", () => {
             originUrl: null,
           },
         ],
-        findFirst: async () => ({
-          id: "d-derived",
-          filename: "[derived] ringkas.csv",
-          status: "ready",
-          tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
-        }),
+        findFirst: async (args: { where: Record<string, unknown> }) => {
+          if (args.where.origin !== undefined) return { id: "d-derived" };
+          return {
+            id: "d-derived",
+            filename: "[derived] ringkas.csv",
+            status: "ready",
+            tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
+          };
+        },
       },
       documentSession: { findMany: async () => [{ documentId: "d-derived" }] },
     });
-    const resolver = createTabularResolver({ userId: "u1", sessionId: "s1", projectId: null, prisma });
+    const resolver = createTabularResolver({
+      userId: "u1",
+      sessionId: "s1",
+      projectId: null,
+      documentIds: ["d-frozen"],
+      prisma,
+    });
     const uploads = await resolver.listUploads();
     expect(uploads[0]).toMatchObject({
       documentId: "d-derived",
