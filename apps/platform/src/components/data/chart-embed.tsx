@@ -7,12 +7,16 @@ export function ChartEmbed({ index }: { index: number }) {
   const spec = chart === null ? null : parseChartSpec(chart);
   if (!spec) {
     return (
-      <span className="text-text-faint" role="note">
+      <span className="my-3 block text-text-faint" role="note">
         Chart {index} is not available.
       </span>
     );
   }
-  return <DataChart spec={spec} />;
+  return (
+    <span className="my-3 block">
+      <DataChart spec={spec} />
+    </span>
+  );
 }
 
 export function chartAltToIndex(alt: string | null | undefined): number | null {
