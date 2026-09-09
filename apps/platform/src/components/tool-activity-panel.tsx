@@ -2,6 +2,7 @@ import type { UIMessagePart } from "@anvia/client";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DataChart } from "#/components/data/data-chart";
+import { useThreadChartSpecs } from "#/components/data/chart-registry-context";
 import { DataTable } from "#/components/data/data-table";
 import { parseChartSpec, parseTableDto } from "#/lib/data-analysis";
 import { useImagePreview } from "#/components/images/image-preview";
@@ -61,6 +62,14 @@ function ChartFromSection({ chart }: { chart: unknown }) {
   return spec ? <DataChart spec={spec} /> : null;
 }
 
+function useThreadChartIndex(chart: unknown): number | undefined {
+  const specs = useThreadChartSpecs();
+  if (chart === undefined) return undefined;
+  const key = JSON.stringify(chart);
+  const index = specs.findIndex((entry) => JSON.stringify(entry) === key);
+  return index >= 0 ? index + 1 : undefined;
+}
+
 function TableFromSection({ table }: { table: unknown }) {
   const parsed = parseTableDto(table);
   if (!parsed) return null;
@@ -78,7 +87,7 @@ function TableFromSection({ table }: { table: unknown }) {
   );
 }
 
-function ToolSectionView({ section, chartIndex }: { section: FormattedSection; chartIndex?: number }) {
+function ToolSectionView({ section }: { section: FormattedSection }) {
   const hasFields = (section.fields?.length ?? 0) > 0;
   const hasItems = (section.items?.length ?? 0) > 0;
 
@@ -129,11 +138,7 @@ function ToolSectionView({ section, chartIndex }: { section: FormattedSection; c
       ) : null}
       {section.chart !== undefined ? <ChartFromSection chart={section.chart} /> : null}
       {section.table !== undefined ? <TableFromSection table={section.table} /> : null}
-      {section.chart !== undefined && chartIndex !== undefined ? (
-        <p className="text-[11px] text-text-faint">
-          Embed in the answer with <code className="chat-md-inline-code">![chart:{chartIndex}]()</code>
-        </p>
-      ) : null}
+      <ChartEmbedHint chart={section.chart} />
       {section.imageLoading ? (
         <div
           className="flex items-center gap-2.5"
@@ -202,8 +207,18 @@ function ToolResultImages({ output }: { output: unknown }) {
   );
 }
 
+function ChartEmbedHint({ chart }: { chart: unknown }) {
+  const chartIndex = useThreadChartIndex(chart);
+  if (chart === undefined || chartIndex === undefined) return null;
+  return (
+    <p className="text-[11px] text-text-faint">
+      Embed in the answer with <code className="chat-md-inline-code">![chart:{chartIndex}]()</code>
+    </p>
+  );
+}
+
 /** Flat collapsible tool step — no card chrome. */
-export function ToolActivityPanel({ part, chartIndex }: { part: ToolPart; chartIndex?: number }) {
+export function ToolActivityPanel({ part }: { part: ToolPart }) {
   const label = getToolActivityLabel(part);
   const isRunning =
     part.state === "input-streaming" || part.state === "input-available";
@@ -333,7 +348,7 @@ export function ToolActivityPanel({ part, chartIndex }: { part: ToolPart; chartI
           }`}
         >
           <ToolSectionView section={requestSection} />
-          <ToolSectionView section={resultSection} chartIndex={chartIndex} />
+          <ToolSectionView section={resultSection} />
           {isDone && !isMessageImageToolName(part.toolName) ? (
             <ToolResultImages output={parseToolValue(part.output)} />
           ) : null}
