@@ -73,7 +73,11 @@ test("P3-C2: derivation from uploaded CSV shows Olahan chip", async ({ page }) =
   );
   await expandAssistantToolPanels(page);
   await expect(page.locator(BAR_CHART).last()).toBeVisible();
-  await expect(page.getByText("Olahan", { exact: true }).first()).toBeVisible();
+  // The right rail lists session documents fetched at page load; reload so
+  // the newly ready derived document appears, then check its Olahan chip.
+  await page.reload();
+  await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Olahan", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
   await saveEvidence(page, "P3-C2");
 });
 
