@@ -83,6 +83,22 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
     },
   },
   {
+    id: "stats-regression-on-dataset",
+    input: {
+      prompt:
+        "My sales.csv is linked (documentId=doc-sales-csv, columns region, product, revenue, units). " +
+        "Run analyze_dataset with operation {op:'stats', column:'revenue'} and then with " +
+        "operation {op:'regression', x:'units', y:'revenue'}. Report the mean and the R². " +
+        "Do all computation through analyze_dataset on the dataset.",
+      sessionConfig: { ...autoApprove },
+      expected: {
+        requiresTools: ["analyze_dataset"],
+        forbidsTools: ["create_dataset", "fetch_dataset_from_url", "query_dataset_sql"],
+        requiresOutputNonEmpty: true,
+      },
+    },
+  },
+  {
     id: "deep-research-builds-derived-chart",
     input: {
       prompt:
