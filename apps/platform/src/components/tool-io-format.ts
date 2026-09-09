@@ -798,6 +798,7 @@ export function formatToolOutput(
     case "read_dataset":
       return formatReadDatasetOutput(output);
     case "analyze_dataset":
+    case "create_chart":
       return formatAnalyzeDatasetOutput(output);
     case "query_dataset_sql":
       return formatQueryDatasetSqlOutput(output);

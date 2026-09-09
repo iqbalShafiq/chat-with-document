@@ -103,6 +103,7 @@ const ACTIVITY_METADATA: Record<
   read_dataset: { kind: "analysis", label: "Reading the dataset" },
   analyze_dataset: { kind: "analysis", label: "Analyzing the dataset" },
   query_dataset_sql: { kind: "analysis", label: "Querying the dataset" },
+  create_chart: { kind: "analysis", label: "Drawing a chart" },
   create_dataset: { kind: "analysis", label: "Creating a derived dataset" },
   fetch_dataset_from_url: { kind: "retrieval", label: "Fetching a dataset from URL" },
 };

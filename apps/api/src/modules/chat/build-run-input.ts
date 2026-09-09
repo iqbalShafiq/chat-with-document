@@ -19,6 +19,7 @@ import {
   createRememberUserProfileTool,
   createSqlJsRunner,
   createTabularAnalysisTools,
+  createChartTools,
   createDerivedDatasetTools,
   createTavilyClient,
   createWebSearchTools,
@@ -34,6 +35,7 @@ import {
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  CHART_TOOL_DEFINITIONS,
   DERIVED_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
@@ -844,6 +846,7 @@ export async function resolveChatAgentRecipe(
   ];
   const toolDefinitions = [
     ...TABULAR_TOOL_DEFINITIONS,
+    ...CHART_TOOL_DEFINITIONS,
     ...DERIVED_TOOL_DEFINITIONS,
     ...(hasActiveDocuments ? DOCUMENT_TOOL_DEFINITIONS : []),
     ...(profilingEnabled ? PROFILE_TOOL_DEFINITIONS : []),
@@ -1136,8 +1139,10 @@ export async function reconstructChatRunInput(input: {
       hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
     },
   });
+  const chartTools = createChartTools({ resolver: tabularResolver });
   const tools = [
     ...tabularTools,
+    ...chartTools,
     ...derivedTools,
     ...documentTools,
     ...(profileTool ? [profileTool] : []),
@@ -1217,6 +1222,7 @@ export async function reconstructChatRunInput(input: {
         ...researchWebTools,
         ...tabularTools,
         ...researchDerivedTools,
+        ...chartTools,
       ],
       recipe.budgets.deepResearchMaxSearches,
       onDeepResearchProgress,

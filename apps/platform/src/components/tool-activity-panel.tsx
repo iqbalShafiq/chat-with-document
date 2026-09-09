@@ -29,6 +29,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_dataset: "Reading dataset",
   analyze_dataset: "Analyzing data",
   query_dataset_sql: "Querying data (SQL)",
+  create_chart: "Drawing chart",
   extract_document_tables: "Extracting tables",
   create_dataset: "Creating dataset",
   fetch_dataset_from_url: "Fetching dataset from URL",

@@ -67,7 +67,7 @@ describe("Deep Research server wiring", () => {
     const input = source("./build-run-input.ts");
 
     expect(input).toMatch(
-      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,/s,
+      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,\s*\.\.\.chartTools,/s,
     );
     expect(input).not.toContain("...createDataAnalysisTools(),");
   });

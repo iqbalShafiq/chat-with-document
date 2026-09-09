@@ -28,6 +28,7 @@ export * from "./tools/tabular/sql.js";
 export * from "./tools/tabular/tools.js";
 export * from "./tools/tabular/fetch-csv.js";
 export * from "./tools/tabular/derived-tools.js";
+export * from "./tools/tabular/chart-tools.js";
 export * from "./prompts/dataset-instructions.js";
 export * from "./tools/image-generation.js";
 export * from "./tools/clarification.js";
