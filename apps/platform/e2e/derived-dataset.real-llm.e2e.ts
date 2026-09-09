@@ -113,3 +113,18 @@ test("P3-C4: non-CSV URL fails gracefully", async ({ page }) => {
   await expect(page.locator("article").last()).toContainText(/not.*csv|html|web_fetch|could not|tidak/i);
   await saveEvidence(page, "P3-C4");
 });
+
+test("P3-C5: create_chart draws a titled multi-series bar chart", async ({ page }) => {
+  test.setTimeout(420_000);
+  await openFreshChat(page);
+  await uploadAndAsk(
+    page,
+    "sales.csv",
+    "Use the create_chart tool with kind bar, x region, series sum of revenue and sum of units, " +
+      "and title 'Sales by region'. Show the chart.",
+  );
+  await expandAssistantToolPanels(page);
+  await expect(page.locator(BAR_CHART).last()).toBeVisible();
+  await expect(page.locator("article").last()).toContainText(/Sales by region/i);
+  await saveEvidence(page, "P3-C5");
+});
