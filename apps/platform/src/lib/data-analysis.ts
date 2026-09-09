@@ -1,8 +1,9 @@
 export type ChartSpec =
-  | { kind: "bar"; labels: string[]; series: { name: string; values: number[] }[]; xLabel?: string; yLabel?: string }
-  | { kind: "line"; labels: string[]; series: { name: string; values: number[] }[]; xLabel?: string; yLabel?: string }
-  | { kind: "scatter"; points: { x: number; y: number }[]; xLabel?: string; yLabel?: string }
-  | { kind: "histogram"; bins: { min: number; max: number; count: number }[]; label?: string };
+  | { kind: "bar"; labels: string[]; series: { name: string; values: number[] }[]; xLabel?: string; yLabel?: string; title?: string }
+  | { kind: "line"; labels: string[]; series: { name: string; values: number[] }[]; xLabel?: string; yLabel?: string; title?: string }
+  | { kind: "scatter"; points: { x: number; y: number }[]; xLabel?: string; yLabel?: string; title?: string }
+  | { kind: "histogram"; bins: { min: number; max: number; count: number }[]; label?: string; title?: string }
+  | { kind: "pie"; labels: string[]; values: number[]; name?: string; title?: string };
 
 export type TableDto = {
   columns: { name: string; type: string }[];
@@ -41,6 +42,12 @@ export function parseChartSpec(value: unknown): ChartSpec | null {
         : [];
       if (bins.length === 0) return null;
       return { kind: "histogram", bins } as ChartSpec;
+    }
+    case "pie": {
+      const labels = Array.isArray(value.labels) ? value.labels.filter((l) => typeof l === "string") : [];
+      const values = Array.isArray(value.values) ? value.values.filter((v): v is number => typeof v === "number") : [];
+      if (labels.length === 0 || values.length === 0 || labels.length !== values.length) return null;
+      return { kind: "pie", labels, values } as ChartSpec;
     }
     default:
       return null;

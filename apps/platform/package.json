@@ -26,6 +26,7 @@
     "@tanstack/react-router": "latest",
     "@tanstack/react-router-devtools": "latest",
     "better-auth": "^1.6.25",
+    "echarts": "^6.1.0",
     "katex": "^0.18.1",
     "lucide-react": "^0.525.0",
     "react": "^19.2.0",
