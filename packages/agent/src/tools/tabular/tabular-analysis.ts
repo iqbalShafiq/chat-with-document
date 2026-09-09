@@ -7,15 +7,17 @@ export type AnalysisOperation =
   | {
       op: "aggregate";
       groupBy: string[];
-      metrics: { column: string; fn: "sum" | "mean" | "count" | "min" | "max" | "median" }[];
+      metrics: { column: string; fn: "sum" | "mean" | "count" | "min" | "max" | "median" | "count_distinct" | "stddev" }[];
     }
   | { op: "filter"; column: string; predicate: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains"; value: CellValue }
   | { op: "sort"; column: string; order: "asc" | "desc" }
-  | { op: "top_n"; column: string; n: number }
+  | { op: "top_n"; column: string; n: number; groupBy?: string[]; metric?: "sum" | "mean" | "count" | "min" | "max" | "median" }
   | { op: "correlation"; x: string; y: string }
   | { op: "trend"; x: string; y: string }
   | { op: "stats"; column: string }
-  | { op: "regression"; x: string; y: string; predictFor?: number[] };
+  | { op: "regression"; x: string; y: string; predictFor?: number[] }
+  | { op: "outliers"; column: string; method?: "iqr" | "zscore"; threshold?: number }
+  | { op: "crosstab"; x: string; y: string; metric?: "count" | "sum" | "mean"; valueColumn?: string };
 
 export type AnalysisResult = {
   operation: string;
@@ -28,7 +30,10 @@ const DEFAULT_LIMITS = { maxRows: 500 };
 
 function columnIndex(sheet: TabularSheet, name: string): number {
   const index = sheet.columns.findIndex((c) => c.name === name);
-  if (index < 0) throw new Error(`Unknown column: ${name}`);
+  if (index < 0) {
+    const available = sheet.columns.map((c) => `"${c.name}"`).join(", ") || "(no columns)";
+    throw new Error(`Unknown column: "${name}". Available columns: ${available}.`);
+  }
   return index;
 }
 
@@ -185,6 +190,8 @@ export function runAnalysis(
           else if (m.fn === "mean") metricCells.push(values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
           else if (m.fn === "min") metricCells.push(values.length ? Math.min(...values) : null);
           else if (m.fn === "max") metricCells.push(values.length ? Math.max(...values) : null);
+          else if (m.fn === "count_distinct") metricCells.push(new Set(bucket.map((row) => JSON.stringify(row[index] ?? null))).size);
+          else if (m.fn === "stddev") metricCells.push(values.length >= 2 ? sampleStdDev(values) : null);
           else metricCells.push(values.length ? median(values) : null);
         }
         outRows.push([...groupCells, ...metricCells]);
@@ -196,22 +203,19 @@ export function runAnalysis(
           type: "number" as const,
         })),
       ];
-      const firstMetric = operation.metrics[0];
       const chart: ChartSpec | undefined =
-        outRows.length > 0 && firstMetric
+        outRows.length > 0 && operation.metrics.length > 0
           ? {
               kind: "bar",
               labels: outRows.map((row) => String(row[0] ?? "")),
-              series: [
-                {
-                  name: `${firstMetric.fn}(${firstMetric.column})`,
-                  values: outRows.map((row) => {
-                    const v = row[groupIndexes.length]!;
-                    return typeof v === "number" ? v : 0;
-                  }),
-                },
-              ],
-              yLabel: firstMetric.column,
+              series: operation.metrics.map((metric, mi) => ({
+                name: `${metric.fn}(${metric.column})`,
+                values: outRows.map((row) => {
+                  const v = row[groupIndexes.length + mi]!;
+                  return typeof v === "number" ? v : 0;
+                }),
+              })),
+              ...(operation.metrics.length === 1 ? { yLabel: operation.metrics[0]!.column } : {}),
             }
           : undefined;
       return {
@@ -266,10 +270,18 @@ export function runAnalysis(
     case "trend": {
       const xi = columnIndex(sheet, operation.x);
       const yi = columnIndex(sheet, operation.y);
-      const points = sheet.rows
+      const numericPoints = sheet.rows
         .map((row) => ({ x: row[xi], y: row[yi] }))
         .filter((p): p is { x: number; y: number } => typeof p.x === "number" && typeof p.y === "number")
         .sort((a, b) => a.x - b.x);
+      const datePoints = sheet.rows
+        .map((row) => ({ x: row[xi], y: row[yi] }))
+        .filter((p): p is { x: string; y: number } => typeof p.x === "string" && /^\d{4}-\d{2}(-\d{2})?/.test(p.x) && typeof p.y === "number")
+        .sort((a, b) => a.x.localeCompare(b.x));
+      const points = numericPoints.length > 0 ? numericPoints.map((p) => ({ x: p.x as number | string, y: p.y })) : datePoints;
+      if (points.length === 0) {
+        return { operation: "trend", summary: `No usable trend data: "${operation.x}" must be numeric or ISO dates and "${operation.y}" numeric` };
+      }
       return {
         operation: "trend",
         summary: `${points.length} points sorted by ${operation.x}`,
@@ -277,6 +289,30 @@ export function runAnalysis(
       };
     }
     case "top_n": {
+      if (operation.groupBy && operation.groupBy.length > 0) {
+        const metric = operation.metric ?? "sum";
+        const grouped = runAnalysis(sheet, {
+          op: "aggregate",
+          groupBy: operation.groupBy,
+          metrics: [{ column: operation.column, fn: metric === "median" ? "median" : metric }],
+        }, limits);
+        if (!grouped.result) {
+          return { operation: "top_n", summary: `Could not group by ${operation.groupBy.join(", ")}` };
+        }
+        const valueIndex = operation.groupBy.length;
+        const ranked = [...grouped.result.rows]
+          .map((row) => ({ row, value: typeof row[valueIndex] === "number" ? (row[valueIndex] as number) : Number.NEGATIVE_INFINITY }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, operation.n);
+        const labels = ranked.map(({ row }) => row.slice(0, valueIndex).map((c) => String(c ?? "")).join(" · "));
+        const values = ranked.map(({ value }) => (value === Number.NEGATIVE_INFINITY ? 0 : value));
+        return {
+          operation: "top_n",
+          summary: `top ${ranked.length} of ${operation.groupBy.join(", ")} by ${metric}(${operation.column})`,
+          result: table(grouped.result.columns, ranked.map(({ row }) => row), { ...limits, maxRows: operation.n }),
+          chart: { kind: "bar", labels, series: [{ name: `${metric}(${operation.column})`, values }], yLabel: operation.column },
+        };
+      }
       const index = columnIndex(sheet, operation.column);
       const sorted = [...sheet.rows]
         .map((row) => row[index])
@@ -330,32 +366,190 @@ export function runAnalysis(
     case "profile": {
       if (operation.column) {
         const index = columnIndex(sheet, operation.column);
+        const columnType = sheet.columns[index]!.type;
         const values = numericValues(sheet, operation.column);
-        if (values.length === 0) {
+        if (columnType === "number" && values.length === 0) {
           return { operation: "profile", summary: `No usable data in column "${operation.column}" (all values non-numeric or empty)` };
         }
-        const sorted = [...values].sort((a, b) => a - b);
-        const min = sorted[0]!; const max = sorted[sorted.length - 1]!;
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))]!;
-        const binCount = Math.min(10, values.length);
-        const binWidth = (max - min) / binCount || 1;
-        const bins = Array.from({ length: binCount }, (_, i) => ({
-          min: min + i * binWidth,
-          max: min + (i + 1) * binWidth,
-          count: 0,
-        }));
-        for (const v of values) {
-          const b = Math.min(binCount - 1, Math.floor((v - min) / binWidth));
-          bins[b]!.count += 1;
+        if (values.length > 0 && (columnType === "number" || values.length >= sheet.rows.length / 2)) {
+          const sorted = [...values].sort((a, b) => a - b);
+          const min = sorted[0]!; const max = sorted[sorted.length - 1]!;
+          const mean = values.reduce((a, b) => a + b, 0) / values.length;
+          const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))]!;
+          const binCount = Math.min(10, values.length);
+          const binWidth = (max - min) / binCount || 1;
+          const bins = Array.from({ length: binCount }, (_, i) => ({
+            min: min + i * binWidth,
+            max: min + (i + 1) * binWidth,
+            count: 0,
+          }));
+          for (const v of values) {
+            const b = Math.min(binCount - 1, Math.floor((v - min) / binWidth));
+            bins[b]!.count += 1;
+          }
+          return {
+            operation: "profile",
+            summary: `${operation.column}: count=${values.length}, mean=${mean.toFixed(2)}, min=${min}, max=${max}, q1=${q(0.25).toFixed(2)}, median=${q(0.5).toFixed(2)}, q3=${q(0.75).toFixed(2)}`,
+            chart: { kind: "histogram", bins, label: operation.column },
+          };
         }
+        const counts = new Map<string, number>();
+        for (const row of sheet.rows) {
+          const key = String(row[index] ?? "(empty)");
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
         return {
           operation: "profile",
-          summary: `${operation.column}: count=${values.length}, mean=${mean.toFixed(2)}, min=${min}, max=${max}, q1=${q(0.25).toFixed(2)}, median=${q(0.5).toFixed(2)}, q3=${q(0.75).toFixed(2)}`,
-          chart: { kind: "histogram", bins, label: operation.column },
+          summary: `${operation.column}: ${counts.size} unique value${counts.size === 1 ? "" : "s"} in ${sheet.rows.length} rows`,
+          result: table(
+            [
+              { name: operation.column, type: "string" },
+              { name: "count", type: "number" },
+            ],
+            top.map(([value, count]) => [value, count]),
+            limits,
+          ),
+          chart: {
+            kind: "bar",
+            labels: top.map(([value]) => value),
+            series: [{ name: "count", values: top.map(([, count]) => count) }],
+            yLabel: "count",
+          },
         };
       }
-      return { operation: "profile", summary: `profile of all columns (n=${sheet.rows.length})`, result: table(sheet.columns, sheet.rows.slice(0, 10), limits) };
+      const overview = sheet.columns.map((column) => {
+        const cells = sheet.rows.map((row) => row[sheet.columns.indexOf(column)]);
+        const nonNull = cells.filter((c) => c !== null && c !== undefined && c !== "");
+        const unique = new Set(nonNull.map((c) => JSON.stringify(c))).size;
+        const counts = new Map<string, number>();
+        for (const cell of nonNull) {
+          const key = String(cell);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        return [
+          column.name,
+          column.type,
+          sheet.rows.length - nonNull.length,
+          unique,
+          top ? `${top[0]} (${top[1]})` : "",
+        ] as CellValue[];
+      });
+      return {
+        operation: "profile",
+        summary: `profile of ${sheet.columns.length} columns (n=${sheet.rows.length})`,
+        result: table(
+          [
+            { name: "column", type: "string" },
+            { name: "type", type: "string" },
+            { name: "nulls", type: "number" },
+            { name: "unique", type: "number" },
+            { name: "top value", type: "string" },
+          ],
+          overview,
+          limits,
+        ),
+      };
+    }
+    case "outliers": {
+      const values = numericValues(sheet, operation.column);
+      if (values.length < 4) {
+        return { operation: "outliers", summary: `Not enough numeric data in "${operation.column}" to detect outliers` };
+      }
+      const method = operation.method ?? "iqr";
+      const index = columnIndex(sheet, operation.column);
+      const flagged = new Set<number>();
+      if (method === "zscore") {
+        const threshold = operation.threshold ?? 3;
+        const avg = seriesMean(values);
+        const stdDev = sampleStdDev(values, avg);
+        if (!(stdDev > 0)) {
+          return { operation: "outliers", summary: `No spread in "${operation.column}" (stddev is 0)` };
+        }
+        sheet.rows.forEach((row, i) => {
+          const v = row[index];
+          if (typeof v === "number" && Math.abs((v - avg) / stdDev) > threshold) flagged.add(i);
+        });
+        const rows = [...flagged].map((i) => sheet.rows[i]!);
+        return {
+          operation: "outliers",
+          summary: `${rows.length} outlier${rows.length === 1 ? "" : "s"} in "${operation.column}" (z-score > ${threshold})`,
+          result: table(sheet.columns, rows, limits),
+        };
+      }
+      const sorted = [...values].sort((a, b) => a - b);
+      const q1 = quantileSorted(sorted, 0.25);
+      const q3 = quantileSorted(sorted, 0.75);
+      const iqr = q3 - q1;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
+      sheet.rows.forEach((row, i) => {
+        const v = row[index];
+        if (typeof v === "number" && (v < lower || v > upper)) flagged.add(i);
+      });
+      const rows = [...flagged].map((i) => sheet.rows[i]!);
+      return {
+        operation: "outliers",
+        summary: `${rows.length} outlier${rows.length === 1 ? "" : "s"} in "${operation.column}" (IQR fence [${lower.toFixed(2)}, ${upper.toFixed(2)}])`,
+        result: table(sheet.columns, rows, limits),
+      };
+    }
+    case "crosstab": {
+      const xi = columnIndex(sheet, operation.x);
+      const metric = operation.metric ?? "count";
+      const yi = columnIndex(sheet, operation.y);
+      const vi = operation.valueColumn ? columnIndex(sheet, operation.valueColumn) : -1;
+      if (metric !== "count" && vi < 0) {
+        throw new Error(`crosstab with metric "${metric}" needs valueColumn. Available columns: ${sheet.columns.map((c) => `"${c.name}"`).join(", ")}.`);
+      }
+      const xValues: string[] = [];
+      const yValues: string[] = [];
+      const seenX = new Set<string>();
+      const seenY = new Set<string>();
+      for (const row of sheet.rows) {
+        const xv = String(row[xi] ?? "(empty)");
+        const yv = String(row[yi] ?? "(empty)");
+        if (!seenX.has(xv)) {
+          seenX.add(xv);
+          xValues.push(xv);
+        }
+        if (!seenY.has(yv)) {
+          seenY.add(yv);
+          yValues.push(yv);
+        }
+      }
+      if (xValues.length > 30 || yValues.length > 30) {
+        throw new Error(`crosstab too large (${xValues.length} × ${yValues.length}). Filter to fewer categories first.`);
+      }
+      const cells = new Map<string, number[]>();
+      for (const row of sheet.rows) {
+        const key = `${String(row[xi] ?? "(empty)")}\u0001${String(row[yi] ?? "(empty)")}`;
+        const bucket = cells.get(key) ?? [];
+        if (metric !== "count") {
+          const v = vi >= 0 ? row[vi] : null;
+          if (typeof v === "number") bucket.push(v);
+        } else {
+          bucket.push(1);
+        }
+        cells.set(key, bucket);
+      }
+      const cellValue = (xv: string, yv: string): CellValue => {
+        const bucket = cells.get(`${xv}\u0001${yv}`) ?? [];
+        if (metric === "count") return bucket.length;
+        if (bucket.length === 0) return null;
+        if (metric === "sum") return bucket.reduce((a, b) => a + b, 0);
+        return bucket.reduce((a, b) => a + b, 0) / bucket.length;
+      };
+      return {
+        operation: "crosstab",
+        summary: `crosstab ${operation.x} × ${operation.y} (${metric}${metric === "count" ? "" : ` of ${operation.valueColumn}`})`,
+        result: table(
+          [{ name: `${operation.x} \\ ${operation.y}`, type: "string" }, ...yValues.map((y) => ({ name: y, type: "number" as const }))],
+          xValues.map((xv) => [xv, ...yValues.map((yv) => cellValue(xv, yv))]),
+          limits,
+        ),
+      };
     }
   }
 }
