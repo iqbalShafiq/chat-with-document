@@ -25,6 +25,7 @@ import {
   createWebSearchTools,
   deepResearchLimits,
   DATASET_INSTRUCTION,
+  DATASET_INSTRUCTION_RESEARCHER,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   buildImageGenerationInstruction,
@@ -1209,8 +1210,7 @@ export async function reconstructChatRunInput(input: {
             grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         })
       : [];
-    // Researcher copy: the parent deep_research approval owns this run, so the
-    // fetch gate is pre-approved here exactly like the research web tools.
+    // Nested researcher is already inside the parent deep_research approval.
     const researchDerivedTools = createDerivedDatasetTools({
       writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
       resolver: tabularResolver,
@@ -1235,7 +1235,7 @@ export async function reconstructChatRunInput(input: {
         | undefined,
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
-        DATASET_INSTRUCTION,
+        DATASET_INSTRUCTION_RESEARCHER,
         ...(catalogInstruction ? [catalogInstruction] : []),
         ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
       ],

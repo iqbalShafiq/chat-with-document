@@ -50,7 +50,8 @@ import {
 import type { BehaviorTrace, EvalCaseInput, SessionConfig } from "./types.js";
 import { createTabularAnalysisTools, type DatasetResolver } from "../tools/tabular/tools.js";
 import { createDerivedDatasetTools } from "../tools/tabular/derived-tools.js";
-import { DATASET_INSTRUCTION } from "../prompts/dataset-instructions.js";
+import { createChartTools } from "../tools/tabular/chart-tools.js";
+import { DATASET_INSTRUCTION, DATASET_INSTRUCTION_RESEARCHER } from "../prompts/dataset-instructions.js";
 import type { TabularSheet } from "../tools/tabular/types.js";
 import { assertReadOnlySql } from "../tools/tabular/sql.js";
 
@@ -316,8 +317,13 @@ export function buildEvalTools(
     writer: stubDerivedWriter,
     resolver: stubResolver,
     fetchFn: createStubDatasetFetch(),
+    lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+    webFetchGate: {
+      enabled: sessionConfig.webSearchEnabled === true,
+    },
   });
-  tools.push(...derivedTools);
+  const chartTools = createChartTools({ resolver: stubResolver });
+  tools.push(...derivedTools, ...chartTools);
   instructions.push(DATASET_INSTRUCTION);
 
   const webTools = createWebSearchTools({
@@ -337,6 +343,7 @@ export function buildEvalTools(
         ...documentTools,
         ...tabularTools,
         ...derivedTools,
+        ...chartTools,
         ...createWebSearchTools({
           tavilyClient: createStubTavilyClient(),
           enabled: true,
@@ -349,7 +356,7 @@ export function buildEvalTools(
       model: parentModel ?? createCompletionModel(evalConfig.model),
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
-        DATASET_INSTRUCTION,
+        DATASET_INSTRUCTION_RESEARCHER,
         ...(sessionConfig.hasDocuments ? [TABULAR_CATALOG_INSTRUCTION] : []),
         WEB_SEARCH_INSTRUCTION,
       ],

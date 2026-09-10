@@ -30,9 +30,23 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
     return rows.map((r) => r.documentId);
   }
 
+  async function scopedDocumentIds(): Promise<string[]> {
+    const frozen = await linkedDocumentIds();
+    const midRun = await prisma.document.findMany({
+      where: {
+        userId,
+        sessionId,
+        origin: { in: ["created", "fetched"] },
+        ...(projectId ? { projectId } : { projectId: null }),
+      },
+      select: { id: true },
+    });
+    return [...new Set([...frozen, ...midRun.map((d) => d.id)])];
+  }
+
   return {
     async listUploads() {
-      const ids = await linkedDocumentIds();
+      const ids = await scopedDocumentIds();
       if (ids.length === 0) return [];
       const docs = await prisma.document.findMany({
         where: { id: { in: ids }, tabularData: { not: Prisma.DbNull } },
@@ -120,7 +134,7 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
     },
 
     async listDocumentTables() {
-      const ids = await linkedDocumentIds();
+      const ids = await scopedDocumentIds();
       const out: Array<{
         documentId: string;
         filename: string;

@@ -1,4 +1,4 @@
-export const DATASET_INSTRUCTION = [
+const DATASET_CORE_LINES = [
   "Dataset sources: user uploads (origin 'upload'), agent-created or derived tables (origin 'created', filenames prefixed [derived] or [synthetic]), and URL downloads (origin 'fetched', filenames prefixed [downloaded]).",
   "Preferred flow: discover via read_dataset / extract_document_tables, verify with read_dataset, then analyze_dataset for computation or create_chart when you need a specific chart shape (multi-series, pie, titled).",
   "When the user asks for an example without data: use create_dataset and label the answer as a synthetic example; never present it as fact.",
@@ -10,6 +10,20 @@ export const DATASET_INSTRUCTION = [
   "When an existing dataset already answers the question: do NOT create a duplicate derivation, analyze it directly.",
   "With no source and no example request: stay out of the analysis tools and answer from context.",
   "analyze_dataset is the only analysis entrypoint: stats, regression, correlation, and every other numeric computation run against dataset columns. Never analyze pasted numbers directly — put them in a dataset first via create_dataset (with a sourceNote when they come from the web) and verify with read_dataset.",
-  "Charts render in two places: inside the tool result card, and anywhere in the answer text via ![chart:N]() where N counts the chart-producing tool calls in this turn in order (chart 1 = first chart). Place each chart where it supports the surrounding paragraph — never all at the top or all at the bottom. Only reference charts whose tool calls actually returned; never invent a chart number.",
+];
+
+/** Parent-chat only: N is 1-based among chart-producing parts of this assistant message. */
+export const DATASET_CHART_EMBED_INSTRUCTION =
+  "Charts render in two places: inside the tool result card, and anywhere in the answer text via ![chart:N]() where N counts the chart-producing tool outputs in this assistant message in order (chart 1 = first chart in this message, including a Deep Research report that forwarded a chart). Place each chart where it supports the surrounding paragraph — never all at the top or all at the bottom. Only reference charts whose tool calls actually returned; never invent a chart number.";
+
+export const DATASET_INSTRUCTION = [
+  ...DATASET_CORE_LINES,
+  DATASET_CHART_EMBED_INSTRUCTION,
+  "Deep Research reports: cite derived or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
+].join("\n");
+
+/** Nested researcher: no ![chart:N]() — parent numbering does not apply inside the report. */
+export const DATASET_INSTRUCTION_RESEARCHER = [
+  ...DATASET_CORE_LINES,
   "Deep Research reports: cite derived or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
 ].join("\n");

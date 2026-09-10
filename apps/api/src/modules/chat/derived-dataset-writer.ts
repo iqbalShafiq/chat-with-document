@@ -1,13 +1,11 @@
 import type { DerivedDocumentWriter } from "@anreal/agent";
 import {
-  MAX_DERIVED_PER_SESSION,
+  DATASET_WAIT_ATTEMPTS,
+  DATASET_WAIT_INTERVAL_MS,
   type DerivedDocumentOrigin,
 } from "@anreal/agent";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { createDerivedDocument } from "../documents/service.js";
-
-const READY_POLL_INTERVAL_MS = 1_000;
-const READY_POLL_ATTEMPTS = 60;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,8 +14,8 @@ function sleep(ms: number): Promise<void> {
 async function waitForReady(
   prisma: PrismaClient,
   documentId: string,
-  attempts = READY_POLL_ATTEMPTS,
-  intervalMs = READY_POLL_INTERVAL_MS,
+  attempts: number,
+  intervalMs: number,
 ): Promise<string> {
   let status = "queued";
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -33,7 +31,9 @@ async function waitForReady(
     }
     await sleep(intervalMs);
   }
-  return status;
+  throw new Error(
+    `Dataset is still ${status} after waiting (documentId ${documentId}). Do NOT create it again — call read_dataset later with the same documentId.`,
+  );
 }
 
 export type DerivedDatasetWriterDeps = {
@@ -41,23 +41,14 @@ export type DerivedDatasetWriterDeps = {
   sessionId: string;
   projectId?: string | null;
   prisma: PrismaClient;
+  wait?: { attempts?: number; intervalMs?: number };
 };
 
 export function createDerivedDatasetWriter(deps: DerivedDatasetWriterDeps): DerivedDocumentWriter {
+  const attempts = deps.wait?.attempts ?? DATASET_WAIT_ATTEMPTS;
+  const intervalMs = deps.wait?.intervalMs ?? DATASET_WAIT_INTERVAL_MS;
   return {
     async createDerived(input) {
-      const derivedCount = await deps.prisma.document.count({
-        where: {
-          userId: deps.userId,
-          sessionId: deps.sessionId,
-          origin: { in: ["created", "fetched"] },
-        },
-      });
-      if (derivedCount >= MAX_DERIVED_PER_SESSION) {
-        throw new Error(
-          `Too many derived datasets in this session (max ${MAX_DERIVED_PER_SESSION}). Delete an old [derived]/[downloaded] document or reuse an existing one.`,
-        );
-      }
       const created = await createDerivedDocument({
         userId: deps.userId,
         sessionId: deps.sessionId,
@@ -71,7 +62,7 @@ export function createDerivedDatasetWriter(deps: DerivedDatasetWriterDeps): Deri
         sourceNote: input.sourceNote ?? null,
         synthetic: input.synthetic,
       });
-      const status = await waitForReady(deps.prisma, created.id);
+      const status = await waitForReady(deps.prisma, created.id, attempts, intervalMs);
       return {
         documentId: created.id,
         filename: created.filename,

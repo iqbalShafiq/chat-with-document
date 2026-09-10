@@ -1,3 +1,5 @@
+import { extractDatasetChartBlocks } from "#/lib/data-analysis";
+
 export type FormattedField = {
   label: string;
   value: string;
@@ -723,28 +725,14 @@ function formatFetchDatasetOutput(output: unknown): FormattedSection {
   };
 }
 
-function extractDatasetChart(output: unknown): { chart: unknown; documentId: string | null } | null {
-  if (typeof output !== "string") return null;
-  const match = /```dataset-chart\s*\n([\s\S]*?)```/.exec(output);
-  if (!match) return null;
-  try {
-    const parsed: unknown = JSON.parse(match[1] ?? "");
-    if (!isRecord(parsed) || !isRecord(parsed.chart)) return null;
-    const documentId = asString(parsed.documentId);
-    return { chart: parsed.chart, documentId };
-  } catch {
-    return null;
-  }
-}
-
 function formatDeepResearchOutput(output: unknown): FormattedSection {
-  const chartBlock = extractDatasetChart(output);
+  const charts = extractDatasetChartBlocks(output);
   const text = typeof output === "string" ? output : "";
   const firstLine = text.split("\n").map((line) => line.trim()).find((line) => line.length > 0);
   return {
     title: "Result",
     summary: firstLine ? truncate(firstLine, 160) : "Deep Research report is ready",
-    ...(chartBlock ? { chart: chartBlock.chart } : {}),
+    ...(charts[0] !== undefined ? { chart: charts[0] } : {}),
   };
 }
 

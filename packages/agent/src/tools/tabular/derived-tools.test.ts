@@ -88,6 +88,7 @@ describe("fetch_dataset_from_url", () => {
     const tools = createDerivedDatasetTools({
       writer,
       fetchFn: (async () => new Response("a,b\n1,2\n", { headers: { "content-type": "text/csv" } })) as typeof fetch,
+      lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
     });
     const tool = tools.find((t) => t.name === "fetch_dataset_from_url")!;
     const out = strictJson(await tool.call({ url: "https://example.com/data.csv", reason: "need data for chart" }));
@@ -100,6 +101,7 @@ describe("fetch_dataset_from_url", () => {
     const tools = createDerivedDatasetTools({
       writer,
       fetchFn: (async () => new Response("<html></html>", { headers: { "content-type": "text/html" } })) as typeof fetch,
+      lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
     });
     const tool = tools.find((t) => t.name === "fetch_dataset_from_url")!;
     await expect(tool.call({ url: "https://example.com/page", reason: "test" })).rejects.toThrow("web_fetch");

@@ -22,6 +22,7 @@ import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
 import { ChartRegistryProvider } from "#/components/data/chart-registry-context";
+
 import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
@@ -1026,6 +1027,7 @@ export function ChatSession({
       });
       onStreamSettled();
       void refreshSessionImages();
+      void refreshSessionDocuments();
       // Anything still inflight at stream end was never acked — send-now
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();
@@ -1044,6 +1046,8 @@ export function ChatSession({
     focusComposer,
     onStreamSettled,
     queueActions,
+    refreshSessionDocuments,
+    refreshSessionImages,
     sessionDocuments,
     setComposerInputText,
   ]);

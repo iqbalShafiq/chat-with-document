@@ -125,18 +125,27 @@ describe("tabular resolver", () => {
   });
 
   it("resolves a derived document created mid-run within the same scope", async () => {
+    const listCalls: unknown[] = [];
     const prisma = prismaMock({
       document: {
-        findMany: async () => [
-          {
-            id: "d-derived",
-            filename: "[derived] ringkas.csv",
-            tabularData: { sheets: [{ name: "ringkas", columns: [], rows: [] }] },
-            origin: "created",
-            parentDocumentId: "d1",
-            originUrl: null,
-          },
-        ],
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          listCalls.push(args.where);
+          if (args.where.origin !== undefined) {
+            return [{ id: "d-derived" }];
+          }
+          const ids = (args.where.id as { in?: string[] } | undefined)?.in ?? [];
+          expect(ids).toEqual(expect.arrayContaining(["d-frozen", "d-derived"]));
+          return [
+            {
+              id: "d-derived",
+              filename: "[derived] ringkas.csv",
+              tabularData: { sheets: [{ name: "ringkas", columns: [], rows: [] }] },
+              origin: "created",
+              parentDocumentId: "d1",
+              originUrl: null,
+            },
+          ];
+        },
         findFirst: async (args: { where: Record<string, unknown> }) => {
           if (args.where.origin !== undefined) return { id: "d-derived" };
           return {
@@ -157,6 +166,7 @@ describe("tabular resolver", () => {
       prisma,
     });
     const uploads = await resolver.listUploads();
+    expect(listCalls.length).toBeGreaterThanOrEqual(2);
     expect(uploads[0]).toMatchObject({
       documentId: "d-derived",
       provenance: { origin: "created", parentDocumentId: "d1", originUrl: null },

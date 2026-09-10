@@ -1,7 +1,7 @@
 import { createTool, type AnyTool } from "@anvia/core";
 import { z } from "zod";
 import { runAnalysis, type AnalysisOperation } from "./tabular-analysis.js";
-import type { DatasetResolver } from "./tools.js";
+import { resolveSheetReady, type DatasetResolver } from "./tools.js";
 import type { DatasetRef } from "./types.js";
 import {
   createStaticToolDefinition,
@@ -79,7 +79,7 @@ export function createChartTools(deps: {
     ...createChartSpec,
     outputSchema: z.json(),
     execute: async ({ source, chart }) => {
-      const sheet = await deps.resolver.resolveSheet(source);
+      const sheet = await resolveSheetReady(deps.resolver, source);
       const limits = deps.limits?.maxRows === undefined ? undefined : { maxRows: deps.limits.maxRows };
       switch (chart.kind) {
         case "bar":

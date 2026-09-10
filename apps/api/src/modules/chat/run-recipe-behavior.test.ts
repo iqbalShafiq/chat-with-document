@@ -7,7 +7,6 @@ import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
 import {
   BASE_INSTRUCTIONS,
   CLARIFICATION_TOOL_DEFINITIONS,
-  DATA_ANALYSIS_TOOL_DEFINITIONS,
   CHART_TOOL_DEFINITIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
   DERIVED_TOOL_DEFINITIONS,
@@ -97,7 +96,6 @@ function recipe(overrides: Record<string, unknown> = {}) {
       : []),
   ];
   const toolDefinitions = [
-    ...DATA_ANALYSIS_TOOL_DEFINITIONS,
     ...TABULAR_TOOL_DEFINITIONS,
     ...CHART_TOOL_DEFINITIONS,
     ...DERIVED_TOOL_DEFINITIONS,

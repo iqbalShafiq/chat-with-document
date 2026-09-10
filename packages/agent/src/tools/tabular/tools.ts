@@ -240,7 +240,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function resolveSheetReady(
+export async function resolveSheetReady(
   resolver: DatasetResolver,
   source: DatasetRef,
   attempts = DATASET_WAIT_ATTEMPTS,

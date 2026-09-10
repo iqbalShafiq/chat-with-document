@@ -1,7 +1,3 @@
-import type { ToolDefinition } from "./static-definition.js";
-
-export const DATA_ANALYSIS_TOOL_DEFINITIONS: ToolDefinition[] = [];
-
 function assertSameLength(x: number[], y: number[]) {
   if (x.length !== y.length) {
     throw new Error(
@@ -93,6 +89,4 @@ function correlationStrength(r: number) {
   return "very_weak";
 }
 
-export function createDataAnalysisTools(): never[] {
-  return [];
-}
+

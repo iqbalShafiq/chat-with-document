@@ -15,7 +15,7 @@ import {
   MAX_FETCH_BYTES,
   MAX_SOURCE_NOTE_CHARS,
 } from "./limits.js";
-import { fetchTabularUrl } from "./fetch-csv.js";
+import { fetchTabularUrl, type DnsLookupResult } from "./fetch-csv.js";
 import { sheetFromRows, toCsvText } from "./parse-csv.js";
 import type { CellValue, DatasetRef, TabularSheet } from "./types.js";
 import type { DatasetResolver } from "./tools.js";
@@ -162,6 +162,7 @@ export function createDerivedDatasetTools(deps: {
   writer: DerivedDocumentWriter;
   resolver?: DatasetResolver | undefined;
   fetchFn?: typeof fetch | undefined;
+  lookupFn?: ((hostname: string) => Promise<DnsLookupResult[]>) | undefined;
   webFetchGate?: {
     enabled: boolean;
     hasGrant?: (toolName: "web_search" | "web_fetch") => Promise<boolean> | boolean;
@@ -218,9 +219,8 @@ export function createDerivedDatasetTools(deps: {
   const fetchDataset = createTool({
     ...fetchDatasetSpec,
     outputSchema: z.json(),
-    // Reuses the web-search approval gate (keputusan final #2): when the
-    // session web toggle is on (or a grant exists), no approval is needed;
-    // otherwise the run suspends with the caller's reason, like web_fetch.
+    // Same approval gate as web_fetch: skip when the session web toggle is on
+    // or a prior grant exists.
     requiresApproval: async (args: { reason: string }, _context: unknown) => {
       const gate = deps.webFetchGate;
       if (!gate) return { reason: args.reason };
@@ -233,7 +233,12 @@ export function createDerivedDatasetTools(deps: {
       return { reason: args.reason };
     },
     execute: async ({ url, name, reason }) => {
-      const fetched = await fetchTabularUrl(url, { fetchFn: deps.fetchFn, maxBytes: MAX_FETCH_BYTES, timeoutMs: FETCH_TIMEOUT_MS });
+      const fetched = await fetchTabularUrl(url, {
+        fetchFn: deps.fetchFn,
+        lookupFn: deps.lookupFn,
+        maxBytes: MAX_FETCH_BYTES,
+        timeoutMs: FETCH_TIMEOUT_MS,
+      });
       const isXlsxMagic = fetched.bytes.length >= 2 && fetched.bytes[0] === 0x50 && fetched.bytes[1] === 0x4b;
       const mediaType = FETCHABLE_MEDIA_TYPES.has(fetched.mediaType)
         ? fetched.mediaType

@@ -27,7 +27,7 @@ function setup(statuses: string[]) {
 describe("derived dataset writer", () => {
   it("waits until the document is ready", async () => {
     setup(["queued", "embedding_processing", "ready"]);
-    const writer = createDerivedDatasetWriter({ userId: "u", sessionId: "s", projectId: null, prisma: prismaMock as never });
+    const writer = createDerivedDatasetWriter({ userId: "u", sessionId: "s", projectId: null, prisma: prismaMock as never, wait: { intervalMs: 0 } });
     const result = await writer.createDerived({
       filename: "a.csv",
       mimeType: "text/csv",
@@ -38,9 +38,26 @@ describe("derived dataset writer", () => {
     expect(prismaMock.document.findUnique).toHaveBeenCalled();
   });
 
+  it("throws when ingest is still queued after the wait budget", async () => {
+    setup(["queued", "queued", "queued"]);
+    const writer = createDerivedDatasetWriter({
+      userId: "u",
+      sessionId: "s",
+      projectId: null,
+      prisma: prismaMock as never,
+      wait: { attempts: 2, intervalMs: 0 },
+    });
+    await expect(writer.createDerived({
+      filename: "a.csv",
+      mimeType: "text/csv",
+      data: new Uint8Array([1]),
+      origin: "created",
+    })).rejects.toThrow("still queued");
+  });
+
   it("surfaces ingest failure instead of hanging", async () => {
     setup(["failed"]);
-    const writer = createDerivedDatasetWriter({ userId: "u", sessionId: "s", projectId: null, prisma: prismaMock as never });
+    const writer = createDerivedDatasetWriter({ userId: "u", sessionId: "s", projectId: null, prisma: prismaMock as never, wait: { intervalMs: 0 } });
     await expect(writer.createDerived({
       filename: "a.csv",
       mimeType: "text/csv",

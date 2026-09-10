@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { prismaMock, putObjectMock, queueAddMock, ensureChatSessionMock } = vi.hoisted(() => ({
   prismaMock: {
     chatSession: { findFirst: vi.fn() },
-    document: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), aggregate: vi.fn() },
+    document: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), aggregate: vi.fn(), count: vi.fn() },
+    $transaction: vi.fn(),
   },
   putObjectMock: vi.fn(),
   queueAddMock: vi.fn(),
@@ -35,6 +36,8 @@ beforeEach(() => {
     filename: data.filename,
     sizeBytes: data.sizeBytes,
   }));
+  prismaMock.document.count.mockResolvedValue(0);
+  prismaMock.$transaction.mockImplementation(async (fn: (tx: typeof prismaMock) => unknown) => fn(prismaMock));
 });
 
 describe("prefixDerivedFilename", () => {
@@ -96,6 +99,20 @@ describe("createDerivedDocument", () => {
         origin: "created",
       }),
     ).rejects.toThrow("Do not create it again — call read_dataset");
+    expect(prismaMock.document.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a session that already has the derived cap", async () => {
+    prismaMock.document.count.mockResolvedValue(20);
+    await expect(
+      createDerivedDocument({
+        ...BASE,
+        filename: "more.csv",
+        mimeType: "text/csv",
+        data: new Uint8Array([1]),
+        origin: "created",
+      }),
+    ).rejects.toThrow("Too many derived datasets");
     expect(prismaMock.document.create).not.toHaveBeenCalled();
   });
 

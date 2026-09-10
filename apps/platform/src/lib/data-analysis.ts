@@ -14,8 +14,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 export function parseChartSpec(value: unknown): ChartSpec | null {
   if (!isRecord(value)) return null;
+  const title = optionalString(value.title);
   switch (value.kind) {
     case "bar":
     case "line": {
@@ -27,31 +32,73 @@ export function parseChartSpec(value: unknown): ChartSpec | null {
             )
         : [];
       if (series.length === 0) return null;
-      return { kind: value.kind, labels, series } as ChartSpec;
+      return {
+        kind: value.kind,
+        labels,
+        series,
+        ...(optionalString(value.xLabel) ? { xLabel: optionalString(value.xLabel) } : {}),
+        ...(optionalString(value.yLabel) ? { yLabel: optionalString(value.yLabel) } : {}),
+        ...(title ? { title } : {}),
+      };
     }
     case "scatter": {
       const points = Array.isArray(value.points)
         ? value.points.filter((p): p is { x: number; y: number } => isRecord(p) && typeof p.x === "number" && typeof p.y === "number")
         : [];
       if (points.length === 0) return null;
-      return { kind: "scatter", points } as ChartSpec;
+      return {
+        kind: "scatter",
+        points,
+        ...(optionalString(value.xLabel) ? { xLabel: optionalString(value.xLabel) } : {}),
+        ...(optionalString(value.yLabel) ? { yLabel: optionalString(value.yLabel) } : {}),
+        ...(title ? { title } : {}),
+      };
     }
     case "histogram": {
       const bins = Array.isArray(value.bins)
         ? value.bins.filter((b): b is { min: number; max: number; count: number } => isRecord(b) && typeof b.min === "number" && typeof b.max === "number" && typeof b.count === "number")
         : [];
       if (bins.length === 0) return null;
-      return { kind: "histogram", bins } as ChartSpec;
+      return {
+        kind: "histogram",
+        bins,
+        ...(optionalString(value.label) ? { label: optionalString(value.label) } : {}),
+        ...(title ? { title } : {}),
+      };
     }
     case "pie": {
       const labels = Array.isArray(value.labels) ? value.labels.filter((l) => typeof l === "string") : [];
       const values = Array.isArray(value.values) ? value.values.filter((v): v is number => typeof v === "number") : [];
       if (labels.length === 0 || values.length === 0 || labels.length !== values.length) return null;
-      return { kind: "pie", labels, values } as ChartSpec;
+      return {
+        kind: "pie",
+        labels,
+        values,
+        ...(optionalString(value.name) ? { name: optionalString(value.name) } : {}),
+        ...(title ? { title } : {}),
+      };
     }
     default:
       return null;
   }
+}
+
+/** Pull chart objects out of Deep Research ```dataset-chart fences. */
+export function extractDatasetChartBlocks(output: unknown): unknown[] {
+  if (typeof output !== "string") return [];
+  const charts: unknown[] = [];
+  const pattern = /```dataset-chart\s*\n([\s\S]*?)```/g;
+  for (const match of output.matchAll(pattern)) {
+    try {
+      const parsed: unknown = JSON.parse(match[1] ?? "");
+      if (isRecord(parsed) && parsed.chart !== undefined && parseChartSpec(parsed.chart)) {
+        charts.push(parsed.chart);
+      }
+    } catch {
+      // ignore malformed fences
+    }
+  }
+  return charts;
 }
 
 export function parseTableDto(value: unknown): TableDto | null {
