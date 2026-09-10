@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCsv, sheetFromRows, detectHeader, inferColumnTypes } from "./parse-csv.js";
+import { parseCsv, sheetFromRows, detectHeader, inferColumnTypes, toCsvText } from "./parse-csv.js";
 
 describe("parseCsv", () => {
   it("parses simple rows", () => {
@@ -56,5 +56,18 @@ describe("inferColumnTypes + sheetFromRows", () => {
       [1, "a"],
       [null, "b"],
     ]);
+  });
+});
+
+describe("toCsvText", () => {
+  it("roundtrips through parseCsv + sheetFromRows", () => {
+    const sheet = sheetFromRows("sales", [
+      ["region", "note", "revenue"],
+      ["east", 'says "hi", ok', "100"],
+      ["west", "line1\nline2", ""],
+    ]);
+    const reparsed = sheetFromRows("sales", parseCsv(toCsvText(sheet)));
+    expect(reparsed.columns).toEqual(sheet.columns);
+    expect(reparsed.rows).toEqual(sheet.rows);
   });
 });

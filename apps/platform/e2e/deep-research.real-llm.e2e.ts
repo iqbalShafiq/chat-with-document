@@ -203,3 +203,23 @@ test("P2-C13: Deep Research progress is visible while running", async ({ page })
   await expect(secondApproval).toHaveCount(0);
   await saveEvidence(page, "P2-C13");
 });
+
+test("P2-C14: Deep Research builds a derived dataset chart", async ({ page }) => {
+  test.setTimeout(720_000);
+  await openFreshChat(page);
+  await requireDeepResearch(page);
+  await setSwitch(page, "Deep Research", true);
+  await attachCorpus(page);
+  await sendMessage(
+    page,
+    "Call the deep_research tool now to compare the linked sales CSV with current authoritative web evidence. " +
+      "Inside the research, build a small derived summary with create_dataset, chart it with analyze_dataset, " +
+      "and embed the exact chart object in a ```dataset-chart block. Do not ask a clarification question. " +
+      "Return a cited comparison with the chart.",
+  );
+  await waitForStreaming(page);
+  await waitForRunDone(page, 600_000);
+  await expect(page.locator('[role="img"]').last()).toBeVisible();
+  await expect(page.locator("article").last()).toContainText(/source|citation|CSV/i);
+  await saveEvidence(page, "P2-C14");
+});

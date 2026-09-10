@@ -5,6 +5,7 @@ export type ChartSpec =
       series: { name: string; values: number[] }[];
       xLabel?: string;
       yLabel?: string;
+      title?: string;
     }
   | {
       kind: "line";
@@ -12,6 +13,8 @@ export type ChartSpec =
       series: { name: string; values: number[] }[];
       xLabel?: string;
       yLabel?: string;
+      title?: string;
     }
-  | { kind: "scatter"; points: { x: number; y: number }[]; xLabel?: string; yLabel?: string }
-  | { kind: "histogram"; bins: { min: number; max: number; count: number }[]; label?: string };
+  | { kind: "scatter"; points: { x: number; y: number }[]; xLabel?: string; yLabel?: string; title?: string }
+  | { kind: "histogram"; bins: { min: number; max: number; count: number }[]; label?: string; title?: string }
+  | { kind: "pie"; labels: string[]; values: number[]; name?: string; title?: string };

@@ -21,6 +21,8 @@ import { AnimatedStatusText } from "#/components/chat/animated-status-text";
 import { ApprovalPanel } from "#/components/chat/approval-panel";
 import { ChatMessageRow } from "#/components/chat/chat-message-row";
 import { CitationSessionProvider } from "#/components/chat/citation-session-context";
+import { ChartRegistryProvider } from "#/components/data/chart-registry-context";
+
 import { ClarificationPanel } from "#/components/chat/clarification-panel";
 import { EmptyState } from "#/components/chat/empty-state";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
@@ -1025,6 +1027,7 @@ export function ChatSession({
       });
       onStreamSettled();
       void refreshSessionImages();
+      void refreshSessionDocuments();
       // Anything still inflight at stream end was never acked — send-now
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();
@@ -1043,6 +1046,8 @@ export function ChatSession({
     focusComposer,
     onStreamSettled,
     queueActions,
+    refreshSessionDocuments,
+    refreshSessionImages,
     sessionDocuments,
     setComposerInputText,
   ]);
@@ -1711,9 +1716,25 @@ export function ChatSession({
       // attachments with their documentIds pre-uploaded at queue time, so
       // the non-image filter finds nothing here and the prelinked ids pass
       // through untouched.
+      // The server authorizes the request against the session's linked
+      // documents (including agent-created ones), so always send the union
+      // of the current session list and fresh uploads — never just uploads.
+      // Re-list first: agent-created documents land server-side without the
+      // client knowing, and a stale list would fail the server check.
+      let sessionLinkedIds = sessionDocuments.map((doc) => doc.id);
+      try {
+        const fresh = await listSessionDocuments(sessionId);
+        setSessionDocuments(fresh);
+        sessionLinkedIds = fresh.map((doc) => doc.id);
+      } catch {
+        // Keep the previous list if refresh fails.
+      }
       const documentIds = [
-        ...input.documentIds,
-        ...(await uploadComposerDocuments(input.attachments)),
+        ...new Set([
+          ...sessionLinkedIds,
+          ...input.documentIds,
+          ...(await uploadComposerDocuments(input.attachments)),
+        ]),
       ];
 
       // Active image context: attach pinned images to the user bubble so
@@ -1823,6 +1844,7 @@ export function ChatSession({
       projectId,
       refreshActiveContext,
       refreshSessionImages,
+      sessionDocuments,
       sessionId,
       uploadComposerDocuments,
     ],
@@ -2372,6 +2394,7 @@ export function ChatSession({
   return (
     <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      <ChartRegistryProvider messages={chat.messages}>
       {/*
         ComposerPrimitive.Root wraps chat + right doc rail so attachments share context.
         When docs exist, rail opens (272px = left sidebar) and pushes chat left.
@@ -2686,6 +2709,7 @@ export function ChatSession({
           />
         </div>
       </ComposerPrimitive.Root>
+      </ChartRegistryProvider>
       </CitationSessionProvider>
     </ChatProvider>
   );

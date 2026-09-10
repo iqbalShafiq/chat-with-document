@@ -63,12 +63,25 @@ describe("Deep Research server wiring", () => {
     expect(openapi).not.toContain('"context7Available"');
   });
 
-  it("gives the nested researcher the default data-analysis tools", () => {
+  it("gives the nested researcher the tabular and derived dataset tools", () => {
     const input = source("./build-run-input.ts");
 
     expect(input).toMatch(
-      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.createDataAnalysisTools\(\),\s*\.\.\.tabularTools,/s,
+      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,\s*\.\.\.chartTools,/s,
     );
+    expect(input).not.toContain("...createDataAnalysisTools(),");
+  });
+
+  it("gives the nested researcher the dataset instruction and derived tools before the parent seal", () => {
+    const input = source("./build-run-input.ts");
+
+    expect(input).toContain("createDerivedDatasetTools");
+    expect(input).toContain("DERIVED_TOOL_DEFINITIONS");
+    expect(input).toContain("DATASET_INSTRUCTION");
+    const derivedPush = input.indexOf("...derivedTools");
+    const seal = input.indexOf("sealRetrievalAfterDeepResearch(");
+    expect(derivedPush).toBeGreaterThan(-1);
+    expect(seal).toBeGreaterThan(derivedPush);
   });
 
   it("seals parent retrieval after Deep Research starts without wrapping nested tools", () => {

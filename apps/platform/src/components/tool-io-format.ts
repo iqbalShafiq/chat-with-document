@@ -1,3 +1,5 @@
+import { extractDatasetChartBlocks } from "#/lib/data-analysis";
+
 export type FormattedField = {
   label: string;
   value: string;
@@ -310,170 +312,6 @@ function formatFindDocumentsOutput(output: unknown): FormattedSection {
         : countLabel(results.length, "document"),
     items: items.length > 0 ? items : undefined,
     emptyText: results.length === 0 ? "No documents matched this query." : undefined,
-  };
-}
-
-function formatDescriptiveStatsInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const values = asArray(record.values).filter(
-    (v): v is number => typeof v === "number" && Number.isFinite(v),
-  );
-  const fields: FormattedField[] = [
-    { label: "Values", value: countLabel(values.length, "number") },
-  ];
-
-  if (values.length > 0) {
-    fields.push({
-      label: "Range",
-      value: `${formatNumber(Math.min(...values))} – ${formatNumber(Math.max(...values))}`,
-    });
-  }
-
-  return { title: "Request", fields };
-}
-
-function formatDescriptiveStatsOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-  const keys: Array<[string, string]> = [
-    ["count", "Count"],
-    ["mean", "Mean"],
-    ["median", "Median"],
-    ["min", "Min"],
-    ["max", "Max"],
-    ["range", "Range"],
-    ["stdDev", "Std. deviation"],
-    ["variance", "Variance"],
-    ["q1", "Q1"],
-    ["q3", "Q3"],
-    ["iqr", "IQR"],
-    ["skewness", "Skewness"],
-  ];
-
-  for (const [key, label] of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      fields.push({ label, value: formatNumber(value) });
-    } else if (value === null && key === "skewness") {
-      fields.push({ label, value: "n/a" });
-    }
-  }
-
-  const mode = record.mode;
-  if (Array.isArray(mode) && mode.length > 0) {
-    fields.push({
-      label: "Mode",
-      value: mode
-        .filter((v): v is number => typeof v === "number")
-        .map((v) => formatNumber(v))
-        .join(", "),
-    });
-  } else if (mode === null) {
-    fields.push({ label: "Mode", value: "none" });
-  }
-
-  return {
-    title: "Result",
-    summary: "Descriptive statistics",
-    fields,
-  };
-}
-
-function formatPearsonInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const x = asArray(record.x);
-  const y = asArray(record.y);
-  return {
-    title: "Request",
-    fields: [
-      { label: "Series X", value: countLabel(x.length, "value") },
-      { label: "Series Y", value: countLabel(y.length, "value") },
-    ],
-  };
-}
-
-function formatPearsonOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-
-  const correlation = asNumber(record.correlation);
-  if (correlation !== null) {
-    fields.push({ label: "Correlation (r)", value: formatNumber(correlation) });
-  }
-
-  const direction = asString(record.direction);
-  if (direction) fields.push({ label: "Direction", value: humanizeKey(direction) });
-
-  const strength = asString(record.strength);
-  if (strength) fields.push({ label: "Strength", value: humanizeKey(strength) });
-
-  const rSquared = asNumber(record.rSquared);
-  if (rSquared !== null) fields.push({ label: "R²", value: formatNumber(rSquared) });
-
-  const n = asNumber(record.n);
-  if (n !== null) fields.push({ label: "Pairs", value: String(n) });
-
-  return {
-    title: "Result",
-    summary: "Pearson correlation",
-    fields,
-  };
-}
-
-function formatLinearRegressionInput(input: unknown): FormattedSection {
-  const record = isRecord(input) ? input : {};
-  const x = asArray(record.x);
-  const predictFor = asArray(record.predictFor);
-  const fields: FormattedField[] = [
-    { label: "Observations", value: countLabel(x.length, "point") },
-  ];
-  if (predictFor.length > 0) {
-    fields.push({
-      label: "Predictions",
-      value: countLabel(predictFor.length, "value"),
-    });
-  }
-  return { title: "Request", fields };
-}
-
-function formatLinearRegressionOutput(output: unknown): FormattedSection {
-  const record = isRecord(output) ? output : {};
-  const fields: FormattedField[] = [];
-
-  const equation = asString(record.equation);
-  if (equation) fields.push({ label: "Equation", value: equation });
-
-  const slope = asNumber(record.slope);
-  if (slope !== null) fields.push({ label: "Slope", value: formatNumber(slope) });
-
-  const intercept = asNumber(record.intercept);
-  if (intercept !== null) {
-    fields.push({ label: "Intercept", value: formatNumber(intercept) });
-  }
-
-  const rSquared = asNumber(record.rSquared);
-  if (rSquared !== null) fields.push({ label: "R²", value: formatNumber(rSquared) });
-
-  const residualStdDev = asNumber(record.residualStdDev);
-  if (residualStdDev !== null) {
-    fields.push({
-      label: "Residual std. dev.",
-      value: formatNumber(residualStdDev),
-    });
-  }
-
-  const predictions = asArray(record.predictions);
-  if (predictions.length > 0) {
-    fields.push({
-      label: "Predictions",
-      value: countLabel(predictions.length, "value"),
-    });
-  }
-
-  return {
-    title: "Result",
-    summary: "Linear regression",
-    fields,
   };
 }
 
@@ -854,6 +692,50 @@ function formatExtractDocumentTablesOutput(output: unknown): FormattedSection {
   };
 }
 
+function formatCreateDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const filename = asString(record.filename) ?? "dataset";
+  const rowCount = asNumber(record.rowCount) ?? 0;
+  const origin = asString(record.origin) ?? "created";
+  const fields: FormattedField[] = [
+    { label: "Origin", value: origin },
+    { label: "Status", value: asString(record.status) ?? "queued" },
+  ];
+  const parent = asString(record.parentDocumentId);
+  if (parent) fields.push({ label: "Derived from", value: shortId(parent) });
+  return {
+    title: "Result",
+    summary: `Dataset created: ${filename} · ${rowCount} rows`,
+    fields,
+  };
+}
+
+function formatFetchDatasetOutput(output: unknown): FormattedSection {
+  const record = isRecord(output) ? output : {};
+  const filename = asString(record.filename) ?? "dataset";
+  const originUrl = asString(record.originUrl);
+  return {
+    title: "Result",
+    summary: `Dataset downloaded: ${filename}`,
+    fields: [
+      { label: "Origin", value: "fetched" },
+      ...(originUrl ? [{ label: "Source URL", value: originUrl }] : []),
+      { label: "Status", value: asString(record.status) ?? "queued" },
+    ],
+  };
+}
+
+function formatDeepResearchOutput(output: unknown): FormattedSection {
+  const charts = extractDatasetChartBlocks(output);
+  const text = typeof output === "string" ? output : "";
+  const firstLine = text.split("\n").map((line) => line.trim()).find((line) => line.length > 0);
+  return {
+    title: "Result",
+    summary: firstLine ? truncate(firstLine, 160) : "Deep Research report is ready",
+    ...(charts[0] !== undefined ? { chart: charts[0] } : {}),
+  };
+}
+
 export function formatToolInput(
   toolName: string,
   input: unknown,
@@ -865,12 +747,6 @@ export function formatToolInput(
       return formatGetDocumentNextPageInput(input);
     case "find_documents":
       return formatFindDocumentsInput(input);
-    case "descriptive_stats":
-      return formatDescriptiveStatsInput(input);
-    case "pearson_correlation":
-      return formatPearsonInput(input);
-    case "linear_regression":
-      return formatLinearRegressionInput(input);
     case "get_document_page_images":
       return formatGetDocumentPageImagesInput(input);
     case "web_search":
@@ -897,12 +773,6 @@ export function formatToolOutput(
       return formatGetDocumentNextPageOutput(output);
     case "find_documents":
       return formatFindDocumentsOutput(output);
-    case "descriptive_stats":
-      return formatDescriptiveStatsOutput(output);
-    case "pearson_correlation":
-      return formatPearsonOutput(output);
-    case "linear_regression":
-      return formatLinearRegressionOutput(output);
     case "get_document_page_images":
       return formatGetDocumentPageImagesOutput(output);
     case "web_search":
@@ -916,11 +786,18 @@ export function formatToolOutput(
     case "read_dataset":
       return formatReadDatasetOutput(output);
     case "analyze_dataset":
+    case "create_chart":
       return formatAnalyzeDatasetOutput(output);
     case "query_dataset_sql":
       return formatQueryDatasetSqlOutput(output);
     case "extract_document_tables":
       return formatExtractDocumentTablesOutput(output);
+    case "create_dataset":
+      return formatCreateDatasetOutput(output);
+    case "fetch_dataset_from_url":
+      return formatFetchDatasetOutput(output);
+    case "deep_research":
+      return formatDeepResearchOutput(output);
     default:
       return formatGenericOutput(output);
   }

@@ -30,13 +30,27 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
     return rows.map((r) => r.documentId);
   }
 
+  async function scopedDocumentIds(): Promise<string[]> {
+    const frozen = await linkedDocumentIds();
+    const midRun = await prisma.document.findMany({
+      where: {
+        userId,
+        sessionId,
+        origin: { in: ["created", "fetched"] },
+        ...(projectId ? { projectId } : { projectId: null }),
+      },
+      select: { id: true },
+    });
+    return [...new Set([...frozen, ...midRun.map((d) => d.id)])];
+  }
+
   return {
     async listUploads() {
-      const ids = await linkedDocumentIds();
+      const ids = await scopedDocumentIds();
       if (ids.length === 0) return [];
       const docs = await prisma.document.findMany({
         where: { id: { in: ids }, tabularData: { not: Prisma.DbNull } },
-        select: { id: true, filename: true, tabularData: true },
+        select: { id: true, filename: true, tabularData: true, origin: true, parentDocumentId: true, originUrl: true },
       });
       return docs.map((doc) => {
         const sheets = ((doc.tabularData as TabularData | null)?.sheets ?? []).map((s) => ({
@@ -44,19 +58,59 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
           columns: s.columns,
           rowCount: s.rows.length,
         }));
-        return { documentId: doc.id, filename: doc.filename, sheets };
+        return {
+          documentId: doc.id,
+          filename: doc.filename,
+          sheets,
+          provenance: {
+            origin: doc.origin ?? "upload",
+            parentDocumentId: doc.parentDocumentId ?? null,
+            originUrl: doc.originUrl ?? null,
+          },
+        };
       });
+    },
+
+    async getDatasetReadiness(ref) {
+      const doc = await prisma.document.findFirst({
+        where: { id: ref.documentId, userId, ...(projectId ? { projectId } : {}) },
+        select: { status: true, filename: true },
+      });
+      if (!doc) return { ready: false as const, status: "missing", filename: "" };
+      if (doc.status !== "ready") {
+        return { ready: false as const, status: doc.status, filename: doc.filename };
+      }
+      return { ready: true as const };
     },
 
     async resolveSheet(ref) {
       if (deps.documentIds !== undefined && !deps.documentIds.includes(ref.documentId)) {
-        throw new Error("Dataset not found or empty");
+        // Derived/fetched documents created mid-run are not in the frozen id
+        // list. Admit them when they belong to this user+session scope (and
+        // project corpus) and carry agent provenance; anything else stays out.
+        const ownDerived = await prisma.document.findFirst({
+          where: {
+            id: ref.documentId,
+            userId,
+            sessionId,
+            origin: { in: ["created", "fetched"] },
+            ...(projectId ? { projectId } : { projectId: null }),
+          },
+          select: { id: true },
+        });
+        if (!ownDerived) throw new Error("Dataset not found or empty");
       }
       if (ref.type === "upload") {
         const doc = await prisma.document.findFirst({
           where: { id: ref.documentId, userId, ...(projectId ? { projectId } : {}) },
-          select: { tabularData: true },
+          select: { tabularData: true, status: true, filename: true },
         });
+        if (!doc) throw new Error("Dataset not found or empty");
+        if (doc.status !== "ready") {
+          throw new Error(
+            `Dataset "${doc.filename}" is not ready yet (status: ${doc.status}). Wait for ingest to finish, then call read_dataset again.`,
+          );
+        }
         const sheets = (doc?.tabularData as TabularData | null)?.sheets ?? [];
         if (ref.sheet) {
           const match = sheets.find((s) => s.name === ref.sheet);
@@ -80,7 +134,7 @@ export function createTabularResolver(deps: TabularResolverDeps): DatasetResolve
     },
 
     async listDocumentTables() {
-      const ids = await linkedDocumentIds();
+      const ids = await scopedDocumentIds();
       const out: Array<{
         documentId: string;
         filename: string;

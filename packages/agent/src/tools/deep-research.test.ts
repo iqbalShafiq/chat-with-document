@@ -338,6 +338,7 @@ describe("buildDeepResearchPrompt", () => {
     expect(prompt).toContain("Before finalizing, verify each material claim");
     expect(prompt).toContain("Do not make more than 4 search or fetch calls");
     expect(prompt).toContain("[[cite:N]]");
+    expect(prompt).toContain("```dataset-chart");
   });
 
   it("requires the parent to delegate first and preserve the citation contract", () => {
@@ -484,6 +485,35 @@ describe("boundDeepResearchTools", () => {
     },
   );
 
+  it("counts fetch_dataset_from_url as retrieval but not create_dataset", async () => {
+    const fetchCall = vi.fn(async () => ({ documentId: "d1" }));
+    const createCall = vi.fn(async () => ({ documentId: "d2" }));
+    const progress: DeepResearchProgress[] = [];
+    const [fetchWrapped, createWrapped] = boundDeepResearchTools(
+      [
+        { name: "fetch_dataset_from_url", definition: vi.fn(), call: fetchCall } as unknown as AnyTool,
+        { name: "create_dataset", definition: vi.fn(), call: createCall } as unknown as AnyTool,
+      ],
+      1,
+      (event) => {
+        progress.push(event);
+      },
+    );
+
+    await fetchWrapped!.call({ url: "https://example.com/a.csv" });
+    const exhausted = await fetchWrapped!.call({ url: "https://example.com/b.csv" });
+    expect(fetchCall).toHaveBeenCalledTimes(1);
+    expect(exhausted).toMatchObject({ error: expect.stringContaining("budget exhausted") });
+
+    await createWrapped!.call({ name: "x", columns: ["a"], rows: [["1"]] });
+    await createWrapped!.call({ name: "y", columns: ["a"], rows: [["2"]] });
+    expect(createCall).toHaveBeenCalledTimes(2);
+    const stats = progress.filter((event) => event.stats).map((event) => event.stats!.retrievalCalls);
+    expect(stats).toContain(1);
+    expect(JSON.stringify(progress)).toContain("Fetching a dataset from URL");
+    expect(JSON.stringify(progress)).toContain("Creating a derived dataset");
+  });
+
   it("reports safe retrieval activity without exposing tool arguments", async () => {
     const progress: DeepResearchProgress[] = [];
     const wrapped = boundDeepResearchTools(
@@ -525,7 +555,7 @@ describe("boundDeepResearchTools", () => {
     const wrapped = boundDeepResearchTools(
       [
         {
-          name: "descriptive_stats",
+          name: "analyze_dataset",
           definition: vi.fn(),
           call: vi.fn(async () => {
             throw new Error("analysis failed");

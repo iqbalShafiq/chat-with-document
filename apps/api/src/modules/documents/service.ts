@@ -1,8 +1,9 @@
 import { prisma } from "../../utils/prisma.js";
+import type { Prisma } from "../../generated/prisma/client.js";
 import { buildDocumentR2Key, putObject } from "../../lib/r2.js";
 import { getDocumentIngestQueue } from "../../lib/queue.js";
 import { ensureChatSession } from "../chat/chat-session.js";
-import { deleteDocumentChunks, normalizePageImages } from "@anreal/agent";
+import { deleteDocumentChunks, MAX_DERIVED_PER_SESSION, normalizePageImages } from "@anreal/agent";
 import { deleteObject, getObjectBuffer } from "../../lib/r2.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -146,18 +147,40 @@ export class DocumentProjectMismatchError extends Error {
   }
 }
 
-export async function createDocumentUpload(input: {
+async function resolveUploadProjectId(input: {
   userId: string;
   sessionId: string;
-  filename: string;
-  mimeType: string;
-  data: Uint8Array;
-  /**
-   * Optional client hint. Existing ChatSession.projectId is source of truth;
-   * mismatch is rejected. Used only when creating a brand-new session row.
-   */
   projectId?: string | null;
-}) {
+}): Promise<string | null> {
+  const clientProjectId =
+    typeof input.projectId === "string" && input.projectId.trim()
+      ? input.projectId.trim()
+      : null;
+
+  const existingChat = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+
+  if (existingChat) {
+    if (
+      clientProjectId !== null &&
+      clientProjectId !== existingChat.projectId
+    ) {
+      throw new DocumentProjectMismatchError();
+    }
+    return existingChat.projectId;
+  }
+
+  const session = await ensureChatSession({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    projectId: clientProjectId,
+  });
+  return session.projectId;
+}
+
+function assertUploadPayload(input: { filename: string; mimeType: string; data: Uint8Array }) {
   if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
     throw new Error("Unsupported file type");
   }
@@ -167,37 +190,23 @@ export async function createDocumentUpload(input: {
   if (input.data.byteLength === 0) {
     throw new Error("File is empty");
   }
+}
 
-  const clientProjectId =
-    typeof input.projectId === "string" && input.projectId.trim()
-      ? input.projectId.trim()
-      : null;
+type PersistQueuedDocumentInput = {
+  userId: string;
+  sessionId: string;
+  filename: string;
+  mimeType: string;
+  data: Uint8Array;
+  projectId: string | null;
+  origin?: "upload" | "created" | "fetched";
+  parentDocumentId?: string | null;
+  originUrl?: string | null;
+  sourceNote?: string | null;
+  beforeCreate?: (tx: Prisma.TransactionClient) => Promise<void>;
+};
 
-  // ChatSession membership wins. Never let client override an existing row.
-  const existingChat = await prisma.chatSession.findFirst({
-    where: { id: input.sessionId, userId: input.userId },
-    select: { projectId: true },
-  });
-
-  let projectId: string | null;
-  if (existingChat) {
-    if (
-      clientProjectId !== null &&
-      clientProjectId !== existingChat.projectId
-    ) {
-      throw new DocumentProjectMismatchError();
-    }
-    projectId = existingChat.projectId;
-  } else {
-    // First touch: register session with optional client project (validated inside).
-    const session = await ensureChatSession({
-      sessionId: input.sessionId,
-      userId: input.userId,
-      projectId: clientProjectId,
-    });
-    projectId = session.projectId;
-  }
-
+async function persistAndQueueDocument(input: PersistQueuedDocumentInput) {
   const storage = await getUserStorageUsage(input.userId);
   if (storage.usedBytes + input.data.byteLength > storage.maxBytes) {
     throw new DocumentStorageQuotaError({
@@ -207,24 +216,43 @@ export async function createDocumentUpload(input: {
     });
   }
 
-  const document = await prisma.document.create({
-    data: {
-      userId: input.userId,
-      sessionId: input.sessionId,
-      projectId,
-      filename: input.filename,
-      mimeType: input.mimeType,
-      sizeBytes: input.data.byteLength,
-      r2Key: "",
-      status: "uploading",
-      sessionLinks: {
-        create: {
-          sessionId: input.sessionId,
-          userId: input.userId,
-        },
+  const provenance =
+    input.origin && input.origin !== "upload"
+      ? {
+          origin: input.origin,
+          parentDocumentId: input.parentDocumentId ?? null,
+          originUrl: input.originUrl ?? null,
+          sourceNote: input.sourceNote ?? null,
+        }
+      : {};
+
+  const createData = {
+    userId: input.userId,
+    sessionId: input.sessionId,
+    projectId: input.projectId,
+    filename: input.filename,
+    mimeType: input.mimeType,
+    sizeBytes: input.data.byteLength,
+    r2Key: "",
+    status: "uploading" as const,
+    ...provenance,
+    sessionLinks: {
+      create: {
+        sessionId: input.sessionId,
+        userId: input.userId,
       },
     },
-  });
+  };
+
+  const document = input.beforeCreate
+    ? await prisma.$transaction(
+        async (tx) => {
+          await input.beforeCreate!(tx);
+          return tx.document.create({ data: createData });
+        },
+        { isolationLevel: "Serializable" },
+      )
+    : await prisma.document.create({ data: createData });
 
   const r2Key = buildDocumentR2Key(
     input.userId,
@@ -253,11 +281,135 @@ export async function createDocumentUpload(input: {
     { jobId: document.id },
   );
 
+  return document;
+}
+
+export async function createDocumentUpload(input: {
+  userId: string;
+  sessionId: string;
+  filename: string;
+  mimeType: string;
+  data: Uint8Array;
+  /**
+   * Optional client hint. Existing ChatSession.projectId is source of truth;
+   * mismatch is rejected. Used only when creating a brand-new session row.
+   */
+  projectId?: string | null;
+}) {
+  assertUploadPayload(input);
+  const projectId = await resolveUploadProjectId(input);
+  const document = await persistAndQueueDocument({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    filename: input.filename,
+    mimeType: input.mimeType,
+    data: input.data,
+    projectId,
+  });
   return {
     id: document.id,
     filename: document.filename,
     status: "queued" as const,
     sizeBytes: document.sizeBytes,
+  };
+}
+
+export type DerivedDocumentOrigin = "created" | "fetched";
+
+const DERIVED_FILENAME_PREFIX: Record<DerivedDocumentOrigin, string> = {
+  created: "[derived] ",
+  fetched: "[downloaded] ",
+};
+
+export function prefixDerivedFilename(filename: string, origin: DerivedDocumentOrigin, synthetic: boolean): string {
+  if (origin === "created" && synthetic) return `[synthetic] ${filename}`;
+  return `${DERIVED_FILENAME_PREFIX[origin]}${filename}`;
+}
+
+export async function createDerivedDocument(input: {
+  userId: string;
+  sessionId: string;
+  filename: string;
+  mimeType: string;
+  data: Uint8Array;
+  origin: DerivedDocumentOrigin;
+  parentDocumentId?: string | null;
+  originUrl?: string | null;
+  sourceNote?: string | null;
+  synthetic?: boolean;
+  projectId?: string | null;
+}) {
+  assertUploadPayload(input);
+  const projectId = await resolveUploadProjectId(input);
+
+  let parentDocumentId: string | null = null;
+  if (input.parentDocumentId) {
+    const parent = await prisma.document.findFirst({
+      where: {
+        id: input.parentDocumentId,
+        userId: input.userId,
+        status: "ready",
+        ...(projectId ? { projectId } : { projectId: null }),
+      },
+      select: { id: true, tabularData: true },
+    });
+    if (!parent || !parent.tabularData) {
+      throw new Error("Parent dataset not found or not ready in this session");
+    }
+    parentDocumentId = parent.id;
+  }
+
+  const filename = prefixDerivedFilename(input.filename, input.origin, input.synthetic === true);
+
+  const document = await persistAndQueueDocument({
+    userId: input.userId,
+    sessionId: input.sessionId,
+    filename,
+    mimeType: input.mimeType,
+    data: input.data,
+    projectId,
+    origin: input.origin,
+    parentDocumentId,
+    originUrl: input.originUrl ?? null,
+    sourceNote: input.sourceNote ?? null,
+    beforeCreate: async (tx) => {
+      const derivedCount = await tx.document.count({
+        where: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+          origin: { in: ["created", "fetched"] },
+        },
+      });
+      if (derivedCount >= MAX_DERIVED_PER_SESSION) {
+        throw new Error(
+          `Too many derived datasets in this session (max ${MAX_DERIVED_PER_SESSION}). Delete an old [derived]/[downloaded] document or reuse an existing one.`,
+        );
+      }
+      const duplicate = await tx.document.findFirst({
+        where: {
+          userId: input.userId,
+          sessionId: input.sessionId,
+          filename,
+          status: { not: "ready" },
+        },
+        select: { id: true, status: true },
+      });
+      if (duplicate) {
+        throw new Error(
+          `A derived document named "${filename}" is already ${duplicate.status} (id ${duplicate.id}). Do not create it again — call read_dataset with that documentId and wait for readiness.`,
+        );
+      }
+    },
+  });
+
+  return {
+    id: document.id,
+    filename: document.filename,
+    status: "queued" as const,
+    sizeBytes: document.sizeBytes,
+    origin: input.origin,
+    parentDocumentId,
+    originUrl: input.originUrl ?? null,
   };
 }
 
@@ -328,6 +480,9 @@ export async function resolveActiveDocuments(input: {
           sizeBytes: true,
           mimeType: true,
           pageCount: true,
+          origin: true,
+          parentDocumentId: true,
+          originUrl: true,
         },
       },
     },
@@ -362,6 +517,9 @@ export type UserDocumentLibraryItem = {
   originSessionId: string;
   projectId: string | null;
   projectName: string | null;
+  origin: string;
+  parentDocumentId: string | null;
+  originUrl: string | null;
 };
 
 export type UserDocumentLibraryPage = {
@@ -454,6 +612,9 @@ export async function listUserDocuments(input: {
       createdAt: true,
       sessionId: true,
       projectId: true,
+      origin: true,
+      parentDocumentId: true,
+      originUrl: true,
       project: { select: { name: true } },
     },
   });
@@ -474,6 +635,9 @@ export async function listUserDocuments(input: {
       originSessionId: doc.sessionId,
       projectId: doc.projectId,
       projectName: doc.project?.name ?? null,
+      origin: doc.origin ?? "upload",
+      parentDocumentId: doc.parentDocumentId ?? null,
+      originUrl: doc.originUrl ?? null,
     })),
     nextCursor:
       hasMore && last

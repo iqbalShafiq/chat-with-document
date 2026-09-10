@@ -6,6 +6,7 @@ import { groundednessSuite } from "./groundedness.suite.js";
 import { documentToolsSuite } from "./document-tools.suite.js";
 import { tabularAnalysisSuite } from "./tabular-analysis.suite.js";
 import { deepResearchSuite } from "./deep-research.suite.js";
+import { derivedDatasetsSuite } from "./derived-datasets.suite.js";
 
 export const EVAL_SUITES = {
   "approval-image": approvalImageSuite,
@@ -16,4 +17,5 @@ export const EVAL_SUITES = {
   "document-tools": documentToolsSuite,
   "tabular-analysis": tabularAnalysisSuite,
   "deep-research": deepResearchSuite,
+  "derived-datasets": derivedDatasetsSuite,
 } as const;

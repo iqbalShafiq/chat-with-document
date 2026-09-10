@@ -49,7 +49,9 @@ import {
 } from "./stub-scopes.js";
 import type { BehaviorTrace, EvalCaseInput, SessionConfig } from "./types.js";
 import { createTabularAnalysisTools, type DatasetResolver } from "../tools/tabular/tools.js";
-import { createDataAnalysisTools } from "../tools/data-analysis.js";
+import { createDerivedDatasetTools } from "../tools/tabular/derived-tools.js";
+import { createChartTools } from "../tools/tabular/chart-tools.js";
+import { DATASET_INSTRUCTION, DATASET_INSTRUCTION_RESEARCHER } from "../prompts/dataset-instructions.js";
 import type { TabularSheet } from "../tools/tabular/types.js";
 import { assertReadOnlySql } from "../tools/tabular/sql.js";
 
@@ -118,7 +120,10 @@ const TABULAR_EMPTY_INSTRUCTION =
   "Do not call read_dataset, analyze_dataset, query_dataset_sql, or extract_document_tables — " +
   "answer from general knowledge or say the dataset is missing.)";
 
-function createStubTabularResolver(hasDocuments: boolean): DatasetResolver {
+function createStubTabularResolver(
+  hasDocuments: boolean,
+  derivedSheets?: Map<string, import("../tools/tabular/types.js").TabularSheet>,
+): DatasetResolver {
   if (!hasDocuments) {
     return {
       async listUploads() {
@@ -150,6 +155,10 @@ function createStubTabularResolver(hasDocuments: boolean): DatasetResolver {
     },
     async resolveSheet(ref) {
       if (ref.type === "document_table") return DOCUMENT_TABLE_SHEET;
+      if (ref.type === "upload") {
+        const derived = derivedSheets?.get(ref.documentId);
+        if (derived) return derived;
+      }
       return TABULAR_FIXTURE_SHEET;
     },
     async listDocumentTables() {
@@ -204,6 +213,61 @@ function createStubSqlRunner() {
   };
 }
 
+const STUB_DERIVED_SHEET: TabularSheet = {
+  name: "derived",
+  columns: [
+    { name: "region", type: "string" },
+    { name: "revenue", type: "number" },
+  ],
+  rows: [
+    ["East", 1200],
+    ["West", 800],
+  ],
+};
+
+function createStubDerivedWriter(hasDocuments: boolean) {
+  const sheets = new Map<string, import("../tools/tabular/types.js").TabularSheet>();
+  const writer = {
+    sheets,
+    createDerived: async (input: {
+      filename: string;
+      origin: "created" | "fetched";
+      data?: Uint8Array;
+    }) => {
+      if (!hasDocuments && input.origin === "created" && input.filename.includes("parent")) {
+        throw new Error("Parent dataset not found or not ready in this session");
+      }
+      const documentId = input.origin === "fetched" ? "doc-derived-url" : "doc-derived-new";
+      if (input.data) {
+        try {
+          const { parseCsv, sheetFromRows } = await import("../tools/tabular/parse-csv.js");
+          const text = new TextDecoder().decode(input.data);
+          if (text.includes(",") || text.includes("\n")) {
+            sheets.set(documentId, sheetFromRows("derived", parseCsv(text)));
+          }
+        } catch {
+          // Fall back to the fixture sheet below.
+        }
+      }
+      if (!sheets.has(documentId)) sheets.set(documentId, STUB_DERIVED_SHEET);
+      return {
+        documentId,
+        filename: input.filename,
+        origin: input.origin,
+        status: "queued",
+      };
+    },
+    countDerived: async () => 0,
+  };
+  return writer;
+}
+
+function createStubDatasetFetch(): typeof fetch {
+  return (async () => new Response("region,revenue\nEast,1200\nWest,800\n", {
+    headers: { "content-type": "text/csv" },
+  })) as unknown as typeof fetch;
+}
+
 export function buildEvalTools(
   sessionConfig: SessionConfig,
   parentModel?: CompletionModel,
@@ -236,12 +300,31 @@ export function buildEvalTools(
   // Tabular tools are always registered (mirrors build-run-input.ts which wires
   // them unconditionally); the stub resolver returns empty/error when no dataset
   // is linked so the "abstain" case can be scored without crashes.
+  // Derived dataset tools use an in-memory writer in eval: create/fetch return
+  // a stub document id whose sheet round-trips the submitted bytes, so the
+  // create -> read -> analyze flow can be scored without prisma/R2/ingest.
+  const stubDerivedWriter = createStubDerivedWriter(Boolean(sessionConfig.hasDocuments));
+  const stubResolver = createStubTabularResolver(Boolean(sessionConfig.hasDocuments), stubDerivedWriter.sheets);
   const tabularTools = createTabularAnalysisTools({
-      resolver: createStubTabularResolver(Boolean(sessionConfig.hasDocuments)),
-      sqlRunner: createStubSqlRunner() as never,
-    });
+    resolver: stubResolver,
+    sqlRunner: createStubSqlRunner() as never,
+    derived: { writer: stubDerivedWriter },
+  });
   tools.push(...tabularTools);
   instructions.push(sessionConfig.hasDocuments ? TABULAR_CATALOG_INSTRUCTION : TABULAR_EMPTY_INSTRUCTION);
+
+  const derivedTools = createDerivedDatasetTools({
+    writer: stubDerivedWriter,
+    resolver: stubResolver,
+    fetchFn: createStubDatasetFetch(),
+    lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+    webFetchGate: {
+      enabled: sessionConfig.webSearchEnabled === true,
+    },
+  });
+  const chartTools = createChartTools({ resolver: stubResolver });
+  tools.push(...derivedTools, ...chartTools);
+  instructions.push(DATASET_INSTRUCTION);
 
   const webTools = createWebSearchTools({
     tavilyClient: createStubTavilyClient(),
@@ -259,7 +342,8 @@ export function buildEvalTools(
       [
         ...documentTools,
         ...tabularTools,
-        ...createDataAnalysisTools(),
+        ...derivedTools,
+        ...chartTools,
         ...createWebSearchTools({
           tavilyClient: createStubTavilyClient(),
           enabled: true,
@@ -272,6 +356,7 @@ export function buildEvalTools(
       model: parentModel ?? createCompletionModel(evalConfig.model),
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
+        DATASET_INSTRUCTION_RESEARCHER,
         ...(sessionConfig.hasDocuments ? [TABULAR_CATALOG_INSTRUCTION] : []),
         WEB_SEARCH_INSTRUCTION,
       ],

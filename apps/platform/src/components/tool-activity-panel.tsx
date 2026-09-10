@@ -2,6 +2,7 @@ import type { UIMessagePart } from "@anvia/client";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DataChart } from "#/components/data/data-chart";
+import { useThreadChartSpecs } from "#/components/data/chart-registry-context";
 import { DataTable } from "#/components/data/data-table";
 import { parseChartSpec, parseTableDto } from "#/lib/data-analysis";
 import { useImagePreview } from "#/components/images/image-preview";
@@ -20,9 +21,6 @@ const TOOL_LABELS: Record<string, string> = {
   find_documents: "Finding documents",
   search_document_pages: "Searching document pages",
   get_document_next_page: "Reading next page",
-  descriptive_stats: "Computing statistics",
-  pearson_correlation: "Computing correlation",
-  linear_regression: "Fitting regression",
   get_document_page_images: "Inspecting page images",
   web_search: "Searching the web",
   web_fetch: "Fetching web page",
@@ -32,7 +30,10 @@ const TOOL_LABELS: Record<string, string> = {
   read_dataset: "Reading dataset",
   analyze_dataset: "Analyzing data",
   query_dataset_sql: "Querying data (SQL)",
+  create_chart: "Drawing chart",
   extract_document_tables: "Extracting tables",
+  create_dataset: "Creating dataset",
+  fetch_dataset_from_url: "Fetching dataset from URL",
   view_image: "Viewing image",
   request_clarification: "Asking for clarification",
   "resolve-library-id": "Looking up library",
@@ -59,6 +60,14 @@ function statusLabel(part: ToolPart) {
 function ChartFromSection({ chart }: { chart: unknown }) {
   const spec = parseChartSpec(chart);
   return spec ? <DataChart spec={spec} /> : null;
+}
+
+function useThreadChartIndex(chart: unknown): number | undefined {
+  const specs = useThreadChartSpecs();
+  if (chart === undefined) return undefined;
+  const key = JSON.stringify(chart);
+  const index = specs.findIndex((entry) => JSON.stringify(entry) === key);
+  return index >= 0 ? index + 1 : undefined;
 }
 
 function TableFromSection({ table }: { table: unknown }) {
@@ -129,6 +138,7 @@ function ToolSectionView({ section }: { section: FormattedSection }) {
       ) : null}
       {section.chart !== undefined ? <ChartFromSection chart={section.chart} /> : null}
       {section.table !== undefined ? <TableFromSection table={section.table} /> : null}
+      <ChartEmbedHint chart={section.chart} />
       {section.imageLoading ? (
         <div
           className="flex items-center gap-2.5"
@@ -194,6 +204,16 @@ function ToolResultImages({ output }: { output: unknown }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function ChartEmbedHint({ chart }: { chart: unknown }) {
+  const chartIndex = useThreadChartIndex(chart);
+  if (chart === undefined || chartIndex === undefined) return null;
+  return (
+    <p className="text-[11px] text-text-faint">
+      Embed in the answer with <code className="chat-md-inline-code">![chart:{chartIndex}]()</code>
+    </p>
   );
 }
 

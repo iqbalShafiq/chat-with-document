@@ -94,3 +94,24 @@ export function sheetFromRows(name: string, rawRows: string[][]): TabularSheet {
   const rows = dataRows.map((row) => coerceRow(row, types));
   return { name, columns, rows };
 }
+
+function escapeCsvField(value: string): string {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function cellToText(cell: CellValue): string {
+  if (cell === null) return "";
+  if (typeof cell === "boolean") return cell ? "true" : "false";
+  return String(cell);
+}
+
+// Serialize a sheet back to RFC 4180 CSV text (inverse of parseCsv + sheetFromRows).
+export function toCsvText(sheet: TabularSheet): string {
+  const lines = [
+    sheet.columns.map((c) => escapeCsvField(c.name)).join(","),
+    ...sheet.rows.map((row) =>
+      sheet.columns.map((_, i) => escapeCsvField(cellToText(row[i] ?? null))).join(","),
+    ),
+  ];
+  return `${lines.join("\n")}\n`;
+}

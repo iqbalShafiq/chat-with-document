@@ -10,7 +10,6 @@ import {
   createChunkSearchService,
   createClarificationTool,
   createCompletionModel,
-  createDataAnalysisTools,
   boundDeepResearchTools,
   createDeepResearchCompletionGuard,
   createDocumentTools,
@@ -20,20 +19,25 @@ import {
   createRememberUserProfileTool,
   createSqlJsRunner,
   createTabularAnalysisTools,
+  createChartTools,
+  createDerivedDatasetTools,
   createTavilyClient,
   createWebSearchTools,
   deepResearchLimits,
+  DATASET_INSTRUCTION,
+  DATASET_INSTRUCTION_RESEARCHER,
   DOCUMENT_IMAGE_INSTRUCTION,
   hasProfileContent,
   buildImageGenerationInstruction,
   BASE_INSTRUCTIONS,
   CLARIFICATION_TOOL_DEFINITIONS,
-  DATA_ANALYSIS_TOOL_DEFINITIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  CHART_TOOL_DEFINITIONS,
+  DERIVED_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
@@ -57,6 +61,7 @@ import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
 import { createTabularResolver } from "./tabular-resolver.js";
+import { createDerivedDatasetWriter } from "./derived-dataset-writer.js";
 import { getImageStore } from "../images/service.js";
 import {
   formatContextSnippetBlock,
@@ -768,6 +773,7 @@ export async function resolveChatAgentRecipe(
 
   const deepResearchAvailable = webSearchAvailable || hasActiveDocuments;
   if (deepResearchAvailable) instructions.push(DEEP_RESEARCH_INSTRUCTION);
+  instructions.push(DATASET_INSTRUCTION);
 
   const activeImageRows = await readActiveImages({
     userId: input.userId,
@@ -840,8 +846,9 @@ export async function resolveChatAgentRecipe(
       : []),
   ];
   const toolDefinitions = [
-    ...DATA_ANALYSIS_TOOL_DEFINITIONS,
     ...TABULAR_TOOL_DEFINITIONS,
+    ...CHART_TOOL_DEFINITIONS,
+    ...DERIVED_TOOL_DEFINITIONS,
     ...(hasActiveDocuments ? DOCUMENT_TOOL_DEFINITIONS : []),
     ...(profilingEnabled ? PROFILE_TOOL_DEFINITIONS : []),
     ...(webSearchAvailable ? WEB_SEARCH_TOOL_DEFINITIONS : []),
@@ -1112,19 +1119,32 @@ export async function reconstructChatRunInput(input: {
 
   const instructions = [...recipe.instructionFragments];
   const contextBlocks = [...profileContext];
-  const tabularTools = createTabularAnalysisTools({
-    resolver: createTabularResolver({
-      userId,
-      sessionId,
-      projectId,
-      documentIds: recipe.documents.ids,
-      prisma,
-    }),
-    sqlRunner: createSqlJsRunner(),
+  const derivedWriter = createDerivedDatasetWriter({ userId, sessionId, projectId, prisma });
+  const tabularResolver = createTabularResolver({
+    userId,
+    sessionId,
+    projectId,
+    documentIds: recipe.documents.ids,
+    prisma,
   });
+  const tabularTools = createTabularAnalysisTools({
+    resolver: tabularResolver,
+    sqlRunner: createSqlJsRunner(),
+    derived: { writer: derivedWriter },
+  });
+  const derivedTools = createDerivedDatasetTools({
+    writer: derivedWriter,
+    resolver: tabularResolver,
+    webFetchGate: {
+      enabled: webSearchEnabled,
+      hasGrant: (name) => grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+    },
+  });
+  const chartTools = createChartTools({ resolver: tabularResolver });
   const tools = [
-    ...createDataAnalysisTools(),
     ...tabularTools,
+    ...chartTools,
+    ...derivedTools,
     ...documentTools,
     ...(profileTool ? [profileTool] : []),
   ];
@@ -1190,12 +1210,19 @@ export async function reconstructChatRunInput(input: {
             grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         })
       : [];
+    // Nested researcher is already inside the parent deep_research approval.
+    const researchDerivedTools = createDerivedDatasetTools({
+      writer: createDerivedDatasetWriter({ userId, sessionId, projectId, prisma }),
+      resolver: tabularResolver,
+      webFetchGate: { enabled: true },
+    });
     const researchTools = boundDeepResearchTools(
       [
         ...documentTools,
         ...researchWebTools,
-        ...createDataAnalysisTools(),
         ...tabularTools,
+        ...researchDerivedTools,
+        ...chartTools,
       ],
       recipe.budgets.deepResearchMaxSearches,
       onDeepResearchProgress,
@@ -1208,7 +1235,8 @@ export async function reconstructChatRunInput(input: {
         | undefined,
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
-      ...(catalogInstruction ? [catalogInstruction] : []),
+        DATASET_INSTRUCTION_RESEARCHER,
+        ...(catalogInstruction ? [catalogInstruction] : []),
         ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
       ],
       additionalContext: contextBlocks,

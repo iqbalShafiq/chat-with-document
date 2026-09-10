@@ -34,4 +34,15 @@ describe("createSqlJsRunner", () => {
       runner(sheet, "DELETE FROM sales", {}),
     ).rejects.toThrow();
   });
+
+  it("exposes the sheet under the stable alias t", async () => {
+    const sheet: TabularSheet = {
+      name: "my sheet",
+      columns: [{ name: "revenue", type: "number" }],
+      rows: [[10], [20]],
+    };
+    const runner = createSqlJsRunner();
+    const result = await runner(sheet, "SELECT SUM(revenue) AS total FROM t", {});
+    expect(result.rows).toEqual([[30]]);
+  });
 });

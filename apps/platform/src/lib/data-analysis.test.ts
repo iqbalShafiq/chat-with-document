@@ -6,6 +6,27 @@ describe("parseChartSpec", () => {
     const spec = parseChartSpec({ kind: "bar", labels: ["a"], series: [{ name: "s", values: [1] }] });
     expect(spec?.kind).toBe("bar");
   });
+  it("keeps title and axis labels", () => {
+    const spec = parseChartSpec({
+      kind: "bar",
+      labels: ["a"],
+      series: [{ name: "s", values: [1] }],
+      title: "Revenue",
+      xLabel: "region",
+      yLabel: "sales",
+    });
+    expect(spec).toMatchObject({ kind: "bar", title: "Revenue", xLabel: "region", yLabel: "sales" });
+  });
+  it("keeps pie name and title", () => {
+    const spec = parseChartSpec({
+      kind: "pie",
+      labels: ["a"],
+      values: [1],
+      name: "share",
+      title: "Mix",
+    });
+    expect(spec).toMatchObject({ kind: "pie", name: "share", title: "Mix" });
+  });
   it("rejects malformed specs", () => {
     expect(parseChartSpec({ kind: "nope" })).toBeNull();
     expect(parseChartSpec(null)).toBeNull();

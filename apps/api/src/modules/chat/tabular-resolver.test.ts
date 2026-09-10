@@ -41,14 +41,20 @@ describe("tabular resolver", () => {
   });
 
   it("rejects a sheet outside the frozen document scope", async () => {
-    const documentLookup = async () => ({
-      id: "d-other",
-      filename: "other.csv",
-      mimeType: "text/csv",
-      tabularData: {
-        sheets: [{ name: "sheet", columns: [], rows: [] }],
-      },
-    });
+    const documentLookup = async (args: { where: Record<string, unknown> }) => {
+      // Gate for mid-run derived documents: d-other is a plain upload from
+      // another session, so it must not pass.
+      if (args.where.origin !== undefined) return null;
+      return {
+        id: "d-other",
+        filename: "other.csv",
+        mimeType: "text/csv",
+        status: "ready",
+        tabularData: {
+          sheets: [{ name: "sheet", columns: [], rows: [] }],
+        },
+      };
+    };
     const prisma = prismaMock({
       document: { findFirst: documentLookup },
       documentSession: { findMany: async () => [] },
@@ -73,6 +79,7 @@ describe("tabular resolver", () => {
           id: "d1",
           filename: "sales.csv",
           mimeType: "text/csv",
+          status: "ready",
           tabularData: {
             sheets: [
               {
@@ -115,5 +122,67 @@ describe("tabular resolver", () => {
     });
     expect(sheet.columns[0]!.name).toBe("a");
     expect(sheet.rows[0]).toEqual([1, 2]);
+  });
+
+  it("resolves a derived document created mid-run within the same scope", async () => {
+    const listCalls: unknown[] = [];
+    const prisma = prismaMock({
+      document: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          listCalls.push(args.where);
+          if (args.where.origin !== undefined) {
+            return [{ id: "d-derived" }];
+          }
+          const ids = (args.where.id as { in?: string[] } | undefined)?.in ?? [];
+          expect(ids).toEqual(expect.arrayContaining(["d-frozen", "d-derived"]));
+          return [
+            {
+              id: "d-derived",
+              filename: "[derived] ringkas.csv",
+              tabularData: { sheets: [{ name: "ringkas", columns: [], rows: [] }] },
+              origin: "created",
+              parentDocumentId: "d1",
+              originUrl: null,
+            },
+          ];
+        },
+        findFirst: async (args: { where: Record<string, unknown> }) => {
+          if (args.where.origin !== undefined) return { id: "d-derived" };
+          return {
+            id: "d-derived",
+            filename: "[derived] ringkas.csv",
+            status: "ready",
+            tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
+          };
+        },
+      },
+      documentSession: { findMany: async () => [{ documentId: "d-derived" }] },
+    });
+    const resolver = createTabularResolver({
+      userId: "u1",
+      sessionId: "s1",
+      projectId: null,
+      documentIds: ["d-frozen"],
+      prisma,
+    });
+    const uploads = await resolver.listUploads();
+    expect(listCalls.length).toBeGreaterThanOrEqual(2);
+    expect(uploads[0]).toMatchObject({
+      documentId: "d-derived",
+      provenance: { origin: "created", parentDocumentId: "d1", originUrl: null },
+    });
+    const sheet = await resolver.resolveSheet({ type: "upload", documentId: "d-derived" });
+    expect(sheet.name).toBe("ringkas");
+  });
+
+  it("reports a not-ready dataset distinctly from a missing one", async () => {
+    const prisma = prismaMock({
+      document: {
+        findFirst: async () => ({ id: "d-new", filename: "[synthetic] x.csv", status: "queued", tabularData: null }),
+      },
+      documentSession: { findMany: async () => [] },
+    });
+    const resolver = createTabularResolver({ userId: "u1", sessionId: "s1", projectId: null, prisma });
+    await expect(resolver.resolveSheet({ type: "upload", documentId: "d-new" })).rejects.toThrow("not ready yet");
   });
 });
