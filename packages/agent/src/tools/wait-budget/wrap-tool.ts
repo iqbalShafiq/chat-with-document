@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AnyTool, ToolCallContext } from "@anvia/core";
 import { waitBudgetForTool } from "./limits.js";
-import { InFlightToolRegistry, type ObserveResult } from "./registry.js";
+import { InFlightToolRegistry } from "./registry.js";
+import type { ObserveResult } from "./types.js";
 import { isControlToolName, type ToolWaitProgress } from "./types.js";
 
 export type ToolCallIdGate = {
@@ -69,9 +70,9 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
       });
       return finishObserve(observed, deps, toolCallId, tool.name);
     },
+    ...(tool.requiresApproval !== undefined ? { requiresApproval: tool.requiresApproval } : {}),
+    ...(tool.parseInput ? { parseInput: (args: Parameters<NonNullable<AnyTool["parseInput"]>>[0]) => tool.parseInput!(args) } : {}),
   };
-  if (tool.requiresApproval !== undefined) wrapped.requiresApproval = tool.requiresApproval;
-  if (tool.parseInput) wrapped.parseInput = (args) => tool.parseInput!(args);
   return wrapped;
 }
 

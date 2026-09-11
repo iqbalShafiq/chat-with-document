@@ -242,6 +242,7 @@ function createDependencies(
       projectId: null,
       sessionId: SESSION_ID,
       userId: USER_ID,
+      waitRegistry: { abortAll() {} },
     } as never),
     releaseActiveRun: async (_sessionId, streamId) => {
       releases.push(streamId);
@@ -675,6 +676,7 @@ describe("Anvia v1 chat worker", () => {
         projectId: null,
         sessionId: SESSION_ID,
         userId: USER_ID,
+        waitRegistry: { abortAll() {} },
       } as never),
       removeFailedPromptRow,
     });

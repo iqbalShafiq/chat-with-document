@@ -135,6 +135,11 @@ import {
   type DeepResearchActivityState,
 } from "#/lib/chat/deep-research-activity";
 import {
+  reduceToolWaitProgress,
+  ToolWaitProgressProvider,
+} from "#/lib/chat/tool-wait-progress";
+import type { ToolWaitProgress } from "#/lib/chat/client-data";
+import {
   persistImageGenSettings,
   persistImageGenerationEnabled,
   persistSelectedModel,
@@ -421,6 +426,7 @@ export function ChatSession({
   const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
     initialDeepResearchActivityState,
   );
+  const [toolWait, setToolWait] = useState<Record<string, ToolWaitProgress>>({});
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -657,6 +663,9 @@ export function ChatSession({
               reduceDeepResearchProgress(state, event.data),
             );
             return;
+          case "toolWaitProgress":
+            setToolWait((state) => reduceToolWaitProgress(state, event.data));
+            return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
               (entry) => entry.id === event.data.clientMessageId,
@@ -714,6 +723,7 @@ export function ChatSession({
       switch (event.type) {
         case "message_end":
           setDeepResearch(resetDeepResearchActivity());
+          setToolWait({});
           void refreshContextUsage();
           return;
         case "error":
@@ -1067,6 +1077,7 @@ export function ChatSession({
     setIsIngesting(false);
     setContextUsage(null);
     setDeepResearch(resetDeepResearchActivity());
+    setToolWait({});
     setPreviousRunError(false);
     if (sessionScopeDisabled) return;
     void refreshSessionDocuments();
@@ -2394,6 +2405,7 @@ export function ChatSession({
   return (
     <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      <ToolWaitProgressProvider value={toolWait}>
       <ChartRegistryProvider messages={chat.messages}>
       {/*
         ComposerPrimitive.Root wraps chat + right doc rail so attachments share context.
@@ -2710,6 +2722,7 @@ export function ChatSession({
         </div>
       </ComposerPrimitive.Root>
       </ChartRegistryProvider>
+      </ToolWaitProgressProvider>
       </CitationSessionProvider>
     </ChatProvider>
   );

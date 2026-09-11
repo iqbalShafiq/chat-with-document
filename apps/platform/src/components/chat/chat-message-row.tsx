@@ -16,6 +16,7 @@ import { useImagePreview } from "#/components/images/image-preview";
 import { MathMarkdown } from "#/components/math-markdown";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
+import { HIDDEN_CONTROL_TOOL_NAMES } from "#/lib/chat/tool-wait-progress";
 import { resolveMessageCitations } from "#/lib/chat/citations";
 import { readChatMessageMeta } from "#/lib/chat/message-metadata";
 import {
@@ -377,7 +378,7 @@ export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): bo
   if (part.type === "data") {
     // Progress/queue events have dedicated chrome; do not reprint them
     // as transcript lines on every update.
-    return part.name !== "deepResearchProgress";
+    return part.name !== "deepResearchProgress" && part.name !== "toolWaitProgress";
   }
   if (
     part.type === "reasoning" ||
@@ -503,7 +504,12 @@ function ChatMessageParts({
           );
         }
 
+        if (part.type === "data") {
+          if (part.name === "toolWaitProgress") return null;
+        }
+
         if (part.type === "tool") {
+          if (HIDDEN_CONTROL_TOOL_NAMES.has(part.toolName)) return null;
           const run = stripForPart.get(part);
           const isRunStart = run !== undefined;
           const runImages = isRunStart

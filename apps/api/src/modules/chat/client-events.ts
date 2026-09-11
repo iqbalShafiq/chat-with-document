@@ -46,6 +46,15 @@ const queuedMessageAppliedSchema = z.object({
   attachmentCount: boundedCount(100),
 }).strict();
 
+const toolWaitProgressSchema = z.object({
+  toolCallId: boundedString(200),
+  toolName: boundedString(200),
+  phase: z.enum(["running", "wait_elapsed", "awaiting", "cancelled", "completed", "failed"]),
+  elapsedMs: boundedCount(86_400_000),
+  waitCount: boundedCount(10_000),
+  stage: boundedString(240).optional(),
+}).strict();
+
 const deepResearchAppEventSchema = z.object({
   type: z.literal("deep_research_progress"),
   phase: deepResearchProgressSchema.shape.phase,
@@ -59,18 +68,30 @@ const queuedMessageAppEventSchema = z.object({
   text: z.string().max(8_000).optional(),
   attachmentCount: queuedMessageAppliedSchema.shape.attachmentCount,
 }).strict();
+const toolWaitProgressAppEventSchema = z.object({
+  type: z.literal("tool_wait_progress"),
+  toolCallId: toolWaitProgressSchema.shape.toolCallId,
+  toolName: toolWaitProgressSchema.shape.toolName,
+  phase: toolWaitProgressSchema.shape.phase,
+  elapsedMs: toolWaitProgressSchema.shape.elapsedMs,
+  waitCount: toolWaitProgressSchema.shape.waitCount,
+  stage: toolWaitProgressSchema.shape.stage,
+}).strict();
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
+export type ToolWaitProgressEvent = z.infer<typeof toolWaitProgressSchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
+  toolWaitProgress: ToolWaitProgressEvent;
 };
 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
+  toolWaitProgress: toolWaitProgressSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -90,6 +111,15 @@ export type ChatAppEvent =
       clientMessageId: string;
       text?: string;
       attachmentCount: number;
+    }
+  | {
+      type: "tool_wait_progress";
+      toolCallId: string;
+      toolName: string;
+      phase: ToolWaitProgressEvent["phase"];
+      elapsedMs: number;
+      waitCount: number;
+      stage?: string;
     }
   ;
 
@@ -129,6 +159,18 @@ export function mapChatAppEvent(
         attachmentCount: event.attachmentCount,
       });
       return withContext(context, { type: "data", name: "queuedMessageApplied", data }) as ChatClientEvent;
+    }
+    case "tool_wait_progress": {
+      toolWaitProgressAppEventSchema.parse(event);
+      const data = toolWaitProgressSchema.parse({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        phase: event.phase,
+        elapsedMs: event.elapsedMs,
+        waitCount: event.waitCount,
+        ...(event.stage === undefined ? {} : { stage: event.stage }),
+      });
+      return withContext(context, { type: "data", name: "toolWaitProgress", data }) as ChatClientEvent;
     }
   }
 }

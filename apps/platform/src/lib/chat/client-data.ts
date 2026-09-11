@@ -36,9 +36,19 @@ export type QueuedMessageApplied = {
   attachmentCount: number;
 };
 
+export type ToolWaitProgress = {
+  toolCallId: string;
+  toolName: string;
+  phase: "running" | "wait_elapsed" | "awaiting" | "cancelled" | "completed" | "failed";
+  elapsedMs: number;
+  waitCount: number;
+  stage?: string;
+};
+
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
+  toolWaitProgress: ToolWaitProgress;
 };
 
 type ParseResult<T> =
@@ -175,6 +185,44 @@ function parseDeepResearchProgress(value: unknown): ParseResult<DeepResearchProg
   });
 }
 
+const TOOL_WAIT_PHASES = [
+  "running",
+  "wait_elapsed",
+  "awaiting",
+  "cancelled",
+  "completed",
+  "failed",
+] as const;
+
+function parseToolWaitProgress(value: unknown): ParseResult<ToolWaitProgress> {
+  if (!isRecord(value)) return failure("invalid tool wait progress");
+  const hasStage = has(value, "stage");
+  const keys = hasStage
+    ? ["toolCallId", "toolName", "phase", "elapsedMs", "waitCount", "stage"]
+    : ["toolCallId", "toolName", "phase", "elapsedMs", "waitCount"];
+  if (
+    !exactKeys(value, keys) ||
+    !boundedString(value.toolCallId, MAX_METADATA_STRING) ||
+    !boundedString(value.toolName, MAX_METADATA_STRING) ||
+    !TOOL_WAIT_PHASES.includes(value.phase as ToolWaitProgress["phase"]) ||
+    !boundedCount(value.elapsedMs, 86_400_000) ||
+    !boundedCount(value.waitCount, 10_000)
+  ) {
+    return failure("invalid tool wait progress");
+  }
+  if (hasStage && !boundedString(value.stage, MAX_ACTIVITY_LABEL)) {
+    return failure("invalid tool wait progress");
+  }
+  return success({
+    toolCallId: value.toolCallId,
+    toolName: value.toolName,
+    phase: value.phase as ToolWaitProgress["phase"],
+    elapsedMs: value.elapsedMs,
+    waitCount: value.waitCount,
+    ...(hasStage ? { stage: value.stage as string } : {}),
+  });
+}
+
 function parseQueuedMessageApplied(value: unknown): ParseResult<QueuedMessageApplied> {
   if (
     !isRecord(value) ||
@@ -196,6 +244,9 @@ const deepResearchProgressSchema: Schema<DeepResearchProgress> = {
 const queuedMessageAppliedSchema: Schema<QueuedMessageApplied> = {
   safeParse: parseQueuedMessageApplied,
 };
+const toolWaitProgressSchema: Schema<ToolWaitProgress> = {
+  safeParse: parseToolWaitProgress,
+};
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
   streamMetadataSchema;
@@ -203,4 +254,5 @@ export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
+  toolWaitProgress: toolWaitProgressSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;

@@ -469,6 +469,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
 
     const controller = new AbortController();
     let nativeStream: AgentStream | null = null;
+    let waitRegistry: import("@anreal/agent").InFlightToolRegistry | undefined;
     let cancelled = false;
     let cancelReason = "chat run stopped";
     let stopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -560,7 +561,12 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         }
         return deps.reconstruct({
           recipe: parsed.recipe,
-          runtime: { sessionExists: deps.sessionExists },
+          runtime: {
+            sessionExists: deps.sessionExists,
+            onToolWaitProgress: (event) => {
+              appEvents.push({ type: "tool_wait_progress", ...event });
+            },
+          },
           grantHelpers: {
             hasGrant: (toolName) => policyRegistry.hasToolGrant(parsed.sessionId, toolName),
             takeToolOverride: async (toolName) => {
@@ -603,6 +609,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         throw Object.assign(new Error(cancelReason), { code: "CHAT_RUN_CANCELLED" });
       }
       const runInput = reconstructed.value;
+      waitRegistry = runInput.waitRegistry;
       if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
         throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
       }
@@ -747,6 +754,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       }
 
       const closeStatus = terminal === "error" ? "error" : "completed";
+      waitRegistry.abortAll(cancelled ? cancelReason : "run ended");
       await deps.streamStore.close({ streamId, status: closeStatus });
       await releaseOwnedActiveRun();
       await clearOwnedStopFlag();
@@ -772,6 +780,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       await clearOwnedStopFlag();
       throw safeError(error);
     } finally {
+      waitRegistry?.abortAll(cancelled ? cancelReason : "run ended");
       stopMonitorDone = true;
       if (stopTimer) clearTimeout(stopTimer);
       unregister();

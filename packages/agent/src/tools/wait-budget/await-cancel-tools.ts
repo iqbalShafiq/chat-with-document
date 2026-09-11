@@ -54,7 +54,13 @@ export function createAwaitCancelTools(deps: AwaitCancelToolDeps): AnyTool[] {
       });
       const sliceMs = deps.sliceMsFor?.(peek.toolName) ?? waitBudgetForTool(peek.toolName);
       const observed = await deps.registry.awaitSlice(toolCallId, sliceMs);
-      return finishObserve(observed, deps, toolCallId, peek.toolName);
+      const output = await finishObserve(
+        observed,
+        deps.onProgress ? { onProgress: deps.onProgress } : {},
+        toolCallId,
+        peek.toolName,
+      );
+      return jsonOutputSchema.parse(output);
     },
   });
 
@@ -71,7 +77,7 @@ export function createAwaitCancelTools(deps: AwaitCancelToolDeps): AnyTool[] {
         waitCount: 0,
         ...(cancelled.stage !== undefined ? { stage: cancelled.stage } : {}),
       });
-      return cancelled;
+      return jsonOutputSchema.parse(cancelled);
     },
   });
 

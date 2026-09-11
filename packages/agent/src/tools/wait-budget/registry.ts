@@ -214,27 +214,36 @@ export class InFlightToolRegistry {
     if (raced === "timeout") {
       job.waitCount += 1;
       const progressMoved = job.stage !== undefined && job.stage !== job.lastObservedStage;
-      job.lastObservedStage = job.stage;
+      if (job.stage !== undefined) job.lastObservedStage = job.stage;
       return {
         kind: "still_running",
         payload: stillRunningPayload(job, this.now(), progressMoved && stageBefore !== undefined),
       };
     }
-    if (job.status === "cancelled") {
-      return { kind: "cancelled", payload: cancelledPayload(job, this.now()) };
+    return this.settleJob(job);
+  }
+
+  private settleJob(job: Job): ObserveResult {
+    switch (job.status) {
+      case "cancelled":
+        return { kind: "cancelled", payload: cancelledPayload(job, this.now()) };
+      case "failed":
+        return { kind: "failed", error: job.error };
+      case "completed":
+        return { kind: "settled", output: job.output };
+      case "running":
+        return { kind: "settled", output: job.output };
     }
-    if (job.status === "failed") return { kind: "failed", error: job.error };
-    return { kind: "settled", output: job.output };
   }
 }
 
 function linkAbort(parent: AbortSignal | undefined, child: AbortController): () => void {
   if (!parent) return () => undefined;
   if (parent.aborted) {
-    child.abort(parent.reason);
+    child.abort(parent.reason ?? new Error("aborted"));
     return () => undefined;
   }
-  const onAbort = () => child.abort(parent.reason);
+  const onAbort = () => child.abort(parent.reason ?? new Error("aborted"));
   parent.addEventListener("abort", onAbort, { once: true });
   return () => parent.removeEventListener("abort", onAbort);
 }
