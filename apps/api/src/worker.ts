@@ -78,6 +78,36 @@ function getProcessEmbeddingModel(): ReturnType<typeof createEmbeddingModel> {
   return processEmbeddingModel;
 }
 
+const EMBEDDING_IO_TIMEOUT_MS = 30_000;
+
+function failedAfterTimeout(texts: string[], timeoutMs: number): never {
+  const error = new Error(`Document embedding exceeded its ${timeoutMs}ms budget (${texts.length} texts).`);
+  error.name = "TimeoutError";
+  throw error;
+}
+
+async function embedWithBudget(
+  texts: string[],
+  job?: Job<DocumentIngestJobData>,
+): Promise<Array<{ document: string; vector: number[] }>> {
+  const timeoutMs = EMBEDDING_IO_TIMEOUT_MS;
+  if (job) {
+    void job.updateProgress({ stage: "embedding_processing" }).catch(() => undefined);
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await getProcessEmbeddingModel().embedTexts(texts, { abortSignal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+      failedAfterTimeout(texts, timeoutMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 console.log("[worker] boot");
 
 const TABULAR_MIME_TYPES = new Set([
@@ -193,7 +223,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
     });
   });
 
-  await deleteDocumentChunks(documentId);
+  await deleteDocumentChunks(documentId, { timeoutMs: EMBEDDING_IO_TIMEOUT_MS });
 
   const pages = await prisma.documentPage.findMany({
     where: { documentId },
@@ -208,9 +238,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
     const chunks = chunkText(page.rawMarkdown);
     if (chunks.length === 0) continue;
 
-    const vectors = await getProcessEmbeddingModel().embedTexts(
-      chunks.map((chunk) => chunk.text),
-    );
+    const vectors = await embedWithBudget(chunks.map((chunk) => chunk.text), job);
 
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i]!;
@@ -235,7 +263,7 @@ async function processDocumentIngest(job: Job<DocumentIngestJobData>) {
   }
 
   if (embeddedDocuments.length > 0) {
-    await upsertDocumentChunks(embeddedDocuments);
+    await upsertDocumentChunks(embeddedDocuments, { timeoutMs: EMBEDDING_IO_TIMEOUT_MS });
   }
 
   await prisma.document.update({
@@ -290,12 +318,10 @@ async function processTabularIngest(input: {
     });
   });
 
-  await deleteDocumentChunks(documentId);
+  await deleteDocumentChunks(documentId, { timeoutMs: EMBEDDING_IO_TIMEOUT_MS });
   const chunks = chunkText(markdown);
   if (chunks.length > 0) {
-    const vectors = await getProcessEmbeddingModel().embedTexts(
-      chunks.map((c) => c.text),
-    );
+    const vectors = await embedWithBudget(chunks.map((c) => c.text), undefined);
     await upsertDocumentChunks(
       chunks.map((chunk, i) => ({
         id: `${documentId}:page0:${chunk.chunkIndex}`,
@@ -310,6 +336,7 @@ async function processTabularIngest(input: {
           documentPageCount: 1,
         },
       })),
+      { timeoutMs: EMBEDDING_IO_TIMEOUT_MS },
     );
   }
 

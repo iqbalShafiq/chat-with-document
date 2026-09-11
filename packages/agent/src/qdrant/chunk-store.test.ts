@@ -21,8 +21,9 @@ import * as chunkStoreModule from "./chunk-store.js";
 type ChunkStoreLifecycle = {
   upsertDocumentChunks(
     documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+    options?: { abortSignal?: AbortSignal; timeoutMs?: number },
   ): Promise<void>;
-  deleteDocumentChunks(documentId: string): Promise<void>;
+  deleteDocumentChunks(documentId: string, options?: { abortSignal?: AbortSignal; timeoutMs?: number }): Promise<void>;
   createChunkSearchService(): ReturnType<
     typeof chunkStoreModule.createChunkSearchService
   >;
@@ -388,6 +389,29 @@ describe("Qdrant chunk store v1 lifecycle", () => {
 
     expect(client.collectionExists).not.toHaveBeenCalled();
     expect(embedTexts).not.toHaveBeenCalled();
+  });
+
+  it("aborts before touching Qdrant when already aborted", async () => {
+    const client = createNativeClient();
+    const { model } = createEmbeddingModel();
+    const lifecycle = createLifecycle(client, model);
+    const controller = new AbortController();
+    controller.abort(new Error("stop"));
+    await expect(
+      lifecycle.upsertDocumentChunks([chunkDocument()], { abortSignal: controller.signal }),
+    ).rejects.toThrow();
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(client.collectionExists).not.toHaveBeenCalled();
+  });
+
+  it("fails a never-resolving upsert at the timeout budget", async () => {
+    const client = createNativeClient();
+    client.upsert.mockImplementation(() => new Promise(() => {}));
+    const { model } = createEmbeddingModel();
+    const lifecycle = createLifecycle(client, model);
+    await expect(
+      lifecycle.upsertDocumentChunks([chunkDocument()], { timeoutMs: 10 }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
   });
 
   it("returns one close promise and rejects use after close", async () => {

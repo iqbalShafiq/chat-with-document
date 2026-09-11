@@ -26,11 +26,17 @@ export type QdrantChunkStoreOptions = {
   url?: string;
 };
 
+export type ChunkIOOptions = {
+  abortSignal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export type QdrantChunkStoreLifecycle = {
   upsertDocumentChunks(
     documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+    options?: ChunkIOOptions,
   ): Promise<void>;
-  deleteDocumentChunks(documentId: string): Promise<void>;
+  deleteDocumentChunks(documentId: string, options?: ChunkIOOptions): Promise<void>;
   createChunkSearchService(): ChunkSearchService;
   close(): Promise<void>;
 };
@@ -94,14 +100,18 @@ export function createQdrantChunkStore(
 
   async function upsertDocumentChunks(
     documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+    options: ChunkIOOptions = {},
   ): Promise<void> {
-    const readyStore = await getStore();
-    await readyStore.upsert({ documents });
+    options.abortSignal?.throwIfAborted();
+    const readyStore = await ioWithBudget(options, () => getStore());
+    options.abortSignal?.throwIfAborted();
+    await ioWithBudget(options, () => readyStore.upsert({ documents }));
   }
 
-  async function deleteDocumentChunks(documentId: string): Promise<void> {
-    await getStore();
-    const nativeClient = await vectorClient.nativeClient();
+  async function deleteDocumentChunks(documentId: string, options: ChunkIOOptions = {}): Promise<void> {
+    options.abortSignal?.throwIfAborted();
+    await ioWithBudget(options, () => getStore());
+    const nativeClient = await ioWithBudget(options, () => vectorClient.nativeClient());
     if (!nativeClient.delete) {
       throw new TypeError("Qdrant metadata deletion requires delete(...).");
     }
@@ -109,12 +119,17 @@ export function createQdrantChunkStore(
     try {
       // The public v1 store deletes Anvia logical ids. Re-ingest must instead
       // purge every chunk whose application metadata belongs to this document.
-      await nativeClient.delete(QDRANT_COLLECTION, {
-        wait: true,
-        filter: {
-          must: [{ key: "documentId", match: { value: documentId } }],
-        },
-      });
+      const client: { delete: NonNullable<typeof nativeClient.delete> } = {
+        delete: nativeClient.delete.bind(nativeClient),
+      };
+      await ioWithBudget(options, () =>
+        client.delete(QDRANT_COLLECTION, {
+          wait: true,
+          filter: {
+            must: [{ key: "documentId", match: { value: documentId } }],
+          },
+        }),
+      );
     } catch (error) {
       // A concurrently wiped collection is equivalent to an empty chunk set.
       if (isMissingCollectionError(error)) return;
@@ -213,14 +228,38 @@ function getProcessChunkStore(): QdrantChunkStoreLifecycle {
   return processChunkStore;
 }
 
-export function upsertDocumentChunks(
-  documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
-): Promise<void> {
-  return getProcessChunkStore().upsertDocumentChunks(documents);
+async function ioWithBudget<T>(options: ChunkIOOptions, work: () => Promise<T>): Promise<T> {
+  const timeoutMs = options.timeoutMs;
+  if (timeoutMs === undefined) return work();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`Vector store exceeded its ${timeoutMs}ms budget.`);
+          error.name = "TimeoutError";
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
-export function deleteDocumentChunks(documentId: string): Promise<void> {
-  return getProcessChunkStore().deleteDocumentChunks(documentId);
+export function upsertDocumentChunks(
+  documents: Array<EmbeddedDocument<string, DocumentChunkMetadata>>,
+  options?: ChunkIOOptions,
+): Promise<void> {
+  return getProcessChunkStore().upsertDocumentChunks(documents, options);
+}
+
+export function deleteDocumentChunks(
+  documentId: string,
+  options?: ChunkIOOptions,
+): Promise<void> {
+  return getProcessChunkStore().deleteDocumentChunks(documentId, options);
 }
 
 export function createChunkSearchService(): ChunkSearchService {
