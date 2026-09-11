@@ -239,6 +239,20 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
   const outputValue = part.state === "output-available" ? parseToolValue(part.output) : undefined;
   const stillRunning = isStillRunningToolOutput(outputValue);
   const cancelledOutput = isCancelledToolOutput(outputValue);
+  const lastWait = stillRunning && outputValue && typeof outputValue === "object"
+    ? {
+        elapsedMs: Number((outputValue as { elapsedMs?: unknown }).elapsedMs ?? Number.NaN),
+        waitCount: Number((outputValue as { waitCount?: unknown }).waitCount ?? Number.NaN),
+        stage: (outputValue as { stage?: unknown }).stage,
+      }
+    : undefined;
+  const waitElapsedMs = Number.isFinite(lastWait?.elapsedMs) ? (lastWait as { elapsedMs: number }).elapsedMs : wait?.elapsedMs;
+  const waitStage =
+    typeof wait?.stage === "string" && wait.stage.length > 0
+      ? wait.stage
+      : typeof lastWait?.stage === "string" && lastWait.stage.length > 0
+        ? lastWait.stage
+        : undefined;
   const isWaiting =
     stillRunning || wait?.phase === "wait_elapsed" || wait?.phase === "awaiting";
   const isCancelled = cancelledOutput || wait?.phase === "cancelled";
@@ -363,8 +377,8 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           · {statusLabel(part, {
             waiting: isWaiting,
             cancelled: isCancelled,
-            ...(wait?.elapsedMs !== undefined ? { elapsedMs: wait.elapsedMs } : {}),
-            ...(wait?.stage !== undefined ? { stage: wait.stage } : {}),
+            ...(waitElapsedMs !== undefined ? { elapsedMs: waitElapsedMs } : {}),
+            ...(waitStage !== undefined ? { stage: waitStage } : {}),
           })}
         </span>
       </button>
