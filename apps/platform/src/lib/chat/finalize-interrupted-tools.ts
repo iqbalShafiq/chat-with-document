@@ -1,6 +1,12 @@
-import type { ClientDataMap, ClientMetadata, UIMessage } from "@anvia/client";
+import type { ClientDataMap, ClientMetadata, UIMessage, UIMessagePart } from "@anvia/client";
+import { isStillRunningToolOutput } from "#/lib/chat/tool-wait-progress";
 
 const STOPPED_TOOL_MESSAGE = "Stopped before this tool finished.";
+
+function isUnfinishedWait(part: Extract<UIMessagePart, { type: "tool" }>): boolean {
+  if (part.state !== "output-available") return false;
+  return isStillRunningToolOutput(part.output);
+}
 
 /**
  * Mark in-flight tool parts as errored so the activity panel shows Error
@@ -23,7 +29,8 @@ export function finalizeInterruptedTools<
     let messageChanged = false;
     const parts = message.parts.map((part) => {
       if (part.type !== "tool") return part;
-      if (part.state === "output-available" || part.state === "error") {
+      if (part.state === "error") return part;
+      if (part.state === "output-available" && !isUnfinishedWait(part)) {
         return part;
       }
       messageChanged = true;

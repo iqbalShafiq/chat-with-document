@@ -68,6 +68,27 @@ describe("finalizeInterruptedTools", () => {
     }
   });
 
+  it("marks an output-available still_running part as stopped", () => {
+    const messages: UIMessage[] = [
+      assistant([tool("output-available", { output: { status: "still_running", toolCallId: "c1" } })]),
+    ];
+    const next = finalizeInterruptedTools(messages);
+    const parts = next[0]!.parts.filter(
+      (part): part is ToolPart => part.type === "tool",
+    );
+    expect(parts[0]?.state).toBe("error");
+    if (parts[0]?.state === "error") {
+      expect(parts[0].error.message).toMatch(/stopped/i);
+    }
+  });
+
+  it("leaves a settled tool output unchanged", () => {
+    const messages: UIMessage[] = [
+      assistant([tool("output-available", { output: { rows: [1] } })]),
+    ];
+    expect(finalizeInterruptedTools(messages)).toBe(messages);
+  });
+
   it("returns the same array reference when nothing changes", () => {
     const messages: UIMessage[] = [
       assistant([tool("output-available", { output: 1 })]),
