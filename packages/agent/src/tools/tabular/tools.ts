@@ -215,6 +215,7 @@ async function saveResultSheet(
   sheet: TabularSheet,
   saveAs: { name: string },
   parentDocumentId: string | null,
+  abortSignal?: AbortSignal,
 ): Promise<{ documentId: string; filename: string; origin: "created"; status: string }> {
   if (!derived) {
     throw new Error("Saving results is not available in this session. Return the result without saveAs.");
@@ -228,6 +229,7 @@ async function saveResultSheet(
     origin: "created",
     parentDocumentId,
     sourceNote: parentDocumentId ? `saved ${sheet.name} result derived from ${parentDocumentId}` : `saved ${sheet.name} result`,
+    ...(abortSignal ? { abortSignal } : {}),
   });
   return { documentId: created.documentId, filename: created.filename, origin: "created", status: created.status };
 }
@@ -298,7 +300,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const analyzeDataset = createTool({
     ...analyzeDatasetSpec,
     outputSchema: jsonOutputSchema,
-    execute: async ({ source, operation, saveAs }) => {
+    execute: async ({ source, operation, saveAs }, context) => {
       const sheet = await resolver.resolveSheet(source);
       const analysis = runAnalysis(sheet, operation, resolvedLimits);
       if (!saveAs) return jsonOutputSchema.parse(analysis);
@@ -310,6 +312,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
         sheetFromAnalysisResult(saveAs.name, analysis.result),
         saveAs,
         parentOf(source),
+        context.abortSignal,
       );
       return jsonOutputSchema.parse({ ...analysis, saved });
     },
@@ -318,15 +321,19 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
   const queryDatasetSql = createTool({
     ...queryDatasetSqlSpec,
     outputSchema: jsonOutputSchema,
-    execute: async ({ source, query, saveAs }) => {
+    execute: async ({ source, query, saveAs }, context) => {
       const sheet = await resolver.resolveSheet(source);
-      const sqlResult = await sqlRunner(sheet, query, limits);
+      const sqlResult = await sqlRunner(sheet, query, {
+        ...limits,
+        ...(context.abortSignal ? { abortSignal: context.abortSignal } : {}),
+      });
       if (!saveAs) return sqlResult;
       const saved = await saveResultSheet(
         deps.derived,
         sheetFromSqlResult(saveAs.name, sheet, sqlResult),
         saveAs,
         parentOf(source),
+        context.abortSignal,
       );
       return { ...sqlResult, saved };
     },

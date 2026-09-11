@@ -61,6 +61,7 @@ export function createDerivedDatasetWriter(deps: DerivedDatasetWriterDeps): Deri
         originUrl: input.originUrl ?? null,
         sourceNote: input.sourceNote ?? null,
         synthetic: input.synthetic,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       });
       const status = await waitForReady(deps.prisma, created.id, attempts, intervalMs);
       return {

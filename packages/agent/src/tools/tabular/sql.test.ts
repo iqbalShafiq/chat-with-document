@@ -45,4 +45,18 @@ describe("createSqlJsRunner", () => {
     const result = await runner(sheet, "SELECT SUM(revenue) AS total FROM t", {});
     expect(result.rows).toEqual([[30]]);
   });
+
+  it("aborts between insert batches when the signal fires", async () => {
+    const sheet: TabularSheet = {
+      name: "big",
+      columns: [{ name: "n", type: "number" }],
+      rows: Array.from({ length: 400 }, (_, i) => [i]),
+    };
+    const runner = createSqlJsRunner();
+    const controller = new AbortController();
+    controller.abort(new Error("stop"));
+    await expect(
+      runner(sheet, "SELECT COUNT(*) AS c FROM t", { abortSignal: controller.signal }),
+    ).rejects.toThrow();
+  });
 });

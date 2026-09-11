@@ -39,6 +39,7 @@ export interface DerivedDocumentWriter {
     originUrl?: string | null;
     sourceNote?: string | null;
     synthetic?: boolean;
+    abortSignal?: AbortSignal;
   }): Promise<DerivedDocumentResult>;
   countDerived(): Promise<number>;
 }
@@ -171,7 +172,7 @@ export function createDerivedDatasetTools(deps: {
   const createDataset = createTool({
     ...createDatasetSpec,
     outputSchema: z.json(),
-    execute: async ({ name, columns, rows, cloneFrom, derivedFrom, sourceNote }) => {
+    execute: async ({ name, columns, rows, cloneFrom, derivedFrom, sourceNote }, context) => {
       if (cloneFrom && (columns !== undefined || rows !== undefined)) {
         throw new Error("cloneFrom is exclusive with columns/rows. Use one or the other.");
       }
@@ -202,6 +203,7 @@ export function createDerivedDatasetTools(deps: {
         parentDocumentId,
         sourceNote: sourceNote?.trim() ? sourceNote.trim() : parentDocumentId ? `derived from ${parentDocumentId}` : "synthetic example",
         synthetic: !parentDocumentId && !sourceNote?.trim(),
+        ...(context.abortSignal ? { abortSignal: context.abortSignal } : {}),
       });
       return {
         documentId: created.documentId,
@@ -232,7 +234,7 @@ export function createDerivedDatasetTools(deps: {
       }
       return { reason: args.reason };
     },
-    execute: async ({ url, name, reason }) => {
+    execute: async ({ url, name, reason }, context) => {
       const fetched = await fetchTabularUrl(url, {
         fetchFn: deps.fetchFn,
         lookupFn: deps.lookupFn,
@@ -259,6 +261,7 @@ export function createDerivedDatasetTools(deps: {
         origin: "fetched",
         originUrl: fetched.finalUrl,
         sourceNote: `${fetched.finalUrl} (content-type: ${fetched.mediaType}; reason: ${reason.trim()})`,
+        ...(context.abortSignal ? { abortSignal: context.abortSignal } : {}),
       });
       return {
         documentId: created.documentId,
