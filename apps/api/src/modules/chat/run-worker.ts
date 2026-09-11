@@ -470,6 +470,9 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     const controller = new AbortController();
     let nativeStream: AgentStream | null = null;
     let waitRegistry: import("@anreal/agent").InFlightToolRegistry | undefined;
+    const cancelOwnedWaitJobs = (reason: string): void => {
+      waitRegistry?.abortAll(reason);
+    };
     let cancelled = false;
     let cancelReason = "chat run stopped";
     let stopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -486,6 +489,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         clearTimeout(stopTimer);
         stopTimer = null;
       }
+      cancelOwnedWaitJobs(reason);
       nativeStream?.cancel(reason);
       controller.abort(reason);
       notifyCancelled?.();
@@ -610,6 +614,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       }
       const runInput = reconstructed.value;
       waitRegistry = runInput.waitRegistry;
+      if (cancelled) cancelOwnedWaitJobs(cancelReason);
       if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
         throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
       }
@@ -780,7 +785,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       await clearOwnedStopFlag();
       throw safeError(error);
     } finally {
-      waitRegistry?.abortAll(cancelled ? cancelReason : "run ended");
+      cancelOwnedWaitJobs(cancelled ? cancelReason : "run ended");
       stopMonitorDone = true;
       if (stopTimer) clearTimeout(stopTimer);
       unregister();

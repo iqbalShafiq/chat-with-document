@@ -283,7 +283,7 @@ describe("Redis resumable stream store", () => {
       protocol: CLIENT_STREAM_PROTOCOL,
       event: {
         runId: "run-1",
-        type: "data",
+        type: "data" as const,
         name: "toolWaitProgress",
         data: {
           toolCallId: "tool_0",
@@ -293,12 +293,12 @@ describe("Redis resumable stream store", () => {
           waitCount: 1,
         },
       },
-    } as never;
-    const record = await store.append({ streamId: "s1", event });
+    };
+    const record = await store.append({ streamId: "s1", event: event as never });
     expect(record.eventId).toBe(1);
     const bad = {
-      ...event,
-      event: { ...(event as { event: Record<string, unknown> }).event, data: { leaked: true } },
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { leaked: true } },
     } as never;
     await expect(store.append({ streamId: "s1", event: bad })).rejects.toThrow(/Invalid protocol-v3/);
   });

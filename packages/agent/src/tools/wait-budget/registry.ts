@@ -170,10 +170,7 @@ export class InFlightToolRegistry {
     const job = this.jobs.get(toolCallId);
     if (!job) throw new ToolCallUnknownError(toolCallId);
     if (job.status === "running") {
-      job.status = "cancelled";
-      const error = new ToolCallCancelledError(toolCallId);
-      job.error = error;
-      job.abort.abort(error);
+      this.cancelJob(job, new ToolCallCancelledError(toolCallId));
     }
     return cancelledPayload(job, this.now());
   }
@@ -182,9 +179,20 @@ export class InFlightToolRegistry {
     const error = new ToolCallCancelledError(reason);
     for (const job of this.jobs.values()) {
       if (job.status !== "running") continue;
-      job.status = "cancelled";
-      job.error = error;
+      this.cancelJob(job, error);
+    }
+  }
+
+  private cancelJob(job: Job, error: Error): void {
+    job.status = "cancelled";
+    job.error = error;
+    try {
       job.abort.abort(error);
+    } catch (abortError) {
+      console.error("[wait-budget] abort listener failed", {
+        toolName: job.toolName,
+        error: abortError instanceof Error ? abortError.message : String(abortError),
+      });
     }
   }
 
