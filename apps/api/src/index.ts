@@ -1,10 +1,11 @@
 import { serve } from "@hono/node-server";
-import { createApp } from "./app.js";
+import { createApp, startRunStaleWatchdog } from "./app.js";
 import { getListenHostname, listLanIpv4Addresses } from "./lib/origins.js";
 
 const app = createApp();
 const port = Number(process.env.PORT ?? 3001);
 const hostname = getListenHostname();
+startRunStaleWatchdog();
 
 serve(
   {

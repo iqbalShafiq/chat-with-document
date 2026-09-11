@@ -449,8 +449,8 @@ const chatRunWorker = new Worker<ChatRunJobData>(
   {
     connection: getBullmqConnectionOptions(),
     concurrency: 2,
-    lockDuration: 300_000,
-    stalledInterval: 120_000,
+    lockDuration: 60_000,
+    stalledInterval: 30_000,
   },
 );
 

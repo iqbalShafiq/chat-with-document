@@ -12,6 +12,8 @@ import type { Message, UserMessage } from "@anvia/core/completion";
 import type { AgentRunOptions } from "@anvia/core/agent";
 import {
   getStreamStore,
+  RUN_CREATED_KEY,
+  RUN_OWNER_WAL_KEY,
   type ResumableStreamStoreWithMeta,
 } from "../../lib/resumable-stream-store.js";
 import { getContext7McpServer } from "../../lib/context7-server.js";
@@ -59,6 +61,9 @@ const SAFE_ERROR_MESSAGE = "Something went wrong while answering. Send again.";
 const SAFE_CANCEL_MESSAGE = "The answer was stopped.";
 const STOP_POLL_MS = 150;
 
+export { RUN_OWNER_WAL_KEY, RUN_CREATED_KEY } from "../../lib/resumable-stream-store.js";
+const RUN_OWNER_WAL_TTL_MS = 60_000;
+
 type WorkerStreamStore = Pick<ResumableStreamStoreWithMeta, "status" | "close"> & {
   append(input: { streamId: string; event: ChatResumableEvent }): Promise<unknown>;
 };
@@ -88,6 +93,9 @@ export type ChatRunWorkerDependencies = {
   approvalRegistry?: ApprovalPolicyRegistry;
   steeringStore?: SteeringStore;
   isStopRequested?: (streamId: string) => Promise<boolean>;
+  touchOwnerWal?: (streamId: string) => Promise<unknown>;
+  touchRunCreated?: (streamId: string) => Promise<unknown>;
+  clearOwnerWal?: (streamId: string) => Promise<unknown>;
   clearStopFlag?: (streamId: string) => Promise<void>;
   releaseActiveRun?: typeof releaseActiveRun;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
@@ -349,6 +357,18 @@ function createDefaultDependencies(): Required<Pick<
     approvalRegistry: getApprovalRegistry(),
     steeringStore: getSteeringStore(),
     isStopRequested: async (streamId) => streamStore.hasStopFlag(streamId),
+    touchOwnerWal: async (streamId) => {
+      const redis = (await import("../../lib/redis.js")).getRedis();
+      await redis.set(RUN_OWNER_WAL_KEY(streamId), String(Date.now()), "PX", RUN_OWNER_WAL_TTL_MS);
+    },
+    touchRunCreated: async (streamId) => {
+      const redis = (await import("../../lib/redis.js")).getRedis();
+      await redis.set(RUN_CREATED_KEY(streamId), String(Date.now()), "PX", 600_000);
+    },
+    clearOwnerWal: async (streamId) => {
+      const redis = (await import("../../lib/redis.js")).getRedis();
+      await redis.del(RUN_OWNER_WAL_KEY(streamId));
+    },
     clearStopFlag: async (streamId) => streamStore.clearStopFlag(streamId),
     releaseActiveRun,
     sessionExists: async (sessionId, userId) => Boolean(await prisma.chatSession.findFirst({ where: { id: sessionId, userId }, select: { id: true } })),
@@ -370,6 +390,9 @@ function mergeDependencies(input?: ChatRunWorkerDependencies): ChatRunWorkerDepe
   approvalRegistry: ApprovalPolicyRegistry;
   steeringStore: SteeringStore;
   isStopRequested: (streamId: string) => Promise<boolean>;
+  touchOwnerWal: (streamId: string) => Promise<unknown>;
+  touchRunCreated: (streamId: string) => Promise<unknown>;
+  clearOwnerWal: (streamId: string) => Promise<unknown>;
   clearStopFlag: (streamId: string) => Promise<void>;
   releaseActiveRun: typeof releaseActiveRun;
   sessionExists: (sessionId: string, userId: string) => Promise<boolean>;
@@ -514,6 +537,32 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       stopFlagCleared = true;
       await deps.clearStopFlag(streamId).catch(() => undefined);
     };
+    // A WAL entry proves this worker owns the run while it is executing. The
+    // API watchdog closes a stream whose WAL goes stale so a run abandoned by
+    // a dead/restarted worker cannot leave clients hanging in "Working".
+    let ownerWalTimer: ReturnType<typeof setInterval> | null = null;
+    const startOwnerWal = (): void => {
+      if (ownerWalTimer) return;
+      const beat = (): void => {
+        void deps.touchOwnerWal(streamId).catch(() => {
+          // A transient Redis failure must not kill a healthy run; the
+          // watchdog only acts when the WAL is *consistently* absent.
+        });
+      };
+      beat();
+      // Record when the worker first claimed this run so the watchdog can
+      // distinguish a still-booting run from one abandoned before claiming.
+      void deps.touchRunCreated(streamId).catch(() => undefined);
+      ownerWalTimer = setInterval(beat, 20_000);
+    };
+    const stopOwnerWal = (): void => {
+      if (ownerWalTimer) {
+        clearInterval(ownerWalTimer);
+        ownerWalTimer = null;
+      }
+      // best-effort
+      void deps.clearOwnerWal(streamId).catch(() => undefined);
+    };
     const monitorStop = (): void => {
       if (stopMonitorDone) return;
       if (stopTimer) clearTimeout(stopTimer);
@@ -540,6 +589,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let resumeOverrideTaken = false;
     let interactionPersistenceFailed = false;
     try {
+      startOwnerWal();
       monitorStop();
       if (await deps.isStopRequested(streamId)) {
         cancelCurrentAttempt("client stop");
@@ -785,6 +835,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       await clearOwnedStopFlag();
       throw safeError(error);
     } finally {
+      stopOwnerWal();
       cancelOwnedWaitJobs(cancelled ? cancelReason : "run ended");
       stopMonitorDone = true;
       if (stopTimer) clearTimeout(stopTimer);

@@ -467,6 +467,10 @@ export function ChatSession({
   const chatRef = useRef<ChatController | null>(null);
   /** useChat reports transport failures through onError instead of rejecting sendMessage. */
   const chatRequestFailedRef = useRef(false);
+  /** Whether the current run produced a terminal event (run_end / error). */
+  const sawRunTerminalRef = useRef(false);
+  /** Last time the stream produced any event; used by the stall watchdog. */
+  const runActivityAtRef = useRef(0);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
@@ -656,6 +660,7 @@ export function ChatSession({
 
   const handleChatEvent = useCallback(
     (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
+      runActivityAtRef.current = Date.now();
       if (event.type === "data") {
         switch (event.name) {
           case "deepResearchProgress":
@@ -721,12 +726,16 @@ export function ChatSession({
       }
 
       switch (event.type) {
+        case "run_end":
+          sawRunTerminalRef.current = true;
+          return;
         case "message_end":
           setDeepResearch(resetDeepResearchActivity());
           setToolWait({});
           void refreshContextUsage();
           return;
         case "error":
+          sawRunTerminalRef.current = true;
           setComposerError(`Run failed: ${event.error.message}`);
           setQueueHold(true);
           {
@@ -778,8 +787,17 @@ export function ChatSession({
         });
         return;
       }
-      if (error.name !== "AbortError") {
+      const aborted = error.name === "AbortError";
+      if (!aborted) {
         setComposerError("The chat request could not be completed.");
+      }
+      // The stream ended without a server terminal (worker/API outage or
+      // restart). Finalize in-flight tool cards so nothing is left spinning.
+      if (!aborted && !sawRunTerminalRef.current) {
+        const current = chatRef.current;
+        if (current) {
+          current.setMessages((messages) => finalizeInterruptedTools([...messages]));
+        }
       }
     },
   });
@@ -799,6 +817,30 @@ export function ChatSession({
     if (chat.status !== "submitted" && chat.status !== "streaming") {
       stopInFlightRef.current = false;
     }
+  }, [chat.status]);
+
+  // Stream stall watchdog: when a run never delivers any event (orphaned
+  // stream — worker/API died before a terminal), eventually finalize the
+  // tool cards and release the composer instead of hanging forever.
+  const STALL_GRACE_MS = 120_000;
+  useEffect(() => {
+    const active = chat.status === "submitted" || chat.status === "streaming";
+    if (!active) return;
+    runActivityAtRef.current = Date.now();
+    const timer = window.setInterval(() => {
+      const current = chatRef.current;
+      if (!current) return;
+      const stillActive =
+        current.status === "submitted" || current.status === "streaming";
+      if (!stillActive) return;
+      if (sawRunTerminalRef.current) return;
+      if (Date.now() - runActivityAtRef.current < STALL_GRACE_MS) return;
+      // No events for the grace period — recover locally.
+      current.stop();
+      current.setMessages((messages) => finalizeInterruptedTools([...messages]));
+      setComposerError("The chat connection stalled. The run was interrupted.");
+    }, 5_000);
+    return () => window.clearInterval(timer);
   }, [chat.status]);
 
   /** Stop the server run, abort the v1 stream, and finalize visible tool cards. */
@@ -1042,12 +1084,20 @@ export function ChatSession({
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();
       void markSessionRead(sessionId).catch(() => {});
+      // The stream closed without a server terminal (worker/API outage or
+      // restart). Finalize in-flight tool cards so nothing is left spinning.
+      if (!sawRunTerminalRef.current) {
+        chat.setMessages((messages) => finalizeInterruptedTools([...messages]));
+      }
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
         setComposerInputText(pendingFailedTextRef.current);
         pendingFailedTextRef.current = null;
       }
       focusComposer();
+    }
+    if (activeRun) {
+      sawRunTerminalRef.current = false;
     }
     wasActiveRunRef.current = activeRun;
   }, [

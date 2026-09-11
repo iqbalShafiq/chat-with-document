@@ -33,6 +33,10 @@ const STATUS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}`;
 const EVENTS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:events`;
 const COUNTER_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:counter`;
 export const streamStopKey = (streamId: string) => `rs-stop:${STREAM_TAG(streamId)}`;
+/** Heartbeat key the chat worker writes while a run is executing; the API watchdog treats a stale WAL as an abandoned run. */
+export const RUN_OWNER_WAL_KEY = (streamId: string) => `rs-owner-wal:${STREAM_TAG(streamId)}`;
+/** Created-at marker the chat worker writes when it first claims a run; lets the watchdog distinguish a booting run from an abandoned one. */
+export const RUN_CREATED_KEY = (streamId: string) => `rs-created:${STREAM_TAG(streamId)}`;
 
 const OPEN_TTL_SECONDS = 6 * 60 * 60;
 const CLOSE_TTL_SECONDS = 24 * 60 * 60;

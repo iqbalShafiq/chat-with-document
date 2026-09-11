@@ -248,6 +248,9 @@ function createDependencies(
       releases.push(streamId);
     },
     isStopRequested: async () => false,
+    touchOwnerWal: async () => undefined,
+    touchRunCreated: async () => undefined,
+    clearOwnerWal: async () => undefined,
     clearStopFlag: async () => undefined,
     sessionExists: async () => true,
     claimInteractionPolicy: async () => null,
