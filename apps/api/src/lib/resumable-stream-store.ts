@@ -189,6 +189,15 @@ function validDefaultData(name: string, value: unknown): boolean {
     return true;
   }
   if (name === "queuedMessageApplied") return exactKeys(value, ["clientMessageId", "attachmentCount"]) && boundedText(value.clientMessageId, 200) && boundedInteger(value.attachmentCount, 100);
+  if (name === "toolWaitProgress") {
+    return exactKeys(value, ["toolCallId", "toolName", "phase", "elapsedMs", "waitCount"], ["stage"]) &&
+      boundedText(value.toolCallId, 200) &&
+      boundedText(value.toolName, 200) &&
+      ["running", "wait_elapsed", "awaiting", "cancelled", "completed", "failed"].includes(String(value.phase)) &&
+      boundedInteger(value.elapsedMs, 86_400_000) &&
+      boundedInteger(value.waitCount, 10_000) &&
+      (value.stage === undefined || boundedText(value.stage, 240));
+  }
   return false;
 }
 
@@ -196,6 +205,7 @@ const DEFAULT_METADATA_SCHEMA = schema(validDefaultMetadata) as ClientMetadataSc
 const DEFAULT_DATA_SCHEMAS = {
   deepResearchProgress: schema((value) => validDefaultData("deepResearchProgress", value)),
   queuedMessageApplied: schema((value) => validDefaultData("queuedMessageApplied", value)),
+  toolWaitProgress: schema((value) => validDefaultData("toolWaitProgress", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {

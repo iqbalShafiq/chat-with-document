@@ -275,6 +275,34 @@ describe("Redis resumable stream store", () => {
     await expect(store.subscribe({ streamId: "s1" })[Symbol.asyncIterator]().next()).rejects.toThrow();
   });
 
+  it("persists tool wait progress data events through the store envelope", async () => {
+    const redis = createFakeRedis();
+    const store = createRedisResumableStreamStore(redis);
+    await store.open({ streamId: "s1" });
+    const event = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: {
+        runId: "run-1",
+        type: "data",
+        name: "toolWaitProgress",
+        data: {
+          toolCallId: "tool_0",
+          toolName: "generate_image",
+          phase: "wait_elapsed",
+          elapsedMs: 2002,
+          waitCount: 1,
+        },
+      },
+    } as never;
+    const record = await store.append({ streamId: "s1", event });
+    expect(record.eventId).toBe(1);
+    const bad = {
+      ...event,
+      event: { ...(event as { event: Record<string, unknown> }).event, data: { leaked: true } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: bad })).rejects.toThrow(/Invalid protocol-v3/);
+  });
+
   it("maps a malformed replay to an error stream_end through the official response guard", async () => {
     const fakeStore = {
       async open() { return { status: "running" as const, lastEventId: 0 }; },
