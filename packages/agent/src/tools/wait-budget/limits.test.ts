@@ -8,10 +8,13 @@ import {
 
 describe("waitBudgetForTool", () => {
   it("uses a longer slice for image generation and deep research", () => {
-    expect(waitBudgetForTool("generate_image")).toBe(IMAGE_WAIT_SLICE_MS);
-    expect(waitBudgetForTool("edit_image")).toBe(IMAGE_WAIT_SLICE_MS);
-    expect(waitBudgetForTool("deep_research")).toBe(DEEP_RESEARCH_WAIT_SLICE_MS);
-    expect(waitBudgetForTool("query_dataset_sql")).toBe(DEFAULT_WAIT_SLICE_MS);
+    const override = process.env.TOOL_WAIT_SLICE_MS
+      ? Number(process.env.TOOL_WAIT_SLICE_MS)
+      : undefined;
+    expect(waitBudgetForTool("generate_image")).toBe(override ?? IMAGE_WAIT_SLICE_MS);
+    expect(waitBudgetForTool("edit_image")).toBe(override ?? IMAGE_WAIT_SLICE_MS);
+    expect(waitBudgetForTool("deep_research")).toBe(override ?? DEEP_RESEARCH_WAIT_SLICE_MS);
+    expect(waitBudgetForTool("query_dataset_sql")).toBe(override ?? DEFAULT_WAIT_SLICE_MS);
   });
 
   it("refuses to budget control tools", () => {
