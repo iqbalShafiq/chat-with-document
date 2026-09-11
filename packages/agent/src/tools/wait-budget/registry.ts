@@ -106,6 +106,17 @@ export class InFlightToolRegistry {
     return this.jobs.get(toolCallId)?.status;
   }
 
+  peek(toolCallId: string): { toolName: string; status: InFlightToolStatus; stage?: string } | undefined {
+    const job = this.jobs.get(toolCallId);
+    if (!job) return undefined;
+    const view: { toolName: string; status: InFlightToolStatus; stage?: string } = {
+      toolName: job.toolName,
+      status: job.status,
+    };
+    if (job.stage !== undefined) view.stage = job.stage;
+    return view;
+  }
+
   setStage(toolCallId: string, stage: string): void {
     const job = this.jobs.get(toolCallId);
     if (!job || job.status !== "running") return;
