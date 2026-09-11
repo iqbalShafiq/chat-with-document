@@ -124,9 +124,13 @@ export class InFlightToolRegistry {
   }
 
   async registerAndWait(input: RegisterAndWaitInput): Promise<ObserveResult> {
-    if (this.jobs.has(input.toolCallId)) {
+    const previous = this.jobs.get(input.toolCallId);
+    if (previous?.status === "running") {
       throw new Error(`Tool call "${input.toolCallId}" is already registered.`);
     }
+    // Providers may reuse a tool call id across turns (e.g. "tool_0" for
+    // every call in a run). A terminal job no longer needs to block the id.
+    if (previous) this.jobs.delete(input.toolCallId);
     const abort = new AbortController();
     const unlinkParent = linkAbort(input.parentSignal, abort);
     const job: Job = {

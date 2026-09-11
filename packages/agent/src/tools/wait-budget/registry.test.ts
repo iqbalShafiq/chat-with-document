@@ -73,6 +73,51 @@ describe("InFlightToolRegistry", () => {
     expect(calls).toBe(1);
   });
 
+  it("re-registers the same id once the previous call is terminal", async () => {
+    const registry = new InFlightToolRegistry();
+    const first = await registry.registerAndWait({
+      toolCallId: "tool_0",
+      toolName: "read_dataset",
+      sliceMs: 200,
+      work: async () => ({ rows: 3 }),
+    });
+    expect(first).toEqual({ kind: "settled", output: { rows: 3 } });
+
+    const second = await registry.registerAndWait({
+      toolCallId: "tool_0",
+      toolName: "query_dataset_sql",
+      sliceMs: 200,
+      work: async () => ({ rows: [{ region: "West", total: 10660 }] }),
+    });
+    expect(second).toEqual({ kind: "settled", output: { rows: [{ region: "West", total: 10660 }] } });
+    const third = await registry.registerAndWait({
+      toolCallId: "tool_0",
+      toolName: "analyze_dataset",
+      sliceMs: 200,
+      work: async () => ({ ok: true }),
+    });
+    expect(third).toEqual({ kind: "settled", output: { ok: true } });
+  });
+
+  it("still rejects the same id while the previous call is running", async () => {
+    const registry = new InFlightToolRegistry();
+    const first = await registry.registerAndWait({
+      toolCallId: "tool_0",
+      toolName: "query_dataset_sql",
+      sliceMs: 20,
+      work: async (signal) => delay(200, signal),
+    });
+    expect(first.kind).toBe("still_running");
+    await expect(
+      registry.registerAndWait({
+        toolCallId: "tool_0",
+        toolName: "query_dataset_sql",
+        sliceMs: 20,
+        work: async () => ({ ok: true }),
+      }),
+    ).rejects.toThrow('Tool call "tool_0" is already registered.');
+  });
+
   it("cancels the same call id and aborts work", async () => {
     const registry = new InFlightToolRegistry();
     let aborted = false;
