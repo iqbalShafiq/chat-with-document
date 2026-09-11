@@ -1,3 +1,4 @@
+import { createMiddleware } from "@anvia/core/tool";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -45,7 +46,13 @@ import {
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
   DEEP_RESEARCH_INSTRUCTION,
+  TOOL_WAIT_INSTRUCTION,
+  createAwaitCancelTools,
+  createToolCallIdGate,
+  InFlightToolRegistry,
+  wrapToolsWithWaitBudget,
   type AgentContextBlock,
+  type ToolWaitProgress,
   type ImageCapabilitySet,
   type ProfileScope,
   type ProfileSectionKey,
@@ -249,6 +256,8 @@ export type ChatRunInput = {
   activeContextImages: ChatAgentImageDescriptor[];
   /** Frozen text snippet descriptor (null if none). */
   activeContextSnippet: ChatAgentSnippetDescriptor | null;
+  /** Per-run in-flight tool jobs (wait-budget). */
+  waitRegistry: InFlightToolRegistry;
 };
 
 /**
@@ -622,6 +631,8 @@ export type ChatRunReconstructionRuntime = {
   createCompletionModel?: typeof createCompletionModel;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
+  onToolWaitProgress?: (event: ToolWaitProgress) => void | Promise<void>;
+  waitRegistry?: InFlightToolRegistry;
 };
 
 /**
@@ -1326,6 +1337,9 @@ export async function reconstructChatRunInput(input: {
   // Native v1 questions are serializable interactions and do not need an
   // application Promise/Redis requester in the worker process.
   tools.push(createClarificationTool());
+  const waitRegistry = runtime?.waitRegistry ?? new InFlightToolRegistry();
+  const waitIds = createToolCallIdGate();
+  const waitProgress = runtime?.onToolWaitProgress;
   const context7Available = recipe.capabilities.context7Requested;
 
   // Vision helper for text-only models: describe session images, document
@@ -1387,6 +1401,14 @@ export async function reconstructChatRunInput(input: {
   const actualContextBlocks = contextBlocks.flatMap((block) =>
     typeof block.id === "string" ? [{ id: block.id, text: block.text }] : [],
   );
+  const waitBudgetTools = wrapToolsWithWaitBudget(tools, {
+    registry: waitRegistry,
+    ids: waitIds,
+    ...(waitProgress ? { onProgress: waitProgress } : {}),
+  });
+  tools.length = 0;
+  tools.push(...waitBudgetTools);
+
   const reconstructedToolDefinitions = await Promise.all(
     tools.map((tool) => tool.definition("")),
   );
@@ -1414,15 +1436,31 @@ export async function reconstructChatRunInput(input: {
     model: recipe.staticContext.model,
   });
 
+  tools.push(
+    ...createAwaitCancelTools({
+      registry: waitRegistry,
+      ...(waitProgress ? { onProgress: waitProgress } : {}),
+    }),
+  );
+  const runtimeInstructions = [...instructions, TOOL_WAIT_INSTRUCTION];
+
   const agent = makeAgent({
     agentId: recipe.agentId,
     model: makeCompletionModel(model),
     reasoningEffort: (reasoningEffort ?? undefined) as
       | ReasoningEffort
       | undefined,
-    additionalInstructions: instructions,
+    additionalInstructions: runtimeInstructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
+    middlewares: [
+      createMiddleware({
+        onToolInput: ({ toolName, toolCallId }) => {
+          if (toolCallId) waitIds.note(toolName, toolCallId);
+          return undefined;
+        },
+      }),
+    ],
     ...(context7Available && context7Server
       ? { mcpServers: [context7Server] }
       : {}),
@@ -1436,7 +1474,7 @@ export async function reconstructChatRunInput(input: {
     projectId,
     model,
     reasoningEffort,
-    instructions,
+    instructions: runtimeInstructions,
     contextBlocks,
     tools,
     memory: runMemory,
@@ -1449,5 +1487,6 @@ export async function reconstructChatRunInput(input: {
     activeContextImages,
     /** The single text snippet pinned as additional context (null if none). */
     activeContextSnippet,
+    waitRegistry,
   };
 }
