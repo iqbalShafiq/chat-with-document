@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseUIMessage, type UIMessage, type UIMessagePart } from "@anvia/client";
-import { finalizeInterruptedTools } from "./finalize-interrupted-tools.js";
+import { finalizeInterruptedTools, settleStoppedRunTools, stillOpenToolCards } from "./finalize-interrupted-tools.js";
 
 type ToolPart = Extract<UIMessagePart, { type: "tool" }>;
 
@@ -128,5 +128,110 @@ describe("finalizeInterruptedTools", () => {
         expect(part.error.message).toBe("Run failed before this tool finished.");
       }
     }
+  });
+
+  it("leaves a tool that is still waiting for approval untouched", () => {
+    // A suspended approval also ends its stream, so the tool has no result yet.
+    // Finalizing it would show "Stopped" next to the prompt asking for it.
+    const messages: UIMessage[] = [
+      assistant([tool("input-available")]),
+    ];
+    const next = finalizeInterruptedTools(messages, undefined, {
+      keepPendingApprovalTools: new Set(["generate_image"]),
+    });
+    expect(next).toBe(messages);
+  });
+});
+
+describe("settleStoppedRunTools", () => {
+  it("keeps a pending approval card open while settling everything else", () => {
+    const messages: UIMessage[] = [
+      assistant([
+        tool("input-available"),
+        tool("input-available", {
+          id: "part-2",
+          toolCallId: "call-2",
+          toolName: "web_search",
+        }),
+      ]),
+    ];
+    const next = settleStoppedRunTools(messages, { pendingApprovalToolNames: ["generate_image"] });
+    const parts = next[0]!.parts.filter(
+      (part): part is ToolPart => part.type === "tool",
+    );
+    // The approval-gated tool keeps its in-flight state...
+    expect(parts[0]?.state).toBe("input-available");
+    // ...while the unrelated unfinished tool is still finalized.
+    expect(parts[1]?.state).toBe("error");
+  });
+
+  it("still settles a finished call of a tool that later waits for approval", () => {
+    // The same tool can run twice in a turn; only the unfinished one is pending.
+    const messages: UIMessage[] = [
+      assistant([
+        tool("output-available", {
+          id: "part-1",
+          toolCallId: "call-1",
+          output: { images: ["url"] },
+        }),
+        tool("input-available", { id: "part-2", toolCallId: "call-2" }),
+      ]),
+    ];
+    const next = settleStoppedRunTools(messages, { pendingApprovalToolNames: ["generate_image"] });
+    const parts = next[0]!.parts.filter(
+      (part): part is ToolPart => part.type === "tool",
+    );
+    expect(parts[0]?.state).toBe("output-available");
+    expect(parts[1]?.state).toBe("input-available");
+  });
+
+  it("settles everything when no approval is pending", () => {
+    const messages: UIMessage[] = [assistant([tool("input-available")])];
+    const next = settleStoppedRunTools(messages, {});
+    const part = next[0]!.parts[0];
+    expect(part?.type === "tool" && part.state).toBe("error");
+  });
+
+  it("drops a card whose tool ran again in a later part", () => {
+    // Answering an approval resumes the run, so the tool re-runs under a new id
+    // and the original card can never settle on its own.
+    const messages: UIMessage[] = [
+      assistant([tool("input-available")]),
+      assistant(
+        [
+          tool("output-available", {
+            id: "part-2",
+            toolCallId: "call-2",
+            output: { results: ["done"] },
+          }),
+        ],
+        "a2",
+      ),
+    ];
+    const next = settleStoppedRunTools(messages, {});
+    expect(next[0]!.parts).toHaveLength(0);
+    expect(next[1]!.parts).toHaveLength(1);
+  });
+
+  it("keeps a card whose tool did not run again", () => {
+    const messages: UIMessage[] = [assistant([tool("input-available")])];
+    const next = settleStoppedRunTools(messages, {});
+    const part = next[0]!.parts[0];
+    expect(part?.type === "tool" && part.state).toBe("error");
+  });
+});
+
+describe("stillOpenToolCards", () => {
+  it("reports an unfinished card that no approval explains", () => {
+    const messages: UIMessage[] = [assistant([tool("input-available")])];
+    expect(stillOpenToolCards(messages)).toBe(true);
+    expect(stillOpenToolCards(messages, ["generate_image"])).toBe(false);
+  });
+
+  it("reports nothing when every card settled", () => {
+    const messages: UIMessage[] = [
+      assistant([tool("output-available", { output: { ok: true } })]),
+    ];
+    expect(stillOpenToolCards(messages)).toBe(false);
   });
 });

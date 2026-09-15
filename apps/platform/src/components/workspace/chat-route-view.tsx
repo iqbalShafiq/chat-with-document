@@ -5,7 +5,8 @@ import { AnrealMark } from "#/components/layout/anreal-brand";
 import { SessionNotFound } from "#/components/workspace/workspace-not-found";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { useModels } from "#/hooks/use-models";
-import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { settleStoppedRunTools } from "#/lib/chat/finalize-interrupted-tools";
+import { peekPendingApprovalToolNames } from "#/lib/chat/interaction-resume-storage";
 import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
 import {
@@ -20,16 +21,20 @@ import {
  *
  * Finalizing is only correct once nothing is running: while a run is live, the
  * same incomplete tool shapes describe work in flight, and marking them stopped
- * would show errors for calls that are still progressing.
+ * would show errors for calls that are still progressing. An approval that is
+ * still waiting on the user keeps its card open for the same reason.
  */
 async function settledHistoryForRoute(
   sessionId: string,
   data: unknown,
 ): Promise<ChatUIMessage[]> {
   const parsed = reconcileWaitedTools(parseMemoryMessages(data));
-  const status = await fetchRunStatus(sessionId).catch(() => null);
+  const [status, pendingApprovalToolNames] = await Promise.all([
+    fetchRunStatus(sessionId).catch(() => null),
+    Promise.resolve(peekPendingApprovalToolNames(window.sessionStorage, sessionId)),
+  ]);
   if (status?.status === "running") return parsed;
-  return finalizeInterruptedTools(parsed);
+  return settleStoppedRunTools(parsed, { pendingApprovalToolNames });
 }
 
 export function useChatRouteData(input: {

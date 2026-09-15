@@ -75,9 +75,7 @@ export function useShareThreadData(shareToken: string): {
         setTitle(snapshot.title);
         setOwnerName(snapshot.ownerName);
         setCreatedAt(snapshot.createdAt);
-        setMessages(
-          finalizeInterruptedTools(reconcileWaitedTools(parseMemoryMessages(snapshot.messages))),
-        );
+        setMessages(finalizeInterruptedTools(reconcileWaitedTools(parseMemoryMessages(snapshot.messages))));
         setStatus("ready");
       } catch {
         if (!cancelled) setStatus("missing");
