@@ -15,6 +15,11 @@ function isUnfinishedWait(part: Extract<UIMessagePart, { type: "tool" }>): boole
  *
  * `input-streaming` / `input-available` → `error`. Done / already-error parts
  * are left alone.
+ *
+ * This assumes the run is over. During a live run the same shapes also describe
+ * work that is simply still in flight, and the tool's own wait progress is what
+ * distinguishes the two, so callers must not use this blindly (see
+ * `mergeServerMessages`).
  */
 export function finalizeInterruptedTools<
   Metadata extends ClientMetadata = ClientMetadata,

@@ -111,6 +111,7 @@ import {
 } from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { mergeServerMessages } from "#/lib/chat/merge-server-messages";
 import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { failedTailTruncate } from "#/lib/chat/failed-tail";
 import {
@@ -1105,15 +1106,10 @@ export function ChatSession({
       // A waited tool's own part only holds the still_running checkpoint, so
       // settle those cards from the control call's result before finalizing;
       // finalizing first would turn them into errors and drop the real output.
-      if (!sawRunTerminalRef.current) {
-        chat.setMessages((messages) =>
-          finalizeInterruptedTools(reconcileWaitedTools([...messages])),
-        );
-      } else {
-        chat.setMessages((messages) =>
-          reconcileWaitedTools([...messages], { markUnfinished: true }),
-        );
-      }
+      // The run has ended here, so anything still unfinished is truly stopped.
+      chat.setMessages((messages) =>
+        finalizeInterruptedTools(reconcileWaitedTools([...messages])),
+      );
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
         setComposerInputText(pendingFailedTextRef.current);
@@ -2033,7 +2029,17 @@ export function ChatSession({
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
     const data = await loadChatMessages(sessionId);
-    const fresh = finalizeInterruptedTools(reconcileWaitedTools(parseMemoryMessages(data)));
+    const server = parseMemoryMessages(data);
+    // Server memory lags a live run, so keep whatever local parts are ahead of
+    // it instead of letting an incomplete snapshot look like stopped tools.
+    const merged = mergeServerMessages(
+      server,
+      messagesRef.current as readonly ChatUIMessage[],
+    );
+    const live = chatRef.current?.status === "submitted" || chatRef.current?.status === "streaming";
+    const fresh = live
+      ? reconcileWaitedTools(merged)
+      : finalizeInterruptedTools(reconcileWaitedTools(merged));
     onReloadMessages?.(fresh);
     chatRef.current?.setMessages(fresh);
   }, [sessionId, onReloadMessages]);
