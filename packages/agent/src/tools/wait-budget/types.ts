@@ -24,7 +24,12 @@ export type StillRunningResult = {
   elapsedMs: number;
   waitCount: number;
   progressMoved: boolean;
-  mustInformUser: true;
+  /**
+   * True only when this wait carries something the user has not heard yet
+   * (first wait, or a stage/progress change). Waiting itself is not news, so
+   * a quiet poll does not ask the model to say anything again.
+   */
+  shouldInformUser: boolean;
   next: readonly [typeof AWAIT_TOOL_CALL_NAME, typeof CANCEL_TOOL_CALL_NAME];
   stage?: string;
 };

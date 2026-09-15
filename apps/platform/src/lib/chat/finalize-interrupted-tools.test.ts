@@ -106,4 +106,27 @@ describe("finalizeInterruptedTools", () => {
     const next = finalizeInterruptedTools(messages);
     expect(next).toBe(messages);
   });
+
+  it("uses a caller-supplied reason for a failed run", () => {
+    const messages: UIMessage[] = [
+      assistant([
+        tool("input-available"),
+        tool("output-available", {
+          id: "part-2",
+          toolCallId: "call-2",
+          output: { status: "still_running", toolCallId: "call-2" },
+        }),
+      ]),
+    ];
+    const next = finalizeInterruptedTools(messages, "Run failed before this tool finished.");
+    const parts = next[0]!.parts.filter(
+      (part): part is ToolPart => part.type === "tool",
+    );
+    for (const part of parts) {
+      expect(part.state).toBe("error");
+      if (part.state === "error") {
+        expect(part.error.message).toBe("Run failed before this tool finished.");
+      }
+    }
+  });
 });

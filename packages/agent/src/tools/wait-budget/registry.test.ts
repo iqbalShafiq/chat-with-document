@@ -45,7 +45,7 @@ describe("InFlightToolRegistry", () => {
     if (first.kind !== "still_running") throw new Error("expected still_running");
     expect(first.payload.toolCallId).toBe("a1");
     expect(first.payload.waitCount).toBe(1);
-    expect(first.payload.mustInformUser).toBe(true);
+    expect(first.payload.shouldInformUser).toBe(true);
     expect(first.payload.next).toEqual(["await_tool_call", "cancel_tool_call"]);
     expect(finished).toBe(false);
     expect(registry.hasRunning()).toBe(true);
@@ -226,5 +226,62 @@ describe("InFlightToolRegistry", () => {
     const observed = await registry.awaitSlice("a1", 50);
     expect(observed.kind).toBe("cancelled");
     expect(observed.kind === "cancelled" ? observed.payload.status : null).toBe("cancelled");
+  });
+
+  it("widens each wait for any long tool so a slow call stops burning turns", async () => {
+    // A fixed slice makes a long tool poll once per slice; the registry must
+    // converge to far fewer, longer waits without any tool-name policy.
+    const registry = new InFlightToolRegistry({ maxWallMs: 60_000 });
+    const sliceMs = 10;
+    const startedAt = Date.now();
+    let waits = 0;
+
+    const first = await registry.registerAndWait({
+      toolCallId: "slow",
+      toolName: "some_slow_tool",
+      sliceMs,
+      work: async (signal) => {
+        await delay(1_500, signal);
+        return "done";
+      },
+    });
+    expect(first.kind).toBe("still_running");
+    let observed = first;
+    while (observed.kind === "still_running") {
+      waits += 1;
+      observed = await registry.awaitSlice("slow", sliceMs);
+    }
+
+    expect(observed.kind).toBe("settled");
+    // With doubling from a 10ms base over ~1.5s, a handful of waits suffice;
+    // a non-escalating registry would need ~150.
+    expect(waits).toBeLessThan(12);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_400);
+  });
+
+  it("does not ask for a user line on a quiet poll after the first wait", async () => {
+    const registry = new InFlightToolRegistry();
+    const first = await registry.registerAndWait({
+      toolCallId: "a1",
+      toolName: "query_dataset_sql",
+      sliceMs: 20,
+      work: async (signal) => delay(600, signal),
+    });
+    expect(first.kind).toBe("still_running");
+    if (first.kind !== "still_running") throw new Error("expected still_running");
+    expect(first.payload.shouldInformUser).toBe(true);
+
+    const second = await registry.awaitSlice("a1", 20);
+    expect(second.kind).toBe("still_running");
+    if (second.kind !== "still_running") throw new Error("expected still_running");
+    expect(second.payload.progressMoved).toBe(false);
+    expect(second.payload.shouldInformUser).toBe(false);
+
+    registry.setStage("a1", "synthesizing");
+    const third = await registry.awaitSlice("a1", 20);
+    expect(third.kind).toBe("still_running");
+    if (third.kind !== "still_running") throw new Error("expected still_running");
+    expect(third.payload.progressMoved).toBe(true);
+    expect(third.payload.shouldInformUser).toBe(true);
   });
 });

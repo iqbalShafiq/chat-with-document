@@ -15,14 +15,14 @@ const jsonOutputSchema = z.json();
 const awaitToolCallSpec = {
   name: AWAIT_TOOL_CALL_NAME,
   description:
-    "Wait for another slice of work on an in-flight tool call that returned still_running. Pass the same toolCallId. Does not start a new tool. Use only after still_running. Always tell the user you are still waiting in the same turn.",
+    "Wait for another slice of work on an in-flight tool call that returned still_running. Pass the same toolCallId. Does not start a new tool. Use only after still_running. Keep the user company in your own words when the payload reports something new (shouldInformUser), and stay silent on quiet repeats.",
   inputSchema: toolCallIdInput,
 } as const;
 
 const cancelToolCallSpec = {
   name: CANCEL_TOOL_CALL_NAME,
   description:
-    "Cancel an in-flight tool call that returned still_running. Pass the same toolCallId. Does not start a new tool. Always tell the user you stopped it in the same turn. After cancel, do not invent that tool's result.",
+    "Cancel an in-flight tool call that returned still_running. Pass the same toolCallId. Does not start a new tool. Use it when the wait is genuinely wasted, not merely slow. Tell the user you stopped it in your own words. After cancel, do not invent that tool's result.",
   inputSchema: toolCallIdInput,
 } as const;
 

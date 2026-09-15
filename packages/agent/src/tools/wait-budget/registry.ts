@@ -8,7 +8,7 @@ import {
   type ObserveResult,
   type StillRunningResult,
 } from "./types.js";
-import { MAX_JOB_WALL_MS } from "./limits.js";
+import { escalateWaitSlice, MAX_JOB_WALL_MS } from "./limits.js";
 
 export class ToolCallCancelledError extends Error {
   readonly code = "TOOL_CALL_CANCELLED";
@@ -67,7 +67,8 @@ function stillRunningPayload(job: Job, now: number, progressMoved: boolean): Sti
     elapsedMs: Math.max(0, now - job.startedAt),
     waitCount: job.waitCount,
     progressMoved,
-    mustInformUser: true,
+    // Only the first wait and waits that carry news ask for a user-facing line.
+    shouldInformUser: job.waitCount <= 1 || progressMoved,
     next: [AWAIT_TOOL_CALL_NAME, CANCEL_TOOL_CALL_NAME],
   };
   if (job.stage !== undefined) payload.stage = job.stage;
@@ -220,7 +221,11 @@ export class InFlightToolRegistry {
     }
 
     const remainingWall = this.maxWallMs - elapsed;
-    const budget = Math.max(1, Math.min(sliceMs, remainingWall));
+    const sliceBefore = Number.isFinite(sliceMs) && sliceMs > 0 ? sliceMs : 1;
+    // A long tool must not spend the agent's turn budget polling: each
+    // elapsed wait widens the next slice for every tool and stage.
+    const slice = escalateWaitSlice(sliceBefore, job.waitCount);
+    const budget = Math.max(1, Math.min(slice, remainingWall));
     const stageBefore = job.stage;
     const raced = await raceSettled(job.promise, budget);
     if (raced === "timeout") {

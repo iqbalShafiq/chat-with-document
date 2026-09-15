@@ -736,6 +736,14 @@ export function ChatSession({
           return;
         case "error":
           sawRunTerminalRef.current = true;
+          // A terminal error means nothing is still running: drop wait state
+          // and finalize open tool cards, or an errored tool keeps showing
+          // "Waiting" from the last progress event it never finished.
+          setToolWait({});
+          setDeepResearch(resetDeepResearchActivity());
+          chatRef.current?.setMessages((messages) =>
+            finalizeInterruptedTools([...messages], "Run failed before this tool finished."),
+          );
           setComposerError(`Run failed: ${event.error.message}`);
           setQueueHold(true);
           {
@@ -822,7 +830,12 @@ export function ChatSession({
   // Stream stall watchdog: when a run never delivers any event (orphaned
   // stream — worker/API died before a terminal), eventually finalize the
   // tool cards and release the composer instead of hanging forever.
-  const STALL_GRACE_MS = 120_000;
+  // The worker emits a progress event at least once per wait slice and slices
+  // grow with the elapsed wait (capped at TOOL_WAIT_MAX_SLICE_MS, 120s by
+  // default), so this grace must clear that cap plus provider latency or a
+  // healthy long tool would be killed as a false stall.
+  const STALL_GRACE_MS = 240_000;
+  const STALL_POLL_MS = 5_000;
   useEffect(() => {
     const active = chat.status === "submitted" || chat.status === "streaming";
     if (!active) return;
@@ -839,7 +852,7 @@ export function ChatSession({
       current.stop();
       current.setMessages((messages) => finalizeInterruptedTools([...messages]));
       setComposerError("The chat connection stalled. The run was interrupted.");
-    }, 5_000);
+    }, STALL_POLL_MS);
     return () => window.clearInterval(timer);
   }, [chat.status]);
 
