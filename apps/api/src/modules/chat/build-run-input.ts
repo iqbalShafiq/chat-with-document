@@ -48,6 +48,7 @@ import {
   DEEP_RESEARCH_INSTRUCTION,
   TOOL_WAIT_INSTRUCTION,
   createAwaitCancelTools,
+  createSubAgentWaitBudget,
   createToolCallIdGate,
   InFlightToolRegistry,
   wrapToolsWithWaitBudget,
@@ -1227,16 +1228,22 @@ export async function reconstructChatRunInput(input: {
       resolver: tabularResolver,
       webFetchGate: { enabled: true },
     });
-    const researchTools = boundDeepResearchTools(
-      [
-        ...documentTools,
-        ...researchWebTools,
-        ...tabularTools,
-        ...researchDerivedTools,
-        ...chartTools,
-      ],
-      recipe.budgets.deepResearchMaxSearches,
-      onDeepResearchProgress,
+    // The researcher gets the same per-call wait budget the parent has, so a
+    // slow nested tool returns still_running and the researcher keeps waiting
+    // instead of the whole research run being cut short.
+    const researchBudget = createSubAgentWaitBudget();
+    const researchTools = researchBudget.wrapTools(
+      boundDeepResearchTools(
+        [
+          ...documentTools,
+          ...researchWebTools,
+          ...tabularTools,
+          ...researchDerivedTools,
+          ...chartTools,
+        ],
+        recipe.budgets.deepResearchMaxSearches,
+        onDeepResearchProgress,
+      ),
     );
     const researcher = makeAgent({
       agentId: `${recipe.agentId}-deep-researcher`,
@@ -1247,11 +1254,13 @@ export async function reconstructChatRunInput(input: {
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
         DATASET_INSTRUCTION_RESEARCHER,
+        researchBudget.instructions,
         ...(catalogInstruction ? [catalogInstruction] : []),
         ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
       ],
       additionalContext: contextBlocks,
-      additionalTools: researchTools,
+      additionalTools: [...researchTools, ...researchBudget.controlTools()],
+      middlewares: [researchBudget.middleware()],
       memory: undefined,
     });
     // Seal parent copies only. Nested researcher tools stay unsealed so the
@@ -1272,6 +1281,7 @@ export async function reconstructChatRunInput(input: {
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         onProgress: onDeepResearchProgress,
         completionGuard,
+        waitBudget: researchBudget,
       }),
     );
   }

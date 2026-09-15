@@ -17,6 +17,7 @@ export * from "./tools/wait-budget/limits.js";
 export * from "./tools/wait-budget/registry.js";
 export * from "./tools/wait-budget/wrap-tool.js";
 export * from "./tools/wait-budget/await-cancel-tools.js";
+export * from "./tools/wait-budget/sub-agent.js";
 export * from "./prompts/document-image-instructions.js";
 export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";

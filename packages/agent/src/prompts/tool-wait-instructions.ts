@@ -8,3 +8,17 @@ export const TOOL_WAIT_INSTRUCTION = [
   "Do not use request_clarification to announce waiting.",
   "After cancel_tool_call, you may call the original tool again only with improved arguments grounded in the tool error or still_running facts. Never invent results for a cancelled or unfinished tool.",
 ].join(" ");
+
+/**
+ * Wait guidance for a nested specialist agent. Same tool contract, but the
+ * narration rules differ: the parent agent owns everything the user reads, so
+ * a sub-agent must not spend its own turns talking to the user.
+ */
+export const SUB_AGENT_TOOL_WAIT_INSTRUCTION = [
+  "Some of your tools may return JSON with status still_running and a toolCallId instead of a final result.",
+  "That means the same call is still working. Do not treat still_running as success.",
+  "Keep waiting with await_tool_call on that toolCallId while the work is plausibly progressing; a slow tool is expected, so never cancel it merely because it is slow. Use cancel_tool_call only when the wait is genuinely wasted for the research question.",
+  "Do not invoke the original tool again to poll it, and do not re-plan around a call that is still running.",
+  "Do not write user-facing prose while you wait: your output is a research report, and the parent agent reports progress to the user. Keep waiting silent and continue your work once the result arrives.",
+  "Never invent results for a cancelled or unfinished tool. If a call could not be completed, say so in the report and state the limitation.",
+].join(" ");

@@ -21,6 +21,7 @@ import {
   isCancelledToolOutput,
   isStillRunningToolOutput,
   useToolWaitProgress,
+  useLiveWaitElapsed,
 } from "#/lib/chat/tool-wait-progress";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -246,7 +247,17 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         stage: (outputValue as { stage?: unknown }).stage,
       }
     : undefined;
-  const waitElapsedMs = Number.isFinite(lastWait?.elapsedMs) ? (lastWait as { elapsedMs: number }).elapsedMs : wait?.elapsedMs;
+  // The card's own payload only carries the first checkpoint's elapsed, while
+// every later await reports a larger one, so take the largest known value.
+  const partElapsedMs = Number.isFinite(lastWait?.elapsedMs)
+    ? (lastWait as { elapsedMs: number }).elapsedMs
+    : undefined;
+  const reportedElapsedMs =
+    partElapsedMs === undefined
+      ? wait?.elapsedMs
+      : wait?.elapsedMs === undefined
+        ? partElapsedMs
+        : Math.max(partElapsedMs, wait.elapsedMs);
   const waitStage =
     typeof wait?.stage === "string" && wait.stage.length > 0
       ? wait.stage
@@ -255,6 +266,9 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         : undefined;
   const isWaiting =
     stillRunning || wait?.phase === "wait_elapsed" || wait?.phase === "awaiting";
+  // A wait slice can last minutes, so tick the reported elapsed forward while
+  // the card is actually waiting instead of showing a frozen number.
+  const waitElapsedMs = useLiveWaitElapsed(reportedElapsedMs, isWaiting);
   const isCancelled = cancelledOutput || wait?.phase === "cancelled";
   const isRunning =
     part.state === "input-streaming" ||

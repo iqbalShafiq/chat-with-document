@@ -6,6 +6,7 @@ import { SessionNotFound } from "#/components/workspace/workspace-not-found";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { useModels } from "#/hooks/use-models";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
 import {
   ApiAuthError,
@@ -55,7 +56,9 @@ export function useChatRouteData(input: {
           ),
         ]);
         if (cancelled) return;
-        const messages = finalizeInterruptedTools(parseMemoryMessages(data));
+        const messages = finalizeInterruptedTools(
+          reconcileWaitedTools(parseMemoryMessages(data)),
+        );
         const known = scoped?.items.some((s) => s.sessionId === sessionId);
         if (messages.length === 0 && !known) {
           setStatus("missing");

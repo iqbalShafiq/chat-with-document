@@ -10,12 +10,14 @@ import {
   buildDeepResearchPrompt,
   createDeepResearchCompletionGuard,
   createDeepResearchTools,
+  deepResearchLimits,
   DEEP_RESEARCH_INSTRUCTION,
   DEEP_RESEARCH_PARENT_SEAL_MESSAGE,
   sealRetrievalAfterDeepResearch,
   type DeepResearchProgress,
   type DeepResearchResearcher,
 } from "./deep-research.js";
+import { MAX_WAIT_SLICE_MS as MAX_SLICE_FOR_TEST } from "./wait-budget/limits.js";
 
 type Researcher = DeepResearchResearcher;
 
@@ -325,6 +327,44 @@ describe("createDeepResearchTools", () => {
       name: "AgentToolSuspensionError",
       message: "Nested agent interaction was rejected",
     });
+  });
+
+  it("stops outstanding nested tool jobs once the research returns", async () => {
+    // The researcher can return while one of its tools is still running; the
+    // run must not leave that job burning wall clock in the background.
+    const abortOutstanding = vi.fn();
+    const { researcher } = makeResearcher("report");
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      waitBudget: { abortOutstanding },
+    })[0]!;
+
+    await expect(tool.call(args)).resolves.toBe("report");
+    expect(abortOutstanding).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops outstanding nested tool jobs when the run fails", async () => {
+    const abortOutstanding = vi.fn();
+    const { researcher, call } = makeResearcher();
+    call.mockRejectedValueOnce(new Error("researcher failed"));
+    const tool = createDeepResearchTools({
+      enabled: true,
+      researcher,
+      waitBudget: { abortOutstanding },
+    })[0]!;
+
+    await expect(tool.call(args)).rejects.toThrow("researcher failed");
+    expect(abortOutstanding).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults to a run ceiling that accommodates real multi-source research", () => {
+    const limits = deepResearchLimits();
+    // A nested specialist agent needs a ceiling well above a single tool wait,
+    // while staying inside the hard cap that bounds cost.
+    expect(limits.maxDurationMs).toBe(15 * 60_000);
+    expect(limits.maxTurns).toBe(24);
+    expect(MAX_SLICE_FOR_TEST).toBeLessThan(limits.maxDurationMs);
   });
 });
 

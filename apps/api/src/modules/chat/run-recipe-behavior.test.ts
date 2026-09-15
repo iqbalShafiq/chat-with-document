@@ -366,4 +366,57 @@ describe("run recipe reconstruction capability boundary", () => {
     expect(context7Reads).toBe(1);
     expect(JSON.parse(JSON.stringify(resolved))).toEqual(resolved);
   });
+
+  it("gives the nested researcher its own wait budget without breaking parity", async () => {
+    // The researcher gets await/cancel tools, so it must still rebuild the same
+    // static surface the recipe froze; a mismatch would abort every deep
+    // research run at reconstruction time.
+    vi.stubEnv("TAVILY_API_KEY", "test-key");
+    const captured: Record<string, unknown>[] = [];
+    const frozen = recipe({
+      documents: { ids: [], catalog: [] },
+      capabilities: {
+        modelAcceptsImage: true,
+        webSearchAvailable: true,
+        imageGenerationAvailable: false,
+        deepResearchAvailable: true,
+        profilingEnabled: false,
+        context7Requested: false,
+        imageModelCapabilities: [],
+      },
+    });
+
+    const reconstructed = await reconstructChatRunInput({
+      recipe: frozen,
+      runtime: {
+        createAgent: ((options: Record<string, unknown>) => {
+          captured.push(options);
+          return { asTool: () => ({ name: "deep_research_researcher" }) } as never;
+        }) as never,
+        createCompletionModel: (() => ({}) as never) as never,
+        createMemoryStore: () =>
+          ({
+            load: async () => [],
+            append: async () => undefined,
+            clear: async () => undefined,
+          }) as never,
+      },
+    });
+
+    expect(reconstructed.deepResearchAvailable).toBe(true);
+    const researcherOptions = captured.find((options) =>
+      String(options.agentId).endsWith("-deep-researcher"),
+    );
+    expect(researcherOptions).toBeDefined();
+    const nestedTools = (researcherOptions?.additionalTools ?? []) as { name: string }[];
+    const nestedNames = nestedTools.map((tool) => tool.name);
+    expect(nestedNames).toContain("await_tool_call");
+    expect(nestedNames).toContain("cancel_tool_call");
+    expect(
+      (researcherOptions?.additionalInstructions ?? []) as string[],
+    ).toEqual(
+      expect.arrayContaining([expect.stringMatching(/do not write user-facing prose/i)]),
+    );
+    expect(researcherOptions?.middlewares).toHaveLength(1);
+  });
 });

@@ -111,6 +111,7 @@ import {
 } from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { failedTailTruncate } from "#/lib/chat/failed-tail";
 import {
   blocksDestructiveSessionAction,
@@ -742,7 +743,10 @@ export function ChatSession({
           setToolWait({});
           setDeepResearch(resetDeepResearchActivity());
           chatRef.current?.setMessages((messages) =>
-            finalizeInterruptedTools([...messages], "Run failed before this tool finished."),
+            finalizeInterruptedTools(
+              reconcileWaitedTools([...messages]),
+              "Run failed before this tool finished.",
+            ),
           );
           setComposerError(`Run failed: ${event.error.message}`);
           setQueueHold(true);
@@ -877,7 +881,8 @@ export function ChatSession({
             stop: () => current.stop(),
             setMessages: (messages) => current.setMessages([...messages]),
           },
-          (messages) => finalizeInterruptedTools([...messages]),
+          (messages) =>
+            finalizeInterruptedTools(reconcileWaitedTools([...messages])),
         );
         setQueueHold(true);
       }
@@ -1097,10 +1102,17 @@ export function ChatSession({
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();
       void markSessionRead(sessionId).catch(() => {});
-      // The stream closed without a server terminal (worker/API outage or
-      // restart). Finalize in-flight tool cards so nothing is left spinning.
+      // A waited tool's own part only holds the still_running checkpoint, so
+      // settle those cards from the control call's result before finalizing;
+      // finalizing first would turn them into errors and drop the real output.
       if (!sawRunTerminalRef.current) {
-        chat.setMessages((messages) => finalizeInterruptedTools([...messages]));
+        chat.setMessages((messages) =>
+          finalizeInterruptedTools(reconcileWaitedTools([...messages])),
+        );
+      } else {
+        chat.setMessages((messages) =>
+          reconcileWaitedTools([...messages], { markUnfinished: true }),
+        );
       }
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
@@ -2021,7 +2033,7 @@ export function ChatSession({
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
     const data = await loadChatMessages(sessionId);
-    const fresh = finalizeInterruptedTools(parseMemoryMessages(data));
+    const fresh = finalizeInterruptedTools(reconcileWaitedTools(parseMemoryMessages(data)));
     onReloadMessages?.(fresh);
     chatRef.current?.setMessages(fresh);
   }, [sessionId, onReloadMessages]);
