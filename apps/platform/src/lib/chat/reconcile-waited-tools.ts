@@ -70,6 +70,20 @@ function observedToolCallId(part: ToolPart): string | null {
 }
 
 /**
+ * Registry job id carried by the checkpoint payload.
+ *
+ * A tool part's own `toolCallId` is the provider id, while the wait registry
+ * (and therefore `await_tool_call` arguments) uses its own id, so matching on
+ * the part id would never settle a waited card.
+ */
+function checkpointJobId(part: ToolPart): string | null {
+  if (part.state !== "output-available") return null;
+  const payload = asRecord(unwrapToolValue(part.output));
+  const id = payload?.toolCallId;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/**
  * Map each wait/cancel result onto the tool call it observed.
  *
  * A waited tool's own part only ever holds the `still_running` checkpoint, so
@@ -125,7 +139,9 @@ export function reconcileWaitedTools<
       if (part.state !== "output-available") return part;
       if (HIDDEN_CONTROL_TOOL_NAMES.has(part.toolName)) return part;
       if (!isStillRunningToolOutput(part.output)) return part;
-      const resolved = results.get(part.toolCallId);
+      // Match on the checkpoint's job id, which is what the wait observes.
+      const jobId = checkpointJobId(part);
+      const resolved = jobId === null ? undefined : results.get(jobId);
       if (resolved !== undefined) {
         messageChanged = true;
         return { ...part, output: resolved };

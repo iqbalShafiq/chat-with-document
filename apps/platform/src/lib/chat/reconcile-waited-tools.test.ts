@@ -44,14 +44,14 @@ describe("reconcileWaitedTools", () => {
         toolPart({
           id: "p-1",
           toolName: "web_search",
-          toolCallId: "call-1",
-          output: stillRunning("call-1"),
+          toolCallId: "provider-1",
+          output: stillRunning("job-1"),
         }),
         toolPart({
           id: "p-2",
           toolName: "await_tool_call",
-          toolCallId: "call-2",
-          toolInput: { toolCallId: "call-1" },
+          toolCallId: "control-1",
+          toolInput: { toolCallId: "job-1" },
           output: { type: "json", value: { query: "Anvia docs", answer: "found" } },
         }),
       ]),
@@ -67,26 +67,55 @@ describe("reconcileWaitedTools", () => {
     }
   });
 
+  it("matches on the checkpoint job id, not the provider tool-call id", () => {
+    // The provider id and the wait-registry id are different values; matching
+    // the part's own toolCallId would never settle a waited card.
+    const messages: UIMessage[] = [
+      assistant([
+        toolPart({
+          id: "p-1",
+          toolName: "web_search",
+          toolCallId: "provider-9",
+          output: stillRunning("job-9"),
+        }),
+        toolPart({
+          id: "p-2",
+          toolName: "await_tool_call",
+          toolCallId: "control-9",
+          toolInput: { toolCallId: "job-9" },
+          output: { type: "json", value: { results: ["resolved"] } },
+        }),
+      ]),
+    ];
+
+    const next = reconcileWaitedTools(messages);
+    const first = next[0]!.parts[0];
+    expect(first?.type === "tool" && first.state).toBe("output-available");
+    if (first?.type === "tool" && first.state === "output-available") {
+      expect(first.output).toEqual({ results: ["resolved"] });
+    }
+  });
+
   it("maps the await result through its toolCallId argument, not just order", () => {
     const messages: UIMessage[] = [
       assistant([
         toolPart({
           id: "p-1",
           toolName: "web_fetch",
-          toolCallId: "call-1",
-          output: stillRunning("call-1"),
+          toolCallId: "provider-1",
+          output: stillRunning("job-1"),
         }),
         toolPart({
           id: "p-2",
           toolName: "web_search",
-          toolCallId: "call-9",
-          output: stillRunning("call-9"),
+          toolCallId: "provider-9",
+          output: stillRunning("job-9"),
         }),
         toolPart({
           id: "p-3",
           toolName: "await_tool_call",
-          toolCallId: "call-3",
-          toolInput: { toolCallId: "call-9" },
+          toolCallId: "control-9",
+          toolInput: { toolCallId: "job-9" },
           output: { type: "json", value: { results: ["only for nine"] } },
         }),
       ]),
@@ -96,30 +125,30 @@ describe("reconcileWaitedTools", () => {
     const parts = next[0]!.parts.filter(
       (part): part is ToolPart => part.type === "tool",
     );
-    // call-1 was never awaited, so it stays as it was for finalize to handle.
+    // job-1 was never awaited, so it stays as it was for finalize to handle.
     expect(parts[0]?.state === "output-available" && parts[0].output).toEqual(
-      stillRunning("call-1"),
+      stillRunning("job-1"),
     );
     if (parts[1]?.state === "output-available") {
       expect(parts[1].output).toEqual({ results: ["only for nine"] });
     }
   });
 
-  it("marks a cancelled wait as an error instead of a result", () => {
+  it("settles a cancelled call so its card renders the cancelled state", () => {
     const messages: UIMessage[] = [
       assistant([
         toolPart({
           id: "p-1",
           toolName: "generate_image",
-          toolCallId: "call-1",
-          output: stillRunning("call-1"),
+          toolCallId: "provider-1",
+          output: stillRunning("job-1"),
         }),
         toolPart({
           id: "p-2",
           toolName: "cancel_tool_call",
-          toolCallId: "call-2",
-          toolInput: { toolCallId: "call-1" },
-          output: { type: "json", value: { status: "cancelled", toolCallId: "call-1" } },
+          toolCallId: "control-1",
+          toolInput: { toolCallId: "job-1" },
+          output: { type: "json", value: { status: "cancelled", toolCallId: "job-1" } },
         }),
       ]),
     ];
@@ -128,7 +157,7 @@ describe("reconcileWaitedTools", () => {
     const first = next[0]!.parts[0];
     expect(first?.type === "tool" && first.state).toBe("output-available");
     if (first?.type === "tool" && first.state === "output-available") {
-      expect(first.output).toEqual({ status: "cancelled", toolCallId: "call-1" });
+      expect(first.output).toEqual({ status: "cancelled", toolCallId: "job-1" });
     }
   });
 
@@ -141,14 +170,14 @@ describe("reconcileWaitedTools", () => {
         toolPart({
           id: "p-1",
           toolName: "deep_research",
-          toolCallId: "call-1",
-          output: stillRunning("call-1"),
+          toolCallId: "provider-1",
+          output: stillRunning("job-1"),
         }),
         toolPart({
           id: "p-2",
           toolName: "await_tool_call",
-          toolCallId: "call-2",
-          toolInput: { toolCallId: "call-1" },
+          toolCallId: "control-1",
+          toolInput: { toolCallId: "job-1" },
           output: report,
         }),
       ]),
@@ -168,8 +197,8 @@ describe("reconcileWaitedTools", () => {
         toolPart({
           id: "p-1",
           toolName: "web_search",
-          toolCallId: "call-1",
-          output: stillRunning("call-1"),
+          toolCallId: "provider-1",
+          output: stillRunning("job-1"),
         }),
       ]),
     ];

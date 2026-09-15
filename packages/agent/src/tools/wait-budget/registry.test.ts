@@ -196,8 +196,10 @@ describe("InFlightToolRegistry", () => {
       toolCallId: "a1",
       toolName: "query_dataset_sql",
       sliceMs: 20,
+      // Keep the work far longer than the escalated slices so scheduling
+      // jitter can never let the job settle mid-test.
       work: async (signal) => {
-        await delay(80, signal);
+        await delay(600, signal);
         return "ok";
       },
     });
