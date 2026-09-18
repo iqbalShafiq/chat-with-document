@@ -18,6 +18,8 @@ import {
 import {
   createWebSearchTools,
   WEB_SEARCH_INSTRUCTION,
+  WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
+  WEB_SEARCH_VISION_IMAGE_INSTRUCTION,
 } from "../tools/web-search.js";
 import {
   boundDeepResearchTools,
@@ -326,12 +328,27 @@ export function buildEvalTools(
   tools.push(...derivedTools, ...chartTools);
   instructions.push(DATASET_INSTRUCTION);
 
+  const attachRemoteImages = sessionConfig.visionModelAvailable
+    ? async (urls: readonly string[]) =>
+        urls.slice(0, 5).map((url, index) => ({
+          url,
+          mediaType: "image/png",
+          data: TRANSPARENT_1X1_PNG_BASE64,
+          imageId: `eval-web-${index}`,
+        }))
+    : undefined;
   const webTools = createWebSearchTools({
     tavilyClient: createStubTavilyClient(),
     enabled: sessionConfig.webSearchEnabled,
+    ...(attachRemoteImages ? { attachRemoteImages } : {}),
   });
   tools.push(...webTools);
   instructions.push(WEB_SEARCH_INSTRUCTION);
+  instructions.push(
+    sessionConfig.visionModelAvailable
+      ? WEB_SEARCH_VISION_IMAGE_INSTRUCTION
+      : WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
+  );
 
   // Eval wiring mirrors the server: Deep Research gets a separate set of
   // direct web tools inside the nested researcher so one parent approval does
@@ -347,6 +364,7 @@ export function buildEvalTools(
         ...createWebSearchTools({
           tavilyClient: createStubTavilyClient(),
           enabled: true,
+          ...(attachRemoteImages ? { attachRemoteImages } : {}),
         }),
       ],
       deepResearchLimits().maxSearches,
@@ -359,6 +377,9 @@ export function buildEvalTools(
         DATASET_INSTRUCTION_RESEARCHER,
         ...(sessionConfig.hasDocuments ? [TABULAR_CATALOG_INSTRUCTION] : []),
         WEB_SEARCH_INSTRUCTION,
+        sessionConfig.visionModelAvailable
+          ? WEB_SEARCH_VISION_IMAGE_INSTRUCTION
+          : WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
       ],
       additionalTools: researchTools,
     });
@@ -406,18 +427,9 @@ export function buildEvalTools(
   tools.push(createClarificationTool());
   instructions.push(CLARIFICATION_INSTRUCTION);
 
-  // Universal view_image: non-vision always gets description mode; vision gets vision mode when web search is available.
-  // In eval, web search is always available via stubTavilyClient, so vision models also receive view_image for web images.
-  let viewImageRegistered = false;
   if (!sessionConfig.visionModelAvailable) {
     tools.push(createStubViewImageTool({ model: createStubViewImageModel() }));
-    if (!viewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION);
-    viewImageRegistered = true;
-  }
-  if (sessionConfig.visionModelAvailable && !viewImageRegistered) {
-    tools.push(createStubViewImageTool({ model: createStubViewImageModel() }));
     instructions.push(VISION_HELPER_INSTRUCTION);
-    viewImageRegistered = true;
   }
 
   const clarificationResponder = createAutoClarificationResponder();

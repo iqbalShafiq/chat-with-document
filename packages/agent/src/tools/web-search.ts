@@ -89,6 +89,17 @@ export const WEB_SEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(webFetchSpec),
 ];
 
+/** Image bytes attached to a vision-model web_search / web_fetch result. */
+export type AttachedRemoteImage = {
+  url: string;
+  mediaType: string;
+  data: string;
+  imageId?: string;
+  width?: number;
+  height?: number;
+  prompt?: string;
+};
+
 export type WebSearchToolScope = {
   tavilyClient: TavilyClient;
   /** Per-session toggle: false → the model must ask the user before searching. */
@@ -100,6 +111,15 @@ export type WebSearchToolScope = {
   maxResults?: number;
   /** Truncate result content to this many characters (default 400). */
   contentLimitChars?: number;
+  /**
+   * When set (vision models), fetch image URLs so they can be persisted and
+   * injected as native image input on the next model turn. The tool itself
+   * still returns JSON only — file parts on the tool result collide when the
+   * provider reuses toolCallId "tool_0" for the next call.
+   */
+  attachRemoteImages?: (
+    urls: readonly string[],
+  ) => Promise<readonly AttachedRemoteImage[]>;
 };
 
 export type WebSearchResultItem = {
@@ -123,6 +143,82 @@ function truncateDesc(text: string, limit: number): string {
 
 function throwIfAborted(context: ToolCallContext): void {
   context.abortSignal?.throwIfAborted();
+}
+
+function imageUrlsFromPayload(payload: JSONType): string[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const images = (payload as { images?: unknown }).images;
+  if (!Array.isArray(images)) return [];
+  const urls: string[] = [];
+  for (const image of images) {
+    if (typeof image === "string" && image.trim()) {
+      urls.push(image.trim());
+      continue;
+    }
+    if (image && typeof image === "object" && !Array.isArray(image)) {
+      const url = (image as { url?: unknown }).url;
+      if (typeof url === "string" && url.trim()) urls.push(url.trim());
+    }
+  }
+  return urls.slice(0, MAX_IMAGES);
+}
+
+function mergeAttachedImages(
+  payload: JSONType,
+  attached: readonly AttachedRemoteImage[],
+): JSONType {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const byUrl = new Map(attached.map((item) => [item.url, item]));
+  const images = (payload as { images?: unknown }).images;
+  if (!Array.isArray(images)) return payload;
+  return {
+    ...(payload as Record<string, JSONType>),
+    images: images.map((image, index) => {
+      const url =
+        typeof image === "string"
+          ? image
+          : image && typeof image === "object" && !Array.isArray(image)
+            ? typeof (image as { url?: unknown }).url === "string"
+              ? (image as { url: string }).url
+              : ""
+            : "";
+      const hit = byUrl.get(url);
+      const base =
+        typeof image === "string"
+          ? { url: image }
+          : image && typeof image === "object" && !Array.isArray(image)
+            ? image
+            : { url };
+      if (!hit?.imageId) return base;
+      return {
+        ...base,
+        imageId: hit.imageId,
+        modelId: "web",
+        source: "web",
+        sourceUrl: url,
+        mediaType: hit.mediaType,
+        width: hit.width ?? 0,
+        height: hit.height ?? 0,
+        prompt: hit.prompt ?? url,
+        index,
+        total: attached.length,
+      };
+    }),
+  };
+}
+
+async function withAttachedImages(
+  payload: JSONType,
+  attach: WebSearchToolScope["attachRemoteImages"],
+): Promise<JSONType> {
+  if (!attach) return payload;
+  const urls = imageUrlsFromPayload(payload);
+  if (urls.length === 0) return payload;
+  const attached = await attach(urls);
+  if (attached.length === 0) return payload;
+  return mergeAttachedImages(payload, attached);
 }
 
 async function safeHasGrant(
@@ -176,9 +272,8 @@ export function createWebSearchTools(
   return [
     createTool({
       ...webSearchSpec,
-      outputSchema: z.json(),
       requiresApproval: requiresApproval("web_search"),
-      execute: async ({ query, maxResults: requestedMax, timeRange }, context): Promise<JSONType> => {
+      execute: async ({ query, maxResults: requestedMax, timeRange }, context) => {
         try {
           throwIfAborted(context);
           const response = await scope.tavilyClient.search(query, {
@@ -190,7 +285,7 @@ export function createWebSearchTools(
             includeImageDescriptions: true,
           });
           throwIfAborted(context);
-          return {
+          const payload = {
             query: response.query,
             answer: response.answer ?? null,
             results: response.results.slice(0, MAX_RESULTS).map((item) => ({
@@ -216,6 +311,7 @@ export function createWebSearchTools(
                 : {}),
             })),
           };
+          return await withAttachedImages(payload, scope.attachRemoteImages);
         } catch (error) {
           throwIfAborted(context);
           return { query, answer: null, results: [], error: mapTavilyError(error) };
@@ -224,9 +320,8 @@ export function createWebSearchTools(
     }),
     createTool({
       ...webFetchSpec,
-      outputSchema: z.json(),
       requiresApproval: requiresApproval("web_fetch"),
-      execute: async ({ url }, context): Promise<JSONType> => {
+      execute: async ({ url }, context) => {
         try {
           throwIfAborted(context);
           const response = await scope.tavilyClient.extract([url], {
@@ -245,12 +340,13 @@ export function createWebSearchTools(
                 : "No content could be extracted from the page",
             };
           }
-          return {
+          const payload = {
             url: result.url,
             title: result.title ?? null,
             content: truncate(result.rawContent, contentLimitChars * 3),
             images: (result.images ?? []).slice(0, MAX_IMAGES),
           };
+          return await withAttachedImages(payload, scope.attachRemoteImages);
         } catch (error) {
           throwIfAborted(context);
           return {
@@ -272,5 +368,12 @@ export const WEB_SEARCH_INSTRUCTION = [
   "When web_search or web_fetch requires approval, respect the user's decision — if declined, answer from the available context and say you could not verify online.",
   "For library/API documentation questions, prefer the context7 tools over web_search.",
   "Cite web sources in your answer with their URLs when you rely on them.",
-  "When you need to see an image from the results, call view_image with its URL — vision models will receive the image directly, text-only models will receive a description.",
 ].join("\n");
+
+/** Text-only models: inspect web images through the view_image helper. */
+export const WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION =
+  "When you need to see an image from the results, call view_image with its URL — you will receive a text description of the real pixels.";
+
+/** Vision models: pixels arrive as native image input on the next turn, not as tool files. */
+export const WEB_SEARCH_VISION_IMAGE_INSTRUCTION =
+  "web_search and web_fetch persist fetched images and you receive those pixels as native image input on the next turn. Inspect them. You do not have a view_image tool — do not try to call one.";

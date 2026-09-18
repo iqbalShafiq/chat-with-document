@@ -62,7 +62,7 @@ describe("createSubAgentWaitBudget", () => {
     expect(wrapped[1]).toBe(controls[1]);
   });
 
-  it("uses the provider tool-call id recorded by its middleware", async () => {
+  it("uses the unique internalCallId recorded by its middleware", async () => {
     const budget = createSubAgentWaitBudget({ sliceMsFor: () => 200 });
     const middleware = budget.middleware();
     await middleware.onToolInput?.({
@@ -70,14 +70,15 @@ describe("createSubAgentWaitBudget", () => {
       args: "{}",
       originalArgs: "{}",
       turn: 1,
-      toolCallId: "provider-call-1",
+      toolCallId: "tool_0",
       internalCallId: "internal-1",
     });
 
     const [wrapped] = budget.wrapTools([fakeTool("web_search", async () => "ok")]);
     await wrapped!.call({});
 
-    expect(budget.registry.peek("provider-call-1")?.status).toBe("completed");
+    expect(budget.registry.peek("internal-1")?.status).toBe("completed");
+    expect(budget.registry.peek("tool_0")).toBeUndefined();
   });
 
   it("aborts outstanding nested jobs so nothing keeps running after the run ends", async () => {

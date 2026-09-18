@@ -1,10 +1,14 @@
 import type { Message as MessageType } from "@anvia/core/completion";
 
 /**
- * Keep text + metadata for the agent prompt. Drop document/image parts —
+ * Keep text + metadata for the agent prompt. Drop document/file parts —
  * files are ingested into RAG and accessed via tools, not the completion API.
+ * Vision models keep image parts so they can see pixels natively.
  */
-export function stripUserAttachments(message: MessageType): MessageType {
+export function stripUserAttachments(
+  message: MessageType,
+  options: { keepImages?: boolean } = {},
+): MessageType {
   if (message.role !== "user") {
     return message;
   }
@@ -15,12 +19,13 @@ export function stripUserAttachments(message: MessageType): MessageType {
     return message;
   }
 
-  const textParts = message.content.filter(
-    (content) => content.type === "text",
-  );
+  const kept = message.content.filter((content) => {
+    if (content.type === "text") return true;
+    return Boolean(options.keepImages) && content.type === "image";
+  });
 
   const content =
-    textParts.length > 0 ? textParts : [{ type: "text" as const, text: "" }];
+    kept.length > 0 ? kept : [{ type: "text" as const, text: "" }];
 
   return { ...message, content } as MessageType;
 }

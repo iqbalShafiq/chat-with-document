@@ -314,11 +314,6 @@ function handleResponses(
       { query: "logo vercel", reason: "butuh referensi visual logo vercel untuk akurasi" },
       "web_search",
     );
-  } else if (turn === 2 && scenario === "websearch_view") {
-    events = toolCallStream(
-      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe this logo image accurately" },
-      "view_image",
-    );
   } else if (turn === 1 && scenario === "view_httpbin") {
     events = toolCallStream(
       { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe what you see" },
@@ -333,11 +328,6 @@ function handleResponses(
     events = toolCallStream(
       { url: "https://example.com/article", reason: "need to read page images" },
       "web_fetch",
-    );
-  } else if (turn === 2 && scenario === "webfetch_view") {
-    events = toolCallStream(
-      { url: "https://www.gstatic.com/webp/gallery/1.jpg", question: "Describe image from fetched page" },
-      "view_image",
     );
   } else if (turn === 1 && scenario === "cap_test") {
     // Query must stay <= 300 chars (webSearchInput.query.max(300)); cap 5 +

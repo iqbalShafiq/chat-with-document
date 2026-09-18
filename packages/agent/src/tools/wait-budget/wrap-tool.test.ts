@@ -95,16 +95,74 @@ describe("wrapToolsWithWaitBudget", () => {
     expect(wrapped[1]).toBe(controls[1]);
   });
 
-  it("prefers the Anvia toolCallId from the id gate", async () => {
+  it("registers the unique internalCallId, not the reused provider toolCallId", async () => {
     const registry = new InFlightToolRegistry();
     const ids = createToolCallIdGate();
-    ids.note("read_dataset", "anvia-id");
+    ids.note("read_dataset", "tool_0", "internal-1");
     const [wrapped] = wrapToolsWithWaitBudget(
       [fakeTool("read_dataset", async () => "ok")],
       { registry, ids, sliceMsFor: () => 200, nextId: () => "generated" },
     );
     await wrapped!.call({});
-    expect(registry.peek("anvia-id")?.status).toBe("completed");
+    expect(registry.peek("internal-1")?.status).toBe("completed");
+    expect(registry.peek("tool_0")).toBeUndefined();
     expect(registry.peek("generated")).toBeUndefined();
+  });
+
+  it("lets a second tool run while the first is still waiting, even if both got tool_0", async () => {
+    const registry = new InFlightToolRegistry();
+    const ids = createToolCallIdGate();
+    ids.note("web_search", "tool_0", "internal-search");
+    ids.note("generate_image", "tool_0", "internal-image");
+    const search = vi.fn(async (_args: unknown, context?: ToolCallContext) => {
+      await delay(80, context?.abortSignal);
+      return { query: "school" };
+    });
+    const image = vi.fn(async () => ({ images: ["ok"] }));
+    const [searchTool, imageTool] = wrapToolsWithWaitBudget(
+      [fakeTool("web_search", search), fakeTool("generate_image", image)],
+      { registry, ids, sliceMsFor: () => 25 },
+    );
+
+    const checkpoint = await searchTool!.call({});
+    expect(isStillRunningResult(checkpoint)).toBe(true);
+    if (!isStillRunningResult(checkpoint)) throw new Error("expected still_running");
+    expect(checkpoint.toolCallId).toBe("internal-search");
+
+    const imageOutput = await imageTool!.call({});
+    expect(imageOutput).toEqual({ images: ["ok"] });
+    expect(image).toHaveBeenCalledOnce();
+    expect(registry.peek("internal-search")?.status).toBe("running");
+    expect(registry.peek("internal-image")?.status).toBe("completed");
+
+    const [awaitTool] = createAwaitCancelTools({ registry, sliceMsFor: () => 200 });
+    await expect(awaitTool!.call({ toolCallId: checkpoint.toolCallId })).resolves.toEqual({
+      query: "school",
+    });
+  });
+
+  it("mirrors wait progress onto the provider id so the original card still updates", async () => {
+    const registry = new InFlightToolRegistry();
+    const ids = createToolCallIdGate();
+    ids.note("web_search", "tool_0", "internal-search");
+    const progress: Array<{ toolCallId: string; phase: string }> = [];
+    const [wrapped] = wrapToolsWithWaitBudget(
+      [fakeTool("web_search", async () => ({ ok: true }))],
+      {
+        registry,
+        ids,
+        sliceMsFor: () => 200,
+        onProgress: (event) => {
+          progress.push({ toolCallId: event.toolCallId, phase: event.phase });
+        },
+      },
+    );
+    await wrapped!.call({});
+    expect(progress).toEqual([
+      { toolCallId: "internal-search", phase: "running" },
+      { toolCallId: "tool_0", phase: "running" },
+      { toolCallId: "internal-search", phase: "completed" },
+      { toolCallId: "tool_0", phase: "completed" },
+    ]);
   });
 });

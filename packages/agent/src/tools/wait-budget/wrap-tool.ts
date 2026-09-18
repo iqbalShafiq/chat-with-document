@@ -5,17 +5,32 @@ import { InFlightToolRegistry } from "./registry.js";
 import type { ObserveResult } from "./types.js";
 import { isControlToolName, type ToolWaitProgress } from "./types.js";
 
+export type NotedToolCallIds = {
+  /** Unique wait-registry / await_tool_call id. Never the reused provider id. */
+  jobId: string;
+  /** Provider-facing id (often "tool_0"). Used only so the original card can show wait progress. */
+  providerToolCallId?: string;
+};
+
 export type ToolCallIdGate = {
-  note(toolName: string, toolCallId: string): void;
-  take(toolName: string): string | undefined;
+  note(
+    toolName: string,
+    providerToolCallId?: string,
+    internalCallId?: string,
+  ): void;
+  take(toolName: string): NotedToolCallIds | undefined;
 };
 
 export function createToolCallIdGate(): ToolCallIdGate {
-  const queues = new Map<string, string[]>();
+  const queues = new Map<string, NotedToolCallIds[]>();
   return {
-    note(toolName, toolCallId) {
+    note(toolName, providerToolCallId, internalCallId) {
+      const jobId = internalCallId?.trim() || randomUUID();
+      const noted: NotedToolCallIds = { jobId };
+      const provider = providerToolCallId?.trim();
+      if (provider) noted.providerToolCallId = provider;
       const queue = queues.get(toolName) ?? [];
-      queue.push(toolCallId);
+      queue.push(noted);
       queues.set(toolName, queue);
     },
     take(toolName) {
@@ -48,9 +63,12 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
     name: tool.name,
     definition: (prompt) => tool.definition(prompt),
     call: async (args, context) => {
-      const toolCallId = deps.ids?.take(tool.name) ?? deps.nextId?.() ?? randomUUID();
-      await emitProgress(deps, {
-        toolCallId,
+      const taken = deps.ids?.take(tool.name);
+      const jobId = taken?.jobId ?? deps.nextId?.() ?? randomUUID();
+      const providerToolCallId = taken?.providerToolCallId;
+      await emitCallProgress(deps, {
+        jobId,
+        providerToolCallId,
         toolName: tool.name,
         phase: "running",
         elapsedMs: 0,
@@ -58,7 +76,7 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
       });
       const sliceMs = deps.sliceMsFor?.(tool.name) ?? waitBudgetForTool(tool.name);
       const observed = await deps.registry.registerAndWait({
-        toolCallId,
+        toolCallId: jobId,
         toolName: tool.name,
         sliceMs,
         work: (signal) => {
@@ -68,7 +86,7 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
         },
         ...(context?.abortSignal ? { parentSignal: context.abortSignal } : {}),
       });
-      return finishObserve(observed, deps, toolCallId, tool.name);
+      return finishObserve(observed, deps, jobId, tool.name, providerToolCallId);
     },
     ...(tool.requiresApproval !== undefined ? { requiresApproval: tool.requiresApproval } : {}),
     ...(tool.parseInput ? { parseInput: (args: Parameters<NonNullable<AnyTool["parseInput"]>>[0]) => tool.parseInput!(args) } : {}),
@@ -81,10 +99,12 @@ export async function finishObserve(
   deps: Pick<WrapWaitBudgetDeps, "onProgress">,
   toolCallId: string,
   toolName: string,
+  providerToolCallId?: string,
 ): Promise<unknown> {
   if (observed.kind === "settled") {
-    await emitProgress(deps, {
-      toolCallId,
+    await emitCallProgress(deps, {
+      jobId: toolCallId,
+      providerToolCallId,
       toolName,
       phase: "completed",
       elapsedMs: 0,
@@ -93,8 +113,9 @@ export async function finishObserve(
     return observed.output;
   }
   if (observed.kind === "still_running") {
-    await emitProgress(deps, {
-      toolCallId: observed.payload.toolCallId,
+    await emitCallProgress(deps, {
+      jobId: observed.payload.toolCallId,
+      providerToolCallId,
       toolName: observed.payload.toolName,
       phase: "wait_elapsed",
       elapsedMs: observed.payload.elapsedMs,
@@ -104,8 +125,9 @@ export async function finishObserve(
     return observed.payload;
   }
   if (observed.kind === "cancelled") {
-    await emitProgress(deps, {
-      toolCallId: observed.payload.toolCallId,
+    await emitCallProgress(deps, {
+      jobId: observed.payload.toolCallId,
+      providerToolCallId,
       toolName: observed.payload.toolName,
       phase: "cancelled",
       elapsedMs: observed.payload.elapsedMs,
@@ -114,8 +136,9 @@ export async function finishObserve(
     });
     return observed.payload;
   }
-  await emitProgress(deps, {
-    toolCallId,
+  await emitCallProgress(deps, {
+    jobId: toolCallId,
+    providerToolCallId,
     toolName,
     phase: "failed",
     elapsedMs: 0,
@@ -124,9 +147,31 @@ export async function finishObserve(
   throw observed.error;
 }
 
-async function emitProgress(
+async function emitCallProgress(
   deps: Pick<WrapWaitBudgetDeps, "onProgress">,
-  event: ToolWaitProgress,
+  event: {
+    jobId: string;
+    providerToolCallId?: string;
+    toolName: string;
+    phase: ToolWaitProgress["phase"];
+    elapsedMs: number;
+    waitCount: number;
+    stage?: string;
+  },
 ): Promise<void> {
-  await deps.onProgress?.(event);
+  if (!deps.onProgress) return;
+  const payload: ToolWaitProgress = {
+    toolCallId: event.jobId,
+    toolName: event.toolName,
+    phase: event.phase,
+    elapsedMs: event.elapsedMs,
+    waitCount: event.waitCount,
+    ...(event.stage !== undefined ? { stage: event.stage } : {}),
+  };
+  await deps.onProgress(payload);
+  // The original card is keyed by the provider id (often reused "tool_0").
+  // Mirror progress there so elapsed wait still lands on that card.
+  if (event.providerToolCallId && event.providerToolCallId !== event.jobId) {
+    await deps.onProgress({ ...payload, toolCallId: event.providerToolCallId });
+  }
 }

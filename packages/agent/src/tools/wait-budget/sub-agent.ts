@@ -24,7 +24,7 @@ export type SubAgentWaitBudget = {
   wrapTools(tools: readonly AnyTool[]): AnyTool[];
   /** await_tool_call / cancel_tool_call for the wrapped tools. */
   controlTools(): AnyTool[];
-  /** Records the provider tool-call id so a wait targets the real call. */
+  /** Records Anvia's unique internalCallId as the wait job id. */
   middleware(): AgentMiddleware;
   /** Sub-agent-specific wait guidance (no user-facing narration). */
   readonly instructions: string;
@@ -53,8 +53,10 @@ export function createSubAgentWaitBudget(
     controlTools: () => createAwaitCancelTools(controlDeps),
     middleware: () =>
       createMiddleware({
-        onToolInput: ({ toolName, toolCallId }) => {
-          if (toolCallId) ids.note(toolName, toolCallId);
+        onToolInput: ({ toolName, toolCallId, internalCallId }) => {
+          if (toolCallId || internalCallId) {
+            ids.note(toolName, toolCallId, internalCallId);
+          }
           return undefined;
         },
       }),

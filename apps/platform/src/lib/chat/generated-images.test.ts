@@ -215,6 +215,46 @@ describe("collectGeneratedImagesFromMessages", () => {
     ]);
   });
 
+  it("collects persisted web_search images without treating the tool as an image card", () => {
+    const parts = [
+      toolPart("web_search", [
+        {
+          type: "text",
+          text: JSON.stringify({
+            images: [
+              {
+                url: "https://example.com/logo.png",
+                imageId: "web-1",
+                modelId: "web",
+                prompt: "https://example.com/logo.png",
+                width: 10,
+                height: 10,
+                mediaType: "image/png",
+                source: "web",
+                sourceUrl: "https://example.com/logo.png",
+              },
+            ],
+          }),
+        },
+      ]),
+    ];
+    expect(isMessageImageToolName("web_search")).toBe(false);
+    expect(collectGeneratedImages(parts)).toEqual([
+      {
+        imageId: "web-1",
+        modelId: "web",
+        prompt: "https://example.com/logo.png",
+        width: 10,
+        height: 10,
+        mediaType: "image/png",
+        index: 0,
+        total: 1,
+        source: "web",
+        sourceUrl: "https://example.com/logo.png",
+      },
+    ]);
+  });
+
   it("collects a view_image web photo from a vision ToolResultContent output", () => {
     const parts = [
       toolPart("view_image", [

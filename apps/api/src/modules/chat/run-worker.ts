@@ -9,6 +9,7 @@ import {
   parseAgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
 import type { Message, UserMessage } from "@anvia/core/completion";
+import { prependPromptImages } from "./attach-prompt-images.js";
 import type { AgentRunOptions } from "@anvia/core/agent";
 import {
   getStreamStore,
@@ -682,7 +683,10 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
         };
         const streamInput: AgentRunOptions = parsed.kind === "start"
           ? {
-              prompt: requireUserPrompt(parsed.prompt),
+              prompt: prependPromptImages(
+                requireUserPrompt(parsed.prompt),
+                runInput.promptImageParts ?? [],
+              ),
               session: { sessionId: parsed.sessionId, userId: parsed.userId, metadata: { streamId } },
               trace,
               abortSignal: controller.signal,

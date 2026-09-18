@@ -44,6 +44,10 @@ export function isMessageImageToolName(name: string): boolean {
   return isImageToolName(name) || name === "view_image";
 }
 
+function isPersistedWebImageToolName(name: string): boolean {
+  return name === "web_search" || name === "web_fetch";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -85,14 +89,21 @@ export function collectGeneratedImages(
 
   for (const part of parts) {
     if (part.type !== "tool") continue;
-    if (!part.toolName || !isMessageImageToolName(part.toolName)) continue;
+    if (
+      !part.toolName ||
+      !(isMessageImageToolName(part.toolName) || isPersistedWebImageToolName(part.toolName))
+    ) continue;
     if (part.state !== "output-available") continue;
 
     const parsed = parseToolOutput(part.output);
 
     let rawImages: unknown[] = [];
     let topLevelSourceUrl: string | null = null;
-    if (part.toolName === "view_image") {
+    if (
+      part.toolName === "view_image" ||
+      part.toolName === "web_search" ||
+      part.toolName === "web_fetch"
+    ) {
       if (Array.isArray(parsed)) {
         const textPart = parsed.find(
           (p): p is { type: "text"; text: string } =>
@@ -118,7 +129,8 @@ export function collectGeneratedImages(
         isRecord(parsed) && Array.isArray(parsed.images) ? parsed.images : [];
     }
 
-    const isViewImage = part.toolName === "view_image";
+    const isViewImage =
+      part.toolName === "view_image" || isPersistedWebImageToolName(part.toolName);
 
     for (const image of rawImages) {
       if (!isRecord(image)) continue;

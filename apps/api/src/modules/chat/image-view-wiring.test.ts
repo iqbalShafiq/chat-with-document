@@ -4,29 +4,24 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 describe("image-view wiring", () => {
-  it("registers view_image for vision model when web search is available (vision mode)", () => {
+  it("registers view_image only for text-only models", () => {
     const currentDir = dirname(fileURLToPath(import.meta.url));
     const content = readFileSync(resolve(currentDir, "./build-run-input.ts"), "utf8");
-    // Must have universal wiring: vision mode when webSearchAvailable
-    expect(content).toContain('mode: "vision"');
-    expect(content).toContain('webSearchAvailable && !universalViewImageRegistered');
-    expect(content).toContain('mode: "description"');
-    expect(content).toContain('universalViewImageRegistered');
-    // Ensure dummy fallback exists
-    expect(content).toContain('makeCompletionModel(model)');
+    expect(content).toContain('...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : [])');
+    expect(content).not.toContain("universalViewImageRegistered");
+    expect(content).toContain("createRemoteImageAttacher");
+    expect(content).toContain("injectPendingVisionImages");
+    expect(content).toContain("WEB_SEARCH_VISION_IMAGE_INSTRUCTION");
+    expect(content).toContain("WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION");
   });
 
-  it("freezes the vision-helper instruction in the recipe", () => {
+  it("freezes the vision-helper instruction only for text-only models", () => {
     const currentDir = dirname(fileURLToPath(import.meta.url));
     const content = readFileSync(resolve(currentDir, "./build-run-input.ts"), "utf8");
-    // The resolver owns the frozen instruction surface; reconstruction reuses
-    // the recipe and only guards duplicate tool registration.
-    expect(content).toContain('if (!modelAcceptsImage || webSearchAvailable) {');
-    expect(content).toContain('instructions.push(VISION_HELPER_INSTRUCTION);');
-    expect(content).toContain('const instructions = [...recipe.instructionFragments];');
-    expect(content).not.toContain(
-      'if (!universalViewImageRegistered) instructions.push(VISION_HELPER_INSTRUCTION)',
-    );
+    expect(content).toContain("if (!modelAcceptsImage) {");
+    expect(content).toContain("instructions.push(VISION_HELPER_INSTRUCTION);");
+    expect(content).toContain("const instructions = [...recipe.instructionFragments];");
+    expect(content).not.toContain("if (!modelAcceptsImage || webSearchAvailable)");
   });
 
   it("reconstructs image settings and capabilities from the frozen recipe", () => {

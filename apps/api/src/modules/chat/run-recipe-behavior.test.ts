@@ -107,9 +107,7 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...(!capabilities.modelAcceptsImage
       ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
-      : capabilities.webSearchAvailable
-        ? [VIEW_IMAGE_TOOL_DEFINITIONS.vision]
-        : []),
+      : []),
   ];
   const staticContext = createNativeStaticContext({
     baseInstructions: BASE_INSTRUCTIONS,

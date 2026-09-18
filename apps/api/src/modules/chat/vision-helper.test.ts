@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { normalizeToolResultOutput } from "@anvia/core/tool";
 import {
+  createRemoteImageAttacher,
   createViewImageTool,
   loadRemoteImage,
   type ViewImageToolOptions,
@@ -144,6 +145,34 @@ describe("view_image universal", () => {
     expect(normalized.type).toBe("content");
     if (normalized.type !== "content") throw new Error("expected content output");
     expect(normalized.value.some((p) => p.type === "file")).toBe(true);
+  });
+
+  it("createRemoteImageAttacher persists and returns file-ready payloads", async () => {
+    const fakeFetch = vi.fn(async () =>
+      new Response(new Uint8Array([0xff, 0xd8, 0xff, 0x00]), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      }),
+    );
+    const store = {
+      findSessionImageBySourceUrl: vi.fn(async () => null),
+      saveGeneratedImage: vi.fn(async () => ({ id: "web-img-1" })),
+    };
+    const attach = createRemoteImageAttacher({
+      userId: USER,
+      sessionId: SESSION,
+      store: store as never,
+      fetchFn: fakeFetch as never,
+    });
+    const attached = await attach(["https://example.com/photo.jpg"]);
+    expect(attached).toEqual([
+      expect.objectContaining({
+        url: "https://example.com/photo.jpg",
+        mediaType: "image/jpeg",
+        imageId: "web-img-1",
+      }),
+    ]);
+    expect(store.saveGeneratedImage).toHaveBeenCalledOnce();
   });
 
   it("persists a web URL photo (vision mode) and returns imageId in the text JSON", async () => {
