@@ -102,6 +102,7 @@ import {
 import {
   createInteractionResumeStorage,
   discardChatResumeSnapshot,
+  peekPendingApprovalToolNames,
   peekPendingResumeInteractionIds,
 } from "#/lib/chat/interaction-resume-storage";
 import {
@@ -110,7 +111,9 @@ import {
   type ChatDataMap,
 } from "#/lib/chat/client-data";
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
-import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { settleStoppedRunTools, stillOpenToolCards } from "#/lib/chat/finalize-interrupted-tools";
+import { mergeServerMessages } from "#/lib/chat/merge-server-messages";
+import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { failedTailTruncate } from "#/lib/chat/failed-tail";
 import {
   blocksDestructiveSessionAction,
@@ -134,6 +137,11 @@ import {
   resetDeepResearchActivity,
   type DeepResearchActivityState,
 } from "#/lib/chat/deep-research-activity";
+import {
+  reduceToolWaitProgress,
+  ToolWaitProgressProvider,
+} from "#/lib/chat/tool-wait-progress";
+import type { ToolWaitProgress } from "#/lib/chat/client-data";
 import {
   persistImageGenSettings,
   persistImageGenerationEnabled,
@@ -421,6 +429,7 @@ export function ChatSession({
   const [deepResearch, setDeepResearch] = useState<DeepResearchActivityState>(
     initialDeepResearchActivityState,
   );
+  const [toolWait, setToolWait] = useState<Record<string, ToolWaitProgress>>({});
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -461,6 +470,12 @@ export function ChatSession({
   const chatRef = useRef<ChatController | null>(null);
   /** useChat reports transport failures through onError instead of rejecting sendMessage. */
   const chatRequestFailedRef = useRef(false);
+  /** Whether the current run produced a terminal event (run_end / error). */
+  const sawRunTerminalRef = useRef(false);
+  /** Tool names with an approval still awaiting the user's decision. */
+  const pendingApprovalToolNamesRef = useRef<readonly string[]>([]);
+  /** Last time the stream produced any event; used by the stall watchdog. */
+  const runActivityAtRef = useRef(0);
   const modelsStatusRef = useRef(modelsStatus);
   modelsStatusRef.current = modelsStatus;
   const reasoningInitializedRef = useRef(false);
@@ -650,12 +665,16 @@ export function ChatSession({
 
   const handleChatEvent = useCallback(
     (event: ClientStreamEvent<ChatClientMetadata, ChatDataMap>) => {
+      runActivityAtRef.current = Date.now();
       if (event.type === "data") {
         switch (event.name) {
           case "deepResearchProgress":
             setDeepResearch((state) =>
               reduceDeepResearchProgress(state, event.data),
             );
+            return;
+          case "toolWaitProgress":
+            setToolWait((state) => reduceToolWaitProgress(state, event.data));
             return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
@@ -712,11 +731,28 @@ export function ChatSession({
       }
 
       switch (event.type) {
+        case "run_end":
+          sawRunTerminalRef.current = true;
+          return;
         case "message_end":
           setDeepResearch(resetDeepResearchActivity());
+          setToolWait({});
           void refreshContextUsage();
           return;
         case "error":
+          sawRunTerminalRef.current = true;
+          // A terminal error means nothing is still running: drop wait state
+          // and finalize open tool cards, or an errored tool keeps showing
+          // "Waiting" from the last progress event it never finished.
+          setToolWait({});
+          setDeepResearch(resetDeepResearchActivity());
+          chatRef.current?.setMessages((messages) =>
+            settleStoppedRunTools(
+              [...messages],
+              { pendingApprovalToolNames: pendingApprovalToolNamesRef.current },
+              "Run failed before this tool finished.",
+            ),
+          );
           setComposerError(`Run failed: ${event.error.message}`);
           setQueueHold(true);
           {
@@ -768,13 +804,54 @@ export function ChatSession({
         });
         return;
       }
-      if (error.name !== "AbortError") {
+      const aborted = error.name === "AbortError";
+      if (!aborted) {
         setComposerError("The chat request could not be completed.");
+      }
+      // The stream ended without a server terminal (worker/API outage or
+      // restart). Finalize in-flight tool cards so nothing is left spinning.
+      if (!aborted && !sawRunTerminalRef.current) {
+        const current = chatRef.current;
+        if (current) {
+          current.setMessages((messages) =>
+            settleStoppedTools(messages),
+          );
+        }
       }
     },
   });
 
   chatRef.current = chat;
+
+  // Approvals the user has not answered yet. They must survive finalization:
+  // a suspended approval also ends its stream, so its tool has no result and
+  // would otherwise be shown as "stopped" beside the prompt asking for it.
+  pendingApprovalToolNamesRef.current = [
+    ...new Set([
+      ...peekPendingApprovalToolNames(window.sessionStorage, sessionId),
+      ...(chat.interactions.pending ?? []).flatMap((interaction) => {
+        const request = interaction.request as { type?: unknown; toolName?: unknown };
+        return request.type === "tool-approval" &&
+          typeof request.toolName === "string" &&
+          request.toolName.length > 0
+          ? [request.toolName]
+          : [];
+      }),
+    ]),
+  ];
+
+  // Tools whose approval the user already answered need no tracking here:
+  // `settleStoppedRunTools` drops such a card once a later part of the same tool
+  // exists, which is how the resumed attempt proves it took over.
+
+  /** Settle a stopped run's tool cards using the tracked approval state. */
+  const settleStoppedTools = useCallback(
+    (messages: readonly ChatUIMessage[]) =>
+      settleStoppedRunTools([...messages], {
+        pendingApprovalToolNames: pendingApprovalToolNamesRef.current,
+      }),
+    [],
+  );
 
   // Keep the latest messages readable from stable event handlers.
   useEffect(() => {
@@ -789,6 +866,37 @@ export function ChatSession({
     if (chat.status !== "submitted" && chat.status !== "streaming") {
       stopInFlightRef.current = false;
     }
+  }, [chat.status]);
+
+  // Stream stall watchdog: when a run never delivers any event (orphaned
+  // stream — worker/API died before a terminal), eventually finalize the
+  // tool cards and release the composer instead of hanging forever.
+  // The worker emits a progress event at least once per wait slice and slices
+  // grow with the elapsed wait (capped at TOOL_WAIT_MAX_SLICE_MS, 120s by
+  // default), so this grace must clear that cap plus provider latency or a
+  // healthy long tool would be killed as a false stall.
+  const STALL_GRACE_MS = 240_000;
+  const STALL_POLL_MS = 5_000;
+  useEffect(() => {
+    const active = chat.status === "submitted" || chat.status === "streaming";
+    if (!active) return;
+    runActivityAtRef.current = Date.now();
+    const timer = window.setInterval(() => {
+      const current = chatRef.current;
+      if (!current) return;
+      const stillActive =
+        current.status === "submitted" || current.status === "streaming";
+      if (!stillActive) return;
+      if (sawRunTerminalRef.current) return;
+      if (Date.now() - runActivityAtRef.current < STALL_GRACE_MS) return;
+      // No events for the grace period — recover locally.
+      current.stop();
+      current.setMessages((messages) =>
+        settleStoppedTools(messages),
+      );
+      setComposerError("The chat connection stalled. The run was interrupted.");
+    }, STALL_POLL_MS);
+    return () => window.clearInterval(timer);
   }, [chat.status]);
 
   /** Stop the server run, abort the v1 stream, and finalize visible tool cards. */
@@ -812,7 +920,8 @@ export function ChatSession({
             stop: () => current.stop(),
             setMessages: (messages) => current.setMessages([...messages]),
           },
-          (messages) => finalizeInterruptedTools([...messages]),
+          (messages) =>
+            settleStoppedTools(messages),
         );
         setQueueHold(true);
       }
@@ -1032,12 +1141,29 @@ export function ChatSession({
       // items that lost their run revert to pending for the next flush.
       queueActions.revertInflight();
       void markSessionRead(sessionId).catch(() => {});
+      // A waited tool's own part only holds the still_running checkpoint, so
+      // settle those cards from the control call's result before finalizing;
+      // finalizing first would turn them into errors and drop the real output.
+      // An approval still owed to the user keeps its own card open.
+      chat.setMessages((messages) =>
+        settleStoppedTools(messages),
+      );
+      // A card can stay unfinished after a resumed attempt reported its result:
+      // the resume arrives as a separate stream whose parts do not always carry
+      // the original tool call. Server memory is authoritative once nothing is
+      // running, so reconcile from it when a card is still open.
+      if (stillOpenToolCards(messagesRef.current, pendingApprovalToolNamesRef.current)) {
+        void reloadChatFromServer().catch(() => {});
+      }
       // A failed run defers its composer prefill until the editor is editable.
       if (pendingFailedTextRef.current !== null) {
         setComposerInputText(pendingFailedTextRef.current);
         pendingFailedTextRef.current = null;
       }
       focusComposer();
+    }
+    if (activeRun) {
+      sawRunTerminalRef.current = false;
     }
     wasActiveRunRef.current = activeRun;
   }, [
@@ -1067,6 +1193,7 @@ export function ChatSession({
     setIsIngesting(false);
     setContextUsage(null);
     setDeepResearch(resetDeepResearchActivity());
+    setToolWait({});
     setPreviousRunError(false);
     if (sessionScopeDisabled) return;
     void refreshSessionDocuments();
@@ -1946,8 +2073,30 @@ export function ChatSession({
 
   /** Reload the conversation from server truth (used by the stale dialog). */
   const reloadChatFromServer = useCallback(async () => {
-    const data = await loadChatMessages(sessionId);
-    const fresh = finalizeInterruptedTools(parseMemoryMessages(data));
+    const [data, runStatus] = await Promise.all([
+      loadChatMessages(sessionId),
+      // Answering an approval resumes the run as a new attempt, so server
+      // memory has no result for that tool yet. Decide from the server, not
+      // from local stream state, or the approval card is settled as stopped
+      // just before the result arrives.
+      fetchRunStatus(sessionId).catch(() => null),
+    ]);
+    const server = parseMemoryMessages(data);
+    // Server memory lags a live run, so keep whatever local parts are ahead of
+    // it instead of letting an incomplete snapshot look like stopped tools.
+    const merged = mergeServerMessages(
+      server,
+      messagesRef.current as readonly ChatUIMessage[],
+    );
+    const live =
+      runStatus?.status === "running" ||
+      chatRef.current?.status === "submitted" ||
+      chatRef.current?.status === "streaming";
+    const fresh = live
+      ? reconcileWaitedTools(merged)
+      : settleStoppedRunTools(merged, {
+          pendingApprovalToolNames: pendingApprovalToolNamesRef.current,
+        });
     onReloadMessages?.(fresh);
     chatRef.current?.setMessages(fresh);
   }, [sessionId, onReloadMessages]);
@@ -2394,6 +2543,7 @@ export function ChatSession({
   return (
     <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
       <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      <ToolWaitProgressProvider value={toolWait}>
       <ChartRegistryProvider messages={chat.messages}>
       {/*
         ComposerPrimitive.Root wraps chat + right doc rail so attachments share context.
@@ -2710,6 +2860,7 @@ export function ChatSession({
         </div>
       </ComposerPrimitive.Root>
       </ChartRegistryProvider>
+      </ToolWaitProgressProvider>
       </CitationSessionProvider>
     </ChatProvider>
   );

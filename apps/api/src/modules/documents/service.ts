@@ -204,6 +204,7 @@ type PersistQueuedDocumentInput = {
   originUrl?: string | null;
   sourceNote?: string | null;
   beforeCreate?: (tx: Prisma.TransactionClient) => Promise<void>;
+  abortSignal?: AbortSignal;
 };
 
 async function persistAndQueueDocument(input: PersistQueuedDocumentInput) {
@@ -261,7 +262,12 @@ async function persistAndQueueDocument(input: PersistQueuedDocumentInput) {
     input.filename,
   );
 
-  await putObject(r2Key, input.data, input.mimeType);
+  await putObject(
+    r2Key,
+    input.data,
+    input.mimeType,
+    input.abortSignal ? { abortSignal: input.abortSignal } : undefined,
+  );
 
   await prisma.document.update({
     where: { id: document.id },
@@ -338,6 +344,7 @@ export async function createDerivedDocument(input: {
   sourceNote?: string | null;
   synthetic?: boolean;
   projectId?: string | null;
+  abortSignal?: AbortSignal;
 }) {
   assertUploadPayload(input);
   const projectId = await resolveUploadProjectId(input);
@@ -372,6 +379,7 @@ export async function createDerivedDocument(input: {
     parentDocumentId,
     originUrl: input.originUrl ?? null,
     sourceNote: input.sourceNote ?? null,
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     beforeCreate: async (tx) => {
       const derivedCount = await tx.document.count({
         where: {

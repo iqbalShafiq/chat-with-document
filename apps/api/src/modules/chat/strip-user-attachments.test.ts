@@ -40,6 +40,40 @@ describe("stripUserAttachments", () => {
     });
   });
 
+  it("keeps image parts for vision models while still dropping files", () => {
+    const message = {
+      role: "user",
+      content: [
+        { type: "text", text: "describe this" },
+        {
+          type: "image",
+          image: { type: "data", data: "aGVsbG8=" },
+          mediaType: "image/png",
+        },
+        {
+          type: "file",
+          data: { type: "data", data: "aGVsbG8=" },
+          mediaType: "application/pdf",
+          filename: "brief.pdf",
+        },
+      ],
+      metadata: { clientMessageId: "client-3" },
+    } as Message;
+
+    expect(stripUserAttachments(message, { keepImages: true })).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "describe this" },
+        {
+          type: "image",
+          image: { type: "data", data: "aGVsbG8=" },
+          mediaType: "image/png",
+        },
+      ],
+      metadata: { clientMessageId: "client-3" },
+    });
+  });
+
   it("keeps a strict empty text part when an attachment-only prompt is stripped", () => {
     const message = {
       role: "user",

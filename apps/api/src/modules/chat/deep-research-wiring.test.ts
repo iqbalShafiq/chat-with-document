@@ -67,7 +67,7 @@ describe("Deep Research server wiring", () => {
     const input = source("./build-run-input.ts");
 
     expect(input).toMatch(
-      /const researchTools = boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,\s*\.\.\.chartTools,/s,
+      /boundDeepResearchTools\(\s*\[\s*\.\.\.documentTools,\s*\.\.\.researchWebTools,\s*\.\.\.tabularTools,\s*\.\.\.researchDerivedTools,\s*\.\.\.chartTools,/s,
     );
     expect(input).not.toContain("...createDataAnalysisTools(),");
   });
@@ -96,5 +96,22 @@ describe("Deep Research server wiring", () => {
     expect(input).toMatch(
       /sealRetrievalAfterDeepResearch\(\s*tools,\s*completionGuard/,
     );
+  });
+
+  it("gives the nested researcher its own per-tool wait budget", () => {
+    const input = source("./build-run-input.ts");
+
+    expect(input).toContain("createSubAgentWaitBudget");
+    // Wait budget must wrap the activity-bounded tools, so a still_running call
+    // is never reported as a completed activity.
+    expect(input).toMatch(/researchBudget\.wrapTools\(\s*boundDeepResearchTools\(/);
+    expect(input).toMatch(
+      /additionalTools: \[\.\.\.researchTools, \.\.\.researchBudget\.controlTools\(\)\]/,
+    );
+    expect(input).toMatch(
+      /middlewares: \[researchBudget\.middleware\(\)\]/,
+    );
+    expect(input).toContain("researchBudget.instructions");
+    expect(input).toMatch(/waitBudget: researchBudget/);
   });
 });

@@ -33,6 +33,10 @@ const STATUS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}`;
 const EVENTS_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:events`;
 const COUNTER_KEY = (streamId: string) => `rs:${STREAM_TAG(streamId)}:counter`;
 export const streamStopKey = (streamId: string) => `rs-stop:${STREAM_TAG(streamId)}`;
+/** Heartbeat key the chat worker writes while a run is executing; the API watchdog treats a stale WAL as an abandoned run. */
+export const RUN_OWNER_WAL_KEY = (streamId: string) => `rs-owner-wal:${STREAM_TAG(streamId)}`;
+/** Created-at marker the chat worker writes when it first claims a run; lets the watchdog distinguish a booting run from an abandoned one. */
+export const RUN_CREATED_KEY = (streamId: string) => `rs-created:${STREAM_TAG(streamId)}`;
 
 const OPEN_TTL_SECONDS = 6 * 60 * 60;
 const CLOSE_TTL_SECONDS = 24 * 60 * 60;
@@ -189,6 +193,15 @@ function validDefaultData(name: string, value: unknown): boolean {
     return true;
   }
   if (name === "queuedMessageApplied") return exactKeys(value, ["clientMessageId", "attachmentCount"]) && boundedText(value.clientMessageId, 200) && boundedInteger(value.attachmentCount, 100);
+  if (name === "toolWaitProgress") {
+    return exactKeys(value, ["toolCallId", "toolName", "phase", "elapsedMs", "waitCount"], ["stage"]) &&
+      boundedText(value.toolCallId, 200) &&
+      boundedText(value.toolName, 200) &&
+      ["running", "wait_elapsed", "awaiting", "cancelled", "completed", "failed"].includes(String(value.phase)) &&
+      boundedInteger(value.elapsedMs, 86_400_000) &&
+      boundedInteger(value.waitCount, 10_000) &&
+      (value.stage === undefined || boundedText(value.stage, 240));
+  }
   return false;
 }
 
@@ -196,6 +209,7 @@ const DEFAULT_METADATA_SCHEMA = schema(validDefaultMetadata) as ClientMetadataSc
 const DEFAULT_DATA_SCHEMAS = {
   deepResearchProgress: schema((value) => validDefaultData("deepResearchProgress", value)),
   queuedMessageApplied: schema((value) => validDefaultData("queuedMessageApplied", value)),
+  toolWaitProgress: schema((value) => validDefaultData("toolWaitProgress", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {

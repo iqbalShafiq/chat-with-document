@@ -53,6 +53,31 @@ export function peekPendingResumeInteractionIds(
   storage: Storage,
   sessionId: string,
 ): string[] {
+  return peekPendingInteractions(storage, sessionId).map((item) => item.id);
+}
+
+/**
+ * Tool names of approvals that are still waiting for the user.
+ *
+ * A suspended approval ends its stream, so those tools have no result in
+ * memory yet; callers need their names to avoid treating a pending prompt as a
+ * stopped tool.
+ */
+export function peekPendingApprovalToolNames(
+  storage: Storage,
+  sessionId: string,
+): string[] {
+  const names = new Set<string>();
+  for (const item of peekPendingInteractions(storage, sessionId)) {
+    if (item.type === "tool-approval" && item.toolName) names.add(item.toolName);
+  }
+  return [...names];
+}
+
+function peekPendingInteractions(
+  storage: Storage,
+  sessionId: string,
+): { id: string; type: string | null; toolName: string | null }[] {
   const raw = storage.getItem(chatResumeStorageKey(sessionId));
   if (raw === null) return [];
   try {
@@ -66,20 +91,27 @@ export function peekPendingResumeInteractionIds(
     ) {
       return [];
     }
-    const ids: string[] = [];
-    for (const item of (value as { interactions: unknown[] }).interactions) {
-      if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
-      const record = item as {
+    const items: { id: string; type: string | null; toolName: string | null }[] = [];
+    for (const entry of (value as { interactions: unknown[] }).interactions) {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+      const record = entry as {
         status?: unknown;
-        request?: { id?: unknown };
+        request?: { id?: unknown; type?: unknown; toolName?: unknown };
       };
       if (record.status !== "pending") continue;
       if (typeof record.request?.id !== "string" || record.request.id.length === 0) {
         continue;
       }
-      ids.push(record.request.id);
+      items.push({
+        id: record.request.id,
+        type: typeof record.request.type === "string" ? record.request.type : null,
+        toolName:
+          typeof record.request.toolName === "string" && record.request.toolName.length > 0
+            ? record.request.toolName
+            : null,
+      });
     }
-    return ids;
+    return items;
   } catch {
     return [];
   }

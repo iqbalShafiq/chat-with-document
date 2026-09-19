@@ -914,7 +914,13 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const { metadata, messages } = parsed;
     const lastMessage = messages.at(-1);
     if (!lastMessage) return c.json({ error: "messages are invalid", code: "INVALID_MESSAGE" }, 400);
-    const promptMessage = stripUserAttachments(lastMessage);
+    const { findActiveModel } = await import("../models/service.js");
+    const selectedModel = await findActiveModel(
+      metadata.modelId ?? DEFAULT_COMPLETION_MODEL,
+    );
+    const promptMessage = stripUserAttachments(lastMessage, {
+      keepImages: selectedModel?.inputModalities.includes("image") === true,
+    });
     const streamId = crypto.randomUUID();
     let recipe;
     try {

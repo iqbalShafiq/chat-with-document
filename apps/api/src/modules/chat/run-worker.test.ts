@@ -242,11 +242,15 @@ function createDependencies(
       projectId: null,
       sessionId: SESSION_ID,
       userId: USER_ID,
+      waitRegistry: { abortAll() {} },
     } as never),
     releaseActiveRun: async (_sessionId, streamId) => {
       releases.push(streamId);
     },
     isStopRequested: async () => false,
+    touchOwnerWal: async () => undefined,
+    touchRunCreated: async () => undefined,
+    clearOwnerWal: async () => undefined,
     clearStopFlag: async () => undefined,
     sessionExists: async () => true,
     claimInteractionPolicy: async () => null,
@@ -675,6 +679,7 @@ describe("Anvia v1 chat worker", () => {
         projectId: null,
         sessionId: SESSION_ID,
         userId: USER_ID,
+        waitRegistry: { abortAll() {} },
       } as never),
       removeFailedPromptRow,
     });

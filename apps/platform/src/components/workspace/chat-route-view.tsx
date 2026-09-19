@@ -5,13 +5,37 @@ import { AnrealMark } from "#/components/layout/anreal-brand";
 import { SessionNotFound } from "#/components/workspace/workspace-not-found";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { useModels } from "#/hooks/use-models";
-import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { settleStoppedRunTools } from "#/lib/chat/finalize-interrupted-tools";
+import { peekPendingApprovalToolNames } from "#/lib/chat/interaction-resume-storage";
+import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
 import {
   ApiAuthError,
+  fetchRunStatus,
   listSessions,
   loadChatMessages,
 } from "#/lib/api";
+
+/**
+ * Build the history view for a route load.
+ *
+ * Finalizing is only correct once nothing is running: while a run is live, the
+ * same incomplete tool shapes describe work in flight, and marking them stopped
+ * would show errors for calls that are still progressing. An approval that is
+ * still waiting on the user keeps its card open for the same reason.
+ */
+async function settledHistoryForRoute(
+  sessionId: string,
+  data: unknown,
+): Promise<ChatUIMessage[]> {
+  const parsed = reconcileWaitedTools(parseMemoryMessages(data));
+  const [status, pendingApprovalToolNames] = await Promise.all([
+    fetchRunStatus(sessionId).catch(() => null),
+    Promise.resolve(peekPendingApprovalToolNames(window.sessionStorage, sessionId)),
+  ]);
+  if (status?.status === "running") return parsed;
+  return settleStoppedRunTools(parsed, { pendingApprovalToolNames });
+}
 
 export function useChatRouteData(input: {
   sessionId: string;
@@ -55,7 +79,10 @@ export function useChatRouteData(input: {
           ),
         ]);
         if (cancelled) return;
-        const messages = finalizeInterruptedTools(parseMemoryMessages(data));
+        // A run that is still going may have already streamed further than the
+        // snapshot committed to memory, so only the settled view is authoritative
+        // for history; a live run keeps its own stream state.
+        const messages = await settledHistoryForRoute(sessionId, data);
         const known = scoped?.items.some((s) => s.sessionId === sessionId);
         if (messages.length === 0 && !known) {
           setStatus("missing");

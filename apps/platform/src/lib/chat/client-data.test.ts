@@ -85,6 +85,25 @@ describe("browser v1 stream data schemas", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
       "deepResearchProgress",
       "queuedMessageApplied",
+      "toolWaitProgress",
     ]);
+  });
+
+  it("accepts bounded tool wait progress", () => {
+    const value: ChatDataMap["toolWaitProgress"] = {
+      toolCallId: "call-1",
+      toolName: "query_dataset_sql",
+      phase: "wait_elapsed",
+      elapsedMs: 12_000,
+      waitCount: 1,
+      stage: "uploading",
+    };
+    expect(ChatDataSchemas.toolWaitProgress.safeParse(value)).toMatchObject({
+      success: true,
+      data: value,
+    });
+    expect(
+      ChatDataSchemas.toolWaitProgress.safeParse({ ...value, secret: "nope" }),
+    ).toMatchObject({ success: false });
   });
 });

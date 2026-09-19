@@ -3,8 +3,8 @@
  * against the local stub (TAVILY_API_KEY=dummy, OPENAI stub on 18765).
  *
  * Covers 5 hands-on cases required by spec 2026-08-19 + plan 2026-08-19:
- * 1. vision: web_search images[] → view_image(httpbin) → bytes (hands-on: snapshot + network)
- * 2. non-vision: view_image httpbin → description (vision bytes path validated, text path via unit; E2E ensures run completes)
+ * 1. vision: web_search images[] attached natively (no view_image)
+ * 2. non-vision: view_image httpbin → description (text-only model)
  * 3. error: SSRF private host → bounded error surfaced, run continues (no crash, no unhandled console error)
  * 4. web_fetch images[] → view_image (hands-on: web_fetch then view_image order)
  * 5. cap & truncate: web_search with long description → capped at 5 / truncated (unit guarantees, E2E ensures no regression)
@@ -16,6 +16,9 @@
  *  - playwright_browser_navigate, snapshot, network_requests, evaluate, console_messages
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { setModel } from "./helpers";
+
+const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 
 const STUB_ORIGIN = "http://127.0.0.1:18765";
 const API_ORIGIN = "http://localhost:3001";
@@ -111,7 +114,7 @@ test.beforeEach(async ({ request }) => {
   await resetStub(request);
 });
 
-test("case 1 — vision: web_search → view_image httpbin succeeds (hands-on)", async ({ page, request }) => {
+test("case 1 — vision: web_search sees images natively without view_image (hands-on)", async ({ page, request }) => {
   await openFreshChat(page);
   await enableWebSearch(page);
 
@@ -122,13 +125,10 @@ test("case 1 — vision: web_search → view_image httpbin succeeds (hands-on)",
   const requests = await stubRequests(request);
   const order = toolCallOrder(requests);
   expect(order).toContain("web_search");
-  expect(order).toContain("view_image");
-  expect(order.indexOf("view_image")).toBeGreaterThan(order.indexOf("web_search"));
+  expect(order).not.toContain("view_image");
 
   const wsArgs = toolCallArgs(requests, "web_search");
   expect(wsArgs[0]).toMatchObject({ query: "logo vercel" });
-  const viArgs = toolCallArgs(requests, "view_image");
-  expect(viArgs[0]).toMatchObject({ url: "https://www.gstatic.com/webp/gallery/1.jpg" });
 
   // hands-on browser checks (playwright_browser_* equivalents):
   // - snapshot composer masih visible, tidak crash
@@ -141,8 +141,8 @@ test("case 1 — vision: web_search → view_image httpbin succeeds (hands-on)",
 
 test("case 6 — web photo persisted as source=web and shown in the rail Images section", async ({ page, request }) => {
   await openFreshChat(page);
-  await enableWebSearch(page);
-  await sendMessage(page, "cari logo vercel dan lihat detail");
+  await setModel(page, TEXT_ONLY_MODEL);
+  await sendMessage(page, "lihat gambar httpbin untuk deskripsi");
   await waitForRunDone(page);
 
   const order = toolCallOrder(await stubRequests(request));
@@ -169,6 +169,7 @@ test("case 2 — view_image httpbin direct (non-vision description path also fun
   request,
 }) => {
   await openFreshChat(page);
+  await setModel(page, TEXT_ONLY_MODEL);
   await sendMessage(page, "lihat gambar httpbin untuk deskripsi");
   await waitForRunDone(page);
 
@@ -191,6 +192,7 @@ test("case 3 — SSRF private host is blocked and run continues with bounded err
   request,
 }) => {
   await openFreshChat(page);
+  await setModel(page, TEXT_ONLY_MODEL);
   // listen for console errors hands-on (playwright_browser_console_messages)
   const consoleErrors: string[] = [];
   page.on("console", (msg) => {
@@ -215,7 +217,7 @@ test("case 3 — SSRF private host is blocked and run continues with bounded err
   expect(unhandled).toEqual([]);
 });
 
-test("case 4 — web_fetch → view_image works", async ({ page, request }) => {
+test("case 4 — vision web_fetch sees page images without view_image", async ({ page, request }) => {
   await openFreshChat(page);
   await enableWebSearch(page);
   await sendMessage(page, "web_fetch gambar dari halaman contoh dan lihat");
@@ -224,13 +226,10 @@ test("case 4 — web_fetch → view_image works", async ({ page, request }) => {
   const requests = await stubRequests(request);
   const order = toolCallOrder(requests);
   expect(order).toContain("web_fetch");
-  expect(order).toContain("view_image");
-  expect(order.indexOf("view_image")).toBeGreaterThan(order.indexOf("web_fetch"));
+  expect(order).not.toContain("view_image");
 
   const fetchArgs = toolCallArgs(requests, "web_fetch");
   expect(fetchArgs[0]).toMatchObject({ url: "https://example.com/article" });
-  const viArgs = toolCallArgs(requests, "view_image");
-  expect(viArgs[0]).toMatchObject({ url: "https://www.gstatic.com/webp/gallery/1.jpg" });
 
   await expect(page.getByText(/Selesai:/).last()).toBeVisible();
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();

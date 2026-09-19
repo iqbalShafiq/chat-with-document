@@ -16,6 +16,13 @@ import {
   parseToolValue,
   type FormattedSection,
 } from "#/components/tool-io-format";
+import {
+  formatElapsed,
+  isCancelledToolOutput,
+  isStillRunningToolOutput,
+  useToolWaitProgress,
+  useLiveWaitElapsed,
+} from "#/lib/chat/tool-wait-progress";
 
 const TOOL_LABELS: Record<string, string> = {
   find_documents: "Finding documents",
@@ -51,8 +58,17 @@ export function toolActivityLabelForName(toolName: string) {
   return TOOL_LABELS[toolName] ?? `Running ${toolName}`;
 }
 
-function statusLabel(part: ToolPart) {
+function statusLabel(
+  part: ToolPart,
+  flags: { waiting: boolean; cancelled: boolean; elapsedMs?: number; stage?: string },
+) {
+  if (flags.cancelled) return "Cancelled";
   if (part.state === "error") return "Error";
+  if (flags.waiting) {
+    const elapsed = flags.elapsedMs !== undefined ? ` ${formatElapsed(flags.elapsedMs)}` : "";
+    const stage = flags.stage ? ` · ${flags.stage}` : "";
+    return `Waiting${elapsed}${stage}`;
+  }
   if (part.state === "output-available") return "Done";
   return "Working";
 }
@@ -220,10 +236,46 @@ function ChartEmbedHint({ chart }: { chart: unknown }) {
 /** Flat collapsible tool step — no card chrome. */
 export function ToolActivityPanel({ part }: { part: ToolPart }) {
   const label = getToolActivityLabel(part);
+  const wait = useToolWaitProgress(part.toolCallId);
+  const outputValue = part.state === "output-available" ? parseToolValue(part.output) : undefined;
+  const stillRunning = isStillRunningToolOutput(outputValue);
+  const cancelledOutput = isCancelledToolOutput(outputValue);
+  const lastWait = stillRunning && outputValue && typeof outputValue === "object"
+    ? {
+        elapsedMs: Number((outputValue as { elapsedMs?: unknown }).elapsedMs ?? Number.NaN),
+        waitCount: Number((outputValue as { waitCount?: unknown }).waitCount ?? Number.NaN),
+        stage: (outputValue as { stage?: unknown }).stage,
+      }
+    : undefined;
+  // The card's own payload only carries the first checkpoint's elapsed, while
+// every later await reports a larger one, so take the largest known value.
+  const partElapsedMs = Number.isFinite(lastWait?.elapsedMs)
+    ? (lastWait as { elapsedMs: number }).elapsedMs
+    : undefined;
+  const reportedElapsedMs =
+    partElapsedMs === undefined
+      ? wait?.elapsedMs
+      : wait?.elapsedMs === undefined
+        ? partElapsedMs
+        : Math.max(partElapsedMs, wait.elapsedMs);
+  const waitStage =
+    typeof wait?.stage === "string" && wait.stage.length > 0
+      ? wait.stage
+      : typeof lastWait?.stage === "string" && lastWait.stage.length > 0
+        ? lastWait.stage
+        : undefined;
+  const isWaiting =
+    stillRunning || wait?.phase === "wait_elapsed" || wait?.phase === "awaiting";
+  // A wait slice can last minutes, so tick the reported elapsed forward while
+  // the card is actually waiting instead of showing a frozen number.
+  const waitElapsedMs = useLiveWaitElapsed(reportedElapsedMs, isWaiting);
+  const isCancelled = cancelledOutput || wait?.phase === "cancelled";
   const isRunning =
-    part.state === "input-streaming" || part.state === "input-available";
-  const isError = part.state === "error";
-  const isDone = part.state === "output-available";
+    part.state === "input-streaming" ||
+    part.state === "input-available" ||
+    isWaiting;
+  const isError = part.state === "error" || isCancelled;
+  const isDone = part.state === "output-available" && !isWaiting && !isCancelled;
 
   const panelId = useId();
   const [open, setOpen] = useState(() => isRunning || isError);
@@ -336,7 +388,12 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
           {label}
         </span>
         <span className={`shrink-0 text-[11px] font-medium ${statusTone}`}>
-          · {statusLabel(part)}
+          · {statusLabel(part, {
+            waiting: isWaiting,
+            cancelled: isCancelled,
+            ...(waitElapsedMs !== undefined ? { elapsedMs: waitElapsedMs } : {}),
+            ...(waitStage !== undefined ? { stage: waitStage } : {}),
+          })}
         </span>
       </button>
 

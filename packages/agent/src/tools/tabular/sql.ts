@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { SQL_TIMEOUT_MS } from "../wait-budget/limits.js";
 import type { TabularSheet } from "./types.js";
 
 const STATEMENT_RE = /^\s*(with\s+\w|select)\b/i;
@@ -22,12 +23,22 @@ export type SqlResult = {
 export type SqlRunner = (
   sheet: TabularSheet,
   query: string,
-  opts?: { maxRows?: number; timeoutMs?: number },
+  opts?: { maxRows?: number; timeoutMs?: number; abortSignal?: AbortSignal },
 ) => Promise<SqlResult>;
+
+function throwIfTimedOut(deadline: number, timeoutMs: number, signal?: AbortSignal): void {
+  signal?.throwIfAborted();
+  if (Date.now() > deadline) {
+    const error = new Error(`SQL exceeded its ${timeoutMs}ms budget.`);
+    error.name = "TimeoutError";
+    throw error;
+  }
+}
 
 export function createSqlJsRunner(): SqlRunner {
   return async (sheet, query, opts = {}) => {
-    const { maxRows = 500 } = opts;
+    const { maxRows = 500, timeoutMs = SQL_TIMEOUT_MS, abortSignal } = opts;
+    const deadline = Date.now() + timeoutMs;
     assertReadOnlySql(query);
     const { default: initSqlJs } = await import("sql.js");
     const require = createRequire(import.meta.url);
@@ -43,12 +54,18 @@ export function createSqlJsRunner(): SqlRunner {
       db.exec(create);
       const insert = `INSERT INTO ${tableName} VALUES (${sheet.columns.map(() => "?").join(", ")})`;
       const stmt = db.prepare(insert);
-      for (const row of sheet.rows) {
+      for (let index = 0; index < sheet.rows.length; index += 1) {
+        if (index % 64 === 0) {
+          throwIfTimedOut(deadline, timeoutMs, abortSignal);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const row = sheet.rows[index]!;
         stmt.bind(row as (string | number | null)[]);
         stmt.step();
         stmt.reset();
       }
       stmt.free();
+      throwIfTimedOut(deadline, timeoutMs, abortSignal);
       // The tool description promises `t` as a stable alias for the sheet.
       if (sheet.name.toLowerCase() !== "t") {
         db.exec(`CREATE TEMP VIEW "t" AS SELECT * FROM ${tableName}`);

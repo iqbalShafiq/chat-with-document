@@ -40,10 +40,23 @@ export function buildDocumentR2Key(
   return `users/${userId}/sessions/${sessionId}/${documentId}/${safeName}`;
 }
 
+export type R2TransferOptions = {
+  abortSignal?: AbortSignal;
+  timeoutMs?: number;
+};
+
+const DEFAULT_R2_TIMEOUT_MS = 20_000;
+
+function transferSignal(options?: R2TransferOptions): AbortSignal {
+  const timeout = AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_R2_TIMEOUT_MS);
+  return options?.abortSignal ? AbortSignal.any([options.abortSignal, timeout]) : timeout;
+}
+
 export async function putObject(
   key: string,
   body: Uint8Array,
   contentType: string,
+  options?: R2TransferOptions,
 ) {
   if (body.byteLength === 0) {
     throw new Error("Cannot upload empty file");
@@ -59,16 +72,18 @@ export async function putObject(
       ContentType: contentType,
       ContentLength: payload.byteLength,
     }),
+    { abortSignal: transferSignal(options) },
   );
 }
 
-export async function getObjectBuffer(key: string) {
+export async function getObjectBuffer(key: string, options?: R2TransferOptions) {
   const client = getClient();
   const response = await client.send(
     new GetObjectCommand({
       Bucket: getBucket(),
       Key: key,
     }),
+    { abortSignal: transferSignal(options) },
   );
 
   const stream = response.Body;

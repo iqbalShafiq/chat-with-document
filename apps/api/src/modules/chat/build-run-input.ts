@@ -1,3 +1,4 @@
+import { createMiddleware } from "@anvia/core/tool";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -44,8 +45,17 @@ import {
   providerOptionsForReasoning,
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
+  WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
+  WEB_SEARCH_VISION_IMAGE_INSTRUCTION,
   DEEP_RESEARCH_INSTRUCTION,
+  TOOL_WAIT_INSTRUCTION,
+  createAwaitCancelTools,
+  createSubAgentWaitBudget,
+  createToolCallIdGate,
+  InFlightToolRegistry,
+  wrapToolsWithWaitBudget,
   type AgentContextBlock,
+  type ToolWaitProgress,
   type ImageCapabilitySet,
   type ProfileScope,
   type ProfileSectionKey,
@@ -55,6 +65,7 @@ import {
   parseMessage,
   type Message,
   type ToolDefinition,
+  type UserContentPart,
 } from "@anvia/core/completion";
 import type { AnyTool, MemoryStore } from "@anvia/core";
 import { createSummaryMemoryCompactor } from "@anvia/core/memory";
@@ -84,7 +95,13 @@ import {
 } from "./memory-policy.js";
 import { findActiveModel } from "../models/service.js";
 import {
+  createPendingVisionImageBuffer,
+  injectPendingVisionImages,
+  loadActiveContextImageParts,
+} from "./attach-prompt-images.js";
+import {
   createDefaultViewImageTool,
+  createRemoteImageAttacher,
   resolveVisionHelperModel,
   VISION_HELPER_INSTRUCTION,
   VIEW_IMAGE_TOOL_DEFINITIONS,
@@ -247,8 +264,12 @@ export type ChatRunInput = {
   context7Available: boolean;
   /** Frozen image descriptors pinned for this run (in pin order). */
   activeContextImages: ChatAgentImageDescriptor[];
+  /** Native image parts for vision models (empty for text-only). */
+  promptImageParts: UserContentPart[];
   /** Frozen text snippet descriptor (null if none). */
   activeContextSnippet: ChatAgentSnippetDescriptor | null;
+  /** Per-run in-flight tool jobs (wait-budget). */
+  waitRegistry: InFlightToolRegistry;
 };
 
 /**
@@ -622,6 +643,8 @@ export type ChatRunReconstructionRuntime = {
   createCompletionModel?: typeof createCompletionModel;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
+  onToolWaitProgress?: (event: ToolWaitProgress) => void | Promise<void>;
+  waitRegistry?: InFlightToolRegistry;
 };
 
 /**
@@ -755,7 +778,14 @@ export async function resolveChatAgentRecipe(
 
   const tavilyConfig = readWebSearchConfig();
   const webSearchAvailable = tavilyConfig !== null;
-  if (webSearchAvailable) instructions.push(WEB_SEARCH_INSTRUCTION);
+  if (webSearchAvailable) {
+    instructions.push(WEB_SEARCH_INSTRUCTION);
+    instructions.push(
+      modelInfo.inputModalities.includes("image")
+        ? WEB_SEARCH_VISION_IMAGE_INSTRUCTION
+        : WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
+    );
+  }
 
   const imageConfig = readImageGenerationConfig();
   const imageGenerationAvailable = imageConfig !== null;
@@ -801,7 +831,7 @@ export async function resolveChatAgentRecipe(
     instructions.push(CONTEXT7_INSTRUCTION);
   }
   const modelAcceptsImage = modelInfo.inputModalities.includes("image");
-  if (!modelAcceptsImage || webSearchAvailable) {
+  if (!modelAcceptsImage) {
     instructions.push(VISION_HELPER_INSTRUCTION);
   }
 
@@ -856,11 +886,7 @@ export async function resolveChatAgentRecipe(
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
-    ...(!modelAcceptsImage
-      ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
-      : webSearchAvailable
-        ? [VIEW_IMAGE_TOOL_DEFINITIONS.vision]
-        : []),
+    ...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : []),
   ];
   const modelBudget = resolveModelTokenBudget({
     contextWindowTokens: modelInfo.contextWindowTokens,
@@ -1183,6 +1209,29 @@ export async function reconstructChatRunInput(input: {
     ? resolvedWebConfig
     : null;
   const webSearchAvailable = recipe.capabilities.webSearchAvailable;
+  const frozenHasViewImage = recipe.staticContext.tools.some(
+    (tool) => tool.name === "view_image",
+  );
+  const parentVisionImages = createPendingVisionImageBuffer();
+  const researchVisionImages = createPendingVisionImageBuffer();
+  const fetchRemoteImages =
+    modelAcceptsImage && !frozenHasViewImage
+      ? createRemoteImageAttacher({ userId, sessionId, projectId })
+      : undefined;
+  const attachRemoteImages = fetchRemoteImages
+    ? async (urls: readonly string[]) => {
+        const attached = await fetchRemoteImages(urls);
+        parentVisionImages.push(attached);
+        return attached;
+      }
+    : undefined;
+  const attachResearchImages = fetchRemoteImages
+    ? async (urls: readonly string[]) => {
+        const attached = await fetchRemoteImages(urls);
+        researchVisionImages.push(attached);
+        return attached;
+      }
+    : undefined;
   if (webSearchAvailable && tavilyConfig) {
     tools.push(
       ...createWebSearchTools({
@@ -1190,6 +1239,7 @@ export async function reconstructChatRunInput(input: {
         enabled: webSearchEnabled,
         hasGrant: (name) =>
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+        ...(attachRemoteImages ? { attachRemoteImages } : {}),
       }),
     );
   }
@@ -1208,6 +1258,7 @@ export async function reconstructChatRunInput(input: {
           enabled: true,
           hasGrant: (name) =>
             grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
+          ...(attachResearchImages ? { attachRemoteImages: attachResearchImages } : {}),
         })
       : [];
     // Nested researcher is already inside the parent deep_research approval.
@@ -1216,16 +1267,22 @@ export async function reconstructChatRunInput(input: {
       resolver: tabularResolver,
       webFetchGate: { enabled: true },
     });
-    const researchTools = boundDeepResearchTools(
-      [
-        ...documentTools,
-        ...researchWebTools,
-        ...tabularTools,
-        ...researchDerivedTools,
-        ...chartTools,
-      ],
-      recipe.budgets.deepResearchMaxSearches,
-      onDeepResearchProgress,
+    // The researcher gets the same per-call wait budget the parent has, so a
+    // slow nested tool returns still_running and the researcher keeps waiting
+    // instead of the whole research run being cut short.
+    const researchBudget = createSubAgentWaitBudget();
+    const researchTools = researchBudget.wrapTools(
+      boundDeepResearchTools(
+        [
+          ...documentTools,
+          ...researchWebTools,
+          ...tabularTools,
+          ...researchDerivedTools,
+          ...chartTools,
+        ],
+        recipe.budgets.deepResearchMaxSearches,
+        onDeepResearchProgress,
+      ),
     );
     const researcher = makeAgent({
       agentId: `${recipe.agentId}-deep-researcher`,
@@ -1236,11 +1293,29 @@ export async function reconstructChatRunInput(input: {
       additionalInstructions: [
         DEEP_RESEARCH_INSTRUCTION,
         DATASET_INSTRUCTION_RESEARCHER,
+        researchBudget.instructions,
         ...(catalogInstruction ? [catalogInstruction] : []),
-        ...(webSearchAvailable ? [WEB_SEARCH_INSTRUCTION] : []),
+        ...(webSearchAvailable
+          ? [
+              WEB_SEARCH_INSTRUCTION,
+              modelAcceptsImage
+                ? WEB_SEARCH_VISION_IMAGE_INSTRUCTION
+                : WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
+            ]
+          : []),
       ],
       additionalContext: contextBlocks,
-      additionalTools: researchTools,
+      additionalTools: [...researchTools, ...researchBudget.controlTools()],
+      middlewares: [
+        researchBudget.middleware(),
+        createMiddleware({
+          onCompletionRequest: ({ request }) => {
+            const images = researchVisionImages.consume();
+            if (images.length === 0) return undefined;
+            return { request: injectPendingVisionImages(request, images) };
+          },
+        }),
+      ],
       memory: undefined,
     });
     // Seal parent copies only. Nested researcher tools stay unsealed so the
@@ -1261,6 +1336,7 @@ export async function reconstructChatRunInput(input: {
           grantHelpers?.hasGrant(name) ?? Promise.resolve(false),
         onProgress: onDeepResearchProgress,
         completionGuard,
+        waitBudget: researchBudget,
       }),
     );
   }
@@ -1326,15 +1402,16 @@ export async function reconstructChatRunInput(input: {
   // Native v1 questions are serializable interactions and do not need an
   // application Promise/Redis requester in the worker process.
   tools.push(createClarificationTool());
+  const waitRegistry = runtime?.waitRegistry ?? new InFlightToolRegistry();
+  const waitIds = createToolCallIdGate();
+  const waitProgress = runtime?.onToolWaitProgress;
   const context7Available = recipe.capabilities.context7Requested;
 
-  // Vision helper for text-only models: describe session images, document
-  // page images, *or* public image URLs (e.g. logos from web_search) via the
-  // cheapest active vision chat model (VISION_HELPER_MODEL overrides the pick).
-  // Universal wiring: non-vision always gets description mode; vision gets vision mode when web search is available.
-  let universalViewImageRegistered = false;
-
-  if (!modelAcceptsImage) {
+  // view_image is a text-only helper. Vision models receive image bytes
+  // natively (document tools, pinned context, web_search/web_fetch attach).
+  // Reconstruction follows the frozen tool surface so in-flight recipes that
+  // still listed view_image for a vision model keep that tool.
+  if (frozenHasViewImage) {
     const visionModel = await resolveVisionHelperModel();
     if (!visionModel) {
       throw new Error("frozen view-image capability is unavailable in this worker process");
@@ -1352,41 +1429,22 @@ export async function reconstructChatRunInput(input: {
             imageSessionId,
             recipe.documents.ids,
           ),
-        mode: "description",
+        mode: modelAcceptsImage ? "vision" : "description",
       }),
     );
-    universalViewImageRegistered = true;
-  }
-
-  if (webSearchAvailable && !universalViewImageRegistered) {
-    if (modelAcceptsImage) {
-      const dummyVisionModel = await resolveVisionHelperModel();
-      if (!dummyVisionModel) {
-        throw new Error("frozen view-image capability is unavailable in this worker process");
-      }
-      tools.push(
-        createDefaultViewImageTool({
-          userId,
-          sessionId,
-          projectId,
-          model: dummyVisionModel,
-          resolveDocumentImage: (imageId, imageUserId, imageSessionId) =>
-            findSessionDocumentImage(
-              imageId,
-              imageUserId,
-              imageSessionId,
-              recipe.documents.ids,
-            ),
-          mode: "vision",
-        }),
-      );
-      universalViewImageRegistered = true;
-    }
   }
 
   const actualContextBlocks = contextBlocks.flatMap((block) =>
     typeof block.id === "string" ? [{ id: block.id, text: block.text }] : [],
   );
+  const waitBudgetTools = wrapToolsWithWaitBudget(tools, {
+    registry: waitRegistry,
+    ids: waitIds,
+    ...(waitProgress ? { onProgress: waitProgress } : {}),
+  });
+  tools.length = 0;
+  tools.push(...waitBudgetTools);
+
   const reconstructedToolDefinitions = await Promise.all(
     tools.map((tool) => tool.definition("")),
   );
@@ -1414,15 +1472,38 @@ export async function reconstructChatRunInput(input: {
     model: recipe.staticContext.model,
   });
 
+  tools.push(
+    ...createAwaitCancelTools({
+      registry: waitRegistry,
+      ...(waitProgress ? { onProgress: waitProgress } : {}),
+    }),
+  );
+  const runtimeInstructions = [...instructions, TOOL_WAIT_INSTRUCTION];
+
   const agent = makeAgent({
     agentId: recipe.agentId,
     model: makeCompletionModel(model),
     reasoningEffort: (reasoningEffort ?? undefined) as
       | ReasoningEffort
       | undefined,
-    additionalInstructions: instructions,
+    additionalInstructions: runtimeInstructions,
     additionalContext: contextBlocks,
     additionalTools: tools,
+    middlewares: [
+      createMiddleware({
+        onToolInput: ({ toolName, toolCallId, internalCallId }) => {
+          if (toolCallId || internalCallId) {
+            waitIds.note(toolName, toolCallId, internalCallId);
+          }
+          return undefined;
+        },
+        onCompletionRequest: ({ request }) => {
+          const images = parentVisionImages.consume();
+          if (images.length === 0) return undefined;
+          return { request: injectPendingVisionImages(request, images) };
+        },
+      }),
+    ],
     ...(context7Available && context7Server
       ? { mcpServers: [context7Server] }
       : {}),
@@ -1436,7 +1517,7 @@ export async function reconstructChatRunInput(input: {
     projectId,
     model,
     reasoningEffort,
-    instructions,
+    instructions: runtimeInstructions,
     contextBlocks,
     tools,
     memory: runMemory,
@@ -1447,7 +1528,14 @@ export async function reconstructChatRunInput(input: {
     context7Available,
     /** Images pinned as active context (bytes fetched by the worker). */
     activeContextImages,
+    promptImageParts: modelAcceptsImage
+      ? await loadActiveContextImageParts({
+          images: activeContextImages,
+          fetchBuffer: getObjectBuffer,
+        })
+      : [],
     /** The single text snippet pinned as additional context (null if none). */
     activeContextSnippet,
+    waitRegistry,
   };
 }

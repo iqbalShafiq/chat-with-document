@@ -20,9 +20,9 @@ const FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 
 export const VISION_HELPER_INSTRUCTION =
-  "When you need to see what an image looks like, call view_image — it returns the image for vision models or a text description for text-only models.\n" +
+  "Your model cannot receive image input directly. When you need to see what an image looks like, call view_image — it returns a text description of the real pixels.\n" +
   "Sources: imageId (session/document) or url (public http(s) image from web_search/web_fetch images).\n" +
-  "web_search now returns images[] with url and description; web_fetch returns images[] URLs. Pass the URL you want to inspect to view_image.";
+  "web_search returns images[] with url and description; web_fetch returns images[] URLs. Pass the URL you want to inspect to view_image.";
 
 const VIEW_IMAGE_DESCRIPTION =
   "Describe what an image actually shows (via a vision model). Use for " +
@@ -582,4 +582,89 @@ export function createDefaultViewImageTool(options: {
     store: getImageStore(),
     mode: options.mode,
   });
+}
+
+/** Skip oversized auto-attached web images so a search result cannot blow the context. */
+const MAX_ATTACH_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Fetch + persist public image URLs as native tool file parts. Used by vision
+ * models so web_search / web_fetch can deliver pixels without view_image.
+ */
+export function createRemoteImageAttacher(options: {
+  userId: string;
+  sessionId: string;
+  projectId?: string | null;
+  store?: ImageStore;
+  fetchFn?: typeof fetch;
+}): (urls: readonly string[]) => Promise<
+  Array<{
+    url: string;
+    mediaType: string;
+    data: string;
+    imageId?: string;
+    width?: number;
+    height?: number;
+    prompt?: string;
+  }>
+> {
+  const store = options.store ?? getImageStore();
+  const projectId = options.projectId ?? null;
+  return async (urls) => {
+    const attached: Array<{
+      url: string;
+      mediaType: string;
+      data: string;
+      imageId?: string;
+      width?: number;
+      height?: number;
+      prompt?: string;
+    }> = [];
+    for (const url of urls) {
+      const loaded = await loadRemoteImage({ url, fetchFn: options.fetchFn });
+      if ("error" in loaded) continue;
+      if (loaded.buffer.byteLength > MAX_ATTACH_BYTES) continue;
+      const dims = imageDimensionsFromBuffer(loaded.buffer, loaded.mediaType);
+      let imageId: string | undefined;
+      const existing = await store
+        .findSessionImageBySourceUrl({
+          userId: options.userId,
+          sessionId: options.sessionId,
+          sourceUrl: url,
+        })
+        .catch(() => null);
+      if (existing) {
+        imageId = existing.id;
+      } else {
+        try {
+          const saved = await store.saveGeneratedImage({
+            userId: options.userId,
+            sessionId: options.sessionId,
+            projectId,
+            buffer: loaded.buffer,
+            mediaType: loaded.mediaType,
+            width: dims.width,
+            height: dims.height,
+            modelId: "web",
+            prompt: url,
+            source: "web",
+            sourceUrl: url,
+          });
+          imageId = saved.id;
+        } catch (error) {
+          console.error("[chat] attach remote image persist failed", { url, error });
+        }
+      }
+      attached.push({
+        url,
+        mediaType: loaded.mediaType,
+        data: loaded.buffer.toString("base64"),
+        imageId,
+        width: dims.width,
+        height: dims.height,
+        prompt: url,
+      });
+    }
+    return attached;
+  };
 }

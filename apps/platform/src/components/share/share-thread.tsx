@@ -11,6 +11,7 @@ import { ShareSessionProviders } from "#/components/share/share-session-provider
 import { useModels } from "#/hooks/use-models";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { finalizeInterruptedTools } from "#/lib/chat/finalize-interrupted-tools";
+import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { fetchPublicShare, forkShareSnapshot } from "#/lib/api";
 import { queueShareForkDraft } from "#/lib/chat/queued-messages";
 import { sessionNavigate } from "#/lib/workspace-urls";
@@ -74,7 +75,7 @@ export function useShareThreadData(shareToken: string): {
         setTitle(snapshot.title);
         setOwnerName(snapshot.ownerName);
         setCreatedAt(snapshot.createdAt);
-        setMessages(finalizeInterruptedTools(parseMemoryMessages(snapshot.messages)));
+        setMessages(finalizeInterruptedTools(reconcileWaitedTools(parseMemoryMessages(snapshot.messages))));
         setStatus("ready");
       } catch {
         if (!cancelled) setStatus("missing");

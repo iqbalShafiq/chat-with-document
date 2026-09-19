@@ -311,6 +311,40 @@ describe("createWebSearchTools", () => {
       expect(output.images).toHaveLength(5);
       expect(output.images[0].description.length).toBeLessThanOrEqual(301); // 300 + ellipsis
     });
+
+    it("merges persisted imageIds into JSON without file parts on the tool result", async () => {
+      const { client, search } = fakeClient();
+      search.mockResolvedValue({
+        query: QUERY,
+        responseTime: 100,
+        images: [{ url: "https://example.com/a.jpg", description: "A logo" }],
+        results: [result("R", "https://example.com/1", "content")],
+        requestId: "req-1",
+      });
+      const attachRemoteImages = vi.fn(async (urls: readonly string[]) =>
+        urls.map((url) => ({
+          url,
+          mediaType: "image/jpeg",
+          data: "AAAA",
+          imageId: "web-1",
+          width: 8,
+          height: 8,
+          prompt: url,
+        })),
+      );
+      const tools = createWebSearchTools({
+        tavilyClient: client,
+        enabled: true,
+        attachRemoteImages,
+      });
+      const output = await tools[0]!.call({ query: QUERY, reason: REASON });
+      const normalized = normalizeToolResultOutput(output);
+      expect(normalized.type).toBe("json");
+      expect(output).toMatchObject({
+        images: [expect.objectContaining({ url: "https://example.com/a.jpg", imageId: "web-1" })],
+      });
+      expect(attachRemoteImages).toHaveBeenCalledWith(["https://example.com/a.jpg"]);
+    });
   });
 
   describe("web_fetch", () => {

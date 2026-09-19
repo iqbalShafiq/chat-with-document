@@ -10,6 +10,7 @@ import {
   createStaticToolDefinition,
   type ToolDefinition,
 } from "./static-definition.js";
+import type { SubAgentWaitBudget } from "./wait-budget/sub-agent.js";
 
 export type DeepResearchProgressPhase =
   | "planning"
@@ -64,15 +65,26 @@ export type DeepResearchToolScope = {
   researcher: DeepResearchResearcher;
   maxTurns?: number;
   maxSearches?: number;
+  /**
+   * Outer safety ceiling for the whole research run. The per-tool wait budget
+   * inside the researcher is what keeps slow tools alive; this only bounds
+   * total cost, so it must stay above the nested per-tool budget.
+   */
   maxDurationMs?: number;
   hasGrant?: (toolName: string) => Promise<boolean> | boolean;
   onProgress?: DeepResearchProgressReporter | undefined;
   completionGuard?: DeepResearchCompletionGuard;
+  /**
+   * Wait budget the researcher's own tools were wrapped with. The run uses it
+   * to abort outstanding nested jobs when the research returns, so a tool that
+   * outlived the report cannot keep working in the background.
+   */
+  waitBudget?: Pick<SubAgentWaitBudget, "abortOutstanding">;
 };
 
-const DEFAULT_MAX_TURNS = 12;
+const DEFAULT_MAX_TURNS = 24;
 const DEFAULT_MAX_SEARCHES = 8;
-const DEFAULT_MAX_DURATION_MS = 6 * 60_000;
+const DEFAULT_MAX_DURATION_MS = 15 * 60_000;
 const MAX_TURNS = 30;
 const MAX_SEARCHES = 20;
 const MAX_DURATION_MS = 30 * 60_000;
@@ -334,6 +346,10 @@ export function createDeepResearchTools(scope: DeepResearchToolScope): AnyTool[]
             timed.context,
           );
         } finally {
+          // The researcher can return while a nested tool is still running.
+          // Nothing will await that job again, so stop it here instead of
+          // letting it burn wall clock in the background.
+          scope.waitBudget?.abortOutstanding("Deep Research finished");
           timed.dispose();
         }
         await emit(scope, {

@@ -6,6 +6,7 @@ import {
   type MemoryOptions,
   type MemoryStore,
 } from "@anvia/core";
+import type { AgentMiddleware } from "@anvia/core/tool";
 import type { AgentObservabilityOptions } from "@anvia/core/observability";
 import type { AgentContextInput as NativeAgentContextInput } from "@anvia/core/agent";
 import type { McpServer } from "@anvia/core/mcp";
@@ -48,6 +49,7 @@ export interface CreateAgentOptions {
   guardrails?: GuardrailPolicyInput;
   memory?: MemoryStore | CreateAgentMemoryOptions;
   mcpServers?: McpServer[];
+  middlewares?: readonly AgentMiddleware[];
 }
 
 export function createAgent(opts: CreateAgentOptions): Agent {
@@ -100,6 +102,7 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     ...(opts.mcpServers?.length ? { mcpServers: [...opts.mcpServers] } : {}),
     ...(opts.observability ? { observability: opts.observability } : {}),
     ...(opts.guardrails !== undefined ? { guardrails: opts.guardrails } : {}),
+    ...(opts.middlewares?.length ? { middlewares: [...opts.middlewares] } : {}),
   });
 }
 

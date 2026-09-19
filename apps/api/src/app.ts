@@ -28,3 +28,13 @@ export function createApp() {
   registerOpenApi(app);
   return app;
 }
+
+/** Idempotent re-entrant watchdog used by tests and the HTTP bootstrap. */
+export function startRunStaleWatchdog(): void {
+  const g = globalThis as typeof globalThis & { __anrealRunStaleWatchdogStarted?: boolean };
+  if (g.__anrealRunStaleWatchdogStarted) return;
+  g.__anrealRunStaleWatchdogStarted = true;
+  void import("./modules/chat/run-stale-watchdog.js").then(({ startRunStaleSweeper }) => {
+    startRunStaleSweeper();
+  });
+}

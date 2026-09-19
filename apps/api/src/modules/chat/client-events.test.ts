@@ -92,6 +92,14 @@ describe("createChatClientStream", () => {
         stats: { retrievalCalls: 1, retrievalLimit: 8 },
       },
       { type: "queued_message_applied", clientMessageId: "client-1", text: "do not forward", attachmentCount: 1 },
+      {
+        type: "tool_wait_progress",
+        toolCallId: "call-1",
+        toolName: "query_dataset_sql",
+        phase: "wait_elapsed",
+        elapsedMs: 12_000,
+        waitCount: 1,
+      },
       outcome("response"),
     ];
 
@@ -100,6 +108,7 @@ describe("createChatClientStream", () => {
     expect(data).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "deepResearchProgress" }),
       expect.objectContaining({ name: "queuedMessageApplied", data: { clientMessageId: "client-1", attachmentCount: 1 } }),
+      expect.objectContaining({ name: "toolWaitProgress" }),
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();
