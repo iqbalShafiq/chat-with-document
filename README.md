@@ -132,7 +132,7 @@ Factory agent yang dipakai API:
    | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
    | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`openai/gpt-5.6-luna`) |
    | `TITLE_ENABLED` | Worker judul sesi AI (default `true`); set `false` untuk mematikan |
-   | `TITLE_MODEL` | Model generator judul (default `openai/gpt-5-nano`) |
+   | `TITLE_MODEL` | Model generator judul (default `openai/gpt-5.6-luna`) |
    | `TITLE_WORKER_CONCURRENCY` | Parallel title worker (default `3`) |
 
 3. **Start Postgres**
@@ -148,7 +148,10 @@ Factory agent yang dipakai API:
    ```bash
    pnpm --filter @anreal/api db:generate
    pnpm --filter @anreal/api db:migrate
+   pnpm --filter @anreal/api db:seed
    ```
+
+   `db:seed` wajib untuk katalog model — tanpa itu composer disabled ("No models are configured").
 
 ## Development
 
