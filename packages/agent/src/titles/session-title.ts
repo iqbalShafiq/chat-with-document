@@ -1,6 +1,7 @@
 import type { CompletionModel, Usage } from "@anvia/core";
 import { generateCompletion } from "@anvia/core/completion";
 import { z } from "zod";
+import { completionApiFor } from "../providers/openai.js";
 
 export const SESSION_TITLE_MAX_PROMPT_CHARS = 2_000;
 
@@ -48,7 +49,7 @@ function reasoningControlFor(
   | { reasoning_effort: "minimal" }
   | undefined {
   if (!model.capabilities.reasoning) return undefined;
-  return modelId.startsWith("meta/")
+  return completionApiFor(modelId) === "chat"
     ? { reasoning_effort: "minimal" }
     : { reasoning: { effort: "minimal" } };
 }

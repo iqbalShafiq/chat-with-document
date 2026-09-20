@@ -57,6 +57,15 @@ describe("OpenAI provider", () => {
     expect(model).toBe(mocks.streamingModel);
   });
 
+  it("routes meta models to chat completions and other models to responses", () => {
+    expect(openaiProvider.completionApiFor("openai/gpt-5.6-luna")).toBe(
+      "responses",
+    );
+    expect(
+      openaiProvider.completionApiFor("meta/muse-spark-1.3-contributor"),
+    ).toBe("chat");
+  });
+
   it("maps reasoning effort to strict provider options", () => {
     expect(openaiProvider.providerOptionsForReasoning("high")).toEqual({
       reasoning: { effort: "high", summary: "auto" },
