@@ -139,3 +139,13 @@ Tabel race:
 | Race dengan rename | Conditional update `title == seed`; rename selalu menang |
 | Migrasi DB | Tidak ada |
 | Regenerate | Hanya dari pesan pertama; tidak pernah regenerate |
+
+---
+
+## Implementation notes (post-review)
+
+- **Default title model is `openai/gpt-5.6-luna`** (chat default), bukan `gpt-5-nano`. `gpt-5-nano` menghabiskan seluruh budget output untuk reasoning, sehingga `maxTokens: 64` selalu truncate (`CompletionStructuredOutputError ... output limit`). `luna` + `reasoning.effort: minimal` menghasilkan judul konsisten (~16–20 output token, 0 reasoning) dan bahasa yang benar.
+- **`maxTokens` sengaja tidak di-set** untuk title. Cap tetap adalah alat yang salah untuk model reasoning (token reasoning ikut terhitung); batasnya sekarang `AbortSignal` 15 detik + reasoning minimal.
+- **Kontrol reasoning mengikuti API model**, dibagi lewat `completionApiFor` (`providers/openai.ts`): model Responses memakai `providerOptions.reasoning.effort`, model `meta/*` (Chat Completions) memakai `reasoning_effort`, model non-reasoning tidak dikirim opsi apa pun. Dengan begitu `TITLE_MODEL` boleh diarahkan ke model katalog mana pun.
+- **Job id = `session-title-<sessionId>`** (tanpa `:`). BullMQ menolak custom `jobId` yang mengandung `:` (`Custom Id cannot contain :`) — ketahuan lewat verifikasi live, bukan unit test. `removeOnFail: true` supaya job yang gagal permanen tidak memblokir enqueue ulang dengan id yang sama; `removeOnComplete: 200` dipertahankan sebagai penjaga dedupe.
+- **Composer menampilkan banner eksplisit** saat katalog model kosong (`modelsStatus === "success"` + list kosong) dengan instruksi `pnpm --filter @anreal/api db:seed`, alih-alih disabled tanpa penjelasan. `db:seed` juga ditambahkan ke langkah Setup README.
