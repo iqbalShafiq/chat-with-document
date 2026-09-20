@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
+import { sessionTitleEnabled } from "./service.js";
 
 export const SESSION_TITLE_QUEUE = "session-title";
 
@@ -35,6 +36,7 @@ export async function enqueueSessionTitle(
   input: SessionTitleJobData,
   queueOverride?: Pick<Queue<SessionTitleJobData>, "add">,
 ): Promise<void> {
+  if (!sessionTitleEnabled()) return;
   await (queueOverride ?? getSessionTitleQueue()).add(
     sessionTitleJobId(input.sessionId),
     input,

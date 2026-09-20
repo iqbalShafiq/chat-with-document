@@ -6,7 +6,7 @@ import {
   parseAgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { DEFAULT_COMPLETION_MODEL } from "@anreal/agent";
+import { DEFAULT_COMPLETION_MODEL, buildSessionTitlePrompt } from "@anreal/agent";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
@@ -1003,7 +1003,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         sessionId: metadata.sessionId,
         userId: user.id,
         seed: titleSeed,
-        prompt: firstUserText,
+        prompt: buildSessionTitlePrompt(firstUserText),
       }).catch((error) => {
         console.warn("[chat] session title enqueue failed", error);
       });

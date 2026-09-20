@@ -15,8 +15,12 @@ export type SessionTitleConfig = {
   model: CompletionModel;
 };
 
+export function sessionTitleEnabled(): boolean {
+  return process.env.TITLE_ENABLED !== "false";
+}
+
 export function sessionTitleConfig(): SessionTitleConfig {
-  const enabled = process.env.TITLE_ENABLED !== "false";
+  const enabled = sessionTitleEnabled();
   const concurrency = Number(process.env.TITLE_WORKER_CONCURRENCY ?? "3");
   const modelId = parseCompletionModel(process.env.TITLE_MODEL);
   return {

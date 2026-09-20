@@ -36,6 +36,7 @@ import {
   applyGeneratedSessionTitle,
   publishSessionTitleEvent,
   sessionTitleConfig,
+  sessionTitleEnabled,
 } from "./service.js";
 
 beforeEach(() => {
@@ -76,6 +77,23 @@ describe("sessionTitleConfig", () => {
   it("falls back to the default concurrency for invalid values", () => {
     vi.stubEnv("TITLE_WORKER_CONCURRENCY", "nope");
     expect(sessionTitleConfig().concurrency).toBe(3);
+  });
+});
+
+describe("sessionTitleEnabled", () => {
+  it("is enabled by default and for values other than exactly false", () => {
+    expect(sessionTitleEnabled()).toBe(true);
+
+    vi.stubEnv("TITLE_ENABLED", "0");
+    expect(sessionTitleEnabled()).toBe(true);
+
+    vi.stubEnv("TITLE_ENABLED", "FALSE");
+    expect(sessionTitleEnabled()).toBe(true);
+  });
+
+  it("is disabled only when TITLE_ENABLED is exactly false", () => {
+    vi.stubEnv("TITLE_ENABLED", "false");
+    expect(sessionTitleEnabled()).toBe(false);
   });
 });
 

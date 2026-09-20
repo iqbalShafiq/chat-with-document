@@ -15,6 +15,7 @@ vi.mock("./service.js", () => ({
   sessionTitleConfig: f.config,
   applyGeneratedSessionTitle: f.apply,
   publishSessionTitleEvent: f.publish,
+  sessionTitleEnabled: () => true,
   SESSION_TITLE_TIMEOUT_MS: 15_000,
 }));
 
@@ -96,6 +97,20 @@ describe("processSessionTitleJob", () => {
     await processSessionTitleJob(JOB);
 
     expect(f.publish).not.toHaveBeenCalled();
+  });
+
+  it("keeps the job successful when the event publish rejects", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    f.publish.mockRejectedValueOnce(new Error("append unavailable"));
+
+    await expect(processSessionTitleJob(JOB)).resolves.toBeUndefined();
+
+    expect(f.apply).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("event publish failed"),
+      expect.any(Error),
+    );
+    warn.mockRestore();
   });
 
   it("propagates generation errors so BullMQ retries", async () => {
