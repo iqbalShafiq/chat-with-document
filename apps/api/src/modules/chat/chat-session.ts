@@ -194,7 +194,7 @@ export async function touchChatSession(
 
 export const TITLE_MAX = 48;
 
-/** Sidebar title normalization: trim, collapse whitespace, cap at 48 chars. */
+/** Sidebar title normalization: trim, collapse whitespace, cap at 48 code points, then trim the capped result. */
 export function normalizeSessionTitle(raw: string): string | null {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   if (!collapsed) return null;
