@@ -8,10 +8,13 @@ import {
   sanitizeGeneratedTitle,
 } from "./session-title.js";
 
-function fakeModel(text: string): CompletionModel {
+function fakeModel(
+  text: string,
+  overrides: { reasoning?: boolean } = {},
+): CompletionModel {
   return {
     provider: "stub",
-    defaultModel: "stub-title",
+    defaultModel: "openai/stub-title",
     capabilities: {
       streaming: false,
       tools: false,
@@ -19,7 +22,7 @@ function fakeModel(text: string): CompletionModel {
       imageInput: false,
       documentInput: false,
       outputSchema: true,
-      reasoning: false,
+      reasoning: overrides.reasoning ?? true,
     },
     completion: vi.fn(async () => ({
       choice: [{ type: "text", text }],
@@ -27,6 +30,13 @@ function fakeModel(text: string): CompletionModel {
       rawResponse: {},
     })),
   } as unknown as CompletionModel;
+}
+
+function completedRequest(model: CompletionModel): Record<string, unknown> {
+  const completion = model.completion as unknown as {
+    mock: { calls: Array<[Record<string, unknown>]> };
+  };
+  return completion.mock.calls[0]![0]!;
 }
 
 describe("sanitizeGeneratedTitle", () => {
@@ -59,6 +69,7 @@ describe("generateSessionTitle", () => {
   it("returns the sanitized structured title with usage", async () => {
     const result = await generateSessionTitle({
       model: fakeModel(JSON.stringify({ title: '"Judul Bersih".' })),
+      modelId: "openai/stub-title",
       prompt: "Tolong ringkas dokumen hukum ini",
     });
 
@@ -66,26 +77,54 @@ describe("generateSessionTitle", () => {
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2 });
   });
 
-  it("keeps reasoning models inside a usable output budget", async () => {
+  it("requests minimal reasoning without pinning an output budget", async () => {
     const model = fakeModel(JSON.stringify({ title: "Judul" }));
     await generateSessionTitle({
       model,
+      modelId: "openai/stub-title",
       prompt: "halooo! salam kenal boy!",
     });
 
-    const completion = model.completion as unknown as {
-      mock: { calls: Array<[Record<string, unknown>]> };
-    };
-    const request = completion.mock.calls[0]![0]!;
-    expect(request.maxTokens).toBeGreaterThanOrEqual(256);
+    const request = completedRequest(model);
+    expect(request.maxTokens).toBeUndefined();
     expect(request.providerOptions).toEqual({
       reasoning: { effort: "minimal" },
     });
   });
 
+  it("uses chat-completions reasoning control for meta models", async () => {
+    const model = fakeModel(JSON.stringify({ title: "Judul" }));
+    await generateSessionTitle({
+      model,
+      modelId: "meta/muse-spark-1.3-contributor",
+      prompt: "halooo! salam kenal boy!",
+    });
+
+    expect(completedRequest(model).providerOptions).toEqual({
+      reasoning_effort: "minimal",
+    });
+  });
+
+  it("omits reasoning controls for non-reasoning models", async () => {
+    const model = fakeModel(JSON.stringify({ title: "Judul" }), {
+      reasoning: false,
+    });
+    await generateSessionTitle({
+      model,
+      modelId: "openai/stub-title",
+      prompt: "halooo! salam kenal boy!",
+    });
+
+    expect(completedRequest(model).providerOptions).toBeUndefined();
+  });
+
   it("throws when the model returns non-JSON structured output", async () => {
     await expect(
-      generateSessionTitle({ model: fakeModel("not json"), prompt: "x" }),
+      generateSessionTitle({
+        model: fakeModel("not json"),
+        modelId: "openai/stub-title",
+        prompt: "x",
+      }),
     ).rejects.toThrow();
   });
 

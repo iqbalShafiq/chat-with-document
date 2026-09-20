@@ -40,18 +40,32 @@ export function sanitizeGeneratedTitle(raw: string): string | null {
   return title.length > 0 ? title : null;
 }
 
+function reasoningControlFor(
+  modelId: string,
+  model: CompletionModel,
+):
+  | { reasoning: { effort: "minimal" } }
+  | { reasoning_effort: "minimal" }
+  | undefined {
+  if (!model.capabilities.reasoning) return undefined;
+  return modelId.startsWith("meta/")
+    ? { reasoning_effort: "minimal" }
+    : { reasoning: { effort: "minimal" } };
+}
+
 export async function generateSessionTitle(input: {
   model: CompletionModel;
+  modelId: string;
   prompt: string;
   abortSignal?: AbortSignal;
 }): Promise<{ title: string; usage: Usage }> {
+  const providerOptions = reasoningControlFor(input.modelId, input.model);
   const result = await generateCompletion({
     model: input.model,
     prompt: buildSessionTitlePrompt(input.prompt),
     instructions: SESSION_TITLE_INSTRUCTIONS,
     outputSchema: sessionTitleSchema,
-    maxTokens: 256,
-    providerOptions: { reasoning: { effort: "minimal" } },
+    ...(providerOptions ? { providerOptions } : {}),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
 
