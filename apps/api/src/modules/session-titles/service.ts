@@ -1,4 +1,8 @@
-import { createCompletionModel, parseCompletionModel } from "@anreal/agent";
+import {
+  createCompletionModel,
+  parseCompletionModel,
+  type CompletionModelId,
+} from "@anreal/agent";
 import type { CompletionModel } from "@anvia/core";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
@@ -6,12 +10,13 @@ import { prisma } from "../../utils/prisma.js";
 import { ACTIVE_RUN_KEY } from "../chat/run-queue.js";
 import { mapChatAppEvent, toChatResumableEvent } from "../chat/client-events.js";
 
-export const DEFAULT_TITLE_MODEL = "openai/gpt-5-nano";
+export const DEFAULT_TITLE_MODEL: CompletionModelId = "openai/gpt-5.6-luna";
 export const SESSION_TITLE_TIMEOUT_MS = 15_000;
 
 export type SessionTitleConfig = {
   enabled: boolean;
   concurrency: number;
+  modelId: CompletionModelId;
   model: CompletionModel;
 };
 
@@ -22,12 +27,14 @@ export function sessionTitleEnabled(): boolean {
 export function sessionTitleConfig(): SessionTitleConfig {
   const enabled = sessionTitleEnabled();
   const concurrency = Number(process.env.TITLE_WORKER_CONCURRENCY ?? "3");
-  const modelId = parseCompletionModel(process.env.TITLE_MODEL);
+  const modelId =
+    parseCompletionModel(process.env.TITLE_MODEL) ?? DEFAULT_TITLE_MODEL;
   return {
     enabled,
     concurrency:
       Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 3,
-    model: createCompletionModel(modelId ?? DEFAULT_TITLE_MODEL),
+    modelId,
+    model: createCompletionModel(modelId),
   };
 }
 

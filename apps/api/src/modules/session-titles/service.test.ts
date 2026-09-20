@@ -53,13 +53,14 @@ afterEach(() => {
 });
 
 describe("sessionTitleConfig", () => {
-  it("defaults to an enabled worker on the cheap title model", () => {
+  it("defaults to an enabled worker on the chat model", () => {
     const config = sessionTitleConfig();
     expect(config.enabled).toBe(true);
     expect(config.concurrency).toBe(3);
+    expect(config.modelId).toBe(DEFAULT_TITLE_MODEL);
     expect(SESSION_TITLE_TIMEOUT_MS).toBe(15_000);
     expect(f.createCompletionModel).toHaveBeenCalledWith(DEFAULT_TITLE_MODEL);
-    expect(DEFAULT_TITLE_MODEL).toBe("openai/gpt-5-nano");
+    expect(DEFAULT_TITLE_MODEL).toBe("openai/gpt-5.6-luna");
   });
 
   it("honors TITLE_ENABLED=false and a custom model/concurrency", () => {

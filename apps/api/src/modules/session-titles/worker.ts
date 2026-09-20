@@ -18,6 +18,7 @@ export async function processSessionTitleJob(job: {
 
   const { title: rawTitle, usage } = await generateSessionTitle({
     model: config.model,
+    modelId: config.modelId,
     prompt: job.data.prompt,
     abortSignal: AbortSignal.timeout(SESSION_TITLE_TIMEOUT_MS),
   });

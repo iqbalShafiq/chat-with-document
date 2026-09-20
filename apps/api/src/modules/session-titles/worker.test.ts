@@ -4,7 +4,12 @@ const f = vi.hoisted(() => ({
   generate: vi.fn(),
   apply: vi.fn(),
   publish: vi.fn(),
-  config: vi.fn(() => ({ enabled: true, concurrency: 3, model: { id: "stub" } })),
+  config: vi.fn(() => ({
+    enabled: true,
+    concurrency: 3,
+    modelId: "openai/stub-title",
+    model: { id: "stub" },
+  })),
 }));
 
 vi.mock("@anreal/agent", () => ({
@@ -64,6 +69,7 @@ describe("processSessionTitleJob", () => {
 
     expect(f.generate).toHaveBeenCalledWith({
       model: { id: "stub" },
+      modelId: "openai/stub-title",
       prompt: "Halo dunia, tolong analisis data ini",
       abortSignal: expect.any(AbortSignal),
     });
