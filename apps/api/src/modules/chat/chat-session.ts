@@ -194,11 +194,14 @@ export async function touchChatSession(
 
 export const TITLE_MAX = 48;
 
-/** Sidebar title normalization: trim, collapse whitespace, cap at 48 chars. */
+/** Sidebar title normalization: trim, collapse whitespace, cap at 48 code points, then trim the capped result. */
 export function normalizeSessionTitle(raw: string): string | null {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   if (!collapsed) return null;
-  return Array.from(collapsed).slice(0, TITLE_MAX).join("");
+  return Array.from(collapsed)
+    .slice(0, TITLE_MAX)
+    .join("")
+    .trim();
 }
 
 /**
@@ -229,7 +232,7 @@ export async function setChatSessionTitleIfEmpty(input: {
   sessionId: string;
   title: string;
 }): Promise<void> {
-  const title = Array.from(input.title.trim()).slice(0, TITLE_MAX).join("");
+  const title = normalizeSessionTitle(input.title);
   if (!title) return;
   await prisma.chatSession.updateMany({
     where: {

@@ -6,7 +6,7 @@ import {
   parseAgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
 import type { Message as MessageType } from "@anvia/core/completion";
-import { DEFAULT_COMPLETION_MODEL } from "@anreal/agent";
+import { DEFAULT_COMPLETION_MODEL, buildSessionTitlePrompt } from "@anreal/agent";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { getRedis } from "../../lib/redis.js";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
@@ -62,6 +62,7 @@ import {
   truncateSessionMemory,
   type TruncateMode,
 } from "./truncate-memory.js";
+import { enqueueSessionTitle } from "../session-titles/queue.js";
 import { computeContextUsage } from "./context-usage.js";
 import {
   ChatSessionNotFoundError,
@@ -922,14 +923,17 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       keepImages: selectedModel?.inputModalities.includes("image") === true,
     });
     const streamId = crypto.randomUUID();
+    const firstUserText = extractUserTextForTitle(promptMessage);
+    let shouldGenerateTitle = false;
     let recipe;
     try {
       // History GET never creates a row (stale ids would stack empty chats).
       // The first authenticated POST is the durable create boundary.
-      await resolveChatSessionForAgent({
+      const session = await resolveChatSessionForAgent({
         userId: user.id,
         sessionId: metadata.sessionId,
       });
+      shouldGenerateTitle = !session.title?.trim();
       recipe = await resolveChatAgentRecipe({
         sessionId: metadata.sessionId,
         userId: user.id,
@@ -988,9 +992,21 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "chat run could not be queued", code: "CHAT_RUN_QUEUE_ERROR" }, 503);
     }
     await touchChatSession(user.id, metadata.sessionId);
-    const titleSeed = extractUserTextForTitle(promptMessage);
-    if (titleSeed) {
-      void setChatSessionTitleIfEmpty({ userId: user.id, sessionId: metadata.sessionId, title: titleSeed }).catch(() => {});
+    const titleSeed = normalizeSessionTitle(firstUserText);
+    if (shouldGenerateTitle && titleSeed) {
+      void setChatSessionTitleIfEmpty({
+        userId: user.id,
+        sessionId: metadata.sessionId,
+        title: titleSeed,
+      }).catch(() => {});
+      void enqueueSessionTitle({
+        sessionId: metadata.sessionId,
+        userId: user.id,
+        seed: titleSeed,
+        prompt: buildSessionTitlePrompt(firstUserText),
+      }).catch((error) => {
+        console.warn("[chat] session title enqueue failed", error);
+      });
     }
     return streamResponse(streamId, 0);
   })

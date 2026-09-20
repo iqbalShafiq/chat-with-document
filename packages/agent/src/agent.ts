@@ -11,6 +11,7 @@ import type { AgentObservabilityOptions } from "@anvia/core/observability";
 import type { AgentContextInput as NativeAgentContextInput } from "@anvia/core/agent";
 import type { McpServer } from "@anvia/core/mcp";
 import {
+  completionApiFor,
   DEFAULT_REASONING_EFFORT,
   defaultModel,
   metaMuseReasoningEffort,
@@ -86,7 +87,7 @@ export function createAgent(opts: CreateAgentOptions): Agent {
   // Meta Muse models run on Chat Completions (see createCompletionModel):
   // send reasoning_effort top-level instead of the Responses reasoning map.
   const providerOptions =
-    typeof modelId === "string" && modelId.startsWith("meta/")
+    typeof modelId === "string" && completionApiFor(modelId) === "chat"
       ? metaMuseReasoningEffort(reasoningEffort)
       : providerOptionsForReasoning(reasoningEffort);
 

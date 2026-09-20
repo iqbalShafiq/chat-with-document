@@ -185,6 +185,7 @@ describe("Anvia v1 migration-wide platform contracts", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
       "deepResearchProgress",
       "queuedMessageApplied",
+      "sessionTitleUpdated",
       "toolWaitProgress",
     ]);
     expect(ChatDataSchemas.queuedMessageApplied.safeParse({

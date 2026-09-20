@@ -6,6 +6,8 @@ function noopRefreshQuiet(): Promise<void> {
   return Promise.resolve();
 }
 
+function noopApplySessionTitle(): void {}
+
 /**
  * Minimal provider shell for surfaces outside the authenticated workspace
  * (public share page). ChatSession only needs the quiet-refresh callback
@@ -25,6 +27,7 @@ export function ShareSessionProviders({ children }: { children: ReactNode }) {
     () => ({
       refreshQuiet: noopRefreshQuiet,
       onImageContextActions,
+      applySessionTitle: noopApplySessionTitle,
     }),
     [onImageContextActions],
   );

@@ -100,6 +100,7 @@ describe("createChatClientStream", () => {
         elapsedMs: 12_000,
         waitCount: 1,
       },
+      { type: "session_title_updated", sessionId: "session-1", title: "Analisis Hukum" },
       outcome("response"),
     ];
 
@@ -109,9 +110,19 @@ describe("createChatClientStream", () => {
       expect.objectContaining({ name: "deepResearchProgress" }),
       expect.objectContaining({ name: "queuedMessageApplied", data: { clientMessageId: "client-1", attachmentCount: 1 } }),
       expect.objectContaining({ name: "toolWaitProgress" }),
+      expect.objectContaining({ name: "sessionTitleUpdated", data: { sessionId: "session-1", title: "Analisis Hukum" } }),
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();
+  });
+
+  it("rejects session title updates with extra fields", () => {
+    expect(() => mapChatAppEvent({
+      type: "session_title_updated",
+      sessionId: "session-1",
+      title: "Judul",
+      prompt: "secret",
+    } as never, { runId: "run-1" })).toThrow();
   });
 
   it("omits absent optional progress fields from strict protocol-v3 JSON", async () => {

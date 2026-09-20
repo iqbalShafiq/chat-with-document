@@ -45,10 +45,16 @@ export type ToolWaitProgress = {
   stage?: string;
 };
 
+export type SessionTitleUpdated = {
+  sessionId: string;
+  title: string;
+};
+
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
   toolWaitProgress: ToolWaitProgress;
+  sessionTitleUpdated: SessionTitleUpdated;
 };
 
 type ParseResult<T> =
@@ -238,6 +244,21 @@ function parseQueuedMessageApplied(value: unknown): ParseResult<QueuedMessageApp
   });
 }
 
+function parseSessionTitleUpdated(value: unknown): ParseResult<SessionTitleUpdated> {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ["sessionId", "title"]) ||
+    !boundedString(value.sessionId, MAX_METADATA_STRING) ||
+    !boundedString(value.title, MAX_METADATA_STRING)
+  ) {
+    return failure("invalid session title update");
+  }
+  return success({
+    sessionId: value.sessionId,
+    title: value.title,
+  });
+}
+
 const deepResearchProgressSchema: Schema<DeepResearchProgress> = {
   safeParse: parseDeepResearchProgress,
 };
@@ -247,6 +268,9 @@ const queuedMessageAppliedSchema: Schema<QueuedMessageApplied> = {
 const toolWaitProgressSchema: Schema<ToolWaitProgress> = {
   safeParse: parseToolWaitProgress,
 };
+const sessionTitleUpdatedSchema: Schema<SessionTitleUpdated> = {
+  safeParse: parseSessionTitleUpdated,
+};
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
   streamMetadataSchema;
@@ -255,4 +279,5 @@ export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
   toolWaitProgress: toolWaitProgressSchema,
+  sessionTitleUpdated: sessionTitleUpdatedSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;

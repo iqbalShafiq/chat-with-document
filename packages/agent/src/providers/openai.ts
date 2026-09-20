@@ -43,16 +43,26 @@ function getOpenAIClient(): OpenAIClient {
   return openai;
 }
 
+/**
+ * Meta's Muse Spark contributor tier returns encrypted-only reasoning on the
+ * Responses API with no reasoning deltas, which the Anvia stream accumulator
+ * rejects after the answer text already streamed. Chat Completions carries
+ * the same top-level reasoning_effort control and a stream shape this model
+ * satisfies (reasoning_details stay inert).
+ */
+export function completionApiFor(
+  modelId: CompletionModelId,
+): "chat" | "responses" {
+  return modelId.startsWith("meta/") ? "chat" : "responses";
+}
+
 export function createCompletionModel(
   modelId: CompletionModelId = DEFAULT_COMPLETION_MODEL,
 ): StreamingCompletionModel {
-  // Meta's Muse Spark contributor tier returns encrypted-only reasoning on
-  // the Responses API with no reasoning deltas, which the Anvia stream
-  // accumulator rejects after the answer text already streamed. Chat
-  // Completions carries the same top-level reasoning_effort control and a
-  // stream shape this model satisfies (reasoning_details stay inert).
-  const api = modelId.startsWith("meta/") ? "chat" : "responses";
-  return getOpenAIClient().completionModel({ modelId, api });
+  return getOpenAIClient().completionModel({
+    modelId,
+    api: completionApiFor(modelId),
+  });
 }
 
 /** Top-level Chat Completions reasoning control for Meta Muse models. */

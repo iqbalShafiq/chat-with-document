@@ -10,14 +10,17 @@ import type { ImagePreviewContextActions } from "#/components/images/image-previ
 export const WorkspaceSessionsContext = createContext<{
   refreshQuiet: () => Promise<void>;
   onImageContextActions: (actions: ImagePreviewContextActions | null) => void;
+  applySessionTitle: (sessionId: string, title: string) => void;
 }>({
   refreshQuiet: async () => {},
   onImageContextActions: () => {},
+  applySessionTitle: () => {},
 });
 
 export function useWorkspaceSessionsContext(): {
   refreshQuiet: () => Promise<void>;
   onImageContextActions: (actions: ImagePreviewContextActions | null) => void;
+  applySessionTitle: (sessionId: string, title: string) => void;
 } {
   return useContext(WorkspaceSessionsContext);
 }

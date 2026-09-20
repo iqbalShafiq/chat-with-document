@@ -156,6 +156,9 @@ export function ChatRouteView(input: {
         }}
         onAuthFailure={input.onAuthFailure}
         onImageContextActions={sessionsContext.onImageContextActions}
+        onSessionTitleUpdated={(title) =>
+          sessionsContext.applySessionTitle(input.sessionId, title)
+        }
         onReloadMessages={(messages) => route.setMessages(messages)}
         initialComposerDraft={
           shareForkHandoff

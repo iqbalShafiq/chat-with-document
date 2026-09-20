@@ -15,6 +15,7 @@ function createDependencies(order: string[], failures: Set<string> = new Set()) 
     chatWorker: { close: close("chat") },
     documentWorker: { close: close("documents") },
     profileWorker: { close: close("profile") },
+    titleWorker: { close: close("title") },
     closeQdrant: close("qdrant"),
     closeContext7: close("context7"),
     closeTracing: close("tracing"),
@@ -37,6 +38,7 @@ describe("worker shutdown coordinator", () => {
       "chat",
       "documents",
       "profile",
+      "title",
       "qdrant",
       "context7",
       "tracing",
@@ -56,7 +58,7 @@ describe("worker shutdown coordinator", () => {
     const second = coordinator.request("SIGINT");
     expect(second).toBe(first);
     await Promise.all([first, second]);
-    expect(order).toHaveLength(10);
+    expect(order).toHaveLength(11);
     expect(dependencies.chatWorker.close).toHaveBeenCalledTimes(1);
   });
 
@@ -76,6 +78,7 @@ describe("worker shutdown coordinator", () => {
       "chat",
       "documents",
       "profile",
+      "title",
       "qdrant",
       "context7",
       "tracing",

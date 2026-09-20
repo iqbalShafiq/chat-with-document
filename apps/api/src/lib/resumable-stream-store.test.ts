@@ -303,6 +303,29 @@ describe("Redis resumable stream store", () => {
     await expect(store.append({ streamId: "s1", event: bad })).rejects.toThrow(/Invalid protocol-v3/);
   });
 
+  it("persists session title updates through the store envelope", async () => {
+    const redis = createFakeRedis();
+    const store = createRedisResumableStreamStore(redis);
+    await store.open({ streamId: "s1" });
+    const event = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: {
+        runId: "run-1",
+        type: "data" as const,
+        name: "sessionTitleUpdated",
+        data: { sessionId: "session-1", title: "Judul Baru" },
+      },
+    };
+    const record = await store.append({ streamId: "s1", event: event as never });
+    expect(record.eventId).toBe(1);
+
+    const bad = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { sessionId: "session-1" } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: bad })).rejects.toThrow(/Invalid protocol-v3/);
+  });
+
   it("maps a malformed replay to an error stream_end through the official response guard", async () => {
     const fakeStore = {
       async open() { return { status: "running" as const, lastEventId: 0 }; },

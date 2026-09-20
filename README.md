@@ -43,7 +43,7 @@ Alur singkat:
 | --- | --- |
 | Chat streaming | Anvia v1 client protocol v3 via `@anvia/client` + `@anvia/react` and `@anvia/react-ui` primitives |
 | Queued follow-ups | Kirim pesan saat streaming — antrean per session (localStorage), `PromptRequest.steer()` ke run aktif (1 pesan/turn FIFO), auto-flush saat idle, hold setelah stop/error, edit + drag reorder, persist lintas reload |
-| Multi-session | Session ID di `localStorage`; daftar session dari DB |
+| Multi-session | Session ID di `localStorage`; daftar session dari DB; judul sesi di-generate AI dari pesan pertama (seed instan, swap real-time) |
 | Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
 | Image generation | `generate_image`/`edit_image`, katalog model image, galeri session + proyek, background transparan |
 | Human approval | Policy consent gate (web + image tools) + `request_clarification` wizard |
@@ -131,6 +131,9 @@ Factory agent yang dipakai API:
    | `PROFILE_REFRESH_DELAY_MINUTES` | Debounce window for background profile refresh (default `15`) |
    | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
    | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`openai/gpt-5.6-luna`) |
+   | `TITLE_ENABLED` | Worker judul sesi AI (default `true`); set `false` untuk mematikan |
+   | `TITLE_MODEL` | Model generator judul (default `openai/gpt-5.6-luna`) |
+   | `TITLE_WORKER_CONCURRENCY` | Parallel title worker (default `3`) |
 
 3. **Start Postgres**
 
@@ -145,7 +148,10 @@ Factory agent yang dipakai API:
    ```bash
    pnpm --filter @anreal/api db:generate
    pnpm --filter @anreal/api db:migrate
+   pnpm --filter @anreal/api db:seed
    ```
+
+   `db:seed` wajib untuk katalog model — tanpa itu composer disabled ("No models are configured").
 
 ## Development
 

@@ -202,6 +202,9 @@ function validDefaultData(name: string, value: unknown): boolean {
       boundedInteger(value.waitCount, 10_000) &&
       (value.stage === undefined || boundedText(value.stage, 240));
   }
+  if (name === "sessionTitleUpdated") {
+    return exactKeys(value, ["sessionId", "title"]) && boundedText(value.sessionId, 200) && boundedText(value.title, 200);
+  }
   return false;
 }
 
@@ -210,6 +213,7 @@ const DEFAULT_DATA_SCHEMAS = {
   deepResearchProgress: schema((value) => validDefaultData("deepResearchProgress", value)),
   queuedMessageApplied: schema((value) => validDefaultData("queuedMessageApplied", value)),
   toolWaitProgress: schema((value) => validDefaultData("toolWaitProgress", value)),
+  sessionTitleUpdated: schema((value) => validDefaultData("sessionTitleUpdated", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {
