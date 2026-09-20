@@ -191,7 +191,7 @@ describe("Anvia v1 composer DOM contract", () => {
 
   it("explains an empty model registry instead of disabling silently", () => {
     renderComposer({ status: "ready", models: [], modelsStatus: "success" });
-    expect(screen.getByText(/db:seed/)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("db:seed");
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true);
   });
 

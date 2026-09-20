@@ -283,7 +283,10 @@ export function ChatComposer({
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
       {!readOnly && (modelsStatus === "error" || modelsEmpty) ? (
-        <div className="flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in"
+        >
           <span className="min-w-0 truncate">
             {modelsStatus === "error"
               ? `Model list is unavailable: ${modelsError}`
