@@ -1,7 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { updateMany } = vi.hoisted(() => ({
+  updateMany: vi.fn(async () => ({ count: 1 })),
+}));
+
+vi.mock("../../utils/prisma.js", () => ({
+  prisma: { chatSession: { updateMany } },
+}));
+
 import {
   normalizeSessionTitle,
   selectReusableChatSessions,
+  setChatSessionTitleIfEmpty,
   type ChatSessionRow,
 } from "./chat-session.js";
 
@@ -63,5 +73,38 @@ describe("selectReusableChatSessions", () => {
 
     expect(result.map((session) => session.id)).toEqual(["available"]);
     expect(sessions.map((session) => session.id)).toEqual(["active", "available"]);
+  });
+});
+
+describe("setChatSessionTitleIfEmpty", () => {
+  beforeEach(() => {
+    updateMany.mockClear();
+  });
+
+  it("stores the normalized seed without collapsing differences", async () => {
+    await setChatSessionTitleIfEmpty({
+      userId: "user-1",
+      sessionId: "session-1",
+      title: "  Halo   dunia \n ",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "session-1",
+        userId: "user-1",
+        OR: [{ title: null }, { title: "" }],
+      },
+      data: { title: "Halo dunia" },
+    });
+  });
+
+  it("skips empty titles", async () => {
+    await setChatSessionTitleIfEmpty({
+      userId: "user-1",
+      sessionId: "session-1",
+      title: "   ",
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
