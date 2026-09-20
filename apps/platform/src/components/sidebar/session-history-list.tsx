@@ -197,7 +197,10 @@ export function SessionHistoryList({
                           : "text-text-muted group-hover/row:text-text"
                       }`}
                     >
-                      <span className="min-w-0 flex-1 truncate">
+                      <span
+                        key={session.title}
+                        className="animate-title-in min-w-0 flex-1 truncate"
+                      >
                         {session.title}
                       </span>
                       {unread ? (

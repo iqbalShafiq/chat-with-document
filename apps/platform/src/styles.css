@@ -528,6 +528,21 @@ body {
   animation: scale-in var(--duration-fast) var(--ease-out-premium) backwards;
 }
 
+@keyframes title-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-title-in {
+  animation: title-in var(--duration-fast) var(--ease-out-premium) backwards;
+}
+
 /*
   View Transitions — auth ↔ app continuity.
   Named layers on sidebar / top bar / main so geometry morphs instead of a
@@ -1043,6 +1058,7 @@ textarea[data-anvia-composer-editor] {
   .animate-fade-in,
   .animate-scale-in,
   .animate-fade-out,
+  .animate-title-in,
   .stagger-item,
   .skeleton-shimmer {
     animation: none !important;
