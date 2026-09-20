@@ -39,6 +39,9 @@ import {
   createProfileWorker,
   scopeFromJobData,
 } from "./modules/profiling/worker.js";
+import { SESSION_TITLE_QUEUE } from "./modules/session-titles/queue.js";
+import { sessionTitleConfig } from "./modules/session-titles/service.js";
+import { createSessionTitleWorker } from "./modules/session-titles/worker.js";
 import { prisma } from "./utils/prisma.js";
 import {
   CHAT_RUN_QUEUE,
@@ -426,6 +429,26 @@ if (profileWorker) {
   });
 }
 
+const titleWorker = sessionTitleConfig().enabled ? createSessionTitleWorker() : null;
+
+if (titleWorker) {
+  titleWorker.on("ready", () => {
+    console.log(`[title] ready on queue ${SESSION_TITLE_QUEUE}`);
+  });
+
+  titleWorker.on("completed", (job) => {
+    console.log(`[title] completed ${job.id}`);
+  });
+
+  titleWorker.on("failed", (job, error) => {
+    console.error(`[title] failed ${job?.id}`, error);
+  });
+
+  titleWorker.on("error", (error) => {
+    console.error("[title] worker error", error);
+  });
+}
+
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
 
 // Validate the Prisma memory adapter/delegates before the chat queue is
@@ -477,6 +500,7 @@ const shutdownCoordinator = createWorkerShutdownCoordinator({
   chatWorker: chatRunWorker,
   documentWorker: worker,
   profileWorker,
+  titleWorker,
   closeQdrant,
   closeContext7: closeContext7Mcp,
   closeTracing,
