@@ -198,7 +198,10 @@ export const TITLE_MAX = 48;
 export function normalizeSessionTitle(raw: string): string | null {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   if (!collapsed) return null;
-  return Array.from(collapsed).slice(0, TITLE_MAX).join("");
+  return Array.from(collapsed)
+    .slice(0, TITLE_MAX)
+    .join("")
+    .trim();
 }
 
 /**

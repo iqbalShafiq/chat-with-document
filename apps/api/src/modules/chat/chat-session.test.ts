@@ -55,6 +55,14 @@ describe("normalizeSessionTitle", () => {
     expect(chars.every((c) => c === "😀")).toBe(true);
   });
 
+  it("is idempotent and never keeps the cap's trailing space", () => {
+    const long = "tolong tulis esai 500 kata tentang sejarah kopi di indonesia";
+    const once = normalizeSessionTitle(long)!;
+
+    expect(once).toBe("tolong tulis esai 500 kata tentang sejarah kopi");
+    expect(normalizeSessionTitle(once)).toBe(once);
+  });
+
   it("never stores a lone surrogate when cutting mid-pair", () => {
     const mixed = "a" + "😀".repeat(60); // 61 code points, 121 UTF-16 units
     const out = normalizeSessionTitle(mixed)!;
