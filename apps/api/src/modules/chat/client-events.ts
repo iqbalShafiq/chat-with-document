@@ -46,6 +46,11 @@ const queuedMessageAppliedSchema = z.object({
   attachmentCount: boundedCount(100),
 }).strict();
 
+const sessionTitleUpdatedSchema = z.object({
+  sessionId: boundedString(200),
+  title: boundedString(200),
+}).strict();
+
 const toolWaitProgressSchema = z.object({
   toolCallId: boundedString(200),
   toolName: boundedString(200),
@@ -77,21 +82,29 @@ const toolWaitProgressAppEventSchema = z.object({
   waitCount: toolWaitProgressSchema.shape.waitCount,
   stage: toolWaitProgressSchema.shape.stage,
 }).strict();
+const sessionTitleUpdatedAppEventSchema = z.object({
+  type: z.literal("session_title_updated"),
+  sessionId: sessionTitleUpdatedSchema.shape.sessionId,
+  title: sessionTitleUpdatedSchema.shape.title,
+}).strict();
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
+export type SessionTitleUpdated = z.infer<typeof sessionTitleUpdatedSchema>;
 export type ToolWaitProgressEvent = z.infer<typeof toolWaitProgressSchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
   toolWaitProgress: ToolWaitProgressEvent;
+  sessionTitleUpdated: SessionTitleUpdated;
 };
 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
   toolWaitProgress: toolWaitProgressSchema,
+  sessionTitleUpdated: sessionTitleUpdatedSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -120,6 +133,11 @@ export type ChatAppEvent =
       elapsedMs: number;
       waitCount: number;
       stage?: string;
+    }
+  | {
+      type: "session_title_updated";
+      sessionId: string;
+      title: string;
     }
   ;
 
@@ -171,6 +189,14 @@ export function mapChatAppEvent(
         ...(event.stage === undefined ? {} : { stage: event.stage }),
       });
       return withContext(context, { type: "data", name: "toolWaitProgress", data }) as ChatClientEvent;
+    }
+    case "session_title_updated": {
+      sessionTitleUpdatedAppEventSchema.parse(event);
+      const data = sessionTitleUpdatedSchema.parse({
+        sessionId: event.sessionId,
+        title: event.title,
+      });
+      return withContext(context, { type: "data", name: "sessionTitleUpdated", data }) as ChatClientEvent;
     }
   }
 }
