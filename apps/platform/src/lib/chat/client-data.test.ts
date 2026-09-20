@@ -70,6 +70,20 @@ describe("browser v1 stream data schemas", () => {
     ).toMatchObject({ success: false });
   });
 
+  it("accepts bounded session title updates and rejects extra fields", () => {
+    const value: ChatDataMap["sessionTitleUpdated"] = {
+      sessionId: "session-1",
+      title: "Judul Baru",
+    };
+    expect(ChatDataSchemas.sessionTitleUpdated.safeParse(value)).toMatchObject({
+      success: true,
+      data: value,
+    });
+    expect(
+      ChatDataSchemas.sessionTitleUpdated.safeParse({ ...value, prompt: "secret" }),
+    ).toMatchObject({ success: false });
+  });
+
   it("does not echo sensitive rejected payloads through safe parse errors", () => {
     const secret = "TOP_SECRET_REASONING_9d7e";
     const result = ChatDataSchemas.deepResearchProgress.safeParse({
@@ -85,6 +99,7 @@ describe("browser v1 stream data schemas", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
       "deepResearchProgress",
       "queuedMessageApplied",
+      "sessionTitleUpdated",
       "toolWaitProgress",
     ]);
   });
