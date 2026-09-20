@@ -444,8 +444,12 @@ export function WorkspaceShell({
   }, [activeSessionId, refreshShareStatus, viewMode]);
 
   const sessionsContextValue = useMemo(
-    () => ({ refreshQuiet, onImageContextActions: setImageContextActions }),
-    [refreshQuiet],
+    () => ({
+      refreshQuiet,
+      onImageContextActions: setImageContextActions,
+      applySessionTitle: renameSessionInList,
+    }),
+    [refreshQuiet, renameSessionInList],
   );
 
   return (

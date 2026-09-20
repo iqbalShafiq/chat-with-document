@@ -320,6 +320,7 @@ export function ChatSession({
   onStreamSettled,
   onAuthFailure,
   onImageContextActions,
+  onSessionTitleUpdated,
   onReloadMessages,
   readOnly = false,
   threadTopSlot,
@@ -343,6 +344,7 @@ export function ChatSession({
   onImageContextActions?: (
     actions: ImagePreviewContextActions | null,
   ) => void;
+  onSessionTitleUpdated?: (title: string) => void;
   /** Replaces the loaded conversation (fresh history after a stale dialog). */
   onReloadMessages?: (messages: ChatUIMessage[]) => void;
   /** Frozen share view: thread renders but never sends, edits, or uploads. */
@@ -676,6 +678,10 @@ export function ChatSession({
           case "toolWaitProgress":
             setToolWait((state) => reduceToolWaitProgress(state, event.data));
             return;
+          case "sessionTitleUpdated": {
+            onSessionTitleUpdated?.(event.data.title);
+            return;
+          }
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
               (entry) => entry.id === event.data.clientMessageId,
@@ -767,7 +773,7 @@ export function ChatSession({
           return;
       }
     },
-    [queueActions, refreshContextUsage, refreshSessionImages],
+    [onSessionTitleUpdated, queueActions, refreshContextUsage, refreshSessionImages],
   );
 
   const interactionResumeStorage = useMemo(

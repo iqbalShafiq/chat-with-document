@@ -61,6 +61,25 @@ describe("strict Anvia v1 message part presentation", () => {
     ]);
   });
 
+  it("hides session title updates from the transcript", () => {
+    const message = parseUIMessage({
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        {
+          id: "title-1",
+          type: "data",
+          name: "sessionTitleUpdated",
+          data: { sessionId: "session-1", title: "Judul Baru" },
+        },
+      ],
+    });
+
+    expect(message.parts.map((part) => isRenderablePart(part, message.role))).toEqual([
+      false,
+    ]);
+  });
+
   it("hides assistant copy/reply while the live bubble is still streaming", () => {
     const message = parseUIMessage({
       id: "assistant-live",
