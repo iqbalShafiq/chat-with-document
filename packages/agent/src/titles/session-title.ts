@@ -50,7 +50,8 @@ export async function generateSessionTitle(input: {
     prompt: buildSessionTitlePrompt(input.prompt),
     instructions: SESSION_TITLE_INSTRUCTIONS,
     outputSchema: sessionTitleSchema,
-    maxTokens: 64,
+    maxTokens: 256,
+    providerOptions: { reasoning: { effort: "minimal" } },
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
 

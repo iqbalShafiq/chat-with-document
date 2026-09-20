@@ -66,6 +66,23 @@ describe("generateSessionTitle", () => {
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 2 });
   });
 
+  it("keeps reasoning models inside a usable output budget", async () => {
+    const model = fakeModel(JSON.stringify({ title: "Judul" }));
+    await generateSessionTitle({
+      model,
+      prompt: "halooo! salam kenal boy!",
+    });
+
+    const completion = model.completion as unknown as {
+      mock: { calls: Array<[Record<string, unknown>]> };
+    };
+    const request = completion.mock.calls[0]![0]!;
+    expect(request.maxTokens).toBeGreaterThanOrEqual(256);
+    expect(request.providerOptions).toEqual({
+      reasoning: { effort: "minimal" },
+    });
+  });
+
   it("throws when the model returns non-JSON structured output", async () => {
     await expect(
       generateSessionTitle({ model: fakeModel("not json"), prompt: "x" }),
