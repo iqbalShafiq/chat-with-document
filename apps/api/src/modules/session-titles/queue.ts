@@ -21,7 +21,7 @@ export function getSessionTitleQueue(): Queue<SessionTitleJobData> {
         attempts: 2,
         backoff: { type: "exponential", delay: 1000 },
         removeOnComplete: 200,
-        removeOnFail: 200,
+        removeOnFail: true,
       },
     });
   }
