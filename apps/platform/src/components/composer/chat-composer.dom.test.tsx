@@ -76,6 +76,9 @@ function composerTree(input: {
   primitiveStop?: () => void;
   defaultAttachments?: UIAttachment[];
   composerError?: string | null;
+  models?: (typeof model)[];
+  modelsStatus?: "loading" | "success" | "error";
+  modelsError?: string | null;
 }) {
   const chat = controller(input.status, input.primitiveStop);
   const submitMessage = vi.fn(async (_args: ComposerSubmitMessageArgs) => undefined);
@@ -99,8 +102,9 @@ function composerTree(input: {
           onStopRun={input.onStopRun}
           onQueueSubmit={input.onQueueSubmit}
           onDismissAttachmentError={() => undefined}
-          models={[model]}
-          modelsStatus="success"
+          models={input.models ?? [model]}
+          modelsStatus={input.modelsStatus ?? "success"}
+          modelsError={input.modelsError ?? null}
         />
       </ComposerPrimitive.Root>
     </ChatProvider>
@@ -115,6 +119,9 @@ function renderComposer(input: {
   primitiveStop?: () => void;
   defaultAttachments?: UIAttachment[];
   composerError?: string | null;
+  models?: (typeof model)[];
+  modelsStatus?: "loading" | "success" | "error";
+  modelsError?: string | null;
 }) {
   const { chat, submitMessage, tree } = composerTree(input);
   const view = render(tree);
@@ -180,6 +187,21 @@ describe("Anvia v1 composer DOM contract", () => {
   it("associates immediate composer errors with an alert", () => {
     renderComposer({ status: "ready", composerError: "Send failed" });
     expect(screen.getByRole("alert").textContent).toContain("Send failed");
+  });
+
+  it("explains an empty model registry instead of disabling silently", () => {
+    renderComposer({ status: "ready", models: [], modelsStatus: "success" });
+    expect(screen.getByText(/db:seed/)).toBeTruthy();
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true);
+  });
+
+  it("surfaces a model list failure with its reason", () => {
+    renderComposer({
+      status: "ready",
+      modelsStatus: "error",
+      modelsError: "Unauthorized",
+    });
+    expect(screen.getByText(/Unauthorized/)).toBeTruthy();
   });
 
   it("uses a non-resizable auto-growing textarea without usage banners", () => {

@@ -184,6 +184,7 @@ export function ChatComposer({
     models.length > 0 &&
     models.some((item) => item.modelId === model);
   const modelsUnavailable = !modelsReady || readOnly;
+  const modelsEmpty = modelsStatus === "success" && models.length === 0;
   // Exit animation state for the context chip: the remove action is deferred
   // ~180ms so the fade-out can play before the snippet unmounts.
   const [removingContext, setRemovingContext] = useState(false);
@@ -281,10 +282,12 @@ export function ChatComposer({
 
   return (
     <div className="glass-composer group/composer flex flex-col gap-2.5 rounded-[1.35rem] p-3.5">
-      {!readOnly && modelsStatus === "error" ? (
+      {!readOnly && (modelsStatus === "error" || modelsEmpty) ? (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger animate-fade-in">
           <span className="min-w-0 truncate">
-            Model list is unavailable: {modelsError}
+            {modelsStatus === "error"
+              ? `Model list is unavailable: ${modelsError}`
+              : "No models are configured. Run pnpm --filter @anreal/api db:seed, then reload."}
           </span>
           <button
             type="button"
