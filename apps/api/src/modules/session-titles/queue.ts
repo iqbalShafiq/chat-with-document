@@ -29,7 +29,7 @@ export function getSessionTitleQueue(): Queue<SessionTitleJobData> {
 }
 
 export function sessionTitleJobId(sessionId: string): string {
-  return `session-title:${sessionId}`;
+  return `session-title-${sessionId}`;
 }
 
 export async function enqueueSessionTitle(
@@ -37,8 +37,8 @@ export async function enqueueSessionTitle(
   queueOverride?: Pick<Queue<SessionTitleJobData>, "add">,
 ): Promise<void> {
   if (!sessionTitleEnabled()) return;
-  await (queueOverride ?? getSessionTitleQueue()).add(
-    sessionTitleJobId(input.sessionId),
-    input,
-  );
+  const jobId = sessionTitleJobId(input.sessionId);
+  await (queueOverride ?? getSessionTitleQueue()).add(jobId, input, {
+    jobId,
+  });
 }

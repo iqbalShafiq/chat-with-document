@@ -60,15 +60,17 @@ describe("session title queue", () => {
       prompt: "Halo dunia, tolong bantu analisis",
     });
 
-    expect(sessionTitleJobId("session-1")).toBe("session-title:session-1");
+    expect(sessionTitleJobId("session-1")).toBe("session-title-session-1");
+    expect(sessionTitleJobId("session-1")).not.toContain(":");
     expect(vi.mocked(getSessionTitleQueue().add)).toHaveBeenCalledWith(
-      "session-title:session-1",
+      "session-title-session-1",
       {
         sessionId: "session-1",
         userId: "user-1",
         seed: "Halo dunia",
         prompt: "Halo dunia, tolong bantu analisis",
       },
+      { jobId: "session-title-session-1" },
     );
   });
 
@@ -79,8 +81,9 @@ describe("session title queue", () => {
       { add },
     );
     expect(add).toHaveBeenCalledWith(
-      "session-title:s2",
+      "session-title-s2",
       expect.objectContaining({ sessionId: "s2" }),
+      { jobId: "session-title-s2" },
     );
   });
 
