@@ -61,3 +61,4 @@ export * from "./profiling/types.js";
 export * from "./profiling/profile-summarizer.js";
 export * from "./profiling/profile-tool.js";
 export * from "./sites/site-plan.js";
+export * from "./sites/site-builder-agent.js";
