@@ -39,6 +39,9 @@ import {
   createProfileWorker,
   scopeFromJobData,
 } from "./modules/profiling/worker.js";
+import { SITE_BUILD_QUEUE } from "./modules/static-sites/queue.js";
+import { siteBuildConfig } from "./modules/static-sites/service.js";
+import { createSiteBuildWorker } from "./modules/static-sites/worker.js";
 import { prisma } from "./utils/prisma.js";
 import {
   CHAT_RUN_QUEUE,
@@ -426,6 +429,26 @@ if (profileWorker) {
   });
 }
 
+const siteBuildWorker = siteBuildConfig().enabled ? createSiteBuildWorker() : null;
+
+if (siteBuildWorker) {
+  siteBuildWorker.on("ready", () => {
+    console.log(`[sites] ready on queue ${SITE_BUILD_QUEUE}`);
+  });
+
+  siteBuildWorker.on("completed", (job) => {
+    console.log(`[sites] completed ${job.id}`);
+  });
+
+  siteBuildWorker.on("failed", (job, error) => {
+    console.error(`[sites] failed ${job?.id}`, error);
+  });
+
+  siteBuildWorker.on("error", (error) => {
+    console.error("[sites] worker error", error);
+  });
+}
+
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
 
 // Validate the Prisma memory adapter/delegates before the chat queue is
@@ -477,6 +500,7 @@ const shutdownCoordinator = createWorkerShutdownCoordinator({
   chatWorker: chatRunWorker,
   documentWorker: worker,
   profileWorker,
+  siteBuildWorker,
   closeQdrant,
   closeContext7: closeContext7Mcp,
   closeTracing,

@@ -9,6 +9,7 @@ export type WorkerShutdownDependencies = {
   chatWorker: Closable;
   documentWorker: Closable;
   profileWorker?: Closable | null;
+  siteBuildWorker?: Closable | null;
   closeQdrant: () => Promise<void>;
   closeContext7: () => Promise<void>;
   closeTracing: () => Promise<void>;
@@ -53,6 +54,9 @@ export function createWorkerShutdownCoordinator(
     await closeStage("document ingest", () => dependencies.documentWorker.close());
     if (dependencies.profileWorker) {
       await closeStage("profile", () => dependencies.profileWorker!.close());
+    }
+    if (dependencies.siteBuildWorker) {
+      await closeStage("site builds", () => dependencies.siteBuildWorker!.close());
     }
     await closeStage("Qdrant", dependencies.closeQdrant);
     await closeStage("Context7 MCP", dependencies.closeContext7);
