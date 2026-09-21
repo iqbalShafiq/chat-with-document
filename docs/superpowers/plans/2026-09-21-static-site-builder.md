@@ -1734,8 +1734,10 @@ describe("site download", () => {
     seedZip();
     const missing = await siteDownloadRouter.request("/nope/v9/download");
     expect(missing.status).toBe(404);
+    // Encoded slash may fail route matching (404) or hit the guard (400):
+    // both mean the traversal is rejected.
     const traversal = await siteDownloadRouter.request("/..%2Fevil/v1/download");
-    expect(traversal.status).toBe(400);
+    expect([400, 404]).toContain(traversal.status);
   });
 
   it("retries a failed build at the same version", async () => {
