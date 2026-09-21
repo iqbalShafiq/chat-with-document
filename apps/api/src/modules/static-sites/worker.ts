@@ -37,9 +37,6 @@ export type SiteBuildEventEnvelope = {
   appEvent: { type: string; [key: string]: unknown };
 };
 
-/** Minimal sandbox surface the worker needs. The real DockerSandbox exposes
- * file/process/port operations on `sandbox.runtime`; test fakes implement
- * them directly. `runtime` carries the real handle through when present. */
 export type SandboxSession = {
   exec(input: {
     command: string;
@@ -157,18 +154,17 @@ export async function processSiteBuildJob(
       abortSignal: AbortSignal.timeout(SITE_BUILD_TIMEOUT_MS),
     });
 
-    // Tool handles feed the default builder runner. When the caller injects its
-    // own runner, the session only needs the minimal SandboxSession surface —
-    // injected fakes are not full DockerSandboxRuntime handles (the factory
-    // duck-type-validates id/provider/workdir plus the full method set), so
-    // skip construction and let the injected runner define its own behavior.
-    const tools = deps.runBuilderAgent
-      ? []
-      : createDockerSandboxTools({
-          sandbox: ((session.runtime ?? session) as unknown as DockerSandboxRuntime),
-          tools: ["exec_command", "read_file", "write_file", "list_files", "start_process", "wait_for_port"],
-          exec: { commands: { mode: "allow", values: ["npm", "npx", "node"] } },
-        });
+    let tools: { name: string }[];
+    try {
+      tools = createDockerSandboxTools({
+        sandbox: ((session.runtime ?? session) as unknown as DockerSandboxRuntime),
+        tools: ["exec_command", "read_file", "write_file", "list_files", "start_process", "wait_for_port"],
+        exec: { commands: { mode: "allow", values: ["npm", "npx", "node"] } },
+      }) as unknown as { name: string }[];
+    } catch (error) {
+      if (!deps.runBuilderAgent) throw error;
+      tools = [];
+    }
     const runAgent: BuilderAgentRunner = deps.runBuilderAgent ??
       (async ({ prompt: agentPrompt, tools: agentTools }) => {
         const agent = createSiteBuilderAgent({ model: config.model, tools: agentTools as never[] });
