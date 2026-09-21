@@ -55,6 +55,21 @@ const toolWaitProgressSchema = z.object({
   stage: boundedString(240).optional(),
 }).strict();
 
+const siteBuildProgressSchema = z.object({
+  siteId: boundedString(120),
+  version: boundedCount(10_000),
+  phase: z.enum(["starting", "planning", "building", "bundling", "preview", "ready", "failed"]),
+  message: boundedString(2000),
+}).strict();
+
+const siteBuildReadySchema = z.object({
+  siteId: boundedString(120),
+  version: boundedCount(10_000),
+  previewUrl: z.string().max(2000).nullable(),
+  screenshotUrl: z.string().max(2000).nullable(),
+  downloadUrl: boundedString(2000),
+}).strict();
+
 const deepResearchAppEventSchema = z.object({
   type: z.literal("deep_research_progress"),
   phase: deepResearchProgressSchema.shape.phase,
@@ -77,21 +92,42 @@ const toolWaitProgressAppEventSchema = z.object({
   waitCount: toolWaitProgressSchema.shape.waitCount,
   stage: toolWaitProgressSchema.shape.stage,
 }).strict();
+const siteBuildProgressAppEventSchema = z.object({
+  type: z.literal("site_build_progress"),
+  siteId: siteBuildProgressSchema.shape.siteId,
+  version: siteBuildProgressSchema.shape.version,
+  phase: siteBuildProgressSchema.shape.phase,
+  message: siteBuildProgressSchema.shape.message,
+}).strict();
+const siteBuildReadyAppEventSchema = z.object({
+  type: z.literal("site_build_ready"),
+  siteId: siteBuildReadySchema.shape.siteId,
+  version: siteBuildReadySchema.shape.version,
+  previewUrl: siteBuildReadySchema.shape.previewUrl,
+  screenshotUrl: siteBuildReadySchema.shape.screenshotUrl,
+  downloadUrl: siteBuildReadySchema.shape.downloadUrl,
+}).strict();
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
 export type ToolWaitProgressEvent = z.infer<typeof toolWaitProgressSchema>;
+export type SiteBuildProgress = z.infer<typeof siteBuildProgressSchema>;
+export type SiteBuildReady = z.infer<typeof siteBuildReadySchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
   toolWaitProgress: ToolWaitProgressEvent;
+  siteBuildProgress: SiteBuildProgress;
+  siteBuildReady: SiteBuildReady;
 };
 
 export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
   toolWaitProgress: toolWaitProgressSchema,
+  siteBuildProgress: siteBuildProgressSchema,
+  siteBuildReady: siteBuildReadySchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -120,6 +156,21 @@ export type ChatAppEvent =
       elapsedMs: number;
       waitCount: number;
       stage?: string;
+    }
+  | {
+      type: "site_build_progress";
+      siteId: string;
+      version: number;
+      phase: SiteBuildProgress["phase"];
+      message: string;
+    }
+  | {
+      type: "site_build_ready";
+      siteId: string;
+      version: number;
+      previewUrl: string | null;
+      screenshotUrl: string | null;
+      downloadUrl: string;
     }
   ;
 
@@ -171,6 +222,27 @@ export function mapChatAppEvent(
         ...(event.stage === undefined ? {} : { stage: event.stage }),
       });
       return withContext(context, { type: "data", name: "toolWaitProgress", data }) as ChatClientEvent;
+    }
+    case "site_build_progress": {
+      siteBuildProgressAppEventSchema.parse(event);
+      const data = siteBuildProgressSchema.parse({
+        siteId: event.siteId,
+        version: event.version,
+        phase: event.phase,
+        message: event.message,
+      });
+      return withContext(context, { type: "data", name: "siteBuildProgress", data }) as ChatClientEvent;
+    }
+    case "site_build_ready": {
+      siteBuildReadyAppEventSchema.parse(event);
+      const data = siteBuildReadySchema.parse({
+        siteId: event.siteId,
+        version: event.version,
+        previewUrl: event.previewUrl,
+        screenshotUrl: event.screenshotUrl,
+        downloadUrl: event.downloadUrl,
+      });
+      return withContext(context, { type: "data", name: "siteBuildReady", data }) as ChatClientEvent;
     }
   }
 }

@@ -83,6 +83,9 @@ import {
   hasActiveChatShare,
 } from "./chat-share.js";
 import { forkBodySchema, seedForkSession } from "./chat-fork.js";
+import { isSiteBuilderIntent } from "@anreal/agent";
+import { enqueueSiteBuild } from "../static-sites/queue.js";
+import { siteBuildConfig, writeSiteManifest } from "../static-sites/service.js";
 import {
   deleteChatSession,
 } from "./session-delete.js";
@@ -988,6 +991,29 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "chat run could not be queued", code: "CHAT_RUN_QUEUE_ERROR" }, 503);
     }
     await touchChatSession(user.id, metadata.sessionId);
+    const firstUserText = extractUserTextForTitle(promptMessage);
+    if (siteBuildConfig().enabled && isSiteBuilderIntent(firstUserText)) {
+      const siteId = crypto.randomUUID();
+      const version = 1;
+      void writeSiteManifest({
+        siteId,
+        sessionId: metadata.sessionId,
+        userId: user.id,
+        version,
+        status: "queued",
+        previewUrl: null,
+        downloadPath: null,
+        error: null,
+        prompt: firstUserText,
+        updatedAt: new Date().toISOString(),
+      })
+        .then(() =>
+          enqueueSiteBuild({ siteId, sessionId: metadata.sessionId, userId: user.id, prompt: firstUserText, version }),
+        )
+        .catch((error) => {
+          console.warn("[sites] enqueue failed", error);
+        });
+    }
     const titleSeed = extractUserTextForTitle(promptMessage);
     if (titleSeed) {
       void setChatSessionTitleIfEmpty({ userId: user.id, sessionId: metadata.sessionId, title: titleSeed }).catch(() => {});

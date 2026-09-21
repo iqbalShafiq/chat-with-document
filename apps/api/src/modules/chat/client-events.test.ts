@@ -100,6 +100,21 @@ describe("createChatClientStream", () => {
         elapsedMs: 12_000,
         waitCount: 1,
       },
+      {
+        type: "site_build_progress",
+        siteId: "site-1",
+        version: 1,
+        phase: "building",
+        message: "Membangun hero.",
+      },
+      {
+        type: "site_build_ready",
+        siteId: "site-1",
+        version: 1,
+        previewUrl: "http://127.0.0.1:49111",
+        screenshotUrl: null,
+        downloadUrl: "/api/sites/site-1/v1/download",
+      },
       outcome("response"),
     ];
 
@@ -109,6 +124,8 @@ describe("createChatClientStream", () => {
       expect.objectContaining({ name: "deepResearchProgress" }),
       expect.objectContaining({ name: "queuedMessageApplied", data: { clientMessageId: "client-1", attachmentCount: 1 } }),
       expect.objectContaining({ name: "toolWaitProgress" }),
+      expect.objectContaining({ name: "siteBuildProgress", data: { siteId: "site-1", version: 1, phase: "building", message: "Membangun hero." } }),
+      expect.objectContaining({ name: "siteBuildReady", data: { siteId: "site-1", version: 1, previewUrl: "http://127.0.0.1:49111", screenshotUrl: null, downloadUrl: "/api/sites/site-1/v1/download" } }),
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();
@@ -257,6 +274,18 @@ describe("createChatClientStream", () => {
       phase: "researching",
       message: "safe",
       activities: [{ id: "a", kind: "retrieval", label: "x", status: "active", prompt: "secret" }],
+    } as never, { runId: "run-1" })).toThrow();
+  });
+
+  it("rejects extra prompt fields on site build ready events", () => {
+    expect(() => mapChatAppEvent({
+      type: "site_build_ready",
+      siteId: "site-1",
+      version: 1,
+      previewUrl: "http://127.0.0.1:49111",
+      screenshotUrl: null,
+      downloadUrl: "/api/sites/site-1/v1/download",
+      prompt: "secret user prompt",
     } as never, { runId: "run-1" })).toThrow();
   });
 

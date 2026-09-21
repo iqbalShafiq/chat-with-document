@@ -202,6 +202,12 @@ function validDefaultData(name: string, value: unknown): boolean {
       boundedInteger(value.waitCount, 10_000) &&
       (value.stage === undefined || boundedText(value.stage, 240));
   }
+  if (name === "siteBuildProgress") {
+    return exactKeys(value, ["siteId", "version", "phase", "message"]) && boundedText(value.siteId, 120) && Number.isInteger(value.version) && boundedText(value.message, 2000);
+  }
+  if (name === "siteBuildReady") {
+    return exactKeys(value, ["siteId", "version", "previewUrl", "screenshotUrl", "downloadUrl"]) && boundedText(value.siteId, 120) && Number.isInteger(value.version) && (value.previewUrl === null || boundedText(value.previewUrl, 2000)) && (value.screenshotUrl === null || boundedText(value.screenshotUrl, 2000)) && boundedText(value.downloadUrl, 2000);
+  }
   return false;
 }
 
@@ -210,6 +216,8 @@ const DEFAULT_DATA_SCHEMAS = {
   deepResearchProgress: schema((value) => validDefaultData("deepResearchProgress", value)),
   queuedMessageApplied: schema((value) => validDefaultData("queuedMessageApplied", value)),
   toolWaitProgress: schema((value) => validDefaultData("toolWaitProgress", value)),
+  siteBuildProgress: schema((value) => validDefaultData("siteBuildProgress", value)),
+  siteBuildReady: schema((value) => validDefaultData("siteBuildReady", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {
