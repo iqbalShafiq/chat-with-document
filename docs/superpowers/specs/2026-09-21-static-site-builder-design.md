@@ -85,7 +85,7 @@ shutdown coordinator worker.
    (tipografi, spacing, netral + satu aksen) sebagai anti-fingerprint.
 8. Platform `sites/` — brief form ringkas, status build live, preview,
    tombol download, riwayat versi per session dengan rollback ke versi
-   stabil sebelumnya.
+   stabil sebelumnya. Detail state streaming: lihat "Streaming UI states".
 
 ## Data flow
 
@@ -101,10 +101,35 @@ shutdown coordinator worker.
 4. Iterasi ("ganti hero") = job baru, `version + 1`; file versi lama
    dipertahankan; download selalu dari versi stabil terakhir.
 
+## Streaming UI states
+
+Selama build berjalan, user melihat `SiteBuildPanel` di bawah chat
+(bertumpuk vertikal, full-width; sama di mobile). Isi panel mengikuti
+phase worker, berurutan: `starting` (Menyiapkan) → `planning`
+(Menyusun brief) → `building` (Membangun halaman) → `bundling`
+(Build production) → `preview` (Menyiapkan pratinjau) → `ready`.
+
+- Stepper: daftar phase sebagai `ol`; phase lewat = done, phase aktif =
+  active + pesan worker (`message`), phase berikut = todo. Phase `failed`
+  tidak ada di stepper normal; hanya muncul sebagai state error.
+- Area pratinjau: sebelum `previewUrl` ada, tampilkan skeleton box
+  (placeholder berdenyut + teks "Pratinjau segera hadir"); setelah URL
+  tiba, ganti dengan `iframe` (`sandbox=""`, `title="Preview {siteId}"`).
+- Ready: pesan "Situs siap diunduh." + iframe + tombol unduh zip +
+  label versi (`v{N}`); bila ada versi stabil lama, tampilkan riwayat
+  singkat dengan tombol rollback ke versi tersebut.
+- Failed: pesan error ringkas dari worker + tombol "Coba lagi"
+  (enqueue ulang versi yang sama, tidak menaikkan versi).
+- Build baru untuk site yang sama me-reset panel ke `starting`;
+  download selalu menunjuk versi stabil terakhir, tidak pernah ke build
+  yang gagal atau masih berjalan.
+
 ## Error handling
 
 - Build gagal: status `failed` + pesan ringkas di panel + tombol retry
-  tanpa menaikkan versi. Tidak ada state setengah jadi yang bisa diunduh.
+  tanpa menaikkan versi. Retry = `POST /api/sites/:siteId/retry`
+  (baca manifest, set `queued`, enqueue ulang versi yang sama).
+  Tidak ada state setengah jadi yang bisa diunduh.
 - Timeout 5 menit per build; concurrency default 2.
 - Tool di luar allowlist ditolak sebelum eksekusi.
 - Gagal screenshot tidak menggagalkan build (preview tetap ada);
