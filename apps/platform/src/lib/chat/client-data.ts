@@ -45,10 +45,27 @@ export type ToolWaitProgress = {
   stage?: string;
 };
 
+export type SiteBuildProgress = {
+  siteId: string;
+  version: number;
+  phase: "starting" | "planning" | "building" | "bundling" | "preview" | "ready" | "failed";
+  message: string;
+};
+
+export type SiteBuildReady = {
+  siteId: string;
+  version: number;
+  previewUrl: string | null;
+  screenshotUrl: string | null;
+  downloadUrl: string;
+};
+
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
   toolWaitProgress: ToolWaitProgress;
+  siteBuildProgress: SiteBuildProgress;
+  siteBuildReady: SiteBuildReady;
 };
 
 type ParseResult<T> =
@@ -238,6 +255,56 @@ function parseQueuedMessageApplied(value: unknown): ParseResult<QueuedMessageApp
   });
 }
 
+function parseSiteBuildProgress(value: unknown): ParseResult<SiteBuildProgress> {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ["siteId", "version", "phase", "message"]) ||
+    !boundedString(value.siteId, MAX_METADATA_STRING) ||
+    typeof value.version !== "number" ||
+    !Number.isInteger(value.version) ||
+    value.version < 0 ||
+    (value.phase !== "starting" &&
+      value.phase !== "planning" &&
+      value.phase !== "building" &&
+      value.phase !== "bundling" &&
+      value.phase !== "preview" &&
+      value.phase !== "ready" &&
+      value.phase !== "failed") ||
+    !boundedString(value.message, MAX_RESEARCH_MESSAGE)
+  ) {
+    return failure("invalid site build progress");
+  }
+  return success({
+    siteId: value.siteId,
+    version: value.version,
+    phase: value.phase,
+    message: value.message,
+  });
+}
+
+function parseSiteBuildReady(value: unknown): ParseResult<SiteBuildReady> {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ["siteId", "version", "previewUrl", "screenshotUrl", "downloadUrl"]) ||
+    !boundedString(value.siteId, MAX_METADATA_STRING) ||
+    typeof value.version !== "number" ||
+    !Number.isInteger(value.version) ||
+    value.version < 0 ||
+    (value.previewUrl !== null && !boundedString(value.previewUrl, 2000)) ||
+    (value.screenshotUrl !== null && !boundedString(value.screenshotUrl, 2000)) ||
+    !boundedString(value.downloadUrl, 2000)
+  ) {
+    return failure("invalid site build ready");
+  }
+  return success({
+    siteId: value.siteId,
+    version: value.version,
+    previewUrl: value.previewUrl,
+    screenshotUrl: value.screenshotUrl,
+    downloadUrl: value.downloadUrl,
+  });
+}
+
 const deepResearchProgressSchema: Schema<DeepResearchProgress> = {
   safeParse: parseDeepResearchProgress,
 };
@@ -247,6 +314,12 @@ const queuedMessageAppliedSchema: Schema<QueuedMessageApplied> = {
 const toolWaitProgressSchema: Schema<ToolWaitProgress> = {
   safeParse: parseToolWaitProgress,
 };
+const siteBuildProgressSchema: Schema<SiteBuildProgress> = {
+  safeParse: parseSiteBuildProgress,
+};
+const siteBuildReadySchema: Schema<SiteBuildReady> = {
+  safeParse: parseSiteBuildReady,
+};
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
   streamMetadataSchema;
@@ -255,4 +328,6 @@ export const ChatDataSchemas = {
   deepResearchProgress: deepResearchProgressSchema,
   queuedMessageApplied: queuedMessageAppliedSchema,
   toolWaitProgress: toolWaitProgressSchema,
+  siteBuildProgress: siteBuildProgressSchema,
+  siteBuildReady: siteBuildReadySchema,
 } satisfies ClientDataSchemas<ChatDataMap>;

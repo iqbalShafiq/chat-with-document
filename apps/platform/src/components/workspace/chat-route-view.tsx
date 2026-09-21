@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ChatSession, parseMemoryMessages, type ChatUIMessage } from "#/components/chat/chat-session";
 import { AnrealMark } from "#/components/layout/anreal-brand";
@@ -9,6 +9,11 @@ import { settleStoppedRunTools } from "#/lib/chat/finalize-interrupted-tools";
 import { peekPendingApprovalToolNames } from "#/lib/chat/interaction-resume-storage";
 import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
+import {
+  applySiteBuildEvent,
+  SiteBuildPanel,
+  type SiteBuildState,
+} from "#/components/sites/site-build-panel";
 import {
   ApiAuthError,
   fetchRunStatus,
@@ -124,6 +129,17 @@ export function ChatRouteView(input: {
   // One-shot share-fork handoff: consumed once on mount so refresh/back
   // never re-sends the same first message.
   const [shareForkHandoff] = useState(() => consumeShareForkDraft(input.sessionId));
+  const [siteBuild, setSiteBuild] = useState<SiteBuildState | null>(null);
+
+  const retrySiteBuild = useCallback(async (siteId: string) => {
+    const response = await fetch(`/api/sites/${siteId}/retry`, { method: "POST" });
+    if (!response.ok) return;
+    setSiteBuild((prev) =>
+      prev?.siteId === siteId
+        ? { ...prev, phase: "starting", message: "Mengulang build." }
+        : prev,
+    );
+  }, []);
 
   if (route.status === "missing") {
     return <SessionNotFound projectId={input.projectId} />;
@@ -157,6 +173,7 @@ export function ChatRouteView(input: {
         onAuthFailure={input.onAuthFailure}
         onImageContextActions={sessionsContext.onImageContextActions}
         onReloadMessages={(messages) => route.setMessages(messages)}
+        onSiteBuildEvent={(event) => setSiteBuild((prev) => applySiteBuildEvent(prev, event))}
         initialComposerDraft={
           shareForkHandoff
             ? { text: shareForkHandoff.text, attachments: shareForkHandoff.attachments }
@@ -173,6 +190,7 @@ export function ChatRouteView(input: {
             : null
         }
       />
+      <SiteBuildPanel build={siteBuild} onRetry={retrySiteBuild} />
     </div>
   );
 }

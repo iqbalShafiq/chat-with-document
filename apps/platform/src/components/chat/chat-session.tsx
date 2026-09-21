@@ -329,6 +329,7 @@ export function ChatSession({
   onDeferredComposerSubmit,
   initialComposerDraft = null,
   initialFeatureFlags = null,
+  onSiteBuildEvent,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -373,6 +374,11 @@ export function ChatSession({
   initialComposerDraft?: InitialComposerDraft | string | null;
   /** Feature toggles pre-selected before the first send (share fork handoff). */
   initialFeatureFlags?: InitialFeatureFlags | null;
+  onSiteBuildEvent?: (
+    event:
+      | { name: "siteBuildProgress"; data: ChatDataMap["siteBuildProgress"] }
+      | { name: "siteBuildReady"; data: ChatDataMap["siteBuildReady"] },
+  ) => void;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -676,6 +682,12 @@ export function ChatSession({
           case "toolWaitProgress":
             setToolWait((state) => reduceToolWaitProgress(state, event.data));
             return;
+          case "siteBuildProgress":
+            onSiteBuildEvent?.({ name: event.name, data: event.data });
+            return;
+          case "siteBuildReady":
+            onSiteBuildEvent?.({ name: event.name, data: event.data });
+            return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
               (entry) => entry.id === event.data.clientMessageId,
@@ -767,7 +779,7 @@ export function ChatSession({
           return;
       }
     },
-    [queueActions, refreshContextUsage, refreshSessionImages],
+    [queueActions, refreshContextUsage, refreshSessionImages, onSiteBuildEvent],
   );
 
   const interactionResumeStorage = useMemo(

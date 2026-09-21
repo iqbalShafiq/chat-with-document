@@ -85,6 +85,8 @@ describe("browser v1 stream data schemas", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
       "deepResearchProgress",
       "queuedMessageApplied",
+      "siteBuildProgress",
+      "siteBuildReady",
       "toolWaitProgress",
     ]);
   });
@@ -105,5 +107,33 @@ describe("browser v1 stream data schemas", () => {
     expect(
       ChatDataSchemas.toolWaitProgress.safeParse({ ...value, secret: "nope" }),
     ).toMatchObject({ success: false });
+  });
+
+  it("accepts bounded site build events and rejects extra fields", () => {
+    const progress: ChatDataMap["siteBuildProgress"] = {
+      siteId: "site-1",
+      version: 1,
+      phase: "building",
+      message: "Membangun hero.",
+    };
+    expect(ChatDataSchemas.siteBuildProgress.safeParse(progress)).toMatchObject({
+      success: true,
+      data: progress,
+    });
+    expect(
+      ChatDataSchemas.siteBuildProgress.safeParse({ ...progress, prompt: "secret" }),
+    ).toMatchObject({ success: false });
+
+    const ready: ChatDataMap["siteBuildReady"] = {
+      siteId: "site-1",
+      version: 1,
+      previewUrl: "http://127.0.0.1:49111",
+      screenshotUrl: null,
+      downloadUrl: "/api/sites/site-1/v1/download",
+    };
+    expect(ChatDataSchemas.siteBuildReady.safeParse(ready)).toMatchObject({
+      success: true,
+      data: ready,
+    });
   });
 });

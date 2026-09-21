@@ -61,6 +61,25 @@ describe("strict Anvia v1 message part presentation", () => {
     ]);
   });
 
+  it("hides site build events from the transcript", () => {
+    const message = parseUIMessage({
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        {
+          id: "site-1",
+          type: "data",
+          name: "siteBuildProgress",
+          data: { siteId: "site-1", version: 1, phase: "building", message: "x" },
+        },
+      ],
+    });
+
+    expect(message.parts.map((part) => isRenderablePart(part, message.role))).toEqual([
+      false,
+    ]);
+  });
+
   it("hides assistant copy/reply while the live bubble is still streaming", () => {
     const message = parseUIMessage({
       id: "assistant-live",
