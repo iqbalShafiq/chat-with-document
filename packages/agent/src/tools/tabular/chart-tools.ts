@@ -60,6 +60,8 @@ const createChartInput = z.object({
   chart: chartRequestSchema.describe("What to draw; computation happens server-side"),
 });
 
+const chartOutputSchema = z.json();
+
 const createChartSpec = {
   name: "create_chart",
   description:
@@ -77,8 +79,8 @@ export function createChartTools(deps: {
 }): AnyTool[] {
   const createChart = createTool({
     ...createChartSpec,
-    outputSchema: z.json(),
-    execute: async ({ source, chart }) => {
+    outputSchema: chartOutputSchema,
+    execute: async ({ source, chart }): Promise<z.output<typeof chartOutputSchema>> => {
       const sheet = await resolveSheetReady(deps.resolver, source);
       const limits = deps.limits?.maxRows === undefined ? undefined : { maxRows: deps.limits.maxRows };
       switch (chart.kind) {
