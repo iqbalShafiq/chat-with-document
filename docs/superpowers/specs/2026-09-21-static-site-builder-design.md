@@ -75,7 +75,7 @@ shutdown coordinator worker.
    dedupe per `sessionId + siteId`.
 4. `apps/api/src/modules/static-sites/service.ts` — config `SITE_ENABLED`
    (default true), `SITE_CONCURRENCY` (default 2), `SITE_MODEL`
-   (default `deepseek/deepseek-v4-flash-0731`), `SITE_BUILD_TIMEOUT_MS`
+   (default `meta/muse-spark-1.3-contributor`), `SITE_BUILD_TIMEOUT_MS`
    (5 menit); status build per versi.
 5. `apps/api/src/modules/static-sites/worker.ts` — orkestrasi sandbox
    end-to-end dan penerbitan event progress/ready.
@@ -129,11 +129,15 @@ fake sandbox session, `jsdom` untuk DOM):
 Integrasi real-LLM (wajib pakai model real, sesuai permintaan):
 
 - Model tunggal untuk semua pengujian builder yang menyentuh LLM:
-  `deepseek/deepseek-v4-flash-0731` via OpenRouter
+  `meta/muse-spark-1.3-contributor` via OpenRouter
   (`OPENAI_BASE_URL=https://openrouter.ai/api/v1` + key).
-  Model ini terkonfirmasi ada di OpenRouter API 2026-09-21
-  (`DeepSeek: DeepSeek V4 Flash 0731`) dan mendukung
-  `structured_outputs`/`response_format` yang dipakai brief parser.
+  ID ini sudah dikenal repo (dipakai di `openai.test.ts` dan commit
+  `719a093`). Catatan: tier contributor ini mengembalikan reasoning
+  terenkripsi saja di Responses API — pemakaian wajib lewat Chat
+  Completions (`completionApiFor` sudah menangani ini; builder memakai
+  endpoint yang sama dengan chat). Plan implementasi wajib verifikasi
+  dukungan structured output model ini untuk brief parser, dengan fallback
+  parse JSON dari teks bila tidak didukung.
 - Smoke manual real-LLM: `pnpm dev`, prompt landing page nyata,
   pastikan tiap section terisi konten asli, build sukses, preview tampil,
   zip terunduh dan berisi `index.html` + aset.
