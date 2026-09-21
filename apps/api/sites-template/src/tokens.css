@@ -1,0 +1,25 @@
+:root {
+  --font-display: system-ui, sans-serif;
+  --font-body: system-ui, sans-serif;
+  --color-ink: #1a1a1a;
+  --color-paper: #ffffff;
+  --color-accent: #b3541e;
+  --space-section: 5rem;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  margin: 0;
+}
+
+main > section {
+  padding: var(--space-section) 1.5rem;
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+h1, h2 {
+  font-family: var(--font-display);
+}
