@@ -8,11 +8,13 @@ describe("sites template", () => {
   it("contains every scaffold file", () => {
     for (const file of [
       "package.json",
+      "tsconfig.json",
       "vite.config.ts",
       "index.html",
       "src/main.tsx",
       "src/App.tsx",
       "src/tokens.css",
+      "src/vite-env.d.ts",
     ]) {
       expect(existsSync(join(DIR, file))).toBe(true);
     }
