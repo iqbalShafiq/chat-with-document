@@ -34,4 +34,9 @@ describe("sites template", () => {
     expect(app).toContain("data-section");
     expect(app).not.toContain("lorem ipsum");
   });
+
+  it("emits relative asset paths for sandboxed preview", () => {
+    const config = readFileSync(join(DIR, "vite.config.ts"), "utf8");
+    expect(config).toContain('base: "./"');
+  });
 });

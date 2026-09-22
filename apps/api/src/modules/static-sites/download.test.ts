@@ -131,10 +131,12 @@ describe("site static preview", () => {
     const html = await siteDownloadRouter.request("/site-1/v1/preview/index.html");
     expect(html.status).toBe(200);
     expect(html.headers.get("content-type")).toContain("text/html");
+    expect(html.headers.get("access-control-allow-origin")).toBe("*");
     expect(await html.text()).toContain("hi");
 
     const css = await siteDownloadRouter.request("/site-1/v1/preview/assets/app.css");
     expect(css.headers.get("content-type")).toContain("text/css");
+    expect(css.headers.get("access-control-allow-origin")).toBe("*");
 
     const fallback = await siteDownloadRouter.request("/site-1/v1/preview/some/route");
     expect(fallback.status).toBe(200);

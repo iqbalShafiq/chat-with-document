@@ -143,6 +143,7 @@ siteDownloadRouter.get("/:siteId/:version/preview/*", async (c) => {
         headers: {
           "content-type": PREVIEW_CONTENT_TYPES[extension] ?? "application/octet-stream",
           "cache-control": "no-store",
+          "access-control-allow-origin": "*",
         },
       });
     } catch {
