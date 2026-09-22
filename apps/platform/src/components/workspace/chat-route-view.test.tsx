@@ -84,6 +84,25 @@ afterEach(() => {
 });
 
 describe("ChatRouteView site panel", () => {
+  it("shows an in-progress panel for a running build on load", async () => {
+    bySessionPayloads.set("session-a", {
+      sites: [
+        {
+          siteId: "s",
+          version: 2,
+          stableVersion: 1,
+          status: "running",
+          previewUrl: null,
+          downloadUrl: "/api/sites/s/v2/download",
+        },
+      ],
+    });
+    render(<ChatRouteView {...baseProps} sessionId="session-a" />);
+    await screen.findByLabelText("Site build");
+    expect(screen.getByText(/v2 · /)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Pratinjau segera hadir.");
+  });
+
   it("clears the previous session panel when switching sessions", async () => {
     bySessionPayloads.set("session-a", { sites: [siteEntry(1, 1)] });
     bySessionPayloads.set("session-b", { sites: [] });

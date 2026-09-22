@@ -201,6 +201,20 @@ export function ChatRouteView(input: {
               downloadUrl: latest.downloadUrl,
             },
       );
+    } else {
+      setSiteBuild((prev) =>
+        prev?.siteId === latest.siteId
+          ? prev
+          : {
+              siteId: latest.siteId,
+              version: latest.version,
+              phase: latest.status === "queued" ? "starting" : "building",
+              message:
+                latest.status === "queued" ? "Menunggu antrean build." : "Membangun situs.",
+              previewUrl: null,
+              downloadUrl: null,
+            },
+      );
     }
   }, []);
 
