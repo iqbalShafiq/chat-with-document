@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import AdmZip from "adm-zip";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const f = vi.hoisted(() => ({
   brief: vi.fn(async () => ({
@@ -26,11 +29,14 @@ vi.mock("@anreal/agent", () => ({
 
 function fakeSandbox() {
   const files = new Map<string, string>();
+  const cwds: (string | undefined)[] = [];
   return {
     files,
+    cwds,
     destroyed: false,
     publishedPorts: [{ containerPort: 4173, hostPort: 49111 }],
-    async exec({ command, args }: { command: string; args?: string[] }) {
+    async exec({ command, args, cwd }: { command: string; args?: string[]; cwd?: string }) {
+      cwds.push(cwd);
       if (command === "npm" && args?.[0] === "run" && args?.[1] === "build") {
         files.set("dist/index.html", "<html></html>");
         return { status: "exited" as const, exitCode: 0, stdout: "built", stderr: "" };
@@ -116,5 +122,83 @@ describe("processSiteBuildJob", () => {
       }),
     ).rejects.toThrow();
     expect(sandbox.destroyed).toBe(true);
+  });
+
+  it("uses workspace-relative site/ paths for scaffold writes and commands", async () => {
+    const sandbox = fakeSandbox();
+    await processSiteBuildJob(JOB, {
+      createSandboxSession: async () => sandbox as never,
+      publish: async () => undefined,
+      readTemplate: async () => ({ "package.json": "{}" }),
+      runBuilderAgent: f.agentRun,
+    });
+
+    const written = [...sandbox.files.keys()];
+    expect(written.length).toBeGreaterThan(0);
+    for (const key of written) {
+      expect(key.startsWith("site/") || key.startsWith("dist/")).toBe(true);
+      expect(key.startsWith("/")).toBe(false);
+      expect(key.includes("workspace")).toBe(false);
+    }
+    expect(sandbox.cwds.length).toBeGreaterThan(0);
+    for (const cwd of sandbox.cwds) {
+      expect(cwd).toBe("site");
+    }
+  });
+
+  it("zips nested dist output via recursive workspace-relative listing", async () => {
+    const siteId = "site-nested-dist";
+    const files = new Map<string, string>([
+      ["site/dist/index.html", "<html></html>"],
+      ["site/dist/assets/app.js", "console.log(1)"],
+    ]);
+    const sandbox = {
+      destroyed: false,
+      publishedPorts: [{ containerPort: 4173, hostPort: 49111 }],
+      async exec() {
+        return { status: "exited" as const, exitCode: 0, stdout: "", stderr: "" };
+      },
+      async writeTextFile({ path, text }: { path: string; text: string }) {
+        files.set(path, text);
+      },
+      async readTextFilePage({ path }: { path: string }) {
+        return { content: files.get(path) ?? "", startLine: 1, endLine: 1, nextStartLine: null, truncated: false, truncatedBy: null };
+      },
+      async listFiles({ path }: { path?: string } = {}) {
+        const dir = (path ?? "").replace(/\/$/, "");
+        const children = new Map<string, "file" | "directory">();
+        for (const key of files.keys()) {
+          if (!key.startsWith(`${dir}/`)) continue;
+          const rest = key.slice(dir.length + 1);
+          const slash = rest.indexOf("/");
+          if (slash < 0) children.set(key, "file");
+          else children.set(`${dir}/${rest.slice(0, slash)}`, "directory");
+        }
+        return [...children].map(([entryPath, type]) => ({ path: entryPath, type }));
+      },
+      async startProcess() {
+        return { id: "p1" };
+      },
+      async waitForPort() {
+        return { containerPort: 4173, host: "127.0.0.1", hostPort: 49111 };
+      },
+      async destroy() {
+        (this as { destroyed: boolean }).destroyed = true;
+      },
+    };
+    await processSiteBuildJob(
+      { data: { ...JOB.data, siteId } },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async () => undefined,
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    const zipPath = join(process.cwd(), "data", "sites", siteId, "v1", "site.zip");
+    const entries = new AdmZip(await readFile(zipPath)).getEntries().map((e) => e.entryName);
+    expect(entries).toContain("index.html");
+    expect(entries).toContain("assets/app.js");
   });
 });

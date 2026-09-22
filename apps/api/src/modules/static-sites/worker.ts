@@ -10,7 +10,8 @@ import {
   DockerSandboxClient,
   type DockerSandboxRuntime,
 } from "@anvia/sandbox";
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import { SITE_BUILD_QUEUE, type SiteBuildJobData } from "./queue.js";
@@ -51,7 +52,7 @@ export type SandboxSession = {
     lineCount?: number;
     maxBytes?: number;
   }): Promise<{ content: string; nextStartLine: number | null }>;
-  listFiles(input?: { path?: string }): Promise<readonly { path: string }[]>;
+  listFiles(input?: { path?: string }): Promise<readonly { path: string; type?: string }[]>;
   startProcess(input: {
     command: string;
     args?: string[];
@@ -79,7 +80,26 @@ function decodeOutput(value: unknown): string {
   return String(value ?? "");
 }
 
+/**
+ * Point TEMP/TMP at the canonical temp-dir spelling once per process.
+ * @anvia/sandbox stages container reads via `docker cp` into os.tmpdir()
+ * and rejects the read when realpath() spelling disagrees with the temp dir
+ * spelling. On Windows, TEMP commonly uses an 8.3 alias
+ * (C:\Users\IQBAL~1.SHA\...) while the copied file canonicalizes to the long
+ * name, failing every read with "escaped its temporary read boundary".
+ */
+async function canonicalizeSandboxTempDir(): Promise<void> {
+  try {
+    const canonical = await realpath(tmpdir());
+    process.env.TEMP = canonical;
+    process.env.TMP = canonical;
+  } catch {
+    // Fall back to whatever os.tmpdir() already returns.
+  }
+}
+
 async function defaultCreateSandboxSession(): Promise<SandboxSession> {
+  await canonicalizeSandboxTempDir();
   const client = new DockerSandboxClient();
   await client.pullImage({ image: "node:22-bookworm" });
   const sandbox = await client.createSandbox({
@@ -143,7 +163,9 @@ export async function processSiteBuildJob(
     const readTemplate = deps.readTemplate ?? (await import("./template.js")).readSiteTemplate;
     const template = await readTemplate();
     for (const [path, text] of Object.entries(template)) {
-      await ops.writeTextFile({ path: `/workspace/site/${path}`, text });
+      // Sandbox file APIs take workspace-relative paths (see @anvia/sandbox
+      // normalizeSandboxPath): the site scaffold lives under `site/`.
+      await ops.writeTextFile({ path: `site/${path}`, text });
     }
     await progress("planning", "Menyusun brief situs.");
 
@@ -194,27 +216,25 @@ export async function processSiteBuildJob(
     });
 
     await progress("bundling", "Menjalankan production build.");
-    const install = await ops.exec({ command: "npm", args: ["install", "--no-audit", "--no-fund"], cwd: "/workspace/site", timeoutMs: 240_000 });
+    const install = await ops.exec({ command: "npm", args: ["install", "--no-audit", "--no-fund"], cwd: "site", timeoutMs: 240_000 });
     if (install.status !== "exited" || install.exitCode !== 0) {
       throw new Error(`npm install failed: ${decodeOutput(install.stderr) || decodeOutput(install.stdout)}`.slice(0, 2000));
     }
-    const build = await ops.exec({ command: "npm", args: ["run", "build"], cwd: "/workspace/site", timeoutMs: 240_000 });
+    const build = await ops.exec({ command: "npm", args: ["run", "build"], cwd: "site", timeoutMs: 240_000 });
     if (build.status !== "exited" || build.exitCode !== 0) {
       throw new Error(`vite build failed: ${decodeOutput(build.stderr) || decodeOutput(build.stdout)}`.slice(0, 2000));
     }
 
     await progress("preview", "Menyiapkan pratinjau.");
-    await ops.startProcess({ command: "npm", args: ["run", "preview", "--", "--host", "0.0.0.0"], cwd: "/workspace/site" });
+    await ops.startProcess({ command: "npm", args: ["run", "preview", "--", "--host", "0.0.0.0"], cwd: "site" });
     const port = await ops.waitForPort({ containerPort: SITE_PREVIEW_PORT, timeoutMs: 60_000 });
     const previewUrl = `http://127.0.0.1:${port.hostPort}`;
 
     await mkdir(baseDir, { recursive: true });
     const zip = new AdmZip();
-    const entries = await ops.listFiles({ path: "/workspace/site/dist" });
-    for (const entry of entries) {
-      if (entry.path.endsWith("/")) continue;
-      const text = await readSandboxText(ops, `/workspace/site/dist/${entry.path}`);
-      zip.addFile(entry.path, Buffer.from(text, "utf8"));
+    for (const name of await listDistFiles(ops)) {
+      const text = await readSandboxText(ops, `site/dist/${name}`);
+      zip.addFile(name, Buffer.from(text, "utf8"));
     }
     const downloadPath = join(baseDir, "site.zip");
     zip.writeZip(downloadPath);
@@ -254,6 +274,44 @@ export async function processSiteBuildJob(
       console.warn(`[sites] sandbox destroy failed ${siteId}`, error);
     });
   }
+}
+
+const SITE_DIST_DIR = "site/dist";
+
+/**
+ * Recursively list the production build output (`site/dist`), returning
+ * dist-relative file names. Sandbox `listFiles` is a single-level listing
+ * with workspace-relative entry paths, so directories are descended into.
+ * Entries outside `site/dist/` are ignored (the unit-test fake lists every
+ * stored key regardless of the requested directory).
+ */
+async function listDistFiles(
+  sandbox: Pick<SandboxSession, "listFiles">,
+): Promise<string[]> {
+  const names: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await sandbox.listFiles({ path: dir });
+    for (const entry of entries) {
+      if (entry.type === "directory" || entry.path.endsWith("/")) {
+        await walk(entry.path.replace(/\/$/, ""));
+        continue;
+      }
+      const distName = toDistName(entry.path);
+      if (distName) names.push(distName);
+    }
+  };
+  await walk(SITE_DIST_DIR);
+  return [...new Set(names)].sort();
+}
+
+function toDistName(workspacePath: string): string | null {
+  const normalized = workspacePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (normalized.startsWith(`${SITE_DIST_DIR}/`)) {
+    return normalized.slice(SITE_DIST_DIR.length + 1);
+  }
+  // Unit-test fake compat: bare `dist/...` keys.
+  if (normalized.startsWith("dist/")) return normalized.slice("dist/".length);
+  return null;
 }
 
 async function readSandboxText(

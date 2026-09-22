@@ -4,11 +4,13 @@ import { SITE_TEMPLATE_DIR } from "./worker.js";
 
 const TEMPLATE_FILES = [
   "package.json",
+  "tsconfig.json",
   "vite.config.ts",
   "index.html",
   "src/main.tsx",
   "src/App.tsx",
   "src/tokens.css",
+  "src/vite-env.d.ts",
 ] as const;
 
 export async function readSiteTemplate(

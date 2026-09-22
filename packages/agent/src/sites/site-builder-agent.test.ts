@@ -39,6 +39,12 @@ describe("createSiteBuilderAgent", () => {
     ]);
   });
 
+  it("accepts an explicit model without throwing", () => {
+    expect(() =>
+      createSiteBuilderAgent({ model: { provider: "stub" } as never, tools: [] }),
+    ).not.toThrow();
+  });
+
   it("bans placeholders and backend code in the instructions", () => {
     expect(SITE_BUILDER_INSTRUCTIONS).toContain("lorem ipsum");
     expect(SITE_BUILDER_INSTRUCTIONS.toLowerCase()).toContain("no backend");

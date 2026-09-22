@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompletionModel } from "@anvia/core/completion";
 import {
   SITE_BRIEF_MAX_PROMPT_CHARS,
+  extractSiteBriefJson,
   isSiteBuilderIntent,
   parseSiteBrief,
 } from "./site-plan.js";
@@ -40,6 +41,31 @@ describe("isSiteBuilderIntent", () => {
   });
 });
 
+describe("extractSiteBriefJson", () => {
+  const brief = {
+    siteName: "Kopi Senja",
+    audience: "pecinta kopi",
+    cta: "Pesan Sekarang",
+    sections: ["hero", "kontak"],
+    vibe: "hangat",
+  };
+
+  it("extracts JSON from a fenced code block with surrounding commentary", () => {
+    const text = `Siap! Berikut briefnya:\n\`\`\`json\n${JSON.stringify(brief)}\n\`\`\`\nSemoga membantu!`;
+    expect(extractSiteBriefJson(text)).toEqual(brief);
+  });
+
+  it("parses a bare JSON object", () => {
+    expect(extractSiteBriefJson(JSON.stringify(brief))).toEqual(brief);
+  });
+
+  it("throws when the text contains no JSON object", () => {
+    expect(() => extractSiteBriefJson("Maaf, saya tidak mengerti.")).toThrow(
+      /no JSON object/i,
+    );
+  });
+});
+
 describe("parseSiteBrief", () => {
   it("returns the structured brief with usage", async () => {
     const brief = {
@@ -63,6 +89,34 @@ describe("parseSiteBrief", () => {
     await expect(
       parseSiteBrief({ model: fakeModel("not json"), modelId: "stub", prompt: "x" }),
     ).rejects.toThrow();
+  });
+
+  it("falls back to JSON-from-text when structured output fails", async () => {
+    const brief = {
+      siteName: "Kopi Senja",
+      audience: "pecinta kopi",
+      cta: "Pesan Sekarang",
+      sections: ["hero", "kontak"],
+      vibe: "hangat",
+    };
+    const texts = [
+      "not json",
+      `Siap! Berikut briefnya:\n\`\`\`json\n${JSON.stringify(brief)}\n\`\`\``,
+    ];
+    const completion = vi.fn(async () => ({
+      choice: [
+        {
+          type: "text" as const,
+          text: texts[Math.min(completion.mock.calls.length - 1, texts.length - 1)],
+        },
+      ],
+      usage: { inputTokens: 5, outputTokens: 8 },
+      rawResponse: {},
+    }));
+    const model = { ...fakeModel(""), completion } as unknown as CompletionModel;
+    const result = await parseSiteBrief({ model, modelId: "stub", prompt: "x" });
+    expect(result.brief).toEqual(brief);
+    expect(completion).toHaveBeenCalledTimes(2);
   });
 
   it("caps the prompt length", () => {
