@@ -37,9 +37,20 @@ export function siteBuildJobId(siteId: string, version: number): string {
 
 export async function enqueueSiteBuild(
   input: SiteBuildJobData,
-  queueOverride?: Pick<Queue<SiteBuildJobData>, "add">,
+  queueOverride?: Pick<Queue<SiteBuildJobData>, "add" | "getJob">,
 ): Promise<void> {
   if (!siteBuildEnabled()) return;
   const jobId = siteBuildJobId(input.siteId, input.version);
-  await (queueOverride ?? getSiteBuildQueue()).add(jobId, input, { jobId });
+  const queue = queueOverride ?? getSiteBuildQueue();
+  // Re-adding a failed version would dedupe onto the dead record and never
+  // run. Re-run that record instead so retry truly rebuilds.
+  const existing = await queue.getJob(jobId).catch(() => null);
+  if (existing) {
+    const state = await existing.getState().catch(() => null);
+    if (state === "failed" && typeof existing.retry === "function") {
+      await existing.retry();
+      return;
+    }
+  }
+  await queue.add(jobId, input, { jobId });
 }

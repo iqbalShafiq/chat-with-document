@@ -7,6 +7,7 @@ vi.mock("../../lib/redis.js", () => ({
 vi.mock("bullmq", () => ({
   Queue: class FakeQueue {
     add = vi.fn(async () => ({}));
+    getJob = vi.fn(async () => null);
   },
 }));
 
@@ -62,6 +63,25 @@ describe("site build queue", () => {
       },
       { jobId: "site-build:site-1:v2" },
     );
+  });
+
+  it("retries the existing job when the same version already failed", async () => {
+    const retry = vi.fn(async () => undefined);
+    const queue = getSiteBuildQueue();
+    vi.mocked(queue.getJob).mockResolvedValueOnce({
+      getState: async () => "failed",
+      retry,
+    } as never);
+    await enqueueSiteBuild({
+      siteId: "site-1",
+      sessionId: "session-1",
+      userId: "user-1",
+      prompt: "bikinkan landing page kopi",
+      brief: null,
+      version: 2,
+    });
+    expect(retry).toHaveBeenCalledOnce();
+    expect(vi.mocked(queue.add)).not.toHaveBeenCalled();
   });
 
   it("does nothing when the builder is disabled", async () => {
