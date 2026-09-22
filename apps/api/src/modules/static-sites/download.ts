@@ -20,7 +20,7 @@ siteDownloadRouter.use("*", requireUser);
 // unchanged: GET /api/sites/:siteId/v:version/download.
 siteDownloadRouter.get("/:siteId/:version/download", async (c) => {
   const siteId = c.req.param("siteId");
-  const rawVersion = c.req.param("version");
+  const rawVersion = String(c.req.param("version") ?? "");
   const version = rawVersion.startsWith("v") ? Number(rawVersion.slice(1)) : NaN;
   try {
     assertSafeSiteId(siteId);

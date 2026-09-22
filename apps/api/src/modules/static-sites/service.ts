@@ -81,7 +81,9 @@ export async function readSiteManifest(
   try {
     const raw = await readFile(manifestPath(siteId, dirOverride), "utf8");
     return JSON.parse(raw) as SiteManifest;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    console.warn(`[sites] manifest read failed ${siteId}`, error);
     return null;
   }
 }

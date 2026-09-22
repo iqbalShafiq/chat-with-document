@@ -157,9 +157,10 @@ export async function processSiteBuildJob(
   await progress("starting", "Menyiapkan sandbox build.");
 
   const createSession = deps.createSandboxSession ?? defaultCreateSandboxSession;
-  const session = await createSession();
-  const ops = (session.runtime as Omit<SandboxSession, "destroy" | "runtime"> | undefined) ?? session;
+  let session: SandboxSession | undefined;
   try {
+    session = await createSession();
+    const ops = (session.runtime as Omit<SandboxSession, "destroy" | "runtime"> | undefined) ?? session;
     const readTemplate = deps.readTemplate ?? (await import("./template.js")).readSiteTemplate;
     const template = await readTemplate();
     for (const [path, text] of Object.entries(template)) {
@@ -180,7 +181,7 @@ export async function processSiteBuildJob(
     try {
       tools = createDockerSandboxTools({
         sandbox: ((session.runtime ?? session) as unknown as DockerSandboxRuntime),
-        tools: ["exec_command", "read_file", "write_file", "list_files", "start_process", "wait_for_port"],
+        tools: ["exec_command", "read_file", "write_file", "list_files"],
         exec: { commands: { mode: "allow", values: ["npm", "npx", "node"] } },
       }) as unknown as { name: string }[];
     } catch (error) {
@@ -268,9 +269,10 @@ export async function processSiteBuildJob(
       prompt,
       updatedAt: new Date().toISOString(),
     });
+    await progress("failed", "Build gagal.");
     throw error;
   } finally {
-    await session.destroy().catch((error) => {
+    await session?.destroy()?.catch((error) => {
       console.warn(`[sites] sandbox destroy failed ${siteId}`, error);
     });
   }
@@ -306,8 +308,11 @@ async function listDistFiles(
 
 function toDistName(workspacePath: string): string | null {
   const normalized = workspacePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (normalized.split("/").includes("..")) return null;
   if (normalized.startsWith(`${SITE_DIST_DIR}/`)) {
-    return normalized.slice(SITE_DIST_DIR.length + 1);
+    const distName = normalized.slice(SITE_DIST_DIR.length + 1);
+    if (!distName || distName.split("/").includes("..")) return null;
+    return distName;
   }
   return null;
 }

@@ -67,6 +67,7 @@ function fakeSandbox() {
 }
 
 import { processSiteBuildJob } from "./worker.js";
+import { readSiteManifest } from "./service.js";
 
 const JOB = {
   data: {
@@ -207,5 +208,90 @@ describe("processSiteBuildJob", () => {
     const entries = new AdmZip(await readFile(zipPath)).getEntries().map((e) => e.entryName);
     expect(entries).toContain("index.html");
     expect(entries).toContain("assets/app.js");
+  });
+
+  it("writes a failed manifest and publishes failed phase when sandbox creation fails", async () => {
+    const siteId = "site-session-fail";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const published: { appEvent: { type: string; phase?: string } }[] = [];
+    await expect(
+      processSiteBuildJob(
+        { data: { ...JOB.data, siteId } },
+        {
+          createSandboxSession: async () => {
+            throw new Error("docker down");
+          },
+          publish: async (event: unknown) => {
+            published.push(event as { appEvent: { type: string; phase?: string } });
+          },
+          readTemplate: async () => ({ "package.json": "{}" }),
+          runBuilderAgent: f.agentRun,
+        },
+      ),
+    ).rejects.toThrow("docker down");
+    const manifest = await readSiteManifest(siteId, dataDir);
+    expect(manifest?.status).toBe("failed");
+    expect(manifest?.error).toContain("docker down");
+    expect(
+      published.some((event) => event.appEvent?.type === "site_build_ready"),
+    ).toBe(false);
+    expect(
+      published.some(
+        (event) =>
+          event.appEvent?.type === "site_build_progress" &&
+          event.appEvent?.phase === "failed",
+      ),
+    ).toBe(true);
+  });
+
+  it("skips zip-slip dist entries containing .. segments", async () => {
+    const siteId = "site-zip-slip";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const files = new Map<string, string>([
+      ["site/dist/index.html", "<html></html>"],
+      ["site/dist/../../evil.txt", "evil"],
+    ]);
+    const sandbox = {
+      destroyed: false,
+      publishedPorts: [{ containerPort: 4173, hostPort: 49111 }],
+      async exec() {
+        return { status: "exited" as const, exitCode: 0, stdout: "", stderr: "" };
+      },
+      async writeTextFile({ path, text }: { path: string; text: string }) {
+        files.set(path, text);
+      },
+      async readTextFilePage({ path }: { path: string }) {
+        return { content: files.get(path) ?? "", startLine: 1, endLine: 1, nextStartLine: null, truncated: false, truncatedBy: null };
+      },
+      async listFiles() {
+        return [...files.keys()].map((path) => ({ path, type: "file" as const }));
+      },
+      async startProcess() {
+        return { id: "p1" };
+      },
+      async waitForPort() {
+        return { containerPort: 4173, host: "127.0.0.1", hostPort: 49111 };
+      },
+      async destroy() {
+        (this as { destroyed: boolean }).destroyed = true;
+      },
+    };
+    await processSiteBuildJob(
+      { data: { ...JOB.data, siteId } },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async () => undefined,
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    const zipPath = join(dataDir, siteId, "v1", "site.zip");
+    const entries = new AdmZip(await readFile(zipPath)).getEntries().map((e) => e.entryName);
+    expect(entries).toContain("index.html");
+    expect(entries.some((name) => name.includes("evil"))).toBe(false);
+    expect(entries.some((name) => name.includes(".."))).toBe(false);
   });
 });
