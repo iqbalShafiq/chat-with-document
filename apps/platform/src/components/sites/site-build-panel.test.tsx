@@ -1,8 +1,19 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { applySiteBuildEvent, applySiteVersionEvent, resolveSiteUrl, stableSiteUrls, SiteBuildPanel } from "./site-build-panel.js";
 import { API_BASE } from "#/lib/api";
+
+beforeEach(() => {
+  if (typeof HTMLDialogElement.prototype.showModal !== "function") {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute("open");
+    };
+  }
+});
 
 afterEach(() => {
   cleanup();
@@ -161,7 +172,7 @@ describe("SiteBuildPanel", () => {
     expect(screen.getByRole("status").className).toMatch(/skeleton-shimmer/);
   });
 
-  it("shows preview, download, and retry on failure", () => {
+  it("shows download and retry on failure without a preview trigger", () => {
     const onRetry = vi.fn();
     const { rerender } = render(
       <SiteBuildPanel
@@ -178,12 +189,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.getByTitle("Preview s").getAttribute("src")).toBe(
-      "http://127.0.0.1:49111",
-    );
-    expect(screen.getByText("Unduh zip").getAttribute("href")).toBe(
-      `${API_BASE}/api/sites/s/v1/download`,
-    );
+    expect(screen.getByText("Lihat pratinjau")).toBeTruthy();
 
     rerender(
       <SiteBuildPanel
@@ -204,7 +210,7 @@ describe("SiteBuildPanel", () => {
     expect(onRetry).toHaveBeenCalledWith("s");
   });
 
-  it("resolves relative preview and download paths against the API base", () => {
+  it("opens the preview in a full-size dialog only on request", () => {
     render(
       <SiteBuildPanel
         build={{
@@ -220,12 +226,20 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.getByTitle("Preview s").getAttribute("src")).toBe(
+    const dialog = () => document.querySelector("dialog") as HTMLDialogElement | null;
+    expect(dialog()?.open).toBe(false);
+    act(() => {
+      screen.getByText("Lihat pratinjau").click();
+    });
+    const frame = screen.getByTitle("Preview s");
+    expect(frame.getAttribute("src")).toBe(
       `${API_BASE}/api/sites/s/v1/preview/index.html`,
     );
-    expect(screen.getByText("Unduh zip").getAttribute("href")).toBe(
-      `${API_BASE}/api/sites/s/v1/download`,
-    );
+    expect(dialog()?.open).toBe(true);
+    act(() => {
+      screen.getByRole("button", { name: "Close" }).click();
+    });
+    expect(dialog()?.open).toBe(false);
   });
 
   it("renders version history with stable marker and rollback", () => {
@@ -328,7 +342,7 @@ describe("SiteBuildPanel", () => {
   });
 
   it("collapses and expands the card body", () => {
-    render(
+    const { container } = render(
       <SiteBuildPanel
         build={{
           siteId: "s",
@@ -343,18 +357,19 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
+    const isBodyHidden = () => container.querySelector("div[hidden]") !== null;
     expect(screen.getByRole("button", { expanded: true })).toBeTruthy();
-    expect(screen.getByTitle("Preview s")).toBeTruthy();
+    expect(isBodyHidden()).toBe(false);
     act(() => {
       screen.getByRole("button", { expanded: true }).click();
     });
     expect(screen.getByRole("button", { expanded: false })).toBeTruthy();
-    expect(screen.getByTitle("Preview s").parentElement?.hasAttribute("hidden")).toBe(true);
+    expect(isBodyHidden()).toBe(true);
     act(() => {
       screen.getByRole("button", { expanded: false }).click();
     });
     expect(screen.getByRole("button", { expanded: true })).toBeTruthy();
-    expect(screen.getByTitle("Preview s").parentElement?.hasAttribute("hidden")).toBe(false);
+    expect(isBodyHidden()).toBe(false);
   });
 
   it("styles the download link as a button", () => {
@@ -373,12 +388,15 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    const link = screen.getByText("Unduh zip").closest("a");
-    expect(link?.getAttribute("href")).toBe(
-      `${API_BASE}/api/sites/s/v1/download`,
-    );
-    expect(link?.className).toMatch(/inline-flex/);
-    expect(link?.className).toMatch(/rounded-xl/);
+    const links = screen.getAllByText("Unduh zip").map((node) => node.closest("a"));
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link?.getAttribute("href")).toBe(
+        `${API_BASE}/api/sites/s/v1/download`,
+      );
+      expect(link?.className).toMatch(/inline-flex/);
+      expect(link?.className).toMatch(/rounded-xl/);
+    }
   });
 
   it("renders nothing without a build", () => {

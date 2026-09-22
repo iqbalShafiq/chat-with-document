@@ -126,11 +126,11 @@ describe("ChatRouteView site panel", () => {
     bySessionPayloads.set("session-a", { sites: [siteEntry(2, 2)] });
     render(<ChatRouteView {...baseProps} sessionId="session-a" />);
     await screen.findByLabelText("Site build");
-    expect(screen.getByText("Unduh zip").getAttribute("href")).toContain("/v2/download");
+    expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v2/download");
 
     screen.getAllByText("Rollback")[0].click();
     await waitFor(() => {
-      expect(screen.getByText("Unduh zip").getAttribute("href")).toContain("/v1/download");
+      expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v1/download");
     });
   });
 });
