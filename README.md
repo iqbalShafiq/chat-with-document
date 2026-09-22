@@ -46,6 +46,7 @@ Alur singkat:
 | Multi-session | Session ID di `localStorage`; daftar session dari DB |
 | Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
 | Image generation | `generate_image`/`edit_image`, katalog model image, galeri session + proyek, background transparan |
+| Static sites | Chat builder: follow-up iterate via rekomendasi agent + konfirmasi user (wizard klarifikasi), riwayat versi + rollback, preview statis permanen + unduh `site.zip`, panel di atas composer |
 | Human approval | Policy consent gate (web + image tools) + `request_clarification` wizard |
 | Model registry | Katalog model text/image via `chat_model` (`outputType`/`imageCapabilities`), seed idempotent |
 | Math rendering | `react-markdown` + `remark-math` + `rehype-katex` |
