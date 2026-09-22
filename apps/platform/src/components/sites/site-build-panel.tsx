@@ -1,5 +1,6 @@
-import { Check, Loader2 } from "lucide-react";
-import { Button } from "#/components/ui/button";
+import { useId, useState } from "react";
+import { Check, ChevronDown, Download, Loader2 } from "lucide-react";
+import { Button, BUTTON_BASE_CLASS, BUTTON_SIZE_CLASSES, BUTTON_VARIANT_CLASSES } from "#/components/ui/button";
 import { API_BASE } from "#/lib/api";
 import type { SiteBuildProgress, SiteBuildReady } from "../../lib/chat/client-data.js";
 
@@ -126,8 +127,11 @@ export function SiteBuildPanel({
   onRollback: (siteId: string, version: number) => void;
 }) {
   if (!build) return null;
-  const active = phaseIndex(build.phase);
+  const done = build.phase === "ready";
+  const active = done ? SITE_BUILD_PHASES.length : phaseIndex(build.phase);
   const isFailed = build.phase === "failed";
+  const [open, setOpen] = useState(true);
+  const bodyId = useId();
   return (
     <section
       aria-label="Site build"
@@ -137,9 +141,27 @@ export function SiteBuildPanel({
           : "border-accent/20 bg-accent/[0.04]"
       }`}
     >
-      <p>
-        v{build.version} · {build.message}
-      </p>
+      <div className="flex min-w-0 items-center gap-2">
+        <p className="min-w-0 flex-1 truncate">
+          v{build.version} · {build.message}
+        </p>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen((current) => !current)}
+          className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-medium text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+        >
+          <span>{open ? "Sembunyikan" : "Tampilkan"}</span>
+          <ChevronDown
+            className={`size-3 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+              open ? "rotate-180" : ""
+            }`}
+            strokeWidth={2}
+          />
+        </button>
+      </div>
+      <div id={bodyId} hidden={!open}>
       <ol>
         {SITE_BUILD_PHASES.map((entry, index) => {
           const stepState = index < active ? "done" : index === active ? "active" : "todo";
@@ -176,11 +198,29 @@ export function SiteBuildPanel({
         </Button>
       ) : null}
       {build.previewUrl ? (
-        <iframe title={`Preview ${build.siteId}`} src={resolveSiteUrl(build.previewUrl)} sandbox="allow-scripts" />
+        <iframe
+          title={`Preview ${build.siteId}`}
+          src={resolveSiteUrl(build.previewUrl)}
+          sandbox="allow-scripts"
+          className="h-64 w-full rounded-lg border border-white/10 bg-black"
+        />
       ) : (
         <div role="status" className="skeleton-shimmer rounded-lg px-3 py-2.5 text-[11px] text-text-muted">Pratinjau segera hadir.</div>
       )}
-      {build.downloadUrl ? <a href={resolveSiteUrl(build.downloadUrl)} download>Unduh zip</a> : null}
+      {build.downloadUrl ? (
+        <a
+          href={resolveSiteUrl(build.downloadUrl)}
+          download
+          className={[
+            BUTTON_BASE_CLASS,
+            BUTTON_VARIANT_CLASSES.secondary,
+            BUTTON_SIZE_CLASSES.sm,
+          ].join(" ")}
+        >
+          <Download className="size-3.5" strokeWidth={2} aria-hidden="true" />
+          Unduh zip
+        </a>
+      ) : null}
       {versions.length > 1 ? (
         <ol aria-label="Versi">
           {versions.map((entry) => (
@@ -194,6 +234,7 @@ export function SiteBuildPanel({
           ))}
         </ol>
       ) : null}
+      </div>
     </section>
   );
 }

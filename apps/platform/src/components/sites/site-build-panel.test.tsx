@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { applySiteBuildEvent, applySiteVersionEvent, resolveSiteUrl, stableSiteUrls, SiteBuildPanel } from "./site-build-panel.js";
 import { API_BASE } from "#/lib/api";
 
@@ -304,6 +304,81 @@ describe("SiteBuildPanel", () => {
       />,
     );
     expect(screen.queryByRole("list", { name: "Versi" })).toBeNull();
+  });
+
+  it("marks every step done with no spinner once ready", () => {
+    const { container } = render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 1,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "/api/sites/s/v1/preview/index.html",
+          downloadUrl: "/api/sites/s/v1/download",
+        }}
+        versions={[]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Siap").getAttribute("data-state")).toBe("done");
+    expect(screen.queryByRole("button", { name: /langkah|step/i })).toBeNull();
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("collapses and expands the card body", () => {
+    render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 1,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "/api/sites/s/v1/preview/index.html",
+          downloadUrl: "/api/sites/s/v1/download",
+        }}
+        versions={[]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    expect(screen.getByRole("button", { expanded: true })).toBeTruthy();
+    expect(screen.getByTitle("Preview s")).toBeTruthy();
+    act(() => {
+      screen.getByRole("button", { expanded: true }).click();
+    });
+    expect(screen.getByRole("button", { expanded: false })).toBeTruthy();
+    expect(screen.getByTitle("Preview s").parentElement?.hasAttribute("hidden")).toBe(true);
+    act(() => {
+      screen.getByRole("button", { expanded: false }).click();
+    });
+    expect(screen.getByRole("button", { expanded: true })).toBeTruthy();
+    expect(screen.getByTitle("Preview s").parentElement?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("styles the download link as a button", () => {
+    render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 1,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "/api/sites/s/v1/preview/index.html",
+          downloadUrl: "/api/sites/s/v1/download",
+        }}
+        versions={[]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    const link = screen.getByText("Unduh zip").closest("a");
+    expect(link?.getAttribute("href")).toBe(
+      `${API_BASE}/api/sites/s/v1/download`,
+    );
+    expect(link?.className).toMatch(/inline-flex/);
+    expect(link?.className).toMatch(/rounded-xl/);
   });
 
   it("renders nothing without a build", () => {
