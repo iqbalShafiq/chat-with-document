@@ -17,7 +17,7 @@ const BRIEF: SiteBrief = {
 
 function deps(overrides: Record<string, unknown> = {}) {
   return {
-    parseBrief: vi.fn(async () => ({ brief: BRIEF, usage: { inputTokens: 1, outputTokens: 1 } })),
+    parseBrief: vi.fn(async () => ({ brief: BRIEF, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0, cacheCreationInputTokens: 0 } })),
     readActiveSite: vi.fn(async () => null),
     enqueueBuild: vi.fn(async () => ({ siteId: "new-id", version: 1 })),
     ...overrides,
