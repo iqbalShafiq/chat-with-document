@@ -18,6 +18,7 @@ import {
   sealRetrievalAfterDeepResearch,
   createImageGenerationTools,
   createRememberUserProfileTool,
+  createSiteBuildTools,
   createSqlJsRunner,
   createTabularAnalysisTools,
   createChartTools,
@@ -32,6 +33,8 @@ import {
   buildImageGenerationInstruction,
   BASE_INSTRUCTIONS,
   CLARIFICATION_TOOL_DEFINITIONS,
+  SITE_BUILD_TOOL_DEFINITIONS,
+  SITE_BUILD_TOOL_INSTRUCTIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
@@ -42,6 +45,7 @@ import {
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
+  parseSiteBrief,
   providerOptionsForReasoning,
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
@@ -129,6 +133,10 @@ import {
   type ChatAgentRecipe,
   type ChatAgentSnippetDescriptor,
 } from "./run-recipe.js";
+import {
+  enqueueSiteBuildFromTool,
+  readActiveSiteTitle,
+} from "../static-sites/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
 function buildProjectWorkspaceContext(input: {
@@ -827,6 +835,7 @@ export async function resolveChatAgentRecipe(
     : null;
 
   instructions.push(CLARIFICATION_INSTRUCTION);
+  instructions.push(SITE_BUILD_TOOL_INSTRUCTIONS);
   if (context7Requested) {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
@@ -885,6 +894,7 @@ export async function resolveChatAgentRecipe(
     ...(deepResearchAvailable ? DEEP_RESEARCH_TOOL_DEFINITIONS : []),
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
+    ...SITE_BUILD_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
     ...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : []),
   ];
@@ -1402,6 +1412,22 @@ export async function reconstructChatRunInput(input: {
   // Native v1 questions are serializable interactions and do not need an
   // application Promise/Redis requester in the worker process.
   tools.push(createClarificationTool());
+  // ToolCallContext carries only { emitStreamEvent?, abortSignal? } — never
+  // session/model. Bind recipe identity into the deps closures instead.
+  const siteBoundModel = makeCompletionModel(model);
+  tools.push(
+    ...createSiteBuildTools({
+      parseBrief: (args) =>
+        parseSiteBrief({
+          model: siteBoundModel,
+          modelId: model,
+          prompt: args.prompt,
+          ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
+        }),
+      readActiveSite: () => readActiveSiteTitle(sessionId),
+      enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),
+    }),
+  );
   const waitRegistry = runtime?.waitRegistry ?? new InFlightToolRegistry();
   const waitIds = createToolCallIdGate();
   const waitProgress = runtime?.onToolWaitProgress;

@@ -13,6 +13,7 @@ import {
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
+  SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
 } from "@anreal/agent";
@@ -105,6 +106,7 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...(capabilities.deepResearchAvailable ? DEEP_RESEARCH_TOOL_DEFINITIONS : []),
     ...(capabilities.imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
+    ...SITE_BUILD_TOOL_DEFINITIONS,
     ...(!capabilities.modelAcceptsImage
       ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
       : []),

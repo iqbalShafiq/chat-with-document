@@ -3,7 +3,9 @@ import {
   parseCompletionModel,
   type CompletionModelId,
 } from "@anreal/agent";
+import type { SiteBrief } from "@anreal/agent";
 import type { CompletionModel } from "@anvia/core";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -86,4 +88,92 @@ export async function readSiteManifest(
     console.warn(`[sites] manifest read failed ${siteId}`, error);
     return null;
   }
+}
+
+function sitesIndexPath(dirOverride?: string): string {
+  return join(dirOverride ?? siteDataDir(), "sites-index.json");
+}
+
+export async function readActiveSiteTitle(
+  sessionId: string,
+  dirOverride?: string,
+): Promise<{ siteId: string; siteName: string } | null> {
+  if (!sessionId) return null;
+  try {
+    const raw = await readFile(sitesIndexPath(dirOverride), "utf8");
+    const entry = (JSON.parse(raw) as Record<string, unknown>)[sessionId];
+    if (typeof entry !== "object" || entry === null) return null;
+    const { siteId, siteName } = entry as { siteId?: unknown; siteName?: unknown };
+    if (typeof siteId !== "string" || !siteId) return null;
+    if (typeof siteName !== "string" || !siteName) return null;
+    return { siteId, siteName };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    console.warn("[sites] index read failed", error);
+    return null;
+  }
+}
+
+export async function enqueueSiteBuildFromTool(
+  input: {
+    siteId: string | null;
+    sessionId: string;
+    userId: string;
+    prompt: string;
+    brief: SiteBrief;
+  },
+  dirOverride?: string,
+): Promise<{ siteId: string; version: number }> {
+  let siteId = input.siteId;
+  let version: number;
+  if (!siteId) {
+    siteId = randomUUID();
+    version = 1;
+  } else {
+    const existing = await readSiteManifest(siteId, dirOverride);
+    version = (existing?.version ?? 0) + 1;
+  }
+  await writeSiteManifest(
+    {
+      siteId,
+      sessionId: input.sessionId,
+      userId: input.userId,
+      version,
+      status: "queued",
+      previewUrl: null,
+      downloadPath: null,
+      error: null,
+      prompt: input.prompt,
+      updatedAt: new Date().toISOString(),
+    },
+    dirOverride,
+  );
+  if (input.sessionId) {
+    try {
+      const path = sitesIndexPath(dirOverride);
+      let index: Record<string, { siteId: string; siteName: string }> = {};
+      try {
+        index = JSON.parse(await readFile(path, "utf8")) as typeof index;
+        if (typeof index !== "object" || index === null || Array.isArray(index)) index = {};
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+          console.warn("[sites] index read failed", error);
+        }
+      }
+      index[input.sessionId] = { siteId, siteName: input.brief.siteName };
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, JSON.stringify(index, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[sites] index write failed", error);
+    }
+  }
+  const { enqueueSiteBuild } = await import("./queue.js");
+  await enqueueSiteBuild({
+    siteId,
+    sessionId: input.sessionId,
+    userId: input.userId,
+    prompt: input.prompt,
+    version,
+  });
+  return { siteId, version };
 }
