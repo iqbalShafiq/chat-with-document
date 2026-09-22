@@ -61,7 +61,7 @@ function fakeSandbox() {
 }
 
 import { processSiteBuildJob } from "./worker.js";
-import { readSiteManifest, writeSiteManifest, writeSitesIndex } from "./service.js";
+import { readActiveSiteTitle, readSiteManifest, writeSiteManifest, writeSitesIndex } from "./service.js";
 
 const JOB = {
   data: {
@@ -202,6 +202,8 @@ describe("processSiteBuildJob", () => {
     const entries = new AdmZip(await readFile(zipPath)).getEntries().map((e) => e.entryName);
     expect(entries).toContain("index.html");
     expect(entries).toContain("assets/app.js");
+    expect(await readFile(join(dataDir, siteId, "v1", "index.html"), "utf8")).toBe("<html></html>");
+    expect(await readFile(join(dataDir, siteId, "v1", "assets", "app.js"), "utf8")).toBe("console.log(1)");
   });
 
   it("writes a failed manifest and publishes failed phase when sandbox creation fails", async () => {
@@ -307,11 +309,34 @@ describe("processSiteBuildJob", () => {
     expect(manifest?.previewUrl).toBe(`/api/sites/${siteId}/v1/preview/index.html`);
     expect(manifest?.stableVersion).toBe(1);
     expect(manifest?.versions[1]?.status).toBe("ready");
+    expect(await readFile(join(dataDir, siteId, "v1", "index.html"), "utf8")).toBe("<html></html>");
     const index = JSON.parse(await readFile(join(dataDir, "sites-index.json"), "utf8"));
-    expect(index).toMatchObject({ [sessionId]: siteId });
+    expect(index).toMatchObject({ [sessionId]: { siteId, siteName: "Kopi Senja" } });
     const ready = published.find((event) => event.appEvent?.type === "site_build_ready");
     expect(ready?.appEvent.previewUrl).toBe(`/api/sites/${siteId}/v1/preview/index.html`);
     expect(ready?.appEvent.downloadUrl).toBe(`/api/sites/${siteId}/v1/download`);
+  });
+
+  it("worker index write satisfies the readActiveSiteTitle contract", async () => {
+    const siteId = "site-active-title";
+    const sessionId = "session-active";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const sandbox = fakeSandbox();
+    await processSiteBuildJob(
+      { data: { ...JOB.data, siteId, sessionId } },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async () => undefined,
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    await expect(readActiveSiteTitle(sessionId, dataDir)).resolves.toEqual({
+      siteId,
+      siteName: "Kopi Senja",
+    });
   });
 
   it("merges the versions map and preserves other sessions on iterate", async () => {
@@ -328,7 +353,7 @@ describe("processSiteBuildJob", () => {
       },
       dataDir,
     );
-    await writeSitesIndex({ "session-other": "site-other" }, dataDir);
+    await writeSitesIndex({ "session-other": { siteId: "site-other", siteName: "Lain" } }, dataDir);
     const sandbox = fakeSandbox();
     await processSiteBuildJob(
       { data: { ...JOB.data, siteId, sessionId: "session-1", version: 2 } },
@@ -347,7 +372,7 @@ describe("processSiteBuildJob", () => {
     expect(manifest?.versions[2]?.status).toBe("ready");
     expect(manifest?.previewUrl).toBe(`/api/sites/${siteId}/v2/preview/index.html`);
     const index = JSON.parse(await readFile(join(dataDir, "sites-index.json"), "utf8"));
-    expect(index).toMatchObject({ "session-other": "site-other", "session-1": siteId });
+    expect(index).toMatchObject({ "session-other": { siteId: "site-other", siteName: "Lain" }, "session-1": { siteId, siteName: "Kopi Senja" } });
   });
 
   it("preserves stableVersion and versions entries on failure", async () => {

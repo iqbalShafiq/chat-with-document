@@ -10,9 +10,9 @@ import {
   DockerSandboxClient,
   type DockerSandboxRuntime,
 } from "@anvia/sandbox";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import { SITE_BUILD_QUEUE, type SiteBuildJobData } from "./queue.js";
 import {
@@ -239,6 +239,9 @@ export async function processSiteBuildJob(
     for (const name of await listDistFiles(ops)) {
       const text = await readSandboxText(ops, `site/dist/${name}`);
       zip.addFile(name, Buffer.from(text, "utf8"));
+      const target = join(baseDir, name);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, Buffer.from(text, "utf8"));
     }
     const downloadPath = join(baseDir, "site.zip");
     zip.writeZip(downloadPath);
@@ -269,7 +272,7 @@ export async function processSiteBuildJob(
           console.warn("[sites] index read failed", error);
         }
       }
-      await writeSitesIndex({ ...existingIndex, [sessionId]: siteId });
+      await writeSitesIndex({ ...existingIndex, [sessionId]: { siteId, siteName: brief.siteName } });
     } catch (error) {
       console.warn("[sites] index write failed", error);
     }
