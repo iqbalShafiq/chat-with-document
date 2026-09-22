@@ -96,6 +96,61 @@ function sitesIndexPath(dirOverride?: string): string {
   return join(dirOverride ?? siteDataDir(), "sites-index.json");
 }
 
+export async function writeSitesIndex(
+  index: Record<string, string | { siteId: string; siteName: string }>,
+  dirOverride?: string,
+): Promise<void> {
+  const path = sitesIndexPath(dirOverride);
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(path, JSON.stringify(index, null, 2), "utf8");
+}
+
+export type SessionSiteEntry = {
+  siteId: string;
+  version: number;
+  stableVersion: number | null;
+  status: SiteBuildStatus;
+  previewUrl: string | null;
+  downloadUrl: string;
+  updatedAt: string;
+};
+
+export async function listSitesBySession(
+  sessionId: string,
+  dirOverride?: string,
+): Promise<SessionSiteEntry[]> {
+  try {
+    const raw = await readFile(sitesIndexPath(dirOverride), "utf8");
+    const index = JSON.parse(raw) as Record<string, unknown>;
+    const entry = index[sessionId];
+    let siteId: string | null = null;
+    if (typeof entry === "string") {
+      siteId = entry;
+    } else if (typeof entry === "object" && entry !== null) {
+      const candidate = (entry as { siteId?: unknown }).siteId;
+      if (typeof candidate === "string" && candidate) siteId = candidate;
+    }
+    if (!siteId) return [];
+    const manifest = await readSiteManifest(siteId, dirOverride);
+    if (!manifest) return [];
+    return [
+      {
+        siteId: manifest.siteId,
+        version: manifest.version,
+        stableVersion: manifest.stableVersion,
+        status: manifest.status,
+        previewUrl: manifest.previewUrl,
+        downloadUrl: `/api/sites/${manifest.siteId}/v${manifest.version}/download`,
+        updatedAt: manifest.updatedAt,
+      },
+    ];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    console.warn("[sites] session sites read failed", error);
+    return [];
+  }
+}
+
 export async function readActiveSiteTitle(
   sessionId: string,
   dirOverride?: string,
