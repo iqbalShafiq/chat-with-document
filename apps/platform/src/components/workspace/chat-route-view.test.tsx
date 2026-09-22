@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 type SiteEvent =
   | { name: "siteBuildProgress"; data: { siteId: string; version: number; phase: string; message: string } }
@@ -120,7 +120,7 @@ describe("ChatRouteView site panel", () => {
     bySessionPayloads.set("session-a", { sites: [siteEntry(1, 1)] });
     render(<ChatRouteView {...baseProps} sessionId="session-a" />);
     await screen.findByLabelText("Site build");
-    expect(screen.queryByRole("list", { name: "Versi" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Versi/ })).toBeNull();
 
     act(() => {
       capturedSiteEvent?.({
@@ -135,10 +135,13 @@ describe("ChatRouteView site panel", () => {
       });
     });
 
-    expect(await screen.findByRole("list", { name: "Versi" })).toBeTruthy();
-    const items = within(screen.getByRole("list", { name: "Versi" })).getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    expect(items[1].textContent).toContain("(stabil)");
+    const trigger = await screen.findByRole("button", { name: /Versi/ });
+    act(() => {
+      trigger.click();
+    });
+    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const options = Array.from(listbox.querySelectorAll("[data-option-value]")).map((o) => o.textContent);
+    expect(options).toEqual(["v2 (stabil)", "v1"]);
   });
 
   it("follows the stable pointer for download after rollback", async () => {
@@ -147,7 +150,15 @@ describe("ChatRouteView site panel", () => {
     await screen.findByLabelText("Site build");
     expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v2/download");
 
-    screen.getAllByText("Rollback")[0].click();
+    const select = await screen.findByRole("button", { name: /Versi/ });
+    act(() => {
+      select.click();
+    });
+    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const option = listbox.querySelector('[data-option-value="1"]');
+    expect(option).not.toBeNull();
+    fireEvent.click(option!);
+    screen.getByRole("button", { name: "Rollback" }).click();
     await waitFor(() => {
       expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v1/download");
     });

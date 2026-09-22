@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { applySiteBuildEvent, applySiteVersionEvent, resolveSiteUrl, stableSiteUrls, SiteBuildPanel } from "./site-build-panel.js";
 import { API_BASE } from "#/lib/api";
 
@@ -242,7 +242,7 @@ describe("SiteBuildPanel", () => {
     expect(dialog()?.open).toBe(false);
   });
 
-  it("renders version history with stable marker and rollback", () => {
+  it("renders compact version dropdown with stable marker and rollback", async () => {
     const onRollback = vi.fn();
     render(
       <SiteBuildPanel
@@ -258,7 +258,7 @@ describe("SiteBuildPanel", () => {
           {
             siteId: "s",
             version: 1,
-            status: "ready",
+            status: "failed",
             stable: false,
             previewUrl: "/api/sites/s/v1/preview/index.html",
             downloadUrl: "/api/sites/s/v1/download",
@@ -284,15 +284,25 @@ describe("SiteBuildPanel", () => {
         onRollback={onRollback}
       />,
     );
-    expect(screen.getByRole("list", { name: "Versi" })).toBeTruthy();
-    expect(screen.getByText(/\(stabil\)/)).toBeTruthy();
-    const rollbackButtons = screen.getAllByText("Rollback");
-    expect(rollbackButtons).toHaveLength(2);
-    rollbackButtons[0].click();
-    expect(onRollback).toHaveBeenCalledWith("s", 1);
+    // Shared Select trigger shows the stable version; options open on click.
+    act(() => {
+      screen.getByRole("button", { name: /Versi, v2 \(stabil\)/ }).click();
+    });
+    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const options = Array.from(listbox.querySelectorAll('[data-option-value]')).map((o) =>
+      o.textContent,
+    );
+    expect(options).toEqual(["v3", "v2 (stabil)", "v1 • gagal"]);
+    // Stable version is selected by default, so rollback starts disabled.
+    expect((screen.getByRole("button", { name: "Rollback" }) as HTMLButtonElement).disabled).toBe(true);
+    const option = listbox.querySelector('[data-option-value="3"]');
+    expect(option).not.toBeNull();
+    fireEvent.click(option!);
+    screen.getByRole("button", { name: "Rollback" }).click();
+    expect(onRollback).toHaveBeenCalledWith("s", 3);
   });
 
-  it("hides the version list for a single version", () => {
+  it("hides the version dropdown for a single version", () => {
     render(
       <SiteBuildPanel
         build={{
@@ -317,7 +327,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.queryByRole("list", { name: "Versi" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Versi/ })).toBeNull();
   });
 
   it("marks every step done with no spinner once ready", () => {
