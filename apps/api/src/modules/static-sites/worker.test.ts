@@ -54,12 +54,6 @@ function fakeSandbox() {
     async listFiles() {
       return [...files.keys()].map((path) => ({ path, type: "file" as const }));
     },
-    async startProcess() {
-      return { id: "p1" };
-    },
-    async waitForPort() {
-      return { containerPort: 4173, host: "127.0.0.1", hostPort: 49111 };
-    },
     async destroy() {
       (this as { destroyed: boolean }).destroyed = true;
     },
@@ -67,7 +61,7 @@ function fakeSandbox() {
 }
 
 import { processSiteBuildJob } from "./worker.js";
-import { readSiteManifest } from "./service.js";
+import { readSiteManifest, writeSiteManifest, writeSitesIndex } from "./service.js";
 
 const JOB = {
   data: {
@@ -110,6 +104,12 @@ describe("processSiteBuildJob", () => {
           (event as { appEvent: { type: string } }).appEvent?.type === "site_build_ready",
       ),
     ).toBe(true);
+    const ready = published.find(
+      (event) =>
+        (event as { appEvent: { type: string } }).appEvent?.type === "site_build_ready",
+    ) as { appEvent: { previewUrl: string; downloadUrl: string } } | undefined;
+    expect(ready?.appEvent.previewUrl).toBe("/api/sites/site-1/v1/preview/index.html");
+    expect(ready?.appEvent.downloadUrl).toBe("/api/sites/site-1/v1/download");
   });
 
   it("destroys the sandbox when the build fails", async () => {
@@ -183,12 +183,6 @@ describe("processSiteBuildJob", () => {
           else children.set(`${dir}/${rest.slice(0, slash)}`, "directory");
         }
         return [...children].map(([entryPath, type]) => ({ path: entryPath, type }));
-      },
-      async startProcess() {
-        return { id: "p1" };
-      },
-      async waitForPort() {
-        return { containerPort: 4173, host: "127.0.0.1", hostPort: 49111 };
       },
       async destroy() {
         (this as { destroyed: boolean }).destroyed = true;
@@ -268,12 +262,6 @@ describe("processSiteBuildJob", () => {
       async listFiles() {
         return [...files.keys()].map((path) => ({ path, type: "file" as const }));
       },
-      async startProcess() {
-        return { id: "p1" };
-      },
-      async waitForPort() {
-        return { containerPort: 4173, host: "127.0.0.1", hostPort: 49111 };
-      },
       async destroy() {
         (this as { destroyed: boolean }).destroyed = true;
       },
@@ -293,5 +281,111 @@ describe("processSiteBuildJob", () => {
     expect(entries).toContain("index.html");
     expect(entries.some((name) => name.includes("evil"))).toBe(false);
     expect(entries.some((name) => name.includes(".."))).toBe(false);
+  });
+
+  it("writes a static previewUrl, stableVersion, versions entry, and session index", async () => {
+    const siteId = "site-static-ready";
+    const sessionId = "session-static";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const sandbox = fakeSandbox();
+    const published: { appEvent: { type: string; previewUrl?: string; downloadUrl?: string } }[] = [];
+    await processSiteBuildJob(
+      { data: { ...JOB.data, siteId, sessionId } },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async (event: unknown) => {
+          published.push(event as { appEvent: { type: string } });
+        },
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    const manifest = await readSiteManifest(siteId, dataDir);
+    expect(manifest?.status).toBe("ready");
+    expect(manifest?.previewUrl).toBe(`/api/sites/${siteId}/v1/preview/index.html`);
+    expect(manifest?.stableVersion).toBe(1);
+    expect(manifest?.versions[1]?.status).toBe("ready");
+    const index = JSON.parse(await readFile(join(dataDir, "sites-index.json"), "utf8"));
+    expect(index).toMatchObject({ [sessionId]: siteId });
+    const ready = published.find((event) => event.appEvent?.type === "site_build_ready");
+    expect(ready?.appEvent.previewUrl).toBe(`/api/sites/${siteId}/v1/preview/index.html`);
+    expect(ready?.appEvent.downloadUrl).toBe(`/api/sites/${siteId}/v1/download`);
+  });
+
+  it("merges the versions map and preserves other sessions on iterate", async () => {
+    const siteId = "site-merge";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    await writeSiteManifest(
+      {
+        siteId, sessionId: "session-1", userId: "user-1", version: 1,
+        status: "ready", previewUrl: `/api/sites/${siteId}/v1/preview/index.html`,
+        downloadPath: "x", error: null, prompt: "x",
+        updatedAt: new Date(0).toISOString(), stableVersion: 1,
+        versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
+      },
+      dataDir,
+    );
+    await writeSitesIndex({ "session-other": "site-other" }, dataDir);
+    const sandbox = fakeSandbox();
+    await processSiteBuildJob(
+      { data: { ...JOB.data, siteId, sessionId: "session-1", version: 2 } },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async () => undefined,
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    const manifest = await readSiteManifest(siteId, dataDir);
+    expect(manifest?.status).toBe("ready");
+    expect(manifest?.stableVersion).toBe(2);
+    expect(manifest?.versions[1]?.status).toBe("ready");
+    expect(manifest?.versions[2]?.status).toBe("ready");
+    expect(manifest?.previewUrl).toBe(`/api/sites/${siteId}/v2/preview/index.html`);
+    const index = JSON.parse(await readFile(join(dataDir, "sites-index.json"), "utf8"));
+    expect(index).toMatchObject({ "session-other": "site-other", "session-1": siteId });
+  });
+
+  it("preserves stableVersion and versions entries on failure", async () => {
+    const siteId = "site-fail-merge";
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    await writeSiteManifest(
+      {
+        siteId, sessionId: "session-1", userId: "user-1", version: 1,
+        status: "ready", previewUrl: `/api/sites/${siteId}/v1/preview/index.html`,
+        downloadPath: "x", error: null, prompt: "x",
+        updatedAt: new Date(0).toISOString(), stableVersion: 1,
+        versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
+      },
+      dataDir,
+    );
+    const sandbox = fakeSandbox();
+    sandbox.exec = async () => ({
+      status: "exited" as const,
+      exitCode: 1,
+      stdout: "",
+      stderr: "boom",
+    });
+    await expect(
+      processSiteBuildJob(
+        { data: { ...JOB.data, siteId, version: 2 } },
+        {
+          createSandboxSession: async () => sandbox as never,
+          publish: async () => undefined,
+          readTemplate: async () => ({ "package.json": "{}" }),
+          runBuilderAgent: f.agentRun,
+        },
+      ),
+    ).rejects.toThrow();
+    const manifest = await readSiteManifest(siteId, dataDir);
+    expect(manifest?.status).toBe("failed");
+    expect(manifest?.stableVersion).toBe(1);
+    expect(manifest?.versions[1]?.status).toBe("ready");
+    expect(manifest?.versions[2]?.status).toBe("failed");
   });
 });

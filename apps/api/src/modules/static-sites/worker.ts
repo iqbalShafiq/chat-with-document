@@ -10,7 +10,7 @@ import {
   DockerSandboxClient,
   type DockerSandboxRuntime,
 } from "@anvia/sandbox";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
@@ -18,14 +18,15 @@ import { SITE_BUILD_QUEUE, type SiteBuildJobData } from "./queue.js";
 import {
   SITE_BUILD_TIMEOUT_MS,
   assertSafeSiteId,
+  readSiteManifest,
   siteBuildConfig,
   siteDataDir,
   writeSiteManifest,
+  writeSitesIndex,
   type SiteManifest,
 } from "./service.js";
 import { publishSiteBuildEvent, type SiteBuildPhase } from "../chat/site-events.js";
 
-export const SITE_PREVIEW_PORT = 4173;
 export const SITE_TEMPLATE_DIR = join(process.cwd(), "sites-template");
 
 export type BuilderAgentRunner = (input: {
@@ -105,7 +106,7 @@ async function defaultCreateSandboxSession(): Promise<SandboxSession> {
   const sandbox = await client.createSandbox({
     image: "node:22-bookworm",
     workspace: { type: "ephemeral" },
-    network: { mode: "bridge", ports: [SITE_PREVIEW_PORT] },
+    network: { mode: "bridge" },
   });
   const runtime = sandbox.runtime;
   return {
@@ -148,14 +149,15 @@ export async function processSiteBuildJob(
     });
 
   const runUpdatedAt = new Date().toISOString();
+  const runExisting = await readSiteManifest(siteId);
   await writeSiteManifest({
     siteId, sessionId, userId, version,
     status: "running",
     previewUrl: null, downloadPath: null, error: null,
     prompt,
     updatedAt: runUpdatedAt,
-    stableVersion: null,
-    versions: { [version]: { status: "running", updatedAt: runUpdatedAt } },
+    stableVersion: runExisting?.stableVersion ?? null,
+    versions: { ...(runExisting?.versions ?? {}), [version]: { status: "running", updatedAt: runUpdatedAt } },
   });
   await progress("starting", "Menyiapkan sandbox build.");
 
@@ -230,9 +232,7 @@ export async function processSiteBuildJob(
     }
 
     await progress("preview", "Menyiapkan pratinjau.");
-    await ops.startProcess({ command: "npm", args: ["run", "preview", "--", "--host", "0.0.0.0"], cwd: "site" });
-    const port = await ops.waitForPort({ containerPort: SITE_PREVIEW_PORT, timeoutMs: 60_000 });
-    const previewUrl = `http://127.0.0.1:${port.hostPort}`;
+    const previewUrl = `/api/sites/${siteId}/v${version}/preview/index.html`;
 
     await mkdir(baseDir, { recursive: true });
     const zip = new AdmZip();
@@ -244,6 +244,7 @@ export async function processSiteBuildJob(
     zip.writeZip(downloadPath);
 
     const readyUpdatedAt = new Date().toISOString();
+    const readyExisting = await readSiteManifest(siteId);
     const manifest: SiteManifest = {
       siteId, sessionId, userId, version,
       status: "ready",
@@ -251,9 +252,27 @@ export async function processSiteBuildJob(
       prompt,
       updatedAt: readyUpdatedAt,
       stableVersion: version,
-      versions: { [version]: { status: "ready", updatedAt: readyUpdatedAt } },
+      versions: { ...(readyExisting?.versions ?? {}), [version]: { status: "ready", updatedAt: readyUpdatedAt } },
     };
     await writeSiteManifest(manifest);
+    try {
+      const indexPath = join(siteDataDir(), "sites-index.json");
+      let existingIndex: Record<string, string | { siteId: string; siteName: string }> = {};
+      try {
+        const raw = await readFile(indexPath, "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          existingIndex = parsed as Record<string, string | { siteId: string; siteName: string }>;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+          console.warn("[sites] index read failed", error);
+        }
+      }
+      await writeSitesIndex({ ...existingIndex, [sessionId]: siteId });
+    } catch (error) {
+      console.warn("[sites] index write failed", error);
+    }
     await publish({
       sessionId,
       appEvent: {
@@ -268,6 +287,7 @@ export async function processSiteBuildJob(
     console.log(`[sites] ready ${siteId} v${version} (${Date.now() - startedAt}ms)`);
   } catch (error) {
     const failedUpdatedAt = new Date().toISOString();
+    const failedExisting = await readSiteManifest(siteId);
     await writeSiteManifest({
       siteId, sessionId, userId, version,
       status: "failed",
@@ -275,8 +295,8 @@ export async function processSiteBuildJob(
       error: error instanceof Error ? error.message.slice(0, 1000) : String(error),
       prompt,
       updatedAt: failedUpdatedAt,
-      stableVersion: null,
-      versions: { [version]: { status: "failed", updatedAt: failedUpdatedAt } },
+      stableVersion: failedExisting?.stableVersion ?? null,
+      versions: { ...(failedExisting?.versions ?? {}), [version]: { status: "failed", updatedAt: failedUpdatedAt } },
     });
     await progress("failed", "Build gagal.");
     throw error;
