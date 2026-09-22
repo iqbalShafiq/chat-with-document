@@ -1,3 +1,4 @@
+import { Check, Loader2 } from "lucide-react";
 import { Button } from "#/components/ui/button";
 import type { SiteBuildProgress, SiteBuildReady } from "../../lib/chat/client-data.js";
 
@@ -86,15 +87,34 @@ export function SiteBuildPanel({
         v{build.version} · {build.message}
       </p>
       <ol>
-        {SITE_BUILD_PHASES.map((entry, index) => (
-          <li
-            key={entry.phase}
-            aria-current={index === active ? "step" : undefined}
-            data-state={index < active ? "done" : index === active ? "active" : "todo"}
-          >
-            {entry.label}
-          </li>
-        ))}
+        {SITE_BUILD_PHASES.map((entry, index) => {
+          const stepState = index < active ? "done" : index === active ? "active" : "todo";
+          return (
+            <li
+              key={entry.phase}
+              aria-current={index === active ? "step" : undefined}
+              data-state={stepState}
+              className={
+                stepState === "active"
+                  ? "flex items-center gap-1.5 text-[11px] font-semibold text-accent"
+                  : stepState === "done"
+                    ? "flex items-center gap-1.5 text-[11px] font-medium text-text-muted"
+                    : "flex items-center gap-1.5 text-[11px] text-text-faint"
+              }
+            >
+              {stepState === "done" ? (
+                <Check className="size-3.5 text-accent" strokeWidth={2.25} aria-hidden="true" />
+              ) : stepState === "active" ? (
+                <Loader2
+                  className="size-3.5 animate-spin text-accent motion-reduce:animate-none"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
+              ) : null}
+              {entry.label}
+            </li>
+          );
+        })}
       </ol>
       {build.phase === "failed" ? (
         <Button size="sm" variant="secondary" onClick={() => onRetry(build.siteId)}>
@@ -104,7 +124,7 @@ export function SiteBuildPanel({
       {build.previewUrl ? (
         <iframe title={`Preview ${build.siteId}`} src={build.previewUrl} sandbox="allow-scripts" />
       ) : (
-        <div role="status">Pratinjau segera hadir.</div>
+        <div role="status" className="skeleton-shimmer rounded-lg px-3 py-2.5 text-[11px] text-text-muted">Pratinjau segera hadir.</div>
       )}
       {build.downloadUrl ? <a href={build.downloadUrl} download>Unduh zip</a> : null}
       {versions.length > 1 ? (

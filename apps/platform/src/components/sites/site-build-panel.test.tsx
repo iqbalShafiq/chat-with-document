@@ -71,6 +71,14 @@ describe("SiteBuildPanel", () => {
     expect(screen.getByText("Build production").getAttribute("aria-current")).toBe("step");
     expect(screen.getByText("Siap").getAttribute("data-state")).toBe("todo");
     expect(screen.getByRole("status").textContent).toContain("Pratinjau segera hadir.");
+    const activeStep = screen.getByText("Build production");
+    expect(activeStep.className).toMatch(/text-accent/);
+    const doneStep = screen.getByText("Menyiapkan");
+    expect(doneStep.className).toMatch(/text-text-muted/);
+    expect(doneStep.querySelector("svg")).toBeTruthy();
+    const todoStep = screen.getByText("Siap");
+    expect(todoStep.className).toMatch(/text-text-faint/);
+    expect(screen.getByRole("status").className).toMatch(/skeleton-shimmer/);
   });
 
   it("shows preview, download, and retry on failure", () => {
