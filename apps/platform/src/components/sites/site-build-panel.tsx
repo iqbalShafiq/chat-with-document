@@ -1,5 +1,6 @@
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "#/components/ui/button";
+import { API_BASE } from "#/lib/api";
 import type { SiteBuildProgress, SiteBuildReady } from "../../lib/chat/client-data.js";
 
 export const SITE_BUILD_PHASES = [
@@ -33,6 +34,10 @@ export type SiteVersionEntry = {
 export function phaseIndex(phase: SiteBuildPhaseName): number {
   const index = SITE_BUILD_PHASES.findIndex((entry) => entry.phase === phase);
   return index === -1 ? SITE_BUILD_PHASES.length : index;
+}
+
+export function resolveSiteUrl(value: string): string {
+  return value.startsWith("/api/sites/") ? `${API_BASE}${value}` : value;
 }
 
 export function applySiteBuildEvent(
@@ -122,11 +127,11 @@ export function SiteBuildPanel({
         </Button>
       ) : null}
       {build.previewUrl ? (
-        <iframe title={`Preview ${build.siteId}`} src={build.previewUrl} sandbox="allow-scripts" />
+        <iframe title={`Preview ${build.siteId}`} src={resolveSiteUrl(build.previewUrl)} sandbox="allow-scripts" />
       ) : (
         <div role="status" className="skeleton-shimmer rounded-lg px-3 py-2.5 text-[11px] text-text-muted">Pratinjau segera hadir.</div>
       )}
-      {build.downloadUrl ? <a href={build.downloadUrl} download>Unduh zip</a> : null}
+      {build.downloadUrl ? <a href={resolveSiteUrl(build.downloadUrl)} download>Unduh zip</a> : null}
       {versions.length > 1 ? (
         <ol aria-label="Versi">
           {versions.map((entry) => (

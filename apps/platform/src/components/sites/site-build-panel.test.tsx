@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { applySiteBuildEvent, SiteBuildPanel } from "./site-build-panel.js";
+import { applySiteBuildEvent, resolveSiteUrl, SiteBuildPanel } from "./site-build-panel.js";
+import { API_BASE } from "#/lib/api";
 
 afterEach(() => {
   cleanup();
@@ -46,6 +47,20 @@ describe("applySiteBuildEvent", () => {
     });
     expect(next.previewUrl).toBeNull();
     expect(next.downloadUrl).toBeNull();
+  });
+});
+
+describe("resolveSiteUrl", () => {
+  it("prefixes relative site paths with the API base", () => {
+    expect(resolveSiteUrl("/api/sites/s/v1/download")).toBe(
+      `${API_BASE}/api/sites/s/v1/download`,
+    );
+  });
+
+  it("leaves absolute URLs unchanged", () => {
+    expect(resolveSiteUrl("http://127.0.0.1:49111")).toBe(
+      "http://127.0.0.1:49111",
+    );
   });
 });
 
@@ -98,9 +113,11 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.getByTitle("Preview s")).toBeTruthy();
+    expect(screen.getByTitle("Preview s").getAttribute("src")).toBe(
+      "http://127.0.0.1:49111",
+    );
     expect(screen.getByText("Unduh zip").getAttribute("href")).toBe(
-      "/api/sites/s/v1/download",
+      `${API_BASE}/api/sites/s/v1/download`,
     );
 
     rerender(
@@ -120,6 +137,30 @@ describe("SiteBuildPanel", () => {
     );
     screen.getByText("Coba lagi").click();
     expect(onRetry).toHaveBeenCalledWith("s");
+  });
+
+  it("resolves relative preview and download paths against the API base", () => {
+    render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 1,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "/api/sites/s/v1/preview/index.html",
+          downloadUrl: "/api/sites/s/v1/download",
+        }}
+        versions={[]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    expect(screen.getByTitle("Preview s").getAttribute("src")).toBe(
+      `${API_BASE}/api/sites/s/v1/preview/index.html`,
+    );
+    expect(screen.getByText("Unduh zip").getAttribute("href")).toBe(
+      `${API_BASE}/api/sites/s/v1/download`,
+    );
   });
 
   it("renders version history with stable marker and rollback", () => {

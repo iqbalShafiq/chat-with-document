@@ -16,7 +16,9 @@ import {
   type SiteVersionEntry,
 } from "#/components/sites/site-build-panel";
 import {
+  API_BASE,
   ApiAuthError,
+  apiFetch,
   fetchRunStatus,
   listSessions,
   loadChatMessages,
@@ -134,7 +136,7 @@ export function ChatRouteView(input: {
   const [siteVersions, setSiteVersions] = useState<SiteVersionEntry[]>([]);
 
   const retrySiteBuild = useCallback(async (siteId: string) => {
-    const response = await fetch(`/api/sites/${siteId}/retry`, { method: "POST" });
+    const response = await apiFetch(`${API_BASE}/api/sites/${siteId}/retry`, { method: "POST" });
     if (!response.ok) return;
     setSiteBuild((prev) =>
       prev?.siteId === siteId
@@ -144,7 +146,7 @@ export function ChatRouteView(input: {
   }, []);
 
   const rollbackSiteBuild = useCallback(async (siteId: string, version: number) => {
-    const response = await fetch(`/api/sites/${siteId}/rollback`, {
+    const response = await apiFetch(`${API_BASE}/api/sites/${siteId}/rollback`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ version }),
@@ -157,7 +159,7 @@ export function ChatRouteView(input: {
   }, []);
 
   const refreshSiteVersions = useCallback(async (sessionId: string) => {
-    const response = await fetch(`/api/sites/by-session/${sessionId}`);
+    const response = await apiFetch(`${API_BASE}/api/sites/by-session/${sessionId}`);
     if (!response.ok) return;
     const data = (await response.json()) as { sites: { siteId: string; version: number; stableVersion: number; status: string; previewUrl: string | null; downloadUrl: string | null }[] };
     const latest = data.sites[0];
