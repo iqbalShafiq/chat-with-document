@@ -70,12 +70,13 @@ export function createSiteBuildTools(deps: SiteBuildToolDeps): AnyTool[] {
     execute: async ({ prompt }, context) => {
       const session = context as { sessionId?: string; userId?: string };
       try {
+        const activeSite = await deps.readActiveSite(session.sessionId ?? "");
         const { brief } = await deps.parseBrief({
           model: (context as { model?: never }).model as never,
           modelId: "site-build",
           prompt,
+          ...(activeSite?.siteName ? { contextSiteName: activeSite.siteName } : {}),
         });
-        const activeSite = await deps.readActiveSite(session.sessionId ?? "");
         if (!activeSite) return { action: "create", brief, reason: "no-active-site" } as const;
         if (activeSite.siteName.trim().toLowerCase() !== brief.siteName.trim().toLowerCase()) {
           return { action: "create", brief, reason: "different-topic" } as const;

@@ -148,4 +148,55 @@ describe("parseSiteBrief", () => {
   it("caps the prompt length", () => {
     expect(SITE_BRIEF_MAX_PROMPT_CHARS).toBe(2000);
   });
+
+  it("returns the same siteName for a modification prompt given context", async () => {
+    const brief = {
+      siteName: "Kopi Senja",
+      audience: "pecinta kopi",
+      cta: "Pesan Sekarang",
+      sections: ["hero", "kontak"],
+      vibe: "lebih berani",
+    };
+    const completion = vi.fn(async () => ({
+      choice: [{ type: "text" as const, text: JSON.stringify(brief) }],
+      usage: { inputTokens: 5, outputTokens: 8 },
+      rawResponse: {},
+    }));
+    const model = { ...fakeModel(""), completion } as unknown as CompletionModel;
+    const result = await parseSiteBrief({
+      model,
+      modelId: "stub",
+      prompt: "ganti headline hero jadi lebih berani",
+      contextSiteName: "Kopi Senja",
+    });
+    expect(result.brief.siteName).toBe("Kopi Senja");
+    const captured = JSON.stringify(completion.mock.calls[0]);
+    expect(captured).toContain("Current site under discussion");
+    expect(captured).toContain("Kopi Senja");
+  });
+
+  it("returns a fresh name without context", async () => {
+    const brief = {
+      siteName: "Hero Berani",
+      audience: "umum",
+      cta: "Mulai",
+      sections: ["hero", "kontak"],
+      vibe: "berani",
+    };
+    const completion = vi.fn(async () => ({
+      choice: [{ type: "text" as const, text: JSON.stringify(brief) }],
+      usage: { inputTokens: 5, outputTokens: 8 },
+      rawResponse: {},
+    }));
+    const model = { ...fakeModel(""), completion } as unknown as CompletionModel;
+    const result = await parseSiteBrief({
+      model,
+      modelId: "stub",
+      prompt: "ganti headline hero jadi lebih berani",
+    });
+    expect(result.brief.siteName).toBe("Hero Berani");
+    expect(JSON.stringify(completion.mock.calls[0])).not.toContain(
+      "Current site under discussion",
+    );
+  });
 });

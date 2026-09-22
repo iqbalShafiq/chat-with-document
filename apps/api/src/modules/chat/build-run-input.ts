@@ -136,6 +136,7 @@ import {
 import {
   enqueueSiteBuildFromTool,
   readActiveSiteTitle,
+  siteBuildConfig,
 } from "../static-sites/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
@@ -1414,15 +1415,16 @@ export async function reconstructChatRunInput(input: {
   tools.push(createClarificationTool());
   // ToolCallContext carries only { emitStreamEvent?, abortSignal? } — never
   // session/model. Bind recipe identity into the deps closures instead.
-  const siteBoundModel = makeCompletionModel(model);
+  const siteConfig = siteBuildConfig();
   tools.push(
     ...createSiteBuildTools({
       parseBrief: (args) =>
         parseSiteBrief({
-          model: siteBoundModel,
-          modelId: model,
+          model: siteConfig.model,
+          modelId: siteConfig.modelId,
           prompt: args.prompt,
           ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
+          ...(args.contextSiteName ? { contextSiteName: args.contextSiteName } : {}),
         }),
       readActiveSite: () => readActiveSiteTitle(sessionId),
       enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),

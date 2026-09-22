@@ -80,8 +80,16 @@ export async function parseSiteBrief(input: {
   modelId: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  contextSiteName?: string;
 }): Promise<{ brief: SiteBrief; usage: Usage }> {
   const prompt = input.prompt.replace(/\s+/g, " ").trim().slice(0, SITE_BRIEF_MAX_PROMPT_CHARS);
+  const contextName = input.contextSiteName?.trim();
+  const instructions = contextName
+    ? `${SITE_BRIEF_INSTRUCTIONS}\nCurrent site under discussion: "${contextName}". If the request modifies it (rewording, sections, style of the same site), return its exact siteName; only invent a new name for a genuinely different site.`
+    : SITE_BRIEF_INSTRUCTIONS;
+  const jsonInstructions = contextName
+    ? `${SITE_BRIEF_JSON_INSTRUCTIONS}\nCurrent site under discussion: "${contextName}". If the request modifies it (rewording, sections, style of the same site), return its exact siteName; only invent a new name for a genuinely different site.`
+    : SITE_BRIEF_JSON_INSTRUCTIONS;
   const providerOptions =
     !input.model.capabilities.reasoning
       ? undefined
@@ -97,7 +105,7 @@ export async function parseSiteBrief(input: {
   try {
     const result = await generateCompletion({
       ...base,
-      instructions: SITE_BRIEF_INSTRUCTIONS,
+      instructions,
       outputSchema: siteBriefSchema,
       maxTokens: 256,
     });
@@ -112,7 +120,7 @@ export async function parseSiteBrief(input: {
     if (!isStructuredOutputError(error)) throw error;
     const fallback = await generateCompletion({
       ...base,
-      instructions: SITE_BRIEF_JSON_INSTRUCTIONS,
+      instructions: jsonInstructions,
       maxTokens: 512,
     });
     return {

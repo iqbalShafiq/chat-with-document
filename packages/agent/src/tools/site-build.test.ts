@@ -64,6 +64,29 @@ describe("propose_site_build", () => {
     const result = await callTool(tools, "propose_site_build", { prompt: "x" });
     expect(result).toMatchObject({ action: "error" });
   });
+
+  it("passes the active site name as brief context", async () => {
+    const parseBrief = vi.fn(async (input: { prompt: string; contextSiteName?: string }) => ({ brief: BRIEF, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0, cacheCreationInputTokens: 0 }, received: input }));
+    const tools = createSiteBuildTools(
+      deps({
+        parseBrief,
+        readActiveSite: vi.fn(async () => ({ siteId: "s-1", siteName: "Kopi Senja" })),
+      }),
+    );
+    await callTool(tools, "propose_site_build", { prompt: "ganti headline hero jadi lebih berani" });
+    expect(parseBrief).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(parseBrief).mock.calls[0]?.[0]).toMatchObject({
+      prompt: "ganti headline hero jadi lebih berani",
+      contextSiteName: "Kopi Senja",
+    });
+  });
+
+  it("omits brief context when no active site exists", async () => {
+    const parseBrief = vi.fn(async (input: { prompt: string; contextSiteName?: string }) => ({ brief: BRIEF, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0, cacheCreationInputTokens: 0 }, received: input }));
+    const tools = createSiteBuildTools(deps({ parseBrief }));
+    await callTool(tools, "propose_site_build", { prompt: "bikinkan landing kopi" });
+    expect(vi.mocked(parseBrief).mock.calls[0]?.[0]).not.toHaveProperty("contextSiteName");
+  });
 });
 
 describe("confirm_site_build", () => {
