@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const f = vi.hoisted(() => ({
@@ -38,7 +40,7 @@ function fakeSandbox() {
     async exec({ command, args, cwd }: { command: string; args?: string[]; cwd?: string }) {
       cwds.push(cwd);
       if (command === "npm" && args?.[0] === "run" && args?.[1] === "build") {
-        files.set("dist/index.html", "<html></html>");
+        files.set("site/dist/index.html", "<html></html>");
         return { status: "exited" as const, exitCode: 0, stdout: "built", stderr: "" };
       }
       return { status: "exited" as const, exitCode: 0, stdout: "", stderr: "" };
@@ -78,6 +80,10 @@ const JOB = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("processSiteBuildJob", () => {
@@ -148,7 +154,8 @@ describe("processSiteBuildJob", () => {
 
   it("zips nested dist output via recursive workspace-relative listing", async () => {
     const siteId = "site-nested-dist";
-    const files = new Map<string, string>([
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);    const files = new Map<string, string>([
       ["site/dist/index.html", "<html></html>"],
       ["site/dist/assets/app.js", "console.log(1)"],
     ]);
@@ -196,7 +203,7 @@ describe("processSiteBuildJob", () => {
       },
     );
 
-    const zipPath = join(process.cwd(), "data", "sites", siteId, "v1", "site.zip");
+    const zipPath = join(dataDir, siteId, "v1", "site.zip");
     const entries = new AdmZip(await readFile(zipPath)).getEntries().map((e) => e.entryName);
     expect(entries).toContain("index.html");
     expect(entries).toContain("assets/app.js");

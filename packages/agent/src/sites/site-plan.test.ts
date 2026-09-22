@@ -119,6 +119,32 @@ describe("parseSiteBrief", () => {
     expect(completion).toHaveBeenCalledTimes(2);
   });
 
+  it("rethrows auth errors without a second LLM call", async () => {
+    const completion = vi.fn(async () => {
+      throw Object.assign(new Error("401 Unauthorized"), {
+        name: "CompletionAuthError",
+      });
+    });
+    const model = { ...fakeModel(""), completion } as unknown as CompletionModel;
+    await expect(
+      parseSiteBrief({ model, modelId: "stub", prompt: "x" }),
+    ).rejects.toThrow("401 Unauthorized");
+    expect(completion).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows timeout errors without a second LLM call", async () => {
+    const completion = vi.fn(async () => {
+      throw Object.assign(new Error("The operation timed out."), {
+        name: "TimeoutError",
+      });
+    });
+    const model = { ...fakeModel(""), completion } as unknown as CompletionModel;
+    await expect(
+      parseSiteBrief({ model, modelId: "stub", prompt: "x" }),
+    ).rejects.toThrow("timed out");
+    expect(completion).toHaveBeenCalledTimes(1);
+  });
+
   it("caps the prompt length", () => {
     expect(SITE_BRIEF_MAX_PROMPT_CHARS).toBe(2000);
   });

@@ -309,8 +309,6 @@ function toDistName(workspacePath: string): string | null {
   if (normalized.startsWith(`${SITE_DIST_DIR}/`)) {
     return normalized.slice(SITE_DIST_DIR.length + 1);
   }
-  // Unit-test fake compat: bare `dist/...` keys.
-  if (normalized.startsWith("dist/")) return normalized.slice("dist/".length);
   return null;
 }
 

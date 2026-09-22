@@ -1,5 +1,5 @@
 import type { CompletionModel, Usage } from "@anvia/core";
-import { generateCompletion } from "@anvia/core/completion";
+import { CompletionStructuredOutputError, generateCompletion } from "@anvia/core/completion";
 import { z } from "zod";
 import {
   metaMuseReasoningEffort,
@@ -60,6 +60,21 @@ export function extractSiteBriefJson(text: string): unknown {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
+/**
+ * Narrow guard for structured-output failure. Uses instanceof plus a name
+ * check so the fallback still triggers across dual-package copies of
+ * @anvia/core. Every other error (auth, timeout/abort, network) propagates
+ * so a failing request is never billed twice or masked.
+ */
+function isStructuredOutputError(error: unknown): boolean {
+  return (
+    error instanceof CompletionStructuredOutputError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { name?: unknown }).name === "CompletionStructuredOutputError")
+  );
+}
+
 export async function parseSiteBrief(input: {
   model: CompletionModel;
   modelId: string;
@@ -87,11 +102,14 @@ export async function parseSiteBrief(input: {
       maxTokens: 256,
     });
     return { brief: siteBriefSchema.parse(result.output), usage: result.usage };
-  } catch {
+  } catch (error) {
     // meta/muse-spark-1.3-contributor via OpenRouter cannot complete
     // structured output within its output limit (Task 11 real-LLM smoke:
     // CompletionStructuredOutputError phase "truncated"). Spec-mandated
-    // fallback: parse JSON from plain text instead.
+    // fallback: parse JSON from plain text instead — but ONLY on
+    // structured-output failure. Auth/timeout/network errors rethrow so a
+    // failing request is never billed twice or masked.
+    if (!isStructuredOutputError(error)) throw error;
     const fallback = await generateCompletion({
       ...base,
       instructions: SITE_BRIEF_JSON_INSTRUCTIONS,
