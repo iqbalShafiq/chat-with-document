@@ -18,7 +18,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "node e2e/stub-openrouter.ts & OPENAI_BASE_URL=http://127.0.0.1:18765/api/v1 OPENAI_API_KEY=e2e-key TAVILY_API_KEY=dummy pnpm --dir ../.. dev",
+      "node e2e/stub-openrouter.ts & OPENAI_BASE_URL=http://127.0.0.1:18765/api/v1 OPENAI_API_KEY=e2e-key TAVILY_API_KEY=dummy SITE_ENABLED=false pnpm --dir ../.. dev",
     url: "http://localhost:3001/api/auth/get-session",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

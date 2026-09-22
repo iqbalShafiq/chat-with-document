@@ -131,6 +131,9 @@ Factory agent yang dipakai API:
    | `PROFILE_REFRESH_DELAY_MINUTES` | Debounce window for background profile refresh (default `15`) |
    | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
    | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`openai/gpt-5.6-luna`) |
+   | `SITE_ENABLED` | Worker static site builder (default `true`); set `false` untuk mematikan |
+   | `SITE_MODEL` | Model builder + brief parser (default `meta/muse-spark-1.3-contributor`) |
+   | `SITE_CONCURRENCY` | Parallel site builds (default `2`) |
 
 3. **Start Postgres**
 
