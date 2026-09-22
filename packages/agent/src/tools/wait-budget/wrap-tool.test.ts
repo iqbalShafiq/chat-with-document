@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnyTool, ToolCallContext } from "@anvia/core";
+import { createQuestionTool, isQuestionTool } from "@anvia/core/tool";
 import { InFlightToolRegistry } from "./registry.js";
 import { isStillRunningResult } from "./types.js";
 import { createAwaitCancelTools } from "./await-cancel-tools.js";
@@ -93,6 +94,20 @@ describe("wrapToolsWithWaitBudget", () => {
     const wrapped = wrapToolsWithWaitBudget(controls, { registry, sliceMsFor: () => 1 });
     expect(wrapped[0]).toBe(controls[0]);
     expect(wrapped[1]).toBe(controls[1]);
+  });
+
+  it("preserves the question-tool marker so the agent runtime still suspends", () => {
+    const registry = new InFlightToolRegistry();
+    const question = createQuestionTool({
+      name: "request_clarification",
+      description: "Ask the user before acting.",
+    });
+    expect(isQuestionTool(question)).toBe(true);
+    const [wrapped] = wrapToolsWithWaitBudget([question as unknown as AnyTool], {
+      registry,
+      sliceMsFor: () => 200,
+    });
+    expect(isQuestionTool(wrapped)).toBe(true);
   });
 
   it("registers the unique internalCallId, not the reused provider toolCallId", async () => {

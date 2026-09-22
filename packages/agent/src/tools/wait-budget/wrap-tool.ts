@@ -62,8 +62,7 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
   const wrapped: AnyTool = {
     name: tool.name,
     definition: (prompt) => tool.definition(prompt),
-    call: async (args, context) => {
-      const taken = deps.ids?.take(tool.name);
+    call: async (args, context) => {      const taken = deps.ids?.take(tool.name);
       const jobId = taken?.jobId ?? deps.nextId?.() ?? randomUUID();
       const providerToolCallId = taken?.providerToolCallId;
       await emitCallProgress(deps, {
@@ -91,6 +90,13 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
     ...(tool.requiresApproval !== undefined ? { requiresApproval: tool.requiresApproval } : {}),
     ...(tool.parseInput ? { parseInput: (args: Parameters<NonNullable<AnyTool["parseInput"]>>[0]) => tool.parseInput!(args) } : {}),
   };
+  // The agent runtime recognizes special tools (question/skill markers) via
+  // non-enumerable symbol props that object literals drop. Copy them over so
+  // a wrapped request_clarification still suspends instead of executing.
+  for (const symbol of Object.getOwnPropertySymbols(tool)) {
+    const descriptor = Object.getOwnPropertyDescriptor(tool, symbol);
+    if (descriptor) Object.defineProperty(wrapped, symbol, descriptor);
+  }
   return wrapped;
 }
 
