@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatSession, parseMemoryMessages, type ChatUIMessage } from "#/components/chat/chat-session";
 import { AnrealMark } from "#/components/layout/anreal-brand";
@@ -11,7 +11,9 @@ import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
 import {
   applySiteBuildEvent,
+  applySiteVersionEvent,
   SiteBuildPanel,
+  stableSiteUrls,
   type SiteBuildState,
   type SiteVersionEntry,
 } from "#/components/sites/site-build-panel";
@@ -134,6 +136,7 @@ export function ChatRouteView(input: {
   const [shareForkHandoff] = useState(() => consumeShareForkDraft(input.sessionId));
   const [siteBuild, setSiteBuild] = useState<SiteBuildState | null>(null);
   const [siteVersions, setSiteVersions] = useState<SiteVersionEntry[]>([]);
+  const siteRequestRef = useRef(0);
 
   const retrySiteBuild = useCallback(async (siteId: string) => {
     const response = await apiFetch(`${API_BASE}/api/sites/${siteId}/retry`, { method: "POST" });
@@ -153,13 +156,21 @@ export function ChatRouteView(input: {
     });
     if (!response.ok) return;
     const manifest = (await response.json()) as { stableVersion: number };
+    const urls = stableSiteUrls(siteId, manifest.stableVersion);
     setSiteVersions((prev) =>
       prev.map((entry) => ({ ...entry, stable: entry.version === manifest.stableVersion })),
+    );
+    setSiteBuild((prev) =>
+      prev?.siteId === siteId
+        ? { ...prev, previewUrl: urls.previewUrl, downloadUrl: urls.downloadUrl }
+        : prev,
     );
   }, []);
 
   const refreshSiteVersions = useCallback(async (sessionId: string) => {
+    const request = (siteRequestRef.current += 1);
     const response = await apiFetch(`${API_BASE}/api/sites/by-session/${sessionId}`);
+    if (siteRequestRef.current !== request) return;
     if (!response.ok) return;
     const data = (await response.json()) as { sites: { siteId: string; version: number; stableVersion: number; status: string; previewUrl: string | null; downloadUrl: string | null }[] };
     const latest = data.sites[0];
@@ -168,6 +179,7 @@ export function ChatRouteView(input: {
       Array.from({ length: latest.version }, (_, index) => {
         const version = index + 1;
         return {
+          siteId: latest.siteId,
           version,
           status: (version === latest.version ? latest.status : "ready") as SiteVersionEntry["status"],
           stable: version === latest.stableVersion,
@@ -193,6 +205,8 @@ export function ChatRouteView(input: {
   }, []);
 
   useEffect(() => {
+    setSiteBuild(null);
+    setSiteVersions([]);
     void refreshSiteVersions(input.sessionId);
   }, [input.sessionId, refreshSiteVersions]);
 
@@ -228,7 +242,10 @@ export function ChatRouteView(input: {
         onAuthFailure={input.onAuthFailure}
         onImageContextActions={sessionsContext.onImageContextActions}
         onReloadMessages={(messages) => route.setMessages(messages)}
-        onSiteBuildEvent={(event) => setSiteBuild((prev) => applySiteBuildEvent(prev, event))}
+        onSiteBuildEvent={(event) => {
+          setSiteBuild((prev) => applySiteBuildEvent(prev, event));
+          setSiteVersions((prev) => applySiteVersionEvent(prev, event));
+        }}
         composerTopSlot={siteBuild ? <SiteBuildPanel build={siteBuild} versions={siteVersions} onRetry={retrySiteBuild} onRollback={rollbackSiteBuild} /> : null}
         initialComposerDraft={
           shareForkHandoff

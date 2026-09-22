@@ -176,12 +176,12 @@ describe("site build recipe identity binding", () => {
     expect(briefInput.model).not.toBe(recipeBoundModel);
     expect(f.readActiveSiteTitle).toHaveBeenCalledWith(RECIPE_SESSION);
 
-    await confirm!.call({ brief: BRIEF, mode: "new-site" }, {});
+    await confirm!.call({ brief: BRIEF, mode: "new-site", prompt: "bikinkan landing kopi" }, {});
     expect(f.enqueueSiteBuildFromTool).toHaveBeenCalledWith({
       siteId: null,
       sessionId: RECIPE_SESSION,
       userId: RECIPE_USER,
-      prompt: expect.any(String),
+      prompt: "bikinkan landing kopi",
       brief: BRIEF,
     });
   });

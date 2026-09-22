@@ -38,6 +38,7 @@ const confirmInput = z.object({
   brief: siteBriefSchema.describe("The brief returned by propose_site_build, unchanged."),
   mode: z.enum(["iterate", "new-site"]).describe("iterate adds a version to activeSiteId; new-site starts fresh."),
   activeSiteId: z.string().min(1).max(120).optional().describe("Required when mode is iterate."),
+  prompt: z.string().min(1).max(2000).describe("The user's site request verbatim (for iterate: the follow-up text), so the builder applies it."),
 });
 
 const proposeSiteBuildSpec = {
@@ -60,7 +61,7 @@ export const SITE_BUILD_TOOL_DEFINITIONS: ToolDefinition[] = [
 
 export const SITE_BUILD_TOOL_INSTRUCTIONS = [
   "You have propose_site_build and confirm_site_build for static-website requests.",
-  "Always call propose_site_build first. After it returns action ask, call request_clarification with its question and choices verbatim, then call confirm_site_build with the user's pick (iterate plus that activeSiteId, or new-site).",
+  "Always call propose_site_build first. After it returns action ask, call request_clarification with its question and choices verbatim, then call confirm_site_build with the user's pick (iterate plus that activeSiteId, or new-site) and the user's request verbatim as prompt.",
   "Never enqueue without confirm. Never invent siteIds.",
 ].join("\n");
 
@@ -103,16 +104,19 @@ export function createSiteBuildTools(deps: SiteBuildToolDeps): AnyTool[] {
 
   const confirm = createTool({
     ...confirmSiteBuildSpec,
-    execute: async ({ brief, mode, activeSiteId }, context) => {
-      const session = context as { sessionId?: string; userId?: string; originalPrompt?: string };
+    execute: async ({ brief, mode, activeSiteId, prompt }, context) => {
+      const session = context as { sessionId?: string; userId?: string };
       if (mode === "iterate" && !activeSiteId) {
         throw new Error("activeSiteId is required to iterate");
+      }
+      if (typeof prompt !== "string" || prompt.length < 1) {
+        throw new Error("prompt is required to enqueue a build");
       }
       return deps.enqueueBuild({
         siteId: mode === "iterate" ? (activeSiteId as string) : null,
         sessionId: session.sessionId ?? "",
         userId: session.userId ?? "",
-        prompt: session.originalPrompt ?? brief.siteName,
+        prompt,
         brief,
       });
     },

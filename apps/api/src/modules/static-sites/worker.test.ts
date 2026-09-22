@@ -69,6 +69,7 @@ const JOB = {
     sessionId: "session-1",
     userId: "user-1",
     prompt: "bikinkan landing page kopi",
+    brief: null,
     version: 1,
   },
 };
@@ -110,6 +111,36 @@ describe("processSiteBuildJob", () => {
     ) as { appEvent: { previewUrl: string; downloadUrl: string } } | undefined;
     expect(ready?.appEvent.previewUrl).toBe("/api/sites/site-1/v1/preview/index.html");
     expect(ready?.appEvent.downloadUrl).toBe("/api/sites/site-1/v1/download");
+  });
+
+  it("uses the enqueued brief without re-parsing", async () => {
+    const sandbox = fakeSandbox();
+    await processSiteBuildJob(
+      {
+        data: {
+          ...JOB.data,
+          prompt: "ganti headline hero jadi lebih berani",
+          brief: {
+            siteName: "Cahaya Abadi",
+            audience: "calon pengantin",
+            cta: "Hubungi",
+            sections: ["hero", "harga"],
+            vibe: "berani",
+          },
+        },
+      },
+      {
+        createSandboxSession: async () => sandbox as never,
+        publish: async () => undefined,
+        readTemplate: async () => ({ "package.json": "{}" }),
+        runBuilderAgent: f.agentRun,
+      },
+    );
+
+    expect(f.brief).not.toHaveBeenCalled();
+    expect(f.agentRun).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "brief:Cahaya Abadi" }),
+    );
   });
 
   it("destroys the sandbox when the build fails", async () => {
@@ -347,7 +378,7 @@ describe("processSiteBuildJob", () => {
       {
         siteId, sessionId: "session-1", userId: "user-1", version: 1,
         status: "ready", previewUrl: `/api/sites/${siteId}/v1/preview/index.html`,
-        downloadPath: "x", error: null, prompt: "x",
+        downloadPath: "x", error: null, prompt: "x", brief: null,
         updatedAt: new Date(0).toISOString(), stableVersion: 1,
         versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
       },
@@ -383,7 +414,7 @@ describe("processSiteBuildJob", () => {
       {
         siteId, sessionId: "session-1", userId: "user-1", version: 1,
         status: "ready", previewUrl: `/api/sites/${siteId}/v1/preview/index.html`,
-        downloadPath: "x", error: null, prompt: "x",
+        downloadPath: "x", error: null, prompt: "x", brief: null,
         updatedAt: new Date(0).toISOString(), stableVersion: 1,
         versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
       },

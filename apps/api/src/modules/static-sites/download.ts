@@ -71,6 +71,7 @@ siteDownloadRouter.post("/:siteId/retry", async (c) => {
     sessionId: manifest.sessionId,
     userId: manifest.userId,
     prompt: manifest.prompt,
+    brief: manifest.brief ?? null,
     version: manifest.version,
   }).catch(() => undefined);
   return c.json({ siteId, version: manifest.version, status: "queued" }, 202);

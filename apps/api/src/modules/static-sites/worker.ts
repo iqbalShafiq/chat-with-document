@@ -155,6 +155,7 @@ export async function processSiteBuildJob(
     status: "running",
     previewUrl: null, downloadPath: null, error: null,
     prompt,
+    brief: job.data.brief ?? runExisting?.brief ?? null,
     updatedAt: runUpdatedAt,
     stableVersion: runExisting?.stableVersion ?? null,
     versions: { ...(runExisting?.versions ?? {}), [version]: { status: "running", updatedAt: runUpdatedAt } },
@@ -175,12 +176,12 @@ export async function processSiteBuildJob(
     }
     await progress("planning", "Menyusun brief situs.");
 
-    const { brief } = await parseSiteBrief({
+    const brief = job.data.brief ?? (await parseSiteBrief({
       model: config.model,
       modelId: config.modelId,
       prompt,
       abortSignal: AbortSignal.timeout(SITE_BUILD_TIMEOUT_MS),
-    });
+    })).brief;
 
     let tools: { name: string }[];
     try {
@@ -253,6 +254,7 @@ export async function processSiteBuildJob(
       status: "ready",
       previewUrl, downloadPath, error: null,
       prompt,
+      brief,
       updatedAt: readyUpdatedAt,
       stableVersion: version,
       versions: { ...(readyExisting?.versions ?? {}), [version]: { status: "ready", updatedAt: readyUpdatedAt } },
@@ -297,6 +299,7 @@ export async function processSiteBuildJob(
       previewUrl: null, downloadPath: null,
       error: error instanceof Error ? error.message.slice(0, 1000) : String(error),
       prompt,
+      brief: job.data.brief ?? failedExisting?.brief ?? null,
       updatedAt: failedUpdatedAt,
       stableVersion: failedExisting?.stableVersion ?? null,
       versions: { ...(failedExisting?.versions ?? {}), [version]: { status: "failed", updatedAt: failedUpdatedAt } },

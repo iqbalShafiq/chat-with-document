@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { applySiteBuildEvent, resolveSiteUrl, SiteBuildPanel } from "./site-build-panel.js";
+import { applySiteBuildEvent, applySiteVersionEvent, resolveSiteUrl, stableSiteUrls, SiteBuildPanel } from "./site-build-panel.js";
 import { API_BASE } from "#/lib/api";
 
 afterEach(() => {
@@ -47,6 +47,71 @@ describe("applySiteBuildEvent", () => {
     });
     expect(next.previewUrl).toBeNull();
     expect(next.downloadUrl).toBeNull();
+  });
+});
+
+describe("applySiteVersionEvent", () => {
+  it("appends a running entry when a new version starts", () => {
+    const next = applySiteVersionEvent([], {
+      name: "siteBuildProgress",
+      data: { siteId: "s", version: 2, phase: "building", message: "Membangun." },
+    });
+    expect(next).toEqual([
+      { siteId: "s", version: 2, status: "running", stable: false, previewUrl: null, downloadUrl: null },
+    ]);
+  });
+
+  it("marks ready with urls and moves the stable flag", () => {
+    const prev = applySiteVersionEvent(
+      [
+        { siteId: "s", version: 1, status: "ready", stable: true, previewUrl: "/api/sites/s/v1/preview/index.html", downloadUrl: "/api/sites/s/v1/download" },
+      ],
+      {
+        name: "siteBuildReady",
+        data: {
+          siteId: "s",
+          version: 2,
+          previewUrl: "/api/sites/s/v2/preview/index.html",
+          screenshotUrl: null,
+          downloadUrl: "/api/sites/s/v2/download",
+        },
+      },
+    );
+    expect(prev).toEqual([
+      { siteId: "s", version: 1, status: "ready", stable: false, previewUrl: "/api/sites/s/v1/preview/index.html", downloadUrl: "/api/sites/s/v1/download" },
+      { siteId: "s", version: 2, status: "ready", stable: true, previewUrl: "/api/sites/s/v2/preview/index.html", downloadUrl: "/api/sites/s/v2/download" },
+    ]);
+  });
+
+  it("resets the list when events belong to a different site", () => {
+    const next = applySiteVersionEvent(
+      [
+        { siteId: "old", version: 1, status: "ready", stable: true, previewUrl: null, downloadUrl: null },
+      ],
+      {
+        name: "siteBuildProgress",
+        data: { siteId: "new", version: 1, phase: "starting", message: "Menyiapkan." },
+      },
+    );
+    expect(next.map((entry) => entry.siteId)).toEqual(["new"]);
+  });
+  it("marks the entry failed on a failed progress event", () => {
+    const next = applySiteVersionEvent([], {
+      name: "siteBuildProgress",
+      data: { siteId: "s", version: 1, phase: "failed", message: "Build gagal." },
+    });
+    expect(next).toEqual([
+      { siteId: "s", version: 1, status: "failed", stable: false, previewUrl: null, downloadUrl: null },
+    ]);
+  });
+});
+
+describe("stableSiteUrls", () => {
+  it("points preview and download at the stable version", () => {
+    expect(stableSiteUrls("s", 1)).toEqual({
+      previewUrl: "/api/sites/s/v1/preview/index.html",
+      downloadUrl: "/api/sites/s/v1/download",
+    });
   });
 });
 
@@ -177,6 +242,7 @@ describe("SiteBuildPanel", () => {
         }}
         versions={[
           {
+            siteId: "s",
             version: 1,
             status: "ready",
             stable: false,
@@ -184,6 +250,7 @@ describe("SiteBuildPanel", () => {
             downloadUrl: "/api/sites/s/v1/download",
           },
           {
+            siteId: "s",
             version: 2,
             status: "ready",
             stable: true,
@@ -191,6 +258,7 @@ describe("SiteBuildPanel", () => {
             downloadUrl: "/api/sites/s/v2/download",
           },
           {
+            siteId: "s",
             version: 3,
             status: "ready",
             stable: false,
@@ -223,6 +291,7 @@ describe("SiteBuildPanel", () => {
         }}
         versions={[
           {
+            siteId: "s",
             version: 1,
             status: "ready",
             stable: true,

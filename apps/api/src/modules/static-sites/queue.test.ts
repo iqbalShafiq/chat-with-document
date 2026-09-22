@@ -33,6 +33,13 @@ describe("site build queue", () => {
       sessionId: "session-1",
       userId: "user-1",
       prompt: "bikinkan landing page kopi",
+      brief: {
+        siteName: "Kopi Senja",
+        audience: "pecinta kopi",
+        cta: "Pesan",
+        sections: ["hero", "kontak"],
+        vibe: "hangat",
+      },
       version: 2,
     });
 
@@ -44,6 +51,13 @@ describe("site build queue", () => {
         sessionId: "session-1",
         userId: "user-1",
         prompt: "bikinkan landing page kopi",
+        brief: {
+          siteName: "Kopi Senja",
+          audience: "pecinta kopi",
+          cta: "Pesan",
+          sections: ["hero", "kontak"],
+          vibe: "hangat",
+        },
         version: 2,
       },
       { jobId: "site-build:site-1:v2" },
@@ -57,6 +71,7 @@ describe("site build queue", () => {
       sessionId: "s",
       userId: "u",
       prompt: "x",
+      brief: null,
       version: 1,
     });
     expect(vi.mocked(getSiteBuildQueue().add)).not.toHaveBeenCalled();

@@ -44,6 +44,13 @@ const MANIFEST: SiteManifest = {
   downloadPath: null,
   error: null,
   prompt: "bikinkan landing page kopi",
+  brief: {
+    siteName: "Kopi Senja",
+    audience: "pecinta kopi",
+    cta: "Pesan",
+    sections: ["hero", "kontak"],
+    vibe: "hangat",
+  },
   updatedAt: new Date(0).toISOString(),
   stableVersion: null,
   versions: { 1: { status: "queued", updatedAt: new Date(0).toISOString() } },
@@ -177,6 +184,7 @@ describe("enqueueSiteBuildFromTool", () => {
       version: 1,
       status: "queued",
       prompt: "bikinkan landing page kopi",
+      brief: BRIEF,
       stableVersion: null,
       versions: { 1: { status: "queued", updatedAt: expect.any(String) } },
     });
@@ -190,6 +198,7 @@ describe("enqueueSiteBuildFromTool", () => {
         sessionId: "session-1",
         userId: "user-1",
         prompt: "bikinkan landing page kopi",
+        brief: BRIEF,
         version: 1,
       },
     ]);

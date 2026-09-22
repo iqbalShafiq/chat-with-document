@@ -24,6 +24,7 @@ export type SiteBuildState = {
 };
 
 export type SiteVersionEntry = {
+  siteId: string;
   version: number;
   status: "queued" | "running" | "ready" | "failed";
   stable: boolean;
@@ -63,6 +64,54 @@ export function applySiteBuildEvent(
     previewUrl: event.data.previewUrl,
     downloadUrl: event.data.downloadUrl,
   };
+}
+
+export function stableSiteUrls(
+  siteId: string,
+  version: number,
+): { previewUrl: string; downloadUrl: string } {
+  return {
+    previewUrl: `/api/sites/${siteId}/v${version}/preview/index.html`,
+    downloadUrl: `/api/sites/${siteId}/v${version}/download`,
+  };
+}
+
+export function applySiteVersionEvent(
+  state: SiteVersionEntry[],
+  event: { name: "siteBuildProgress"; data: SiteBuildProgress } | { name: "siteBuildReady"; data: SiteBuildReady },
+): SiteVersionEntry[] {
+  const siteId = event.data.siteId;
+  const version = event.data.version;
+  const rest = state.some((entry) => entry.siteId !== siteId)
+    ? []
+    : state.filter((entry) => entry.version !== version);
+  if (event.name === "siteBuildProgress") {
+    const keep = state.find((entry) => entry.siteId === siteId && entry.version === version);
+    const status: SiteVersionEntry["status"] =
+      event.data.phase === "starting" ? "queued" : event.data.phase === "failed" ? "failed" : "running";
+    return [
+      ...rest,
+      {
+        siteId,
+        version,
+        status,
+        stable: keep?.stable ?? false,
+        previewUrl: keep?.previewUrl ?? null,
+        downloadUrl: keep?.downloadUrl ?? null,
+      },
+    ].sort((a, b) => a.version - b.version);
+  }
+  const ready: SiteVersionEntry = {
+    siteId,
+    version,
+    status: "ready",
+    stable: true,
+    previewUrl: event.data.previewUrl,
+    downloadUrl: event.data.downloadUrl,
+  };
+  return [...rest.map((entry) => ({ ...entry, stable: false })), ready].sort(
+    (a, b) => a.version - b.version,
+  );
 }
 
 export function SiteBuildPanel({

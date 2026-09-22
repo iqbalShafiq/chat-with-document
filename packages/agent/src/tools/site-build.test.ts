@@ -90,25 +90,41 @@ describe("propose_site_build", () => {
 });
 
 describe("confirm_site_build", () => {
-  it("enqueues iterate with the active site id", async () => {
+  it("enqueues iterate with the active site id and the verbatim prompt", async () => {
     const enqueueBuild = vi.fn(async () => ({ siteId: "s-1", version: 2 }));
     const tools = createSiteBuildTools(deps({ enqueueBuild }));
     const result = await callTool(tools, "confirm_site_build", {
       brief: BRIEF,
       mode: "iterate",
       activeSiteId: "s-1",
+      prompt: "ganti headline hero jadi lebih berani",
     });
     expect(result).toEqual({ siteId: "s-1", version: 2 });
     expect(enqueueBuild).toHaveBeenCalledWith(
-      expect.objectContaining({ siteId: "s-1", prompt: expect.any(String) }),
+      expect.objectContaining({ siteId: "s-1", prompt: "ganti headline hero jadi lebih berani", brief: BRIEF }),
     );
   });
 
-  it("enqueues new-site with null site id", async () => {
+  it("enqueues new-site with null site id and the verbatim prompt", async () => {
     const enqueueBuild = vi.fn(async () => ({ siteId: "s-2", version: 1 }));
     const tools = createSiteBuildTools(deps({ enqueueBuild }));
-    await callTool(tools, "confirm_site_build", { brief: BRIEF, mode: "new-site" });
-    expect(enqueueBuild).toHaveBeenCalledWith(expect.objectContaining({ siteId: null }));
+    await callTool(tools, "confirm_site_build", {
+      brief: BRIEF,
+      mode: "new-site",
+      prompt: "bikinkan landing kopi",
+    });
+    expect(enqueueBuild).toHaveBeenCalledWith(
+      expect.objectContaining({ siteId: null, prompt: "bikinkan landing kopi" }),
+    );
+  });
+
+  it("rejects confirm without the verbatim prompt", async () => {
+    const enqueueBuild = vi.fn(async () => ({ siteId: "s-1", version: 2 }));
+    const tools = createSiteBuildTools(deps({ enqueueBuild }));
+    await expect(
+      callTool(tools, "confirm_site_build", { brief: BRIEF, mode: "iterate", activeSiteId: "s-1" }),
+    ).rejects.toThrow();
+    expect(enqueueBuild).not.toHaveBeenCalled();
   });
 });
 

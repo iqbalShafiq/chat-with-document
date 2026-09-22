@@ -1,4 +1,5 @@
 import { Queue } from "bullmq";
+import type { SiteBrief } from "@anreal/agent";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import { siteBuildEnabled } from "./service.js";
 
@@ -9,6 +10,7 @@ export type SiteBuildJobData = {
   sessionId: string;
   userId: string;
   prompt: string;
+  brief: SiteBrief | null;
   version: number;
 };
 

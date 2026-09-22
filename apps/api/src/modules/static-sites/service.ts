@@ -24,6 +24,7 @@ export type SiteManifest = {
   downloadPath: string | null;
   error: string | null;
   prompt: string;
+  brief: SiteBrief | null;
   updatedAt: string;
   stableVersion: number | null;
   versions: Record<number, { status: SiteBuildStatus; updatedAt: string }>;
@@ -84,7 +85,8 @@ export async function readSiteManifest(
 ): Promise<SiteManifest | null> {
   try {
     const raw = await readFile(manifestPath(siteId, dirOverride), "utf8");
-    return JSON.parse(raw) as SiteManifest;
+    const parsed = JSON.parse(raw) as SiteManifest;
+    return { ...parsed, brief: parsed.brief ?? null };
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
     console.warn(`[sites] manifest read failed ${siteId}`, error);
@@ -207,6 +209,7 @@ export async function enqueueSiteBuildFromTool(
       downloadPath: null,
       error: null,
       prompt: input.prompt,
+      brief: input.brief,
       updatedAt,
       stableVersion,
       versions,
@@ -238,6 +241,7 @@ export async function enqueueSiteBuildFromTool(
     sessionId: input.sessionId,
     userId: input.userId,
     prompt: input.prompt,
+    brief: input.brief,
     version,
   });
   return { siteId, version };

@@ -46,6 +46,13 @@ async function seedFailedManifest(): Promise<void> {
     downloadPath: null,
     error: "vite build failed: boom",
     prompt: "bikinkan landing page kopi",
+    brief: {
+      siteName: "Kopi Senja",
+      audience: "pecinta kopi",
+      cta: "Pesan",
+      sections: ["hero", "kontak"],
+      vibe: "hangat",
+    },
     updatedAt: new Date(0).toISOString(),
     stableVersion: null,
     versions: { 1: { status: "failed", updatedAt: new Date(0).toISOString() } },
@@ -87,6 +94,13 @@ describe("site download", () => {
         sessionId: "session-1",
         userId: "user-1",
         prompt: "bikinkan landing page kopi",
+        brief: {
+          siteName: "Kopi Senja",
+          audience: "pecinta kopi",
+          cta: "Pesan",
+          sections: ["hero", "kontak"],
+          vibe: "hangat",
+        },
         version: 1,
       },
     ]);
@@ -104,6 +118,7 @@ describe("site download", () => {
       downloadPath: "/tmp/x/site.zip",
       error: null,
       prompt: "x",
+      brief: null,
       updatedAt: new Date(0).toISOString(),
       stableVersion: 1,
       versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
@@ -124,7 +139,7 @@ describe("site static preview", () => {
     await writeSiteManifest({
       siteId: "site-1", sessionId: "session-1", userId: "user-1", version: 1,
       status: "ready", previewUrl: null, downloadPath: "x", error: null,
-      prompt: "x", stableVersion: 1, updatedAt: new Date(0).toISOString(),
+      prompt: "x", brief: null, stableVersion: 1, updatedAt: new Date(0).toISOString(),
       versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
     });
 
@@ -159,7 +174,7 @@ describe("site static preview", () => {
     await writeSiteManifest({
       siteId: "site-1", sessionId: "session-1", userId: "user-1", version: 1,
       status: "ready", previewUrl: null, downloadPath: "x", error: null,
-      prompt: "x", stableVersion: 1, updatedAt: new Date(0).toISOString(),
+      prompt: "x", brief: null, stableVersion: 1, updatedAt: new Date(0).toISOString(),
       versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
     });
     const app = new Hono().route("/api/sites", siteDownloadRouter);
@@ -180,7 +195,7 @@ describe("site by-session and rollback", () => {
     await writeSiteManifest({
       siteId: "site-1", sessionId: "session-1", userId: "user-1", version: 2,
       status: "ready", previewUrl: null, downloadPath: "x", error: null,
-      prompt: "x", stableVersion: 2, updatedAt: new Date(0).toISOString(),
+      prompt: "x", brief: null, stableVersion: 2, updatedAt: new Date(0).toISOString(),
       versions: {
         1: { status: "ready", updatedAt: new Date(0).toISOString() },
         2: { status: "ready", updatedAt: new Date(0).toISOString() },
