@@ -10,7 +10,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const DEFAULT_SITE_MODEL: CompletionModelId = "meta/muse-spark-1.3-contributor";
-export const SITE_BUILD_TIMEOUT_MS = 300_000;
+// Budget per agent stream: real high-effort builder runs measured >5min
+// (v2 attempt aborted at ~307s on 2026-09-22), so allow 10min.
+export const SITE_BUILD_TIMEOUT_MS = 600_000;
 
 export type SiteBuildStatus = "queued" | "running" | "ready" | "failed";
 

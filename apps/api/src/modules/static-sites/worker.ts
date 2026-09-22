@@ -82,25 +82,54 @@ function decodeOutput(value: unknown): string {
 }
 
 /**
- * Point TEMP/TMP at the canonical temp-dir spelling once per process.
+ * Point TEMP/TMP/TMPDIR at the canonical temp-dir spelling once per process.
  * @anvia/sandbox stages container reads via `docker cp` into os.tmpdir()
  * and rejects the read when realpath() spelling disagrees with the temp dir
  * spelling. On Windows, TEMP commonly uses an 8.3 alias
  * (C:\Users\IQBAL~1.SHA\...) while the copied file canonicalizes to the long
- * name, failing every read with "escaped its temporary read boundary".
+ * name; on macOS, TMPDIR uses the /var symlink spelling while realpath()
+ * returns /private/var. Node's os.tmpdir() prefers TMPDIR over TEMP/TMP, so
+ * all three must be canonicalized — setting TEMP/TMP alone is a no-op on mac.
+ * Failing every read with "escaped its temporary read boundary".
  */
-async function canonicalizeSandboxTempDir(): Promise<void> {
+export async function canonicalizeSandboxTempDir(): Promise<void> {
   try {
     const canonical = await realpath(tmpdir());
     process.env.TEMP = canonical;
     process.env.TMP = canonical;
+    process.env.TMPDIR = canonical;
   } catch {
     // Fall back to whatever os.tmpdir() already returns.
   }
 }
 
-async function defaultCreateSandboxSession(): Promise<SandboxSession> {
-  await canonicalizeSandboxTempDir();
+/**
+ * Readable message from a builder-agent stream error event. Installed
+ * @anvia/core declares AgentErrorStreamEvent as `{ type: "error", error:
+ * unknown, usage }` — the cause lives in `error`, so throwing the whole
+ * event serializes as "[object Object]" in the site manifest.
+ */
+export function builderAgentErrorMessage(event: unknown): string {
+  const fromValue = (value: unknown): string | null => {
+    if (value instanceof Error && value.message) return value.message;
+    if (typeof value === "string" && value.length > 0) return value;
+    return null;
+  };
+  if (event && typeof event === "object") {
+    const record = event as Record<string, unknown>;
+    const inner = fromValue(record.error) ?? fromValue(record.message) ?? fromValue(record.delta);
+    if (inner) return inner;
+    try {
+      const json = JSON.stringify(event);
+      if (json && json !== "{}") return json;
+    } catch {
+      // Fall through to the generic message below.
+    }
+  }
+  return fromValue(event) ?? "Builder agent failed";
+}
+
+async function defaultCreateSandboxSession(): Promise<SandboxSession> {  await canonicalizeSandboxTempDir();
   const client = new DockerSandboxClient();
   await client.pullImage({ image: "node:22-bookworm" });
   const sandbox = await client.createSandbox({
@@ -209,7 +238,7 @@ export async function processSiteBuildJob(
           if (next.done) break;
           const event = next.value as { type?: string; delta?: string };
           if (event?.type === "text_delta" && typeof event.delta === "string") text += event.delta;
-          if (event?.type === "error") throw event;
+          if (event?.type === "error") throw new Error(builderAgentErrorMessage(event));
         }
         const outcome = (await stream.result) as { type: string };
         if (outcome.type !== "response") throw new Error(`Builder agent did not complete: ${outcome.type}`);

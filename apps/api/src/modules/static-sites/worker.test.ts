@@ -79,7 +79,7 @@ function fakeSandbox() {
   };
 }
 
-import { createSiteBuildWorker, markSiteBuildFailed, processSiteBuildJob } from "./worker.js";
+import { createSiteBuildWorker, builderAgentErrorMessage, canonicalizeSandboxTempDir, markSiteBuildFailed, processSiteBuildJob } from "./worker.js";
 import { readActiveSiteTitle, readSiteManifest, writeSiteManifest, writeSitesIndex } from "./service.js";
 
 const JOB = {
@@ -570,5 +570,37 @@ describe("createSiteBuildWorker failed handling", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect((await readSiteManifest(siteId, dataDir))?.status).toBe("failed");
     expect(published).toHaveLength(1);
+  });
+});
+
+describe("canonicalizeSandboxTempDir", () => {
+  it("points TEMP, TMP, and TMPDIR at the canonical temp dir spelling", async () => {
+    const { realpath } = await import("node:fs/promises");
+    const { tmpdir: osTmpdir } = await import("node:os");
+    await canonicalizeSandboxTempDir();
+    const canonical = await realpath(osTmpdir());
+    expect(process.env.TEMP).toBe(canonical);
+    expect(process.env.TMP).toBe(canonical);
+    // os.tmpdir() prefers TMPDIR over TEMP/TMP: without this, @anvia/sandbox
+    // mkdtemp(os.tmpdir()) + realpath() mismatch fails every read with
+    // "escaped its temporary read boundary" (macOS /var -> /private/var).
+    expect(process.env.TMPDIR).toBe(canonical);
+  });
+});
+
+describe("builderAgentErrorMessage", () => {
+  it("extracts the underlying error from Anvia stream error events", () => {
+    // Installed @anvia/core declares AgentErrorStreamEvent as
+    // { type: "error", error: unknown, usage: Usage } — the message lives in
+    // `error`, so throwing the whole event serializes as "[object Object]".
+    expect(builderAgentErrorMessage({ type: "error", error: new Error("npm install failed") }))
+      .toBe("npm install failed");
+    expect(builderAgentErrorMessage({ type: "error", error: "boom" })).toBe("boom");
+  });
+
+  it("never returns [object Object] for bare error events", () => {
+    const message = builderAgentErrorMessage({ type: "error" });
+    expect(message).not.toBe("[object Object]");
+    expect(message.length).toBeGreaterThan(0);
   });
 });

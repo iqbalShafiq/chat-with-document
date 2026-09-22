@@ -78,7 +78,9 @@ describe("siteBuildConfig", () => {
     expect(config.concurrency).toBe(2);
     expect(config.modelId).toBe(DEFAULT_SITE_MODEL);
     expect(DEFAULT_SITE_MODEL).toBe("meta/muse-spark-1.3-contributor");
-    expect(SITE_BUILD_TIMEOUT_MS).toBe(300_000);
+    // Real high-effort agentic builds (LLM file-gen + npm install + vite build)
+    // measured >5min on 2026-09-22 (v2 attempt aborted at ~307s); budget 10min.
+    expect(SITE_BUILD_TIMEOUT_MS).toBe(600_000);
     expect(f.createCompletionModel).toHaveBeenCalledWith(DEFAULT_SITE_MODEL);
   });
 

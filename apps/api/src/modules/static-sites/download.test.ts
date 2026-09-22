@@ -9,8 +9,16 @@ vi.mock("./queue.js", () => ({
     ((globalThis as { __enqueue?: (...a: unknown[]) => Promise<void> }).__enqueue ?? (async () => undefined))(...args),
 }));
 
+const auth = vi.hoisted(() => ({ reject: false }));
+
 vi.mock("../auth/middleware.js", () => ({
-  requireUser: async (_c: unknown, next: () => Promise<void>) => next(),
+  requireUser: async (c: unknown, next: () => Promise<void>) => {
+    if (auth.reject) {
+      const ctx = c as { json: (body: unknown, status: number) => Response };
+      return ctx.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  },
 }));
 
 import { siteDownloadRouter } from "./download.js";
@@ -182,6 +190,26 @@ describe("site static preview", () => {
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
     expect(await css.text()).toContain("body{}");
+  });
+
+  it("serves preview without auth (sandboxed iframe sends no cookies) but keeps download authed", async () => {
+    const dir = useTempSiteDir();
+    mkdirSync(join(dir, "site-1", "v1"), { recursive: true });
+    writeFileSync(join(dir, "site-1", "v1", "index.html"), "<html>hi</html>");
+    writeFileSync(join(dir, "site-1", "v1", "site.zip"), Buffer.from("PK-fake-zip"));
+    auth.reject = true;
+    try {
+      const app = new Hono().route("/api/sites", siteDownloadRouter);
+      // Subresource requests from the sandbox="allow-scripts" (opaque-origin)
+      // preview iframe carry no SameSite=Lax session cookie, so the preview
+      // must be a public capability URL (unguessable UUID site id).
+      const css = await app.request("/api/sites/site-1/v1/preview/index.html");
+      expect(css.status).toBe(200);
+      const zip = await app.request("/api/sites/site-1/v1/download");
+      expect(zip.status).toBe(401);
+    } finally {
+      auth.reject = false;
+    }
   });
 });
 

@@ -14,13 +14,17 @@ import {
 
 export const siteDownloadRouter = new Hono();
 
-siteDownloadRouter.use("*", requireUser);
+// NOTE: the static preview stays public (capability URL with an unguessable
+// UUID site id). The panel embeds it in a sandbox="allow-scripts" iframe with
+// an opaque origin, so subresource requests carry no SameSite=Lax session
+// cookie and would 401 behind requireUser — leaving the preview unstyled.
+// Enumeration (by-session) and mutations (retry/rollback) stay authed.
 
 // NOTE: Hono 4.12 does not capture partial-segment params like `v:version`
 // (c.req.param("version") comes back undefined), so the version segment is
 // captured whole ("v1") and the `v` prefix is stripped here. URL shape is
 // unchanged: GET /api/sites/:siteId/v:version/download.
-siteDownloadRouter.get("/:siteId/:version/download", async (c) => {
+siteDownloadRouter.get("/:siteId/:version/download", requireUser, async (c) => {
   const siteId = c.req.param("siteId");
   const rawVersion = String(c.req.param("version") ?? "");
   const version = rawVersion.startsWith("v") ? Number(rawVersion.slice(1)) : NaN;
@@ -48,7 +52,7 @@ siteDownloadRouter.get("/:siteId/:version/download", async (c) => {
   });
 });
 
-siteDownloadRouter.post("/:siteId/retry", async (c) => {
+siteDownloadRouter.post("/:siteId/retry", requireUser, async (c) => {
   const siteId = c.req.param("siteId");
   try {
     assertSafeSiteId(siteId);
@@ -77,7 +81,7 @@ siteDownloadRouter.post("/:siteId/retry", async (c) => {
   return c.json({ siteId, version: manifest.version, status: "queued" }, 202);
 });
 
-siteDownloadRouter.get("/by-session/:sessionId", async (c) => {
+siteDownloadRouter.get("/by-session/:sessionId", requireUser, async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!/^[A-Za-z0-9_-]{1,120}$/.test(sessionId ?? "")) {
     return c.json({ error: "invalid session id" }, 400);
@@ -156,7 +160,7 @@ siteDownloadRouter.get("/:siteId/:version/preview/*", async (c) => {
 
 const rollbackBody = z.object({ version: z.number().int().min(1).max(10_000) });
 
-siteDownloadRouter.post("/:siteId/rollback", async (c) => {
+siteDownloadRouter.post("/:siteId/rollback", requireUser, async (c) => {
   const siteId = c.req.param("siteId");
   try {
     assertSafeSiteId(siteId);
