@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { applySiteBuildEvent, SiteBuildPanel } from "./site-build-panel.js";
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("applySiteBuildEvent", () => {
   it("tracks progress then ready with download", () => {
@@ -57,7 +61,9 @@ describe("SiteBuildPanel", () => {
           previewUrl: null,
           downloadUrl: null,
         }}
+        versions={[]}
         onRetry={() => undefined}
+        onRollback={() => undefined}
       />,
     );
     expect(screen.getByText("v2 · Build production.")).toBeTruthy();
@@ -79,7 +85,9 @@ describe("SiteBuildPanel", () => {
           previewUrl: "http://127.0.0.1:49111",
           downloadUrl: "/api/sites/s/v1/download",
         }}
+        versions={[]}
         onRetry={onRetry}
+        onRollback={() => undefined}
       />,
     );
     expect(screen.getByTitle("Preview s")).toBeTruthy();
@@ -97,15 +105,98 @@ describe("SiteBuildPanel", () => {
           previewUrl: null,
           downloadUrl: null,
         }}
+        versions={[]}
         onRetry={onRetry}
+        onRollback={() => undefined}
       />,
     );
     screen.getByText("Coba lagi").click();
     expect(onRetry).toHaveBeenCalledWith("s");
   });
 
+  it("renders version history with stable marker and rollback", () => {
+    const onRollback = vi.fn();
+    render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 3,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "http://127.0.0.1:49111",
+          downloadUrl: "/api/sites/s/v3/download",
+        }}
+        versions={[
+          {
+            version: 1,
+            status: "ready",
+            stable: false,
+            previewUrl: "/api/sites/s/v1/preview/index.html",
+            downloadUrl: "/api/sites/s/v1/download",
+          },
+          {
+            version: 2,
+            status: "ready",
+            stable: true,
+            previewUrl: "/api/sites/s/v2/preview/index.html",
+            downloadUrl: "/api/sites/s/v2/download",
+          },
+          {
+            version: 3,
+            status: "ready",
+            stable: false,
+            previewUrl: "http://127.0.0.1:49111",
+            downloadUrl: "/api/sites/s/v3/download",
+          },
+        ]}
+        onRetry={() => undefined}
+        onRollback={onRollback}
+      />,
+    );
+    expect(screen.getByRole("list", { name: "Versi" })).toBeTruthy();
+    expect(screen.getByText(/\(stabil\)/)).toBeTruthy();
+    const rollbackButtons = screen.getAllByText("Rollback");
+    expect(rollbackButtons).toHaveLength(2);
+    rollbackButtons[0].click();
+    expect(onRollback).toHaveBeenCalledWith("s", 1);
+  });
+
+  it("hides the version list for a single version", () => {
+    render(
+      <SiteBuildPanel
+        build={{
+          siteId: "s",
+          version: 1,
+          phase: "ready",
+          message: "Situs siap diunduh.",
+          previewUrl: "http://127.0.0.1:49111",
+          downloadUrl: "/api/sites/s/v1/download",
+        }}
+        versions={[
+          {
+            version: 1,
+            status: "ready",
+            stable: true,
+            previewUrl: "http://127.0.0.1:49111",
+            downloadUrl: "/api/sites/s/v1/download",
+          },
+        ]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    expect(screen.queryByRole("list", { name: "Versi" })).toBeNull();
+  });
+
   it("renders nothing without a build", () => {
-    const { container } = render(<SiteBuildPanel build={null} onRetry={() => undefined} />);
+    const { container } = render(
+      <SiteBuildPanel
+        build={null}
+        versions={[]}
+        onRetry={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
     expect(container.innerHTML).toBe("");
   });
 });

@@ -13,6 +13,7 @@ import {
   applySiteBuildEvent,
   SiteBuildPanel,
   type SiteBuildState,
+  type SiteVersionEntry,
 } from "#/components/sites/site-build-panel";
 import {
   ApiAuthError,
@@ -130,6 +131,7 @@ export function ChatRouteView(input: {
   // never re-sends the same first message.
   const [shareForkHandoff] = useState(() => consumeShareForkDraft(input.sessionId));
   const [siteBuild, setSiteBuild] = useState<SiteBuildState | null>(null);
+  const [siteVersions, setSiteVersions] = useState<SiteVersionEntry[]>([]);
 
   const retrySiteBuild = useCallback(async (siteId: string) => {
     const response = await fetch(`/api/sites/${siteId}/retry`, { method: "POST" });
@@ -140,6 +142,57 @@ export function ChatRouteView(input: {
         : prev,
     );
   }, []);
+
+  const rollbackSiteBuild = useCallback(async (siteId: string, version: number) => {
+    const response = await fetch(`/api/sites/${siteId}/rollback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version }),
+    });
+    if (!response.ok) return;
+    const manifest = (await response.json()) as { stableVersion: number };
+    setSiteVersions((prev) =>
+      prev.map((entry) => ({ ...entry, stable: entry.version === manifest.stableVersion })),
+    );
+  }, []);
+
+  const refreshSiteVersions = useCallback(async (sessionId: string) => {
+    const response = await fetch(`/api/sites/by-session/${sessionId}`);
+    if (!response.ok) return;
+    const data = (await response.json()) as { sites: { siteId: string; version: number; stableVersion: number; status: string; previewUrl: string | null; downloadUrl: string | null }[] };
+    const latest = data.sites[0];
+    if (!latest) return;
+    setSiteVersions(
+      Array.from({ length: latest.version }, (_, index) => {
+        const version = index + 1;
+        return {
+          version,
+          status: (version === latest.version ? latest.status : "ready") as SiteVersionEntry["status"],
+          stable: version === latest.stableVersion,
+          previewUrl: version === latest.version ? latest.previewUrl : `/api/sites/${latest.siteId}/v${version}/preview/index.html`,
+          downloadUrl: version === latest.version ? latest.downloadUrl : `/api/sites/${latest.siteId}/v${version}/download`,
+        };
+      }),
+    );
+    if (latest.status === "ready" || latest.status === "failed") {
+      setSiteBuild((prev) =>
+        prev?.siteId === latest.siteId
+          ? prev
+          : {
+              siteId: latest.siteId,
+              version: latest.version,
+              phase: latest.status === "ready" ? "ready" : "failed",
+              message: latest.status === "ready" ? "Situs siap diunduh." : "Build gagal.",
+              previewUrl: latest.previewUrl,
+              downloadUrl: latest.downloadUrl,
+            },
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSiteVersions(input.sessionId);
+  }, [input.sessionId, refreshSiteVersions]);
 
   if (route.status === "missing") {
     return <SessionNotFound projectId={input.projectId} />;
@@ -174,6 +227,7 @@ export function ChatRouteView(input: {
         onImageContextActions={sessionsContext.onImageContextActions}
         onReloadMessages={(messages) => route.setMessages(messages)}
         onSiteBuildEvent={(event) => setSiteBuild((prev) => applySiteBuildEvent(prev, event))}
+        composerTopSlot={siteBuild ? <SiteBuildPanel build={siteBuild} versions={siteVersions} onRetry={retrySiteBuild} onRollback={rollbackSiteBuild} /> : null}
         initialComposerDraft={
           shareForkHandoff
             ? { text: shareForkHandoff.text, attachments: shareForkHandoff.attachments }
@@ -190,7 +244,6 @@ export function ChatRouteView(input: {
             : null
         }
       />
-      <SiteBuildPanel build={siteBuild} onRetry={retrySiteBuild} />
     </div>
   );
 }

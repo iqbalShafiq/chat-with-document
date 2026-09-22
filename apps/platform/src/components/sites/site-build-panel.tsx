@@ -1,3 +1,4 @@
+import { Button } from "#/components/ui/button";
 import type { SiteBuildProgress, SiteBuildReady } from "../../lib/chat/client-data.js";
 
 export const SITE_BUILD_PHASES = [
@@ -16,6 +17,14 @@ export type SiteBuildState = {
   version: number;
   phase: SiteBuildPhaseName;
   message: string;
+  previewUrl: string | null;
+  downloadUrl: string | null;
+};
+
+export type SiteVersionEntry = {
+  version: number;
+  status: "queued" | "running" | "ready" | "failed";
+  stable: boolean;
   previewUrl: string | null;
   downloadUrl: string | null;
 };
@@ -52,15 +61,27 @@ export function applySiteBuildEvent(
 
 export function SiteBuildPanel({
   build,
+  versions,
   onRetry,
+  onRollback,
 }: {
   build: SiteBuildState | null;
+  versions: SiteVersionEntry[];
   onRetry: (siteId: string) => void;
+  onRollback: (siteId: string, version: number) => void;
 }) {
   if (!build) return null;
   const active = phaseIndex(build.phase);
+  const isFailed = build.phase === "failed";
   return (
-    <section aria-label="Site build">
+    <section
+      aria-label="Site build"
+      className={`glass rounded-xl border px-3 py-2.5 animate-fade-in ${
+        isFailed
+          ? "border-danger/25 bg-danger-soft/40"
+          : "border-accent/20 bg-accent/[0.04]"
+      }`}
+    >
       <p>
         v{build.version} · {build.message}
       </p>
@@ -76,9 +97,9 @@ export function SiteBuildPanel({
         ))}
       </ol>
       {build.phase === "failed" ? (
-        <button type="button" onClick={() => onRetry(build.siteId)}>
+        <Button size="sm" variant="secondary" onClick={() => onRetry(build.siteId)}>
           Coba lagi
-        </button>
+        </Button>
       ) : null}
       {build.previewUrl ? (
         <iframe title={`Preview ${build.siteId}`} src={build.previewUrl} sandbox="allow-scripts" />
@@ -86,6 +107,19 @@ export function SiteBuildPanel({
         <div role="status">Pratinjau segera hadir.</div>
       )}
       {build.downloadUrl ? <a href={build.downloadUrl} download>Unduh zip</a> : null}
+      {versions.length > 1 ? (
+        <ol aria-label="Versi">
+          {versions.map((entry) => (
+            <li key={entry.version}>
+              v{entry.version}
+              {entry.stable ? " (stabil)" : null}
+              {!entry.stable && entry.status === "ready" ? (
+                <Button size="sm" variant="secondary" onClick={() => onRollback(build.siteId, entry.version)}>Rollback</Button>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
     </section>
   );
 }
