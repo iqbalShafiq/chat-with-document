@@ -18,6 +18,25 @@ const f = vi.hoisted(() => ({
   })),
   agentRun: vi.fn(async () => ({ text: "done", usage: { inputTokens: 2, outputTokens: 2 } })),
   publish: vi.fn(async (_event: unknown) => undefined),
+  siteWorker: null as null | {
+    handlers: Map<string, (...args: never[]) => unknown>;
+  },
+}));
+
+vi.mock("bullmq", () => ({
+  Queue: class FakeQueue {
+    add = vi.fn(async () => ({}));
+  },
+  Worker: class FakeWorker {
+    handlers = new Map<string, (...args: never[]) => unknown>();
+    constructor() {
+      f.siteWorker = this as unknown as typeof f.siteWorker;
+    }
+    on(event: string, handler: (...args: never[]) => unknown) {
+      this.handlers.set(event, handler);
+      return this;
+    }
+  },
 }));
 
 vi.mock("@anreal/agent", () => ({
@@ -60,7 +79,7 @@ function fakeSandbox() {
   };
 }
 
-import { processSiteBuildJob } from "./worker.js";
+import { createSiteBuildWorker, markSiteBuildFailed, processSiteBuildJob } from "./worker.js";
 import { readActiveSiteTitle, readSiteManifest, writeSiteManifest, writeSitesIndex } from "./service.js";
 
 const JOB = {
@@ -443,5 +462,113 @@ describe("processSiteBuildJob", () => {
     expect(manifest?.stableVersion).toBe(1);
     expect(manifest?.versions[1]?.status).toBe("ready");
     expect(manifest?.versions[2]?.status).toBe("failed");
+  });
+});
+
+describe("markSiteBuildFailed", () => {
+  it("moves a running manifest to failed, keeps the brief, and publishes", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "site-failed-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const siteId = "site-9";
+    await writeSiteManifest(
+      {
+        siteId, sessionId: "session-9", userId: "user-9", version: 2,
+        status: "running", previewUrl: null,
+        downloadPath: null, error: null, prompt: "ganti headline",
+        brief: {
+          siteName: "Kopi Senja", audience: "pecinta kopi", cta: "Pesan",
+          sections: ["hero"], vibe: "hangat",
+        },
+        updatedAt: new Date(0).toISOString(), stableVersion: 1,
+        versions: {
+          1: { status: "ready", updatedAt: new Date(0).toISOString() },
+          2: { status: "running", updatedAt: new Date(0).toISOString() },
+        },
+      },
+      dataDir,
+    );
+    const published: unknown[] = [];
+    const moved = await markSiteBuildFailed(siteId, new Error("job stalled"), {
+      publish: async (event: unknown) => {
+        published.push(event);
+      },
+    });
+    expect(moved).toBe(true);
+    const manifest = await readSiteManifest(siteId, dataDir);
+    expect(manifest?.status).toBe("failed");
+    expect(manifest?.prompt).toBe("ganti headline");
+    expect(manifest?.brief?.siteName).toBe("Kopi Senja");
+    expect(manifest?.stableVersion).toBe(1);
+    expect(manifest?.versions[2]?.status).toBe("failed");
+    expect(published).toEqual([
+      {
+        sessionId: "session-9",
+        appEvent: {
+          type: "site_build_progress", siteId, version: 2, phase: "failed", message: "Build gagal.",
+        },
+      },
+    ]);
+  });
+
+  it("leaves an already-ready manifest untouched", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "site-failed-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const siteId = "site-10";
+    await writeSiteManifest(
+      {
+        siteId, sessionId: "session-10", userId: "user-10", version: 1,
+        status: "ready", previewUrl: "/api/sites/site-10/v1/preview/index.html",
+        downloadPath: "x", error: null, prompt: "x", brief: null,
+        updatedAt: new Date(0).toISOString(), stableVersion: 1,
+        versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
+      },
+      dataDir,
+    );
+    const publish = vi.fn(async () => undefined);
+    const moved = await markSiteBuildFailed(siteId, new Error("late"), { publish });
+    expect(moved).toBe(false);
+    expect((await readSiteManifest(siteId, dataDir))?.status).toBe("ready");
+    expect(publish).not.toHaveBeenCalled();
+  });
+});
+
+describe("createSiteBuildWorker failed handling", () => {
+  it("marks the manifest failed only after attempts are exhausted", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "site-worker-"));
+    vi.stubEnv("SITE_DATA_DIR", dataDir);
+    const siteId = "site-11";
+    await writeSiteManifest(
+      {
+        siteId, sessionId: "session-11", userId: "user-11", version: 1,
+        status: "running", previewUrl: null,
+        downloadPath: null, error: null, prompt: "x", brief: null,
+        updatedAt: new Date(0).toISOString(), stableVersion: null,
+        versions: { 1: { status: "running", updatedAt: new Date(0).toISOString() } },
+      },
+      dataDir,
+    );
+    const published: unknown[] = [];
+    createSiteBuildWorker({
+      publish: async (event: unknown) => {
+        published.push(event);
+      },
+    });
+    const onFailed = f.siteWorker?.handlers.get("failed");
+    expect(onFailed).toBeDefined();
+    const job = {
+      data: { siteId, sessionId: "session-11", userId: "user-11", prompt: "x", brief: null, version: 1 },
+      attemptsMade: 1,
+      opts: { attempts: 2 },
+    };
+    await (onFailed as (job: unknown, error: unknown) => unknown)(job, new Error("boom"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await readSiteManifest(siteId, dataDir))?.status).toBe("running");
+    await (onFailed as (job: unknown, error: unknown) => unknown)(
+      { ...job, attemptsMade: 2 },
+      new Error("boom"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await readSiteManifest(siteId, dataDir))?.status).toBe("failed");
+    expect(published).toHaveLength(1);
   });
 });

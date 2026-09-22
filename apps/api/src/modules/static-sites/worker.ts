@@ -366,12 +366,12 @@ async function readSandboxText(
   }
 }
 
-export function createSiteBuildWorker(): Worker<SiteBuildJobData> {
-  return new Worker<SiteBuildJobData>(
+export function createSiteBuildWorker(deps: Pick<SiteBuildDeps, "publish"> = {}): Worker<SiteBuildJobData> {
+  const worker = new Worker<SiteBuildJobData>(
     SITE_BUILD_QUEUE,
     async (job) => {
       try {
-        await processSiteBuildJob(job);
+        await processSiteBuildJob(job, deps.publish ? { publish: deps.publish } : undefined);
       } catch (error) {
         console.error(`[sites] failed ${job.id}`, error);
         throw error;
@@ -382,4 +382,58 @@ export function createSiteBuildWorker(): Worker<SiteBuildJobData> {
       concurrency: siteBuildConfig().concurrency,
     },
   );
+  worker.on("failed", (job, error) => {
+    if (!job) return;
+    if (job.attemptsMade < (job.opts.attempts ?? 1)) return;
+    void markSiteBuildFailed(
+      job.data.siteId,
+      error,
+      deps.publish ? { publish: deps.publish } : undefined,
+    ).catch((reconcileError) => {
+      console.error(`[sites] reconcile failed ${job.data.siteId}`, reconcileError);
+    });
+  });
+  return worker;
+}
+
+/**
+ * Reconcile a manifest whose BullMQ job died outside processSiteBuildJob
+ * (stall-exhausted, worker killed): a "running" row would otherwise promise
+ * progress forever. Ready rows are never downgraded. Returns whether the
+ * manifest moved to failed.
+ */
+export async function markSiteBuildFailed(
+  siteId: string,
+  error: unknown,
+  deps: Pick<SiteBuildDeps, "publish"> = {},
+): Promise<boolean> {
+  const existing = await readSiteManifest(siteId);
+  if (!existing || existing.status === "ready" || existing.status === "failed") return false;
+  const failedAt = new Date().toISOString();
+  await writeSiteManifest({
+    ...existing,
+    status: "failed",
+    previewUrl: null,
+    downloadPath: null,
+    error: error instanceof Error ? error.message.slice(0, 1000) : String(error),
+    updatedAt: failedAt,
+    versions: {
+      ...existing.versions,
+      [existing.version]: { status: "failed", updatedAt: failedAt },
+    },
+  });
+  const publish = deps.publish ?? publishSiteBuildEvent;
+  await publish({
+    sessionId: existing.sessionId,
+    appEvent: {
+      type: "site_build_progress",
+      siteId,
+      version: existing.version,
+      phase: "failed",
+      message: "Build gagal.",
+    },
+  }).catch((publishError) => {
+    console.warn(`[sites] failed publish failed ${siteId}`, publishError);
+  });
+  return true;
 }
