@@ -147,12 +147,15 @@ export async function processSiteBuildJob(
       console.warn(`[sites] progress publish failed ${siteId}`, error);
     });
 
+  const runUpdatedAt = new Date().toISOString();
   await writeSiteManifest({
     siteId, sessionId, userId, version,
     status: "running",
     previewUrl: null, downloadPath: null, error: null,
     prompt,
-    updatedAt: new Date().toISOString(),
+    updatedAt: runUpdatedAt,
+    stableVersion: null,
+    versions: { [version]: { status: "running", updatedAt: runUpdatedAt } },
   });
   await progress("starting", "Menyiapkan sandbox build.");
 
@@ -240,12 +243,15 @@ export async function processSiteBuildJob(
     const downloadPath = join(baseDir, "site.zip");
     zip.writeZip(downloadPath);
 
+    const readyUpdatedAt = new Date().toISOString();
     const manifest: SiteManifest = {
       siteId, sessionId, userId, version,
       status: "ready",
       previewUrl, downloadPath, error: null,
       prompt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: readyUpdatedAt,
+      stableVersion: version,
+      versions: { [version]: { status: "ready", updatedAt: readyUpdatedAt } },
     };
     await writeSiteManifest(manifest);
     await publish({
@@ -261,13 +267,16 @@ export async function processSiteBuildJob(
     });
     console.log(`[sites] ready ${siteId} v${version} (${Date.now() - startedAt}ms)`);
   } catch (error) {
+    const failedUpdatedAt = new Date().toISOString();
     await writeSiteManifest({
       siteId, sessionId, userId, version,
       status: "failed",
       previewUrl: null, downloadPath: null,
       error: error instanceof Error ? error.message.slice(0, 1000) : String(error),
       prompt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: failedUpdatedAt,
+      stableVersion: null,
+      versions: { [version]: { status: "failed", updatedAt: failedUpdatedAt } },
     });
     await progress("failed", "Build gagal.");
     throw error;

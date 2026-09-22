@@ -25,6 +25,8 @@ export type SiteManifest = {
   error: string | null;
   prompt: string;
   updatedAt: string;
+  stableVersion: number | null;
+  versions: Record<number, { status: SiteBuildStatus; updatedAt: string }>;
 };
 
 export type SiteBuildConfig = {
@@ -126,13 +128,19 @@ export async function enqueueSiteBuildFromTool(
 ): Promise<{ siteId: string; version: number }> {
   let siteId = input.siteId;
   let version: number;
+  let stableVersion: number | null = null;
+  let versions: SiteManifest["versions"] = {};
   if (!siteId) {
     siteId = randomUUID();
     version = 1;
   } else {
     const existing = await readSiteManifest(siteId, dirOverride);
     version = (existing?.version ?? 0) + 1;
+    stableVersion = existing?.stableVersion ?? null;
+    versions = { ...(existing?.versions ?? {}) };
   }
+  const updatedAt = new Date().toISOString();
+  versions[version] = { status: "queued", updatedAt };
   await writeSiteManifest(
     {
       siteId,
@@ -144,7 +152,9 @@ export async function enqueueSiteBuildFromTool(
       downloadPath: null,
       error: null,
       prompt: input.prompt,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
+      stableVersion,
+      versions,
     },
     dirOverride,
   );

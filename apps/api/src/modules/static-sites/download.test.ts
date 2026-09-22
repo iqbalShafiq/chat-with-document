@@ -46,6 +46,8 @@ async function seedFailedManifest(): Promise<void> {
     error: "vite build failed: boom",
     prompt: "bikinkan landing page kopi",
     updatedAt: new Date(0).toISOString(),
+    stableVersion: null,
+    versions: { 1: { status: "failed", updatedAt: new Date(0).toISOString() } },
   });
 }
 
@@ -102,6 +104,8 @@ describe("site download", () => {
       error: null,
       prompt: "x",
       updatedAt: new Date(0).toISOString(),
+      stableVersion: 1,
+      versions: { 1: { status: "ready", updatedAt: new Date(0).toISOString() } },
     });
     const ready = await siteDownloadRouter.request("/site-2/retry", { method: "POST" });
     expect(ready.status).toBe(409);

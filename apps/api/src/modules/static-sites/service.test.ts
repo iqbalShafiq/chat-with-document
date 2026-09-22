@@ -45,6 +45,8 @@ const MANIFEST: SiteManifest = {
   error: null,
   prompt: "bikinkan landing page kopi",
   updatedAt: new Date(0).toISOString(),
+  stableVersion: null,
+  versions: { 1: { status: "queued", updatedAt: new Date(0).toISOString() } },
 };
 
 let dir: string;
@@ -85,6 +87,21 @@ describe("site manifest store", () => {
   it("round-trips a manifest through site.json", async () => {
     await writeSiteManifest(MANIFEST, dir);
     await expect(readSiteManifest("site-1", dir)).resolves.toEqual(MANIFEST);
+  });
+
+  it("preserves stableVersion and the versions map", async () => {
+    const manifest: SiteManifest = {
+      ...MANIFEST,
+      version: 2,
+      status: "ready",
+      stableVersion: 1,
+      versions: {
+        1: { status: "ready", updatedAt: new Date(0).toISOString() },
+        2: { status: "ready", updatedAt: new Date(1).toISOString() },
+      },
+    };
+    await writeSiteManifest(manifest, dir);
+    await expect(readSiteManifest("site-1", dir)).resolves.toEqual(manifest);
   });
 
   it("returns null for unknown sites", async () => {
@@ -160,6 +177,8 @@ describe("enqueueSiteBuildFromTool", () => {
       version: 1,
       status: "queued",
       prompt: "bikinkan landing page kopi",
+      stableVersion: null,
+      versions: { 1: { status: "queued", updatedAt: expect.any(String) } },
     });
     await expect(readActiveSiteTitle("session-1")).resolves.toEqual({
       siteId: result.siteId,
@@ -199,5 +218,13 @@ describe("enqueueSiteBuildFromTool", () => {
     expect(second).toEqual({ siteId: first.siteId, version: 2 });
     expect(enqueued).toHaveLength(2);
     expect(enqueued[1]).toMatchObject({ siteId: first.siteId, version: 2 });
+    await expect(readSiteManifest(first.siteId)).resolves.toMatchObject({
+      version: 2,
+      stableVersion: null,
+      versions: {
+        1: { status: "queued", updatedAt: expect.any(String) },
+        2: { status: "queued", updatedAt: expect.any(String) },
+      },
+    });
   });
 });
