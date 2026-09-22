@@ -992,27 +992,31 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     }
     await touchChatSession(user.id, metadata.sessionId);
     const firstUserText = extractUserTextForTitle(promptMessage);
-    if (siteBuildConfig().enabled && isSiteBuilderIntent(firstUserText)) {
-      const siteId = crypto.randomUUID();
-      const version = 1;
-      void writeSiteManifest({
-        siteId,
-        sessionId: metadata.sessionId,
-        userId: user.id,
-        version,
-        status: "queued",
-        previewUrl: null,
-        downloadPath: null,
-        error: null,
-        prompt: firstUserText,
-        updatedAt: new Date().toISOString(),
-      })
-        .then(() =>
-          enqueueSiteBuild({ siteId, sessionId: metadata.sessionId, userId: user.id, prompt: firstUserText, version }),
-        )
-        .catch((error) => {
-          console.warn("[sites] enqueue failed", error);
-        });
+    try {
+      if (siteBuildConfig().enabled && isSiteBuilderIntent(firstUserText)) {
+        const siteId = crypto.randomUUID();
+        const version = 1;
+        void writeSiteManifest({
+          siteId,
+          sessionId: metadata.sessionId,
+          userId: user.id,
+          version,
+          status: "queued",
+          previewUrl: null,
+          downloadPath: null,
+          error: null,
+          prompt: firstUserText,
+          updatedAt: new Date().toISOString(),
+        })
+          .then(() =>
+            enqueueSiteBuild({ siteId, sessionId: metadata.sessionId, userId: user.id, prompt: firstUserText, version }),
+          )
+          .catch((error) => {
+            console.warn("[sites] enqueue failed", error);
+          });
+      }
+    } catch (error) {
+      console.warn("[sites] enqueue failed", error);
     }
     const titleSeed = extractUserTextForTitle(promptMessage);
     if (titleSeed) {
