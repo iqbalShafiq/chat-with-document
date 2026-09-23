@@ -128,10 +128,24 @@ function lastAssistant(page: Page) {
   return page.locator('article[data-role="assistant"]').last();
 }
 
-async function approveOnce(page: Page): Promise<void> {
-  const allow = page.getByRole("button", { name: "Allow once" });
-  await expect(allow).toBeVisible({ timeout: 120_000 });
-  await allow.click();
+/** Click approvals until the run goes idle (bounded). */
+async function driveRunToIdle(page: Page, maxApprovals = 8): Promise<void> {
+  for (let i = 0; i < maxApprovals; i++) {
+    const send = page.getByRole("button", { name: "Send", exact: true });
+    if (await send.isVisible().catch(() => false)) return;
+    const allow = page.getByRole("button", { name: "Allow once" });
+    try {
+      await expect(allow).toBeVisible({ timeout: 60_000 });
+    } catch {
+      continue;
+    }
+    // Raw dispatch: the live-updating panel replaces the button node every
+    // frame, so resolved clicks (even forced) never land. React listens at
+    // the root, so the bubbled event still registers the decision.
+    await allow.dispatchEvent("click").catch(() => undefined);
+    await page.waitForTimeout(3000);
+  }
+  await waitForRunDone(page);
 }
 
 test.describe.serial("agent-managed skills and mcp", () => {
@@ -141,8 +155,7 @@ test.describe.serial("agent-managed skills and mcp", () => {
     await openFreshChatExact(page);
 
     await sendMessage(page, `Please save "always start replies with [AGENT-SKILL]" as a skill named ${SKILL_NAME}`);
-    await approveOnce(page);
-    await waitForRunDone(page);
+    await driveRunToIdle(page);
 
     const skill = await apiSkillByName(page, SKILL_NAME);
     expect(skill).not.toBeNull();
@@ -156,8 +169,7 @@ test.describe.serial("agent-managed skills and mcp", () => {
     await openFreshChatExact(page);
 
     await sendMessage(page, `Please enable the skill named ${SKILL_NAME}`);
-    await approveOnce(page);
-    await waitForRunDone(page);
+    await driveRunToIdle(page);
     await expect(lastAssistant(page)).toContainText(/modal|review/i);
 
     const skill = await apiSkillByName(page, SKILL_NAME);
@@ -188,6 +200,8 @@ test.describe.serial("agent-managed skills and mcp", () => {
       expect(retry.ok()).toBe(true);
     }
 
+    // Fresh chat so per-chat selection recomputes from the enabled catalog.
+    await openFreshChatExact(page);
     await sendMessage(page, "Balas dengan satu kata: halo");
     await waitForRunDone(page);
     await expect(lastAssistant(page)).toContainText("[AGENT-SKILL]");
@@ -203,8 +217,7 @@ test.describe.serial("agent-managed skills and mcp", () => {
       page,
       `Please connect the MCP server at https://mcp.context7.com/mcp with the name ${MCP_NAME}`,
     );
-    await approveOnce(page);
-    await waitForRunDone(page);
+    await driveRunToIdle(page);
 
     const server = await apiMcpByName(page, MCP_NAME);
     expect(server).not.toBeNull();

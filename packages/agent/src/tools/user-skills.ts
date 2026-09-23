@@ -40,6 +40,9 @@ const manageUserSkillsSpec = {
     "Manage the user's reusable skills (procedures the agent loads when a task fits). " +
     "Use list to see them; create/update/delete/enable/disable change them. " +
     "Created skills start as drafts the user reviews in the Skills modal — tell the user that. " +
+    "bodyMd MUST be a complete SKILL.md starting with YAML frontmatter between --- lines, " +
+    'for example: ---\\nname: my-skill\\ndescription: When to use it.\\n---\\n\\n# My skill\\n\\nSteps. ' +
+    "The frontmatter name: and description: must equal the name and description fields, or the call fails. " +
     "Never invent secrets: this tool takes no tokens or credentials.",
   inputSchema: manageUserSkillsInput,
 } as const;
