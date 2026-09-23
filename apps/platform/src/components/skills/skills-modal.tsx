@@ -5,6 +5,7 @@ import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
 import { ManagementRow } from "#/components/ui/management-row";
+import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import type { SkillInput, UserSkill } from "#/lib/api";
 import { issuesFromError, issuesToFieldErrors, type FieldErrors } from "./skill-issues";
@@ -47,6 +48,7 @@ export function SkillsModal({
   const [editingId, setEditingId] = useState<string | null | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   const closeEditor = () => {
     setEditingId(undefined);
@@ -66,72 +68,84 @@ export function SkillsModal({
       size="lg"
       heightMode="viewport"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {skills.loading ? (
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div
+          ref={contentScrollRef}
+          className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4"
+        >
           <div className="flex flex-col gap-3">
-            <div className="skeleton-shimmer h-16 w-full rounded-xl" />
-            <div className="skeleton-shimmer h-16 w-full rounded-xl" />
-          </div>
-        ) : skills.error && !skills.data ? (
-          <p className="text-sm text-danger" role="alert">
-            {skills.error}
-          </p>
-        ) : editingId !== undefined ? (
-          <SkillEditor
-            key={editingId ?? "new"}
-            initial={
-              editingId
-                ? (skills.data ?? []).find((skill) => skill.id === editingId) ?? null
-                : null
-            }
-            saving={skills.saving}
-            onCancel={closeEditor}
-            onSave={async (input) => {
-              await skills.save(editingId ?? null, input);
-              handleChanged();
-            }}
-          />
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-text-muted">
-                {(skills.data ?? []).length === 0
-                  ? "No skills yet — write the first one."
-                  : "Enabled skills load automatically when the task fits."}
-              </p>
-              <Button variant="primary" size="sm" onClick={() => setEditingId(null)}>
-                <Plus className="size-4" strokeWidth={2} />
-                New skill
-              </Button>
-            </div>
-            <ul className="flex flex-col gap-2">
-              {(skills.data ?? []).map((skill) => (
-                <ManagementRow
-                  key={skill.id}
-                  title={skill.name}
-                  subtitle={
-                    skill.status === "active" ? skill.description : "Invalid — edit to fix"
-                  }
-                  enabled={skill.isEnabled}
-                  onToggle={() => {
-                    void skills.toggle(skill.id, !skill.isEnabled).then(onChanged);
-                  }}
-                  toggleLabel={`Enable ${skill.name}`}
-                  toggleTitle={skill.isEnabled ? "Enabled" : "Disabled"}
-                  onEdit={() => setEditingId(skill.id)}
-                  editLabel={`Edit ${skill.name}`}
-                  onDelete={() => setDeleteId(skill.id)}
-                  deleteLabel={`Delete ${skill.name}`}
-                />
-              ))}
-            </ul>
-            {skills.error ? (
-              <p className="text-[11px] text-danger" role="alert">
+            {skills.loading ? (
+              <div className="flex flex-col gap-3">
+                <div className="skeleton-shimmer h-16 w-full rounded-xl" />
+                <div className="skeleton-shimmer h-16 w-full rounded-xl" />
+              </div>
+            ) : skills.error && !skills.data ? (
+              <p className="text-sm text-danger" role="alert">
                 {skills.error}
               </p>
-            ) : null}
-          </>
-        )}
+            ) : editingId !== undefined ? (
+              <SkillEditor
+                key={editingId ?? "new"}
+                initial={
+                  editingId
+                    ? (skills.data ?? []).find((skill) => skill.id === editingId) ?? null
+                    : null
+                }
+                saving={skills.saving}
+                onCancel={closeEditor}
+                onSave={async (input) => {
+                  await skills.save(editingId ?? null, input);
+                  handleChanged();
+                }}
+              />
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-text-muted">
+                    {(skills.data ?? []).length === 0
+                      ? "No skills yet — write the first one."
+                      : "Enabled skills load automatically when the task fits."}
+                  </p>
+                  <Button variant="primary" size="sm" onClick={() => setEditingId(null)}>
+                    <Plus className="size-4" strokeWidth={2} />
+                    New skill
+                  </Button>
+                </div>
+                <ul className="flex flex-col gap-2">
+                  {(skills.data ?? []).map((skill) => (
+                    <ManagementRow
+                      key={skill.id}
+                      title={skill.name}
+                      subtitle={
+                        skill.status === "active" ? skill.description : "Invalid — edit to fix"
+                      }
+                      enabled={skill.isEnabled}
+                      onToggle={() => {
+                        void skills.toggle(skill.id, !skill.isEnabled).then(onChanged);
+                      }}
+                      toggleLabel={`Enable ${skill.name}`}
+                      toggleTitle={skill.isEnabled ? "Enabled" : "Disabled"}
+                      onEdit={() => setEditingId(skill.id)}
+                      editLabel={`Edit ${skill.name}`}
+                      onDelete={() => setDeleteId(skill.id)}
+                      deleteLabel={`Delete ${skill.name}`}
+                    />
+                  ))}
+                </ul>
+                {skills.error ? (
+                  <p className="text-[11px] text-danger" role="alert">
+                    {skills.error}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+        <InsetScrollbar
+          scrollRef={contentScrollRef}
+          top="0.75rem"
+          bottom="0.75rem"
+        />
       </div>
       <ConfirmDialog
         open={deleteId !== null}

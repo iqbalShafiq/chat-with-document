@@ -19,6 +19,8 @@ describe("Enhancement modals", () => {
       expect(modal).toContain("DialogShell");
       expect(modal).toContain("ConfirmDialog");
       expect(modal).toContain("onChanged");
+      expect(modal).toContain("InsetScrollbar");
+      expect(modal).toContain("chat-scroll-bleed");
     }
     expect(skills).toContain("FormTextAreaField");
     expect(mcp).toContain("Test connection");

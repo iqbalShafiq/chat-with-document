@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import { FormTextField } from "#/components/ui/form-field";
 import { ManagementRow } from "#/components/ui/management-row";
+import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { Select } from "#/components/ui/select";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
 import type { McpServerInput, McpTestResult, McpTestTool, UserMcpServer } from "#/lib/api";
@@ -29,6 +30,7 @@ export function McpModal({
   const [editingId, setEditingId] = useState<string | null | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   const handleChanged = () => {
     setEditingId(undefined);
@@ -44,96 +46,108 @@ export function McpModal({
       size="lg"
       heightMode="viewport"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {servers.loading ? (
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div
+          ref={contentScrollRef}
+          className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4"
+        >
           <div className="flex flex-col gap-3">
-            <div className="skeleton-shimmer h-16 w-full rounded-xl" />
-            <div className="skeleton-shimmer h-16 w-full rounded-xl" />
-          </div>
-        ) : servers.error && !servers.data ? (
-          <p className="text-sm text-danger" role="alert">
-            {servers.error}
-          </p>
-        ) : editingId !== undefined ? (
-          <McpEditor
-            key={editingId ?? "new"}
-            initial={
-              editingId
-                ? (servers.data ?? []).find((server) => server.id === editingId) ?? null
-                : null
-            }
-            saving={servers.saving}
-            testing={servers.testing}
-            onTest={(input) => servers.test(input)}
-            onCancel={() => setEditingId(undefined)}
-            onSave={async (input, review) => {
-              await servers.save(editingId ?? null, {
-                ...input,
-                ...(review
-                  ? {
-                      allowedTools: review.checked,
-                      tools: review.tools
-                        .filter((tool) => review.checked.includes(tool.name))
-                        .map((tool) => ({
-                          name: tool.name,
-                          description: tool.description,
-                          parameters: tool.parameters ?? {},
-                        })),
-                    }
-                  : {}),
-              });
-              handleChanged();
-            }}
-          />
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-text-muted">
-                {(servers.data ?? []).length === 0
-                  ? "No servers yet — paste a URL to connect the first one."
-                  : "Only https hosts. Tools are reviewed per server."}
-              </p>
-              <Button variant="primary" size="sm" onClick={() => setEditingId(null)}>
-                <Plus className="size-4" strokeWidth={2} />
-                New server
-              </Button>
-            </div>
-            <ul className="flex flex-col gap-2">
-              {(servers.data ?? []).map((server) => (
-                <ManagementRow
-                  key={server.id}
-                  title={server.name}
-                  subtitle={
-                    server.status === "error" && server.lastError
-                      ? server.lastError
-                      : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`
-                  }
-                  leading={
-                    <span
-                      aria-hidden
-                      className={`size-2 shrink-0 rounded-full ${server.status === "ok" ? "bg-emerald-400/80" : server.status === "error" ? "bg-danger" : "bg-white/30"}`}
-                    />
-                  }
-                  enabled={server.isEnabled}
-                  onToggle={() => {
-                    void servers.toggle(server.id, !server.isEnabled).then(onChanged);
-                  }}
-                  toggleLabel={`Enable ${server.name}`}
-                  toggleTitle={server.isEnabled ? "Enabled" : "Disabled"}
-                  onEdit={() => setEditingId(server.id)}
-                  editLabel={`Edit ${server.name}`}
-                  onDelete={() => setDeleteId(server.id)}
-                  deleteLabel={`Delete ${server.name}`}
-                />
-              ))}
-            </ul>
-            {servers.error ? (
-              <p className="text-[11px] text-danger" role="alert">
+            {servers.loading ? (
+              <div className="flex flex-col gap-3">
+                <div className="skeleton-shimmer h-16 w-full rounded-xl" />
+                <div className="skeleton-shimmer h-16 w-full rounded-xl" />
+              </div>
+            ) : servers.error && !servers.data ? (
+              <p className="text-sm text-danger" role="alert">
                 {servers.error}
               </p>
-            ) : null}
-          </>
-        )}
+            ) : editingId !== undefined ? (
+              <McpEditor
+                key={editingId ?? "new"}
+                initial={
+                  editingId
+                    ? (servers.data ?? []).find((server) => server.id === editingId) ?? null
+                    : null
+                }
+                saving={servers.saving}
+                testing={servers.testing}
+                onTest={(input) => servers.test(input)}
+                onCancel={() => setEditingId(undefined)}
+                onSave={async (input, review) => {
+                  await servers.save(editingId ?? null, {
+                    ...input,
+                    ...(review
+                      ? {
+                          allowedTools: review.checked,
+                          tools: review.tools
+                            .filter((tool) => review.checked.includes(tool.name))
+                            .map((tool) => ({
+                              name: tool.name,
+                              description: tool.description,
+                              parameters: tool.parameters ?? {},
+                            })),
+                        }
+                      : {}),
+                  });
+                  handleChanged();
+                }}
+              />
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-text-muted">
+                    {(servers.data ?? []).length === 0
+                      ? "No servers yet — paste a URL to connect the first one."
+                      : "Only https hosts. Tools are reviewed per server."}
+                  </p>
+                  <Button variant="primary" size="sm" onClick={() => setEditingId(null)}>
+                    <Plus className="size-4" strokeWidth={2} />
+                    New server
+                  </Button>
+                </div>
+                <ul className="flex flex-col gap-2">
+                  {(servers.data ?? []).map((server) => (
+                    <ManagementRow
+                      key={server.id}
+                      title={server.name}
+                      subtitle={
+                        server.status === "error" && server.lastError
+                          ? server.lastError
+                          : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`
+                      }
+                      leading={
+                        <span
+                          aria-hidden
+                          className={`size-2 shrink-0 rounded-full ${server.status === "ok" ? "bg-emerald-400/80" : server.status === "error" ? "bg-danger" : "bg-white/30"}`}
+                        />
+                      }
+                      enabled={server.isEnabled}
+                      onToggle={() => {
+                        void servers.toggle(server.id, !server.isEnabled).then(onChanged);
+                      }}
+                      toggleLabel={`Enable ${server.name}`}
+                      toggleTitle={server.isEnabled ? "Enabled" : "Disabled"}
+                      onEdit={() => setEditingId(server.id)}
+                      editLabel={`Edit ${server.name}`}
+                      onDelete={() => setDeleteId(server.id)}
+                      deleteLabel={`Delete ${server.name}`}
+                    />
+                  ))}
+                </ul>
+                {servers.error ? (
+                  <p className="text-[11px] text-danger" role="alert">
+                    {servers.error}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+        <InsetScrollbar
+          scrollRef={contentScrollRef}
+          top="0.75rem"
+          bottom="0.75rem"
+        />
       </div>
       <ConfirmDialog
         open={deleteId !== null}
