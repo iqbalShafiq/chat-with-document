@@ -2002,6 +2002,13 @@ export type UserMcpServer = {
   isEnabled: boolean;
   status: string;
   lastError: string | null;
+  hasCredentials: boolean;
+  hasHeaders: boolean;
+};
+
+export type McpHeaderInput = {
+  name: string;
+  value: string;
 };
 
 export type McpServerInput = {
@@ -2009,6 +2016,8 @@ export type McpServerInput = {
   url: string;
   authType: "none" | "bearer";
   token?: string;
+  headers?: McpHeaderInput[];
+  serverId?: string;
 };
 
 export type McpTestTool = {

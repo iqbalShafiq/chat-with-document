@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
@@ -8,7 +8,13 @@ import { ManagementRow } from "#/components/ui/management-row";
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { Select } from "#/components/ui/select";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
-import type { McpServerInput, McpTestResult, McpTestTool, UserMcpServer } from "#/lib/api";
+import type {
+  McpHeaderInput,
+  McpServerInput,
+  McpTestResult,
+  McpTestTool,
+  UserMcpServer,
+} from "#/lib/api";
 import { issuesFromError, issuesToFieldErrors, type FieldErrors } from "#/components/skills/skill-issues";
 import { shouldReturnToList } from "#/components/skills/modal-navigation";
 
@@ -231,6 +237,8 @@ function McpEditor({
   const [url, setUrl] = useState(initial?.url ?? "https://");
   const [authType, setAuthType] = useState<"none" | "bearer">(initial?.authType ?? "none");
   const [token, setToken] = useState("");
+  const [headers, setHeaders] = useState<McpHeaderInput[]>([]);
+  const [headersTouched, setHeadersTouched] = useState(false);
   const [review, setReview] = useState<ReviewState>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -252,6 +260,8 @@ function McpEditor({
         url: url.trim(),
         authType,
         ...(token.trim() ? { token: token.trim() } : {}),
+        ...(headers.length > 0 ? { headers } : {}),
+        ...(initial ? { serverId: initial.id } : {}),
       });
       if (result.ok) {
         setReview({ tools: result.tools, checked: result.tools.map((tool) => tool.name), testedUrl: url.trim() });
@@ -293,12 +303,30 @@ function McpEditor({
           url: url.trim(),
           authType,
           ...(token.trim() ? { token: token.trim() } : {}),
+          ...(headersTouched ? { headers } : {}),
         },
         freshReview ? { checked: freshReview.checked, tools: freshReview.tools } : null,
       );
     } catch (error) {
       setErrors(issuesToFieldErrors(issuesFromError(error)));
     }
+  };
+
+  const addHeader = () => {
+    setHeaders((current) => [...current, { name: "", value: "" }]);
+    setHeadersTouched(true);
+  };
+
+  const updateHeader = (index: number, patch: Partial<McpHeaderInput>) => {
+    setHeaders((current) =>
+      current.map((header, i) => (i === index ? { ...header, ...patch } : header)),
+    );
+    setHeadersTouched(true);
+  };
+
+  const removeHeader = (index: number) => {
+    setHeaders((current) => current.filter((_, i) => i !== index));
+    setHeadersTouched(true);
   };
 
   saveRef.current = () => void submit();
@@ -367,6 +395,54 @@ function McpEditor({
           disabled={saving || testing}
         />
       ) : null}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-text-faint">
+            Custom headers
+          </span>
+          <Button variant="ghost" size="sm" onClick={addHeader} disabled={saving || testing}>
+            Add header
+          </Button>
+        </div>
+        {initial?.hasHeaders && !headersTouched ? (
+          <p className="text-[11px] text-text-faint">
+            Stored headers are kept. Add, edit, or remove a row to replace them.
+          </p>
+        ) : null}
+        {headers.map((header, index) => (
+          <div key={index} className="flex items-start gap-1.5">
+            <div className="min-w-0 flex-1">
+              <FormTextField
+                label={`Header ${index + 1} name`}
+                value={header.name}
+                onChange={(event) => updateHeader(index, { name: event.target.value })}
+                placeholder="X-Api-Key"
+                disabled={saving || testing}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <FormTextField
+                label={`Header ${index + 1} value`}
+                type="password"
+                value={header.value}
+                onChange={(event) => updateHeader(index, { value: event.target.value })}
+                placeholder="value"
+                disabled={saving || testing}
+              />
+            </div>
+            <button
+              type="button"
+              aria-label={`Remove header ${index + 1}`}
+              title="Remove header"
+              onClick={() => removeHeader(index)}
+              disabled={saving || testing}
+              className="mt-6 inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-danger-soft hover:text-danger active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X className="size-4" strokeWidth={1.75} />
+            </button>
+          </div>
+        ))}
+      </div>
       <div className="flex items-center gap-2">
         {dirty ? (
           <span className="text-[11px] text-text-faint">URL changed — re-test before saving.</span>

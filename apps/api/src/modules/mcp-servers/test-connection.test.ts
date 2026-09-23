@@ -51,4 +51,16 @@ describe("testMcpConnection", () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it("sends custom headers with the connection", async () => {
+    const { McpClient } = await import("@anvia/mcp");
+    const Fake = McpClient as unknown as { lastArgs: unknown };
+    await testMcpConnection({
+      url: "https://mcp.example.com/mcp",
+      authType: "none",
+      headers: [{ name: "X-Api-Key", value: "k" }],
+    });
+    const transport = (Fake.lastArgs as { transport: { headers?: Record<string, string> } }).transport;
+    expect(transport.headers).toEqual({ "X-Api-Key": "k" });
+  });
 });

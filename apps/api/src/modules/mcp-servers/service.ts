@@ -99,6 +99,9 @@ export function validateMcpServerInput(input: McpServerInput):
   };
 }
 
+import { Buffer } from "node:buffer";
+import { decryptToken, encryptToken } from "./credentials.js";
+
 export const MAX_REVIEW_TOOLS = 64;
 export const MCP_TOOL_NAME_MAX = 128;
 // Matches the frozen recipe surface (staticToolDefinitionSchema description
@@ -176,6 +179,84 @@ export async function setMcpReview(
   });
 }
 
+export const MAX_MCP_HEADERS = 16;
+export const MCP_HEADER_NAME_MAX = 128;
+export const MCP_HEADER_VALUE_MAX = 2048;
+
+export type McpHeader = { name: string; value: string };
+
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9a-zA-Z]+$/;
+
+function validateMcpHeaders(headers: unknown): McpHeader[] {
+  if (!Array.isArray(headers) || headers.length > MAX_MCP_HEADERS) {
+    throw new McpInputError([{ path: "name", message: "Custom headers are invalid" }]);
+  }
+  const seen = new Set<string>();
+  const clean: McpHeader[] = [];
+  for (const entry of headers) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new McpInputError([{ path: "name", message: "Custom headers are invalid" }]);
+    }
+    const record = entry as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const value = typeof record.value === "string" ? record.value : "";
+    if (!HEADER_NAME_RE.test(name) || name.length > MCP_HEADER_NAME_MAX) {
+      throw new McpInputError([{ path: "name", message: "Header name must be a valid token (max 128 chars)" }]);
+    }
+    if (name.toLowerCase() === "authorization") {
+      throw new McpInputError([
+        { path: "name", message: "Use the auth type for authorization, not a custom header" },
+      ]);
+    }
+    if (!value || value.length > MCP_HEADER_VALUE_MAX) {
+      throw new McpInputError([{ path: "name", message: "Header value must be 1-2048 characters" }]);
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      throw new McpInputError([{ path: "name", message: `Duplicate header "${name}"` }]);
+    }
+    seen.add(key);
+    clean.push({ name, value });
+  }
+  return clean;
+}
+
+/** Store custom headers encrypted (values may hold secrets like API keys). */
+export async function setMcpHeaders(
+  db: McpDb,
+  userId: string,
+  id: string,
+  headers: unknown,
+) {
+  const existing = await db.userMcpServer.findFirst({ where: { id, userId } });
+  if (!existing) throw new McpInputError(NOT_FOUND);
+  const validated = validateMcpHeaders(headers);
+  return db.userMcpServer.update({
+    where: { id },
+    data: { headersRef: encryptToken(JSON.stringify(validated)) },
+  });
+}
+
+/** Read and decrypt stored custom headers ([] when none were saved). */
+export async function getMcpHeaders(
+  db: McpDb,
+  userId: string,
+  id: string,
+): Promise<McpHeader[]> {
+  const existing = (await db.userMcpServer.findFirst({
+    where: { id, userId },
+  })) as { headersRef?: unknown } | null;
+  if (!existing || typeof existing.headersRef !== "string" || !existing.headersRef) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(decryptToken(existing.headersRef));
+    return validateMcpHeaders(parsed);
+  } catch {
+    return [];
+  }
+}
+
 export type McpDb = {
   userMcpServer: {
     findMany(args: unknown): Promise<unknown[]>;
@@ -198,12 +279,15 @@ export async function listMcpServers(db: McpDb, userId: string) {
     where: { userId },
     orderBy: { updatedAt: "desc" },
   })) as Record<string, unknown>[];
-  return rows.map(stripCredentials);
-}
-
-function stripCredentials(row: Record<string, unknown>) {
-  const { credentialsRef: _dropped, ...rest } = row;
-  return rest;
+  return rows.map((row) => {
+    const { credentialsRef: _c, headersRef: _h, ...rest } = row;
+    return {
+      ...rest,
+      hasCredentials:
+        typeof _c === "string" && (_c as string).length > 0,
+      hasHeaders: typeof _h === "string" && (_h as string).length > 0,
+    };
+  });
 }
 
 export async function createMcpServer(
@@ -260,7 +344,47 @@ export async function setMcpCredentials(
 ) {
   const existing = await db.userMcpServer.findFirst({ where: { id, userId } });
   if (!existing) throw new McpInputError(NOT_FOUND);
-  return db.userMcpServer.update({ where: { id }, data: { credentialsRef } });
+  // Encrypt at the single write choke point; raw tokens never reach the DB.
+  return db.userMcpServer.update({
+    where: { id },
+    data: { credentialsRef: encryptToken(credentialsRef) },
+  });
+}
+
+/** Read and decrypt the stored credential (null when none was saved). */
+export async function getMcpCredentials(
+  db: McpDb,
+  userId: string,
+  id: string,
+): Promise<string | null> {
+  const existing = (await db.userMcpServer.findFirst({
+    where: { id, userId },
+  })) as { credentialsRef?: unknown } | null;
+  if (!existing || typeof existing.credentialsRef !== "string" || !existing.credentialsRef) {
+    return null;
+  }
+  const ref = existing.credentialsRef;
+  if (!looksLikeEnvelope(ref)) {
+    // Legacy plaintext row (pre-encryption): use once and transparently
+    // upgrade to an encrypted envelope so the next read is clean.
+    await db.userMcpServer.update({
+      where: { id },
+      data: { credentialsRef: encryptToken(ref) },
+    });
+    return ref;
+  }
+  return decryptToken(ref);
+}
+
+function looksLikeEnvelope(ref: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(ref, "base64").toString("utf8"));
+    return (
+      typeof parsed === "object" && parsed !== null && (parsed as { v?: unknown }).v === 1
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function deleteMcpServer(db: McpDb, userId: string, id: string) {

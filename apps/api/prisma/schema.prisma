@@ -504,6 +504,8 @@ model UserMcpServer {
   url             String
   authType        String    @default("none")
   credentialsRef  String    @default("")
+  /// Encrypted custom headers JSON [{name,value}] (may hold secrets).
+  headersRef      String    @default("")
   allowedToolsJson Json     @default("[]")
   /// Last successful test-connection tool definitions (frozen into the recipe, CONTEXT7_TOOL_DEFINITIONS pattern).
   toolsJson       Json      @default("[]")

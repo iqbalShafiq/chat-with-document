@@ -22,6 +22,7 @@ export async function testMcpConnection(input: {
   url: string;
   authType: "none" | "bearer";
   token?: string;
+  headers?: { name: string; value: string }[];
 }): Promise<McpTestResult> {
   const urlError = validateMcpUrl(input.url);
   if (urlError) return { ok: false, error: urlError };
@@ -29,15 +30,21 @@ export async function testMcpConnection(input: {
   if (input.authType === "bearer" && !token) {
     return { ok: false, error: "Bearer token is required for bearer auth" };
   }
+  const customHeaders: Record<string, string> = {};
+  for (const header of input.headers ?? []) {
+    if (header.name.toLowerCase() === "authorization") continue;
+    customHeaders[header.name] = header.value;
+  }
   const client = new McpClient({
     name: "mcp-test",
     transport: {
       type: "streamableHttp",
       url: input.url.trim(),
       ssrfProtection: "strict",
-      ...(input.authType === "bearer"
-        ? { headers: { authorization: `Bearer ${token}` } }
-        : {}),
+      headers: {
+        ...customHeaders,
+        ...(input.authType === "bearer" ? { authorization: `Bearer ${token}` } : {}),
+      },
     },
     versionNegotiation: { mode: "auto" },
   });

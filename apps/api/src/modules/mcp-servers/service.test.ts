@@ -99,6 +99,61 @@ describe("mcp crud", () => {
     ).rejects.toThrow("ghost");
     expect(db.userMcpServer.update).not.toHaveBeenCalled();
   });
+
+  it("encrypts credentials at rest and decrypts on read", async () => {
+    const { db } = setup();
+    const { decryptToken } = await import("./credentials.js");
+    const { setMcpCredentials, getMcpCredentials } = await import("./service.js");
+    db.userMcpServer.findFirst.mockResolvedValue({ id: "m1" });
+    await setMcpCredentials(db, "u1", "m1", "super-secret");
+    const stored = db.userMcpServer.update.mock.calls[0]?.[0] as {
+      data: { credentialsRef: string };
+    };
+    expect(stored.data.credentialsRef).not.toContain("super-secret");
+    db.userMcpServer.findFirst.mockResolvedValueOnce({
+      id: "m1",
+      credentialsRef: stored.data.credentialsRef,
+    });
+    await expect(getMcpCredentials(db, "u1", "m1")).resolves.toBe("super-secret");
+    expect(decryptToken(stored.data.credentialsRef)).toBe("super-secret");
+  });
+
+  it("transparently upgrades legacy plaintext rows", async () => {
+    const { db } = setup();
+    const { getMcpCredentials } = await import("./service.js");
+    db.userMcpServer.findFirst.mockResolvedValueOnce({
+      id: "m1",
+      credentialsRef: "legacy-plaintext",
+    });
+    await expect(getMcpCredentials(db, "u1", "m1")).resolves.toBe("legacy-plaintext");
+    const stored = db.userMcpServer.update.mock.calls[0]?.[0] as {
+      data: { credentialsRef: string };
+    };
+    expect(stored.data.credentialsRef).not.toBe("legacy-plaintext");
+  });
+
+  it("validates custom headers and rejects the authorization header", async () => {
+    const { db } = setup();
+    const { setMcpHeaders, getMcpHeaders } = await import("./service.js");
+    db.userMcpServer.findFirst.mockResolvedValue({ id: "m1" });
+    await expect(
+      setMcpHeaders(db, "u1", "m1", [{ name: "Authorization", value: "x" }]),
+    ).rejects.toThrow("authorization");
+    await expect(
+      setMcpHeaders(db, "u1", "m1", [{ name: "bad name!", value: "x" }]),
+    ).rejects.toThrow("Header name");
+    await setMcpHeaders(db, "u1", "m1", [{ name: "X-Api-Key", value: "k" }]);
+    const stored = db.userMcpServer.update.mock.calls.at(-1)?.[0] as {
+      data: { headersRef: string };
+    };
+    db.userMcpServer.findFirst.mockResolvedValueOnce({
+      id: "m1",
+      headersRef: stored.data.headersRef,
+    });
+    await expect(getMcpHeaders(db, "u1", "m1")).resolves.toEqual([
+      { name: "X-Api-Key", value: "k" },
+    ]);
+  });
 });
 
 describe("validateMcpUrl", () => {

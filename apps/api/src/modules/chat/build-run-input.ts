@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve as resolvePath, sep } from "node:path";
 import { McpClient } from "@anvia/mcp";
 import { loadSkills, skill } from "@anvia/core/skills";
+import { getMcpCredentials, getMcpHeaders } from "../mcp-servers/service.js";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -1614,10 +1615,27 @@ export async function reconstructChatRunInput(input: {
       assertMcpEntryReviewed(entry);
       const stored = await prisma.userMcpServer.findFirst({
         where: { id: entry.id, userId },
-        select: { authType: true, credentialsRef: true, isEnabled: true },
+        select: { authType: true, isEnabled: true },
       });
       if (!stored || !stored.isEnabled) {
         throw new Error(`MCP server "${entry.name}" is no longer available`);
+      }
+      let bearerToken: string | null = null;
+      if (stored.authType === "bearer") {
+        try {
+          bearerToken = await getMcpCredentials(prisma, userId, entry.id);
+        } catch {
+          bearerToken = null;
+        }
+        if (!bearerToken) {
+          throw new Error(
+            `MCP server "${entry.name}" credentials are unreadable — re-enter the token`,
+          );
+        }
+      }
+      const customHeaders: Record<string, string> = {};
+      for (const header of await getMcpHeaders(prisma, userId, entry.id)) {
+        customHeaders[header.name] = header.value;
       }
       const prefix = slugForMcpPrefix(entry.name, entry.id);
       const client = new McpClient({
@@ -1627,9 +1645,10 @@ export async function reconstructChatRunInput(input: {
           type: "streamableHttp",
           url: entry.url,
           ssrfProtection: "strict",
-          ...(stored.authType === "bearer" && stored.credentialsRef
-            ? { headers: { authorization: `Bearer ${stored.credentialsRef}` } }
-            : {}),
+          headers: {
+            ...customHeaders,
+            ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
+          },
         },
         versionNegotiation: { mode: "auto" },
       });
