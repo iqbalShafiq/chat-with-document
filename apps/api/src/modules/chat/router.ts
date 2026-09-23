@@ -50,6 +50,7 @@ import {
   InteractionPolicyUnavailableError,
 } from "./interaction-policy-store.js";
 import { resolveChatAgentRecipe } from "./build-run-input.js";
+import { getUserEnhancementCounts } from "./user-enhancements.js";
 import { releaseChatAgentRecipeClaim } from "./run-recipe.js";
 import { isContext7Configured } from "../../lib/context7-server.js";
 import { resolveActiveDocuments } from "../documents/service.js";
@@ -1127,6 +1128,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       deepResearchAvailable: webSearchConfig() !== null || hasActiveDocuments,
       imageGenerationAvailable: imageGenerationConfig() !== null,
       context7Configured: isContext7Configured(),
+      ...(await getUserEnhancementCounts(prisma, c.get("user").id)),
     });
   })
   .get("/interactions/:interactionId", async (c) => {

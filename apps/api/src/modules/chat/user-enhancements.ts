@@ -36,6 +36,27 @@ export type UserEnhancementSelection = {
   mcpServerIds: string[];
 };
 
+export type UserEnhancementCountsDb = {
+  userSkill: {
+    count(args: unknown): Promise<number>;
+  };
+  userMcpServer: {
+    count(args: unknown): Promise<number>;
+  };
+};
+
+/** Counts only — never urls, bodies, or credentials. */
+export async function getUserEnhancementCounts(
+  db: UserEnhancementCountsDb,
+  userId: string,
+): Promise<{ userSkillsCount: number; userMcpCount: number }> {
+  const [userSkillsCount, userMcpCount] = await Promise.all([
+    db.userSkill.count({ where: { userId } }),
+    db.userMcpServer.count({ where: { userId } }),
+  ]);
+  return { userSkillsCount, userMcpCount };
+}
+
 export type UserEnhancementResolution = {
   userSkills: UserSkillSnapshot[];
   userMcp: UserMcpSnapshot[];
