@@ -299,16 +299,29 @@ function McpEditor({
       />
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium tracking-wide text-text-muted">Auth</span>
-        <Select
-          value={authType}
-          onChange={(value) => setAuthType(value === "bearer" ? "bearer" : "none")}
-          options={[
-            { value: "none", label: "None" },
-            { value: "bearer", label: "Bearer token" },
-          ]}
-          ariaLabel="Authentication type"
-          disabled={saving || testing}
-        />
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <Select
+              value={authType}
+              onChange={(value) => setAuthType(value === "bearer" ? "bearer" : "none")}
+              options={[
+                { value: "none", label: "None" },
+                { value: "bearer", label: "Bearer token" },
+              ]}
+              ariaLabel="Authentication type"
+              disabled={saving || testing}
+            />
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => void runTest()}
+            disabled={saving || testing}
+            className="shrink-0"
+          >
+            {testing ? "Testing…" : review && !dirty ? "Re-test" : "Test connection"}
+          </Button>
+        </div>
       </div>
       {authType === "bearer" ? (
         <FormTextField
@@ -323,9 +336,6 @@ function McpEditor({
         />
       ) : null}
       <div className="flex items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => void runTest()} disabled={saving || testing}>
-          {testing ? "Testing…" : review && !dirty ? "Re-test" : "Test connection"}
-        </Button>
         {dirty ? (
           <span className="text-[11px] text-text-faint">URL changed — re-test before saving.</span>
         ) : null}
