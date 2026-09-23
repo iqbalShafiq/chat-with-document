@@ -888,7 +888,7 @@ git commit -m "feat(platform): skills and mcp management modals"
 ### Task 13: E2E with real LLM (no stubs)
 
 **Files:**
-- Create: `apps/platform/e2e/user-skills-mcp.e2e.ts`
+- Create: `apps/platform/e2e/user-skills-mcp.real-llm.e2e.ts` (`*.real-llm.*` so it runs under `playwright.real-llm.config.ts` with a real model, never the stub project)
 - Test: the e2e itself (excluded from the stub config, like `anvia-v1-migration.e2e.ts:1-3`)
 
 **Interfaces:**
@@ -897,19 +897,19 @@ git commit -m "feat(platform): skills and mcp management modals"
 
 Prerequisites (document at the top of the file): API + platform + worker running, real model key configured, test user `shafiq@testing.com` / `Test@123` (register via the UI `/register` route inside the test when login fails).
 
-- [ ] **Step 1: Confirm how e2e runs** — read `apps/platform/package.json` e2e script + `e2e/helpers.ts` exports; mirror the invocation (expected shape: `pnpm --filter @anreal/platform exec playwright test e2e/user-skills-mcp.e2e.ts`).
+- [ ] **Step 1: Confirm how e2e runs** — read `apps/platform/package.json` e2e script + `e2e/helpers.ts` exports; mirror the invocation (expected shape: `pnpm --filter @anreal/platform e2e -- --config playwright.real-llm.config.ts e2e/user-skills-mcp.real-llm.e2e.ts`).
 - [ ] **Step 2: Write the spec** — scenarios: (1) login/register test user; (2) plus-menu → Skills → write skill "Jawab setiap pesan dengan awalan [SKILL-OK]" → save → enable → count shows 1 → send chat → response contains `[SKILL-OK]`; (3) upload a `.md` file via the file input → appears in list; (4) plus-menu → MCP → add `https://mcp.context7.com/mcp` → Test → tool list non-empty → save → enable → count shows 1 → chat library question uses it; (5) disable both → counts 0 → chat answers normally; (6) reload → enabled state persists (global) while a per-chat toggle override holds for that session. Use `saveEvidence` redaction pattern from `anvia-v1-migration.e2e.ts:30-47` (no prompts/outputs in evidence files).
 - [ ] **Step 3: Run it**
 
 ```bash
-pnpm --filter @anreal/platform exec playwright test e2e/user-skills-mcp.e2e.ts
+pnpm --filter @anreal/platform e2e -- --config playwright.real-llm.config.ts e2e/user-skills-mcp.real-llm.e2e.ts
 ```
 
 Expected: PASS; screenshots + redacted snapshots under `.playwright-mcp/user-skills-mcp/`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add apps/platform/e2e/user-skills-mcp.e2e.ts
+git add apps/platform/e2e/user-skills-mcp.real-llm.e2e.ts apps/platform/e2e/fixtures/e2e-skill.md
 git commit -m "test(e2e): user skills and self-serve mcp with real llm"
 ```
 

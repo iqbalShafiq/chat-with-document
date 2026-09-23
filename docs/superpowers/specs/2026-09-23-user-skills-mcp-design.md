@@ -63,7 +63,7 @@ App owns: authN/Z, ownership checks (`userId`), persistence, kredensial (server-
 - `SkillsModal` + `McpModal` (baru, di `components/skills/` & `components/mcp/`): `DialogShell size="lg" heightMode="viewport"` + `FormTextField` (nama) + `FormTextAreaField` (SKILL.md / deskripsi) + `Select` (authType) + `Button` + `ConfirmDialog` (hapus). States: loading skeleton, empty ("belum ada — tulis pertama"), error field-spesifik, testing (spinner + disable save), sukses (toast/inline + tutup + refresh list).
 - Hooks `useUserSkills` / `useUserMcpServers` (pola `useProfilePersonalization`): fetch, create, update, remove, test; `lib/api.ts` tambah client fns tipis.
 - State composer: `chat-session.tsx` pegang `activeSkillIds/activeMcpIds` per sesi (default dari localStorage seleksi terakhir ∩ katalog `isEnabled`); teruskan ke `ChatComposer` → `FeaturesPopover`. Toggle row = flip seleksi sesi + persist localStorage; on/off global (`isEnabled`) diatur di dalam modal per item.
-- A11y: row `role="switch" aria-checked`, modal fokus-trap + Esc/backdrop via `DialogShell`, count terbaca screen-reader (`"3 skills aktif"`).
+- A11y: row `role="switch" aria-checked`, modal fokus-trap + Esc/backdrop via `DialogShell`, count terbaca screen-reader (`"3 skills active"`, English mengikuti copy UI sekitarnya).
 
 ### 4.5 Validation & error mapping
 
