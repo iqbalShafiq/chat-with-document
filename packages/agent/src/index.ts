@@ -22,6 +22,8 @@ export * from "./prompts/document-image-instructions.js";
 export * from "./citations/parse-citations.js";
 export * from "./citations/publish-groundedness.js";
 export * from "./tools/documents.js";
+export * from "./tools/user-skills.js";
+export * from "./tools/user-mcp.js";
 export * from "./tools/web-search.js";
 export * from "./tools/deep-research.js";
 export * from "./tools/tabular/types.js";
