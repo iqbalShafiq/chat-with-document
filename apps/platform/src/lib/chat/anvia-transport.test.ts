@@ -21,6 +21,8 @@ const metadata: ChatRequestMetadata = {
   webSearchEnabled: true,
   imageGenerationEnabled: false,
   deepResearchEnabled: true,
+  skillIds: [],
+  mcpServerIds: [],
   imageGenSettings: null,
 };
 
@@ -149,6 +151,8 @@ describe("Anvia v1 HTTP transport", () => {
       webSearchEnabled: false,
       imageGenerationEnabled: true,
       deepResearchEnabled: false,
+      skillIds: [],
+      mcpServerIds: [],
       imageGenSettings: { modelId: "gpt-image-1", aspectRatio: "16:9" },
     };
     const stale = {
@@ -219,6 +223,28 @@ describe("Anvia v1 HTTP transport", () => {
     }));
     await expect(
       collect(transport.send({ request: { type: "messages", messages: [message] } })),
+    ).rejects.toThrow("Chat request metadata is invalid.");
+  });
+
+  it("carries skill and mcp selections and rejects over-cap lists", async () => {
+    const { transport, getCaptured } = transportWithCapture(() => ({
+      ...metadata,
+      skillIds: ["s1"],
+      mcpServerIds: ["m1"],
+    }));
+    await collect(transport.send({ request: { type: "messages", messages: [message] } }));
+    const body = JSON.parse(String(getCaptured()?.init?.body)) as {
+      metadata: { skillIds: string[]; mcpServerIds: string[] };
+    };
+    expect(body.metadata.skillIds).toEqual(["s1"]);
+    expect(body.metadata.mcpServerIds).toEqual(["m1"]);
+
+    const overCap = transportWithCapture(() => ({
+      ...metadata,
+      skillIds: Array.from({ length: 21 }, (_, index) => `s${index}`),
+    }));
+    await expect(
+      collect(overCap.transport.send({ request: { type: "messages", messages: [message] } })),
     ).rejects.toThrow("Chat request metadata is invalid.");
   });
 

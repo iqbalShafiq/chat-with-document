@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
-import { FeaturesPopover } from "#/components/composer/features-popover";
+import { FeaturesPopover, type FeatureCountSummary } from "#/components/composer/features-popover";
 import { MessageQueueDock } from "#/components/composer/message-queue-dock";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
@@ -80,6 +80,14 @@ export function ChatComposer({
   onImageGenerationToggle = () => {},
   imageGenSettings = {},
   onImageGenSettingsChange = () => {},
+  skillsSummary = null,
+  mcpSummary = null,
+  skillsPerChatEnabled = false,
+  mcpPerChatEnabled = false,
+  onSkillsToggle = () => {},
+  onMcpToggle = () => {},
+  onOpenSkills = () => {},
+  onOpenMcp = () => {},
   activeContextImages = [],
   onToggleImageContext = () => {},
   contextSnippet = null,
@@ -145,6 +153,15 @@ export function ChatComposer({
   /** Capability-driven image generation settings. */
   imageGenSettings?: ImageGenSettings;
   onImageGenSettingsChange?: (settings: ImageGenSettings) => void;
+  /** Null while the user-enhancement catalog is loading. */
+  skillsSummary?: FeatureCountSummary | null;
+  mcpSummary?: FeatureCountSummary | null;
+  skillsPerChatEnabled?: boolean;
+  mcpPerChatEnabled?: boolean;
+  onSkillsToggle?: (enabled: boolean) => void;
+  onMcpToggle?: (enabled: boolean) => void;
+  onOpenSkills?: () => void;
+  onOpenMcp?: () => void;
   /** Pinned images sent with the next message — shown above the field. */
   activeContextImages?: GeneratedImageItem[];
   onToggleImageContext?: (image: GeneratedImageItem) => void;
@@ -471,6 +488,14 @@ export function ChatComposer({
               imageGenerationAvailable={imageGenerationAvailable}
               settings={imageGenSettings}
               onSettingsChange={onImageGenSettingsChange}
+              skillsSummary={skillsSummary}
+              mcpSummary={mcpSummary}
+              skillsPerChatEnabled={skillsPerChatEnabled}
+              mcpPerChatEnabled={mcpPerChatEnabled}
+              onSkillsToggle={onSkillsToggle}
+              onMcpToggle={onMcpToggle}
+              onOpenSkills={onOpenSkills}
+              onOpenMcp={onOpenMcp}
             />
             <ModelReasoningSwitcher
               models={models}
