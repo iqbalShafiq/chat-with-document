@@ -1,11 +1,7 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   SkillInputError,
   createSkill,
-  materializeUserSkills,
   updateSkill,
   validateSkillInput,
 } from "./service.js";
@@ -90,19 +86,5 @@ describe("updateSkill", () => {
       version: number;
     };
     expect(updated.version).toBe(3);
-  });
-});
-
-describe("materializeUserSkills", () => {
-  it("writes one SKILL.md per active skill", async () => {
-    const { db } = setup();
-    db.userSkill.findMany.mockResolvedValueOnce([
-      { id: "s1", name: "brief", description: "d", bodyMd: VALID.bodyMd },
-    ]);
-    const root = await mkdtemp(resolve(tmpdir(), "skills-"));
-    const dirs = await materializeUserSkills(db, "u1", root);
-    expect(dirs).toEqual([resolve(root, "s1")]);
-    const content = await readFile(resolve(root, "s1", "SKILL.md"), "utf8");
-    expect(content).toContain("name: brief");
   });
 });

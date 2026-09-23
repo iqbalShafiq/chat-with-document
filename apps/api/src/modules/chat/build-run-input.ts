@@ -295,7 +295,7 @@ export type ChatRunInput = {
 
 const USER_MCP_CONNECT_TIMEOUT_MS = 15_000;
 
-function slugForMcpPrefix(name: string, fallback: string): string {
+export function slugForMcpPrefix(name: string, fallback: string): string {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
@@ -309,12 +309,15 @@ function timeoutError(message: string): Promise<never> {
   );
 }
 
-async function materializeRecipeSkills(
-  skills: { id: string; bodyMd: string }[],
+export async function materializeRecipeSkills(
+  skills: { id: string; name: string; bodyMd: string }[],
   rootDir: string,
 ): Promise<void> {
+  // Directory MUST equal the frontmatter name: the native loader rejects
+  // anything else ("name must match the skill directory name"). Names are
+  // validated slugs (lowercase-hyphen), so they are path-safe.
   for (const entry of skills) {
-    const dir = resolvePath(rootDir, entry.id);
+    const dir = resolvePath(rootDir, entry.name);
     await mkdir(dir, { recursive: true });
     await writeFile(resolvePath(dir, "SKILL.md"), `${entry.bodyMd.trim()}\n`, "utf8");
   }

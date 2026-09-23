@@ -1,6 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 export const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const SKILL_NAME_MAX = 64;
 export const SKILL_DESCRIPTION_MAX = 1024;
@@ -167,26 +164,4 @@ export async function setSkillEnabled(
   const existing = await db.userSkill.findFirst({ where: { id, userId } });
   if (!existing) throw new SkillInputError([{ path: "name", message: "Skill not found" }]);
   return db.userSkill.update({ where: { id }, data: { isEnabled } });
-}
-
-/**
- * Writes each enabled+active skill as <rootDir>/<id>/SKILL.md for
- * `loadSkills(skill.local(rootDir))`. Returns written dirs.
- */
-export async function materializeUserSkills(
-  db: SkillsDb,
-  userId: string,
-  rootDir: string,
-): Promise<string[]> {
-  const rows = (await db.userSkill.findMany({
-    where: { userId, isEnabled: true, status: "active" },
-  })) as { id: string; name: string; description: string; bodyMd: string }[];
-  const dirs: string[] = [];
-  for (const row of rows) {
-    const dir = resolve(rootDir, row.id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(resolve(dir, "SKILL.md"), `${row.bodyMd.trim()}\n`, "utf8");
-    dirs.push(dir);
-  }
-  return dirs;
 }
