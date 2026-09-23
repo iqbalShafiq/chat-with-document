@@ -78,6 +78,33 @@ describe("manage_user_skills", () => {
     });
   });
 
+  it("requires approval for every mutation action", async () => {
+    const { tools } = setup();
+    const requiresApproval = tools[0]!.requiresApproval as ApprovalFn;
+    for (const action of ["create", "update", "delete", "enable", "disable"]) {
+      expect(await requiresApproval({ action }, {})).toEqual({
+        reason: expect.stringContaining("skill"),
+      });
+    }
+  });
+
+  it("names duplicate conflicts instead of leaking database text", async () => {
+    const { deps, tools } = setup();
+    deps.create.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
+    );
+    const output = await tools[0]!.call({
+      action: "create",
+      name: "brief",
+      description: "d",
+      bodyMd: "b",
+    });
+    expect(normalizeToolResultOutput(output)).toEqual({
+      type: "json",
+      value: { ok: false, error: expect.stringContaining("already exists") },
+    });
+  });
+
   it("rejects unknown arg keys before any service runs", async () => {
     const { deps, tools } = setup();
     await expect(

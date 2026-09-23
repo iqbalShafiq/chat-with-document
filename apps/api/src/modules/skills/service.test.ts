@@ -107,6 +107,19 @@ describe("updateSkill", () => {
     };
     expect(updated.version).toBe(3);
   });
+
+  it("promotes drafts only through the explicit review flag", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValue({ id: "s1", version: 1, status: "draft" });
+    await updateSkill(db, "u1", "s1", VALID);
+    expect(db.userSkill.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "draft" }) }),
+    );
+    await updateSkill(db, "u1", "s1", VALID, { markReviewed: true });
+    expect(db.userSkill.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "active" }) }),
+    );
+  });
 });
 
 describe("setSkillEnabled", () => {

@@ -82,6 +82,33 @@ describe("manage_user_mcp_servers", () => {
     });
   });
 
+  it("requires approval for every mutation action", async () => {
+    const { tools } = setup();
+    const requiresApproval = tools[0]!.requiresApproval as ApprovalFn;
+    for (const action of ["create", "update", "delete", "enable", "disable"]) {
+      expect(await requiresApproval({ action }, {})).toEqual({
+        reason: expect.stringContaining("MCP"),
+      });
+    }
+  });
+
+  it("names duplicate conflicts instead of leaking database text", async () => {
+    const { deps, tools } = setup();
+    deps.create.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
+    );
+    const output = await tools[0]!.call({
+      action: "create",
+      name: "docs",
+      url: "https://mcp.example.com/mcp",
+      authType: "none",
+    });
+    expect(normalizeToolResultOutput(output)).toEqual({
+      type: "json",
+      value: { ok: false, error: expect.stringContaining("already exists") },
+    });
+  });
+
   it("rejects unknown arg keys before any service runs", async () => {
     const { deps, tools } = setup();
     await expect(

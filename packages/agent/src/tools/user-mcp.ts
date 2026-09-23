@@ -118,6 +118,13 @@ export function createUserMcpTools(deps: UserMcpToolDeps): AnyTool[] {
           }
         } catch (error) {
           context.abortSignal?.throwIfAborted();
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            (error as { code?: string }).code === "P2002"
+          ) {
+            return { ok: false, error: "An MCP server with this name already exists" };
+          }
           const message = error instanceof Error ? error.message : String(error);
           return { ok: false, error: message };
         }

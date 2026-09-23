@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { skillsRouter } from "./router.js";
-import { SkillInputError, createSkill } from "./service.js";
+import { SkillInputError, createSkill, setSkillEnabled } from "./service.js";
 
 vi.mock("../auth/middleware.js", () => ({
   requireUser: async (c: { set: (k: string, v: unknown) => void }, next: () => Promise<void>) => {
@@ -17,6 +17,7 @@ vi.mock("./service.js", async (importOriginal) => {
     createSkill: vi.fn(async () => {
       throw new SkillInputError([{ path: "name", message: "bad" }]);
     }),
+    setSkillEnabled: vi.fn(async () => ({})),
   };
 });
 
@@ -50,5 +51,19 @@ describe("skillsRouter", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { issues: { path: string }[] };
     expect(body.issues[0]?.path).toBe("name");
+  });
+
+  it("reports draft-enable rejection readably instead of 404", async () => {
+    (setSkillEnabled as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new SkillInputError([{ path: "name", message: "Review the skill first" }]),
+    );
+    const response = await skillsRouter.request("/s1/enabled", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled: true }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("Review");
   });
 });

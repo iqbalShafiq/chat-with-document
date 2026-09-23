@@ -82,7 +82,9 @@ export const skillsRouter = new Hono<{ Variables: AuthVariables }>()
     }
     try {
       return c.json(
-        await updateSkill(prisma, user.id, c.req.param("id"), parsed.data),
+        await updateSkill(prisma, user.id, c.req.param("id"), parsed.data, {
+          markReviewed: true,
+        }),
       );
     } catch (error) {
       if (error instanceof SkillInputError) {
@@ -112,7 +114,13 @@ export const skillsRouter = new Hono<{ Variables: AuthVariables }>()
       );
     } catch (error) {
       if (error instanceof SkillInputError) {
-        return c.json(notFound(), 404);
+        const status = error.message === "Skill not found" ? 404 : 400;
+        return c.json(
+          status === 404
+            ? notFound()
+            : { error: error.message, issues: error.issues },
+          status,
+        );
       }
       throw error;
     }

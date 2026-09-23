@@ -152,16 +152,27 @@ export async function updateSkill(
   userId: string,
   id: string,
   input: SkillInput,
+  opts?: { markReviewed?: boolean },
 ) {
-  const existing = await db.userSkill.findFirst({ where: { id, userId } });
+  const existing = (await db.userSkill.findFirst({ where: { id, userId } })) as {
+    version?: unknown;
+    status?: unknown;
+  } | null;
   if (!existing) throw new SkillInputError([{ path: "name", message: "Skill not found" }]);
   const validated = validateSkillInput(input);
   if (!validated.ok) throw new SkillInputError(validated.issues);
   const current = existing as { version?: unknown };
   const version = typeof current.version === "number" ? current.version + 1 : 1;
+  // Drafts stay drafts unless the caller is the explicit modal-review path.
+  // The agent tool path never passes markReviewed, so it cannot self-promote.
+  const status = opts?.markReviewed
+    ? "active"
+    : existing.status === "draft"
+      ? "draft"
+      : "active";
   return db.userSkill.update({
     where: { id },
-    data: { ...validated.value, status: "active", issuesJson: null, version },
+    data: { ...validated.value, status, issuesJson: null, version },
   });
 }
 
