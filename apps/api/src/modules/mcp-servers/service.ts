@@ -83,7 +83,9 @@ export function validateMcpServerInput(input: McpServerInput):
 
 export const MAX_REVIEW_TOOLS = 64;
 export const MCP_TOOL_NAME_MAX = 128;
-export const MCP_TOOL_DESCRIPTION_MAX = 2000;
+// Matches the frozen recipe surface (staticToolDefinitionSchema description
+// bound): the server must never reject a definition the recipe accepts.
+export const MCP_TOOL_DESCRIPTION_MAX = 16000;
 
 export type McpReviewTool = {
   name: string;
@@ -116,7 +118,7 @@ function validateReviewTools(
       throw new McpInputError([{ path: "name", message: "Tool name must be 1-128 characters" }]);
     }
     if (typeof record.description !== "string" || record.description.length > MCP_TOOL_DESCRIPTION_MAX) {
-      throw new McpInputError([{ path: "name", message: "Tool description must be at most 2000 characters" }]);
+      throw new McpInputError([{ path: "name", message: `Tool description must be at most ${MCP_TOOL_DESCRIPTION_MAX} characters` }]);
     }
     const parameters =
       typeof record.parameters === "object" && record.parameters !== null && !Array.isArray(record.parameters)

@@ -3,6 +3,7 @@ import z from "zod";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import { prisma } from "../../utils/prisma.js";
 import {
+  MCP_TOOL_DESCRIPTION_MAX,
   McpInputError,
   createMcpServer,
   deleteMcpServer,
@@ -26,7 +27,7 @@ const mcpBodySchema = z
         z
           .object({
             name: z.string().max(128),
-            description: z.string().max(2000),
+            description: z.string().max(MCP_TOOL_DESCRIPTION_MAX),
             parameters: z.record(z.string(), z.unknown()).optional(),
           })
           .strict(),

@@ -66,6 +66,17 @@ describe("mcp crud", () => {
     });
   });
 
+  it("accepts real-world MCP descriptions up to the recipe ceiling", async () => {
+    const { db } = setup();
+    db.userMcpServer.findFirst.mockResolvedValueOnce({ id: "m1" });
+    const description = "d".repeat(2006);
+    await setMcpReview(db, "u1", "m1", {
+      allowedTools: ["search_docs"],
+      tools: [{ name: "search_docs", description, parameters: {} }],
+    });
+    expect(db.userMcpServer.update).toHaveBeenCalled();
+  });
+
   it("rejects review tools outside the bounds", async () => {
     const { db } = setup();
     db.userMcpServer.findFirst.mockResolvedValueOnce({ id: "m1" });
