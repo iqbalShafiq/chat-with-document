@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { Switch } from "#/components/ui/switch";
 
 /**
  * Standard management list row: title + subtitle, a state switch, a
@@ -41,20 +42,12 @@ export function ManagementRow({
           <p className="truncate text-[11px] text-text-faint">{subtitle}</p>
         ) : null}
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={toggleLabel}
-        title={toggleTitle ?? toggleLabel}
-        onClick={onToggle}
-        className={`relative h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring ${enabled ? "bg-accent/80" : "bg-white/12"}`}
-      >
-        <span
-          aria-hidden
-          className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${enabled ? "translate-x-3.5" : "translate-x-0.5"}`}
-        />
-      </button>
+      <Switch
+        checked={enabled}
+        onToggle={onToggle}
+        label={toggleLabel}
+        title={toggleTitle}
+      />
       <span aria-hidden className="h-5 w-px shrink-0 bg-white/[0.08]" />
       <button
         type="button"

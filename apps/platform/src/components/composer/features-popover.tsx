@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { ImageGenParamsEditor } from "#/components/composer/image-gen-params-editor";
 import { CountBadge } from "#/components/ui/count-badge";
+import { Switch } from "#/components/ui/switch";
 import { HoverCard } from "#/components/ui/hover-card";
 import {
   fetchImageModels,
@@ -72,34 +73,20 @@ function EnhancementRow({
 }) {
   return (
     <div className="group flex w-full items-center gap-1 rounded-lg transition duration-150 hover:bg-white/[0.07] focus-within:bg-white/[0.07]">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={label}
-        title={enabled ? activeLabel : inactiveLabel}
-        disabled={toggleDisabled}
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition duration-150 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
-      >
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2">
         <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-text">
           {icon}
           {label}
           {badge}
         </span>
-        <span
-          className={`relative h-4 w-7 shrink-0 rounded-full transition-colors duration-200 ${
-            enabled ? "bg-accent/80" : "bg-white/12"
-          }`}
-          aria-hidden
-        >
-          <span
-            className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-              enabled ? "translate-x-3.5" : "translate-x-0.5"
-            }`}
-          />
-        </span>
-      </button>
+        <Switch
+          checked={enabled}
+          onToggle={onToggle}
+          label={label}
+          title={enabled ? activeLabel : inactiveLabel}
+          disabled={toggleDisabled}
+        />
+      </div>
       <button
         type="button"
         aria-label={openLabel}
@@ -486,7 +473,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         webSearchEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
@@ -531,7 +518,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         deepResearchEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
@@ -580,7 +567,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         imageGenerationEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
