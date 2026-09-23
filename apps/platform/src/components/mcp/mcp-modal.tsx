@@ -151,7 +151,9 @@ export function McpModal({
                       subtitle={
                         server.status === "error" && server.lastError
                           ? server.lastError
-                          : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`
+                          : server.status !== "ok"
+                            ? `${server.allowedTools.length} tools · untested — test in the editor to activate`
+                            : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`
                       }
                       leading={
                         <span

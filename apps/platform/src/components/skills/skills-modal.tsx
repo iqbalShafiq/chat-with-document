@@ -149,14 +149,25 @@ export function SkillsModal({
                       key={skill.id}
                       title={skill.name}
                       subtitle={
-                        skill.status === "active" ? skill.description : "Invalid — edit to fix"
+                        skill.status === "draft"
+                          ? "Draft — review in the editor before enabling"
+                          : skill.status === "active"
+                            ? skill.description
+                            : "Invalid — edit to fix"
                       }
                       enabled={skill.isEnabled}
                       onToggle={() => {
                         void skills.toggle(skill.id, !skill.isEnabled).then(onChanged);
                       }}
                       toggleLabel={`Enable ${skill.name}`}
-                      toggleTitle={skill.isEnabled ? "Enabled" : "Disabled"}
+                      toggleTitle={
+                        skill.status === "draft"
+                          ? "Review first"
+                          : skill.isEnabled
+                            ? "Enabled"
+                            : "Disabled"
+                      }
+                      toggleDisabled={skill.status === "draft"}
                       onEdit={() => setEditingId(skill.id)}
                       editLabel={`Edit ${skill.name}`}
                       onDelete={() => setDeleteId(skill.id)}

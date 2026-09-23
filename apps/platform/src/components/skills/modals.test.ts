@@ -23,6 +23,7 @@ describe("Enhancement modals", () => {
       expect(modal).toContain("chat-scroll-bleed");
       expect(modal).toContain("footer={");
     }
+    expect(skills).toContain("Draft");
     expect(skills).toContain("FormTextAreaField");
     expect(mcp).toContain("Test connection");
     expect(session).toContain("SkillsModal");

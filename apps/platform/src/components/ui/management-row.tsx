@@ -16,6 +16,7 @@ export function ManagementRow({
   onToggle,
   toggleLabel,
   toggleTitle,
+  toggleDisabled = false,
   onEdit,
   editLabel,
   onDelete,
@@ -28,6 +29,7 @@ export function ManagementRow({
   onToggle: () => void;
   toggleLabel: string;
   toggleTitle?: string;
+  toggleDisabled?: boolean;
   onEdit: () => void;
   editLabel: string;
   onDelete: () => void;
@@ -47,6 +49,7 @@ export function ManagementRow({
         onToggle={onToggle}
         label={toggleLabel}
         title={toggleTitle}
+        disabled={toggleDisabled}
       />
       <span aria-hidden className="h-5 w-px shrink-0 bg-white/[0.08]" />
       <button
