@@ -1307,6 +1307,8 @@ export type WebCapabilities = {
   deepResearchAvailable: boolean;
   imageGenerationAvailable: boolean;
   context7Configured: boolean;
+  userSkillsCount: number;
+  userMcpCount: number;
 };
 
 const capabilitiesPromises = new Map<string, Promise<WebCapabilities>>();
@@ -1341,7 +1343,9 @@ async function fetchChatCapabilitiesRemote(
     typeof (data as WebCapabilities).webSearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).deepResearchAvailable !== "boolean" ||
     typeof (data as WebCapabilities).imageGenerationAvailable !== "boolean" ||
-    typeof (data as WebCapabilities).context7Configured !== "boolean"
+    typeof (data as WebCapabilities).context7Configured !== "boolean" ||
+    typeof (data as WebCapabilities).userSkillsCount !== "number" ||
+    typeof (data as WebCapabilities).userMcpCount !== "number"
   ) {
     throw new Error("Unexpected capabilities response shape");
   }
@@ -1898,4 +1902,191 @@ export async function removeContextSnippet(input: {
     { method: "DELETE" },
   );
   if (!response.ok) throw new Error("Failed to remove context snippet");
+}
+
+// ─── User skills ────────────────────────────────────────────────────────────
+
+export type UserSkill = {
+  id: string;
+  name: string;
+  description: string;
+  bodyMd?: string;
+  isEnabled: boolean;
+  status: string;
+  version: number;
+};
+
+export type SkillIssue = { path: string; message: string };
+
+export type SkillInput = {
+  name: string;
+  description: string;
+  bodyMd: string;
+};
+
+async function throwSkillError(response: Response, fallback: string): Promise<never> {
+  let detail = fallback;
+  try {
+    const body = (await response.json()) as {
+      error?: string;
+      issues?: SkillIssue[];
+    };
+    if (body?.error) {
+      const issues = Array.isArray(body.issues) ? ` (${body.issues.map((issue) => issue.message).join("; ")})` : "";
+      detail = `${body.error}${issues}`;
+    }
+  } catch {
+    // Fall through with the generic message.
+  }
+  throw new Error(detail);
+}
+
+export async function listSkills(): Promise<UserSkill[]> {
+  const response = await apiFetch(`${API_BASE}/api/skills`);
+  if (!response.ok) throw new Error("Failed to load skills");
+  return (await response.json()) as UserSkill[];
+}
+
+export async function createSkill(input: SkillInput): Promise<UserSkill> {
+  const response = await apiFetch(`${API_BASE}/api/skills`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) await throwSkillError(response, "Failed to create skill");
+  return (await response.json()) as UserSkill;
+}
+
+export async function updateSkill(id: string, input: SkillInput): Promise<UserSkill> {
+  const response = await apiFetch(`${API_BASE}/api/skills/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) await throwSkillError(response, "Failed to save skill");
+  return (await response.json()) as UserSkill;
+}
+
+export async function deleteSkill(id: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/api/skills/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error("Failed to delete skill");
+}
+
+export async function setSkillEnabled(id: string, isEnabled: boolean): Promise<UserSkill> {
+  const response = await apiFetch(
+    `${API_BASE}/api/skills/${encodeURIComponent(id)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled }),
+    },
+  );
+  if (!response.ok) throw new Error("Failed to update skill");
+  return (await response.json()) as UserSkill;
+}
+
+// ─── User MCP servers ───────────────────────────────────────────────────────
+
+export type UserMcpServer = {
+  id: string;
+  name: string;
+  url: string;
+  authType: "none" | "bearer";
+  allowedTools: string[];
+  isEnabled: boolean;
+  status: string;
+  lastError: string | null;
+};
+
+export type McpServerInput = {
+  name: string;
+  url: string;
+  authType: "none" | "bearer";
+  token?: string;
+};
+
+export type McpTestTool = {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+};
+
+export type McpTestResult =
+  | { ok: true; tools: McpTestTool[] }
+  | { ok: false; error: string };
+
+function normalizeMcpServer(
+  row: UserMcpServer & { allowedToolsJson?: unknown },
+): UserMcpServer {
+  return {
+    ...row,
+    allowedTools: Array.isArray(row.allowedTools)
+      ? row.allowedTools
+      : Array.isArray(row.allowedToolsJson)
+        ? (row.allowedToolsJson as string[])
+        : [],
+  };
+}
+
+export async function listMcpServers(): Promise<UserMcpServer[]> {
+  const response = await apiFetch(`${API_BASE}/api/mcp-servers`);
+  if (!response.ok) throw new Error("Failed to load MCP servers");
+  const rows = (await response.json()) as (UserMcpServer & { allowedToolsJson?: unknown })[];
+  return rows.map(normalizeMcpServer);
+}
+
+export async function createMcpServer(input: McpServerInput): Promise<UserMcpServer> {
+  const response = await apiFetch(`${API_BASE}/api/mcp-servers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) await throwSkillError(response, "Failed to add MCP server");
+  return normalizeMcpServer((await response.json()) as UserMcpServer);
+}
+
+export async function updateMcpServer(id: string, input: McpServerInput): Promise<UserMcpServer> {
+  const response = await apiFetch(
+    `${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) await throwSkillError(response, "Failed to save MCP server");
+  return normalizeMcpServer((await response.json()) as UserMcpServer);
+}
+
+export async function deleteMcpServer(id: string): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error("Failed to delete MCP server");
+}
+
+export async function setMcpServerEnabled(id: string, isEnabled: boolean): Promise<UserMcpServer> {
+  const response = await apiFetch(
+    `${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled }),
+    },
+  );
+  if (!response.ok) throw new Error("Failed to update MCP server");
+  return normalizeMcpServer((await response.json()) as UserMcpServer);
+}
+
+export async function testMcpConnection(input: McpServerInput): Promise<McpTestResult> {
+  const response = await apiFetch(`${API_BASE}/api/mcp-servers/test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error("Failed to test MCP connection");
+  return (await response.json()) as McpTestResult;
 }
