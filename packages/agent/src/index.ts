@@ -11,6 +11,7 @@ export * from "./document/types.js";
 export * from "./prompts/build-document-catalog.js";
 export * from "./prompts/citation-instructions.js";
 export * from "./prompts/base-instructions.js";
+export * from "./prompts/skill-management-instructions.js";
 export * from "./prompts/tool-wait-instructions.js";
 export * from "./tools/wait-budget/types.js";
 export * from "./tools/wait-budget/limits.js";
