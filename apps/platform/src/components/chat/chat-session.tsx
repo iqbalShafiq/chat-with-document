@@ -154,6 +154,8 @@ import {
 } from "#/lib/chat-preferences";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
+import { SkillsModal } from "#/components/skills/skills-modal";
+import { McpModal } from "#/components/mcp/mcp-modal";
 import {
   MCP_SELECTION_KEY,
   SKILLS_SELECTION_KEY,
@@ -449,6 +451,8 @@ export function ChatSession({
    */
   const [activeSkillIds, setActiveSkillIds] = useState<string[] | null>(null);
   const [activeMcpIds, setActiveMcpIds] = useState<string[] | null>(null);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
   const userSkillsCatalog = useUserSkills(true);
   const userMcpCatalog = useUserMcpServers(true);
@@ -2940,6 +2944,8 @@ export function ChatSession({
                     mcpPerChatEnabled={(activeMcpIds ?? []).length > 0}
                     onSkillsToggle={handleSkillsToggle}
                     onMcpToggle={handleMcpToggle}
+                    onOpenSkills={() => setSkillsOpen(true)}
+                    onOpenMcp={() => setMcpOpen(true)}
                     activeContextImages={activeContextImages}
                     onToggleImageContext={(image) => {
                       void handleToggleImageContext(image);
@@ -2969,6 +2975,20 @@ export function ChatSession({
                           }
                         : null
                     }
+                  />
+                  <SkillsModal
+                    open={skillsOpen}
+                    onClose={() => setSkillsOpen(false)}
+                    onChanged={() => {
+                      void userSkillsCatalog.reload();
+                    }}
+                  />
+                  <McpModal
+                    open={mcpOpen}
+                    onClose={() => setMcpOpen(false)}
+                    onChanged={() => {
+                      void userMcpCatalog.reload();
+                    }}
                   />
                 </div>
               </div>

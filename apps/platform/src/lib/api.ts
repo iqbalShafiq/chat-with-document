@@ -1926,19 +1926,23 @@ export type SkillInput = {
 
 async function throwSkillError(response: Response, fallback: string): Promise<never> {
   let detail = fallback;
+  let issues: SkillIssue[] | undefined;
   try {
     const body = (await response.json()) as {
       error?: string;
       issues?: SkillIssue[];
     };
     if (body?.error) {
-      const issues = Array.isArray(body.issues) ? ` (${body.issues.map((issue) => issue.message).join("; ")})` : "";
-      detail = `${body.error}${issues}`;
+      issues = Array.isArray(body.issues) ? body.issues : undefined;
+      const suffix = issues ? ` (${issues.map((issue) => issue.message).join("; ")})` : "";
+      detail = `${body.error}${suffix}`;
     }
   } catch {
     // Fall through with the generic message.
   }
-  throw new Error(detail);
+  const error = new Error(detail);
+  if (issues) (error as Error & { issues?: SkillIssue[] }).issues = issues;
+  throw error;
 }
 
 export async function listSkills(): Promise<UserSkill[]> {

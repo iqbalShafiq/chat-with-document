@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createMcpServer,
   listMcpServers,
+  setMcpReview,
   validateMcpUrl,
 } from "./service.js";
 
@@ -24,8 +25,6 @@ function setup() {
   };
 }
 
-void setup;
-
 describe("mcp crud", () => {
   it("strips credentialsRef when listing", async () => {
     const { db } = setup();
@@ -47,6 +46,35 @@ describe("mcp crud", () => {
         authType: "none",
       }),
     ).rejects.toThrow("MCP server limit reached");
+  });
+
+  it("stores the reviewed tool subset", async () => {
+    const { db } = setup();
+    db.userMcpServer.findFirst.mockResolvedValueOnce({ id: "m1" });
+    await setMcpReview(db, "u1", "m1", {
+      allowedTools: ["search_docs"],
+      tools: [{ name: "search_docs", description: "Search", parameters: { type: "object" } }],
+    });
+    expect(db.userMcpServer.update).toHaveBeenCalledWith({
+      where: { id: "m1" },
+      data: {
+        allowedToolsJson: ["search_docs"],
+        toolsJson: [{ name: "search_docs", description: "Search", parameters: { type: "object" } }],
+        status: "ok",
+        lastError: null,
+      },
+    });
+  });
+
+  it("rejects review tools outside the bounds", async () => {
+    const { db } = setup();
+    db.userMcpServer.findFirst.mockResolvedValueOnce({ id: "m1" });
+    await expect(
+      setMcpReview(db, "u1", "m1", {
+        allowedTools: ["x".repeat(200)],
+        tools: [],
+      }),
+    ).rejects.toThrow("Tool name");
   });
 });
 

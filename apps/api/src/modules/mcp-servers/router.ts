@@ -8,6 +8,7 @@ import {
   deleteMcpServer,
   listMcpServers,
   setMcpCredentials,
+  setMcpReview,
   setMcpServerEnabled,
   updateMcpServer,
 } from "./service.js";
@@ -19,6 +20,19 @@ const mcpBodySchema = z
     url: z.string().max(520),
     authType: z.enum(["none", "bearer"]),
     token: z.string().max(2048).optional(),
+    allowedTools: z.array(z.string().max(128)).max(64).optional(),
+    tools: z
+      .array(
+        z
+          .object({
+            name: z.string().max(128),
+            description: z.string().max(2000),
+            parameters: z.record(z.string(), z.unknown()).optional(),
+          })
+          .strict(),
+      )
+      .max(64)
+      .optional(),
   })
   .strict();
 
@@ -47,6 +61,12 @@ export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
         // v1 stores the token server-side only (see credentialsRef); at-rest
         // encryption moves with the gateway-broker milestone. Never echoed.
         await setMcpCredentials(prisma, user.id, created.id, token);
+      }
+      if (parsed.data.allowedTools !== undefined || parsed.data.tools !== undefined) {
+        await setMcpReview(prisma, user.id, created.id, {
+          allowedTools: parsed.data.allowedTools ?? [],
+          tools: parsed.data.tools ?? [],
+        });
       }
       const row = await prisma.userMcpServer.findFirst({
         where: { id: created.id, userId: user.id },
@@ -85,17 +105,27 @@ export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
       return c.json({ error: "Invalid MCP server", code: "INVALID_MCP_SERVER" }, 400);
     }
     try {
-      const updated = (await updateMcpServer(
+      await updateMcpServer(
         prisma,
         user.id,
         c.req.param("id"),
         parsed.data,
-      )) as Record<string, unknown>;
+      );
       const token = parsed.data.token?.trim();
       if (parsed.data.authType === "bearer" && token) {
         await setMcpCredentials(prisma, user.id, c.req.param("id"), token);
       }
-      const { credentialsRef: _dropped, ...rest } = updated;
+      if (parsed.data.allowedTools !== undefined || parsed.data.tools !== undefined) {
+        await setMcpReview(prisma, user.id, c.req.param("id"), {
+          allowedTools: parsed.data.allowedTools ?? [],
+          tools: parsed.data.tools ?? [],
+        });
+      }
+      const row = (await prisma.userMcpServer.findFirst({
+        where: { id: c.req.param("id"), userId: user.id },
+      })) as Record<string, unknown> | null;
+      if (!row) return c.json(notFound(), 404);
+      const { credentialsRef: _dropped, ...rest } = row;
       return c.json(rest);
     } catch (error) {
       if (error instanceof McpInputError) {

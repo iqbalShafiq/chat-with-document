@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listMcpServers, listSkills } from "./api";
+import { createSkill, listMcpServers, listSkills } from "./api";
 
 function mockFetchJson(payload: unknown) {
   const json = vi.fn(async () => payload);
@@ -29,5 +29,28 @@ describe("user enhancement api client", () => {
   it("lists mcp servers", async () => {
     mockFetchJson([]);
     await expect(listMcpServers()).resolves.toEqual([]);
+  });
+
+  it("attaches server issues to save errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: false,
+            json: async () => ({
+              error: "Invalid skill",
+              issues: [{ path: "bodyMd", message: "Frontmatter name: must match" }],
+            }),
+          }) as unknown as Response,
+      ),
+    );
+    const failure = await createSkill({ name: "x", description: "d", bodyMd: "b" }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as { issues?: unknown }).issues).toEqual([
+      { path: "bodyMd", message: "Frontmatter name: must match" },
+    ]);
   });
 });

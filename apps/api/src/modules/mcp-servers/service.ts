@@ -81,6 +81,73 @@ export function validateMcpServerInput(input: McpServerInput):
   };
 }
 
+export const MAX_REVIEW_TOOLS = 64;
+export const MCP_TOOL_NAME_MAX = 128;
+export const MCP_TOOL_DESCRIPTION_MAX = 2000;
+
+export type McpReviewTool = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+function validateReviewTools(
+  allowedTools: unknown,
+  tools: unknown,
+): { allowedTools: string[]; tools: McpReviewTool[] } {
+  if (!Array.isArray(allowedTools) || allowedTools.length > MAX_REVIEW_TOOLS) {
+    throw new McpInputError([{ path: "name", message: "Reviewed tools are invalid" }]);
+  }
+  for (const name of allowedTools) {
+    if (typeof name !== "string" || !name.trim() || name.length > MCP_TOOL_NAME_MAX) {
+      throw new McpInputError([{ path: "name", message: "Tool name must be 1-128 characters" }]);
+    }
+  }
+  if (!Array.isArray(tools) || tools.length > MAX_REVIEW_TOOLS) {
+    throw new McpInputError([{ path: "name", message: "Reviewed tools are invalid" }]);
+  }
+  const clean: McpReviewTool[] = [];
+  for (const entry of tools) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new McpInputError([{ path: "name", message: "Reviewed tools are invalid" }]);
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.name !== "string" || !record.name.trim() || record.name.length > MCP_TOOL_NAME_MAX) {
+      throw new McpInputError([{ path: "name", message: "Tool name must be 1-128 characters" }]);
+    }
+    if (typeof record.description !== "string" || record.description.length > MCP_TOOL_DESCRIPTION_MAX) {
+      throw new McpInputError([{ path: "name", message: "Tool description must be at most 2000 characters" }]);
+    }
+    const parameters =
+      typeof record.parameters === "object" && record.parameters !== null && !Array.isArray(record.parameters)
+        ? (record.parameters as Record<string, unknown>)
+        : {};
+    clean.push({ name: record.name, description: record.description, parameters });
+  }
+  return { allowedTools: allowedTools as string[], tools: clean };
+}
+
+/** Store the reviewed tool subset from a successful test-connection. */
+export async function setMcpReview(
+  db: McpDb,
+  userId: string,
+  id: string,
+  review: { allowedTools: unknown; tools: unknown },
+) {
+  const existing = await db.userMcpServer.findFirst({ where: { id, userId } });
+  if (!existing) throw new McpInputError(NOT_FOUND);
+  const validated = validateReviewTools(review.allowedTools, review.tools);
+  return db.userMcpServer.update({
+    where: { id },
+    data: {
+      allowedToolsJson: validated.allowedTools,
+      toolsJson: validated.tools,
+      status: "ok",
+      lastError: null,
+    },
+  });
+}
+
 export type McpDb = {
   userMcpServer: {
     findMany(args: unknown): Promise<unknown[]>;
