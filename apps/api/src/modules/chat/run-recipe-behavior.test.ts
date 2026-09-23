@@ -23,7 +23,7 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 2,
+    version: 3,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
     model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
@@ -340,6 +340,12 @@ describe("run recipe reconstruction capability boundary", () => {
         imageGenerationConfig: () => null,
         profilingEnabled: () => false,
         deepResearchLimits: () => ({ maxTurns: 8, maxSearches: 12, maxDurationMs: 360_000 }),
+        resolveUserEnhancements: async () => ({
+          userSkills: [],
+          userMcp: [],
+          droppedSkillIds: [],
+          droppedMcpServerIds: [],
+        }),
         context7Requested: () => {
           context7Reads += 1;
           return false;

@@ -18,6 +18,8 @@ const metadata: ChatRequestMetadata = {
   webSearchEnabled: true,
   imageGenerationEnabled: false,
   deepResearchEnabled: true,
+  skillIds: [],
+  mcpServerIds: [],
   imageGenSettings: null,
 };
 

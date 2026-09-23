@@ -864,8 +864,10 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
       const sameFeatures = existing.recipe.features.webSearchEnabled === parsed.metadata.webSearchEnabled
         && existing.recipe.features.imageGenerationEnabled === parsed.metadata.imageGenerationEnabled
         && existing.recipe.features.deepResearchEnabled === parsed.metadata.deepResearchEnabled;
+      const sameUserSkills = JSON.stringify([...existing.recipe.userSkills.map((s) => s.id)].sort()) === JSON.stringify([...parsed.metadata.skillIds].sort());
+      const sameUserMcp = JSON.stringify([...existing.recipe.userMcp.map((s) => s.id)].sort()) === JSON.stringify([...parsed.metadata.mcpServerIds].sort());
       const sameImageSettings = canonicalJson(existing.recipe.imageGenSettings) === canonicalJson(parsed.metadata.imageGenSettings);
-      if (existing.recipe.model.id !== parsed.metadata.modelId || existing.recipe.model.reasoningEffort !== parsed.metadata.reasoningEffort || !sameDocuments || !sameFeatures || !sameImageSettings) {
+      if (existing.recipe.model.id !== parsed.metadata.modelId || existing.recipe.model.reasoningEffort !== parsed.metadata.reasoningEffort || !sameDocuments || !sameFeatures || !sameUserSkills || !sameUserMcp || !sameImageSettings) {
         return c.json({ error: "interaction response metadata is invalid", code: "INTERACTION_RESPONSE_INVALID" }, 400);
       }
       try {
@@ -939,6 +941,8 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         webSearchEnabled: metadata.webSearchEnabled,
         imageGenerationEnabled: metadata.imageGenerationEnabled,
         deepResearchEnabled: metadata.deepResearchEnabled,
+        skillIds: metadata.skillIds,
+        mcpServerIds: metadata.mcpServerIds,
         imageGenSettings: metadata.imageGenSettings,
         traceId: streamId,
         streamId,

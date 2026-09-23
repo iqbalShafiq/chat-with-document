@@ -2,7 +2,7 @@ import z from "zod";
 import { imageGenSettingsSchema } from "./image-gen-settings.js";
 
 export const CHAT_AGENT_ID = "chat-agent" as const;
-export const CHAT_AGENT_RECIPE_VERSION = 2 as const;
+export const CHAT_AGENT_RECIPE_VERSION = 3 as const;
 
 /**
  * Recipes cross the BullMQ/Redis boundary. Keep every string bounded and
@@ -172,6 +172,33 @@ export const chatAgentRecipeSchema = z
         deepResearchEnabled: z.boolean(),
       })
       .strict(),
+    userSkills: z
+      .array(
+        z
+          .object({
+            id,
+            name: bounded(64),
+            description: bounded(1024),
+            bodyMd: instructionText,
+          })
+          .strict(),
+      )
+      .max(20)
+      .default([]),
+    userMcp: z
+      .array(
+        z
+          .object({
+            id,
+            name: bounded(64),
+            url: bounded(512),
+            allowedTools: z.array(bounded(128)).max(64),
+            toolDefinitions: z.array(staticToolDefinitionSchema).max(64),
+          })
+          .strict(),
+      )
+      .max(5)
+      .default([]),
     imageGenSettings: chatAgentImageGenSettingsSchema.nullable(),
     budgets: z
       .object({

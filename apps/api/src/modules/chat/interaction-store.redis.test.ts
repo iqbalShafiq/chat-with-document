@@ -17,7 +17,7 @@ import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
 const userId = "redis-integration-user";
 const sessionId = "redis-integration-session";
 const recipe = parseChatAgentRecipe({
-  version: 2,
+  version: 3,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId, userId, projectId: null },
   model: { id: "openai/gpt-5.6-luna", reasoningEffort: "medium" },
@@ -43,6 +43,8 @@ const recipe = parseChatAgentRecipe({
     staticContextTokens: 0,
   },
   features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false },
+  userSkills: [],
+  userMcp: [],
   imageGenSettings: null,
   budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
   documents: { ids: [], catalog: [] },

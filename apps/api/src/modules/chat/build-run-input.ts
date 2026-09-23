@@ -122,6 +122,7 @@ import {
 } from "../profiling/service.js";
 import {
   CHAT_AGENT_ID,
+  CHAT_AGENT_RECIPE_VERSION,
   attachChatAgentRecipeClaim,
   chatAgentImageGenSettingsSchema,
   createChatAgentRecipe,
@@ -133,6 +134,10 @@ import {
   type ChatAgentRecipe,
   type ChatAgentSnippetDescriptor,
 } from "./run-recipe.js";
+import {
+  resolveUserEnhancements,
+  type UserEnhancementDb,
+} from "./user-enhancements.js";
 import {
   enqueueSiteBuildFromTool,
   readActiveSiteTitle,
@@ -622,6 +627,20 @@ export type ChatAgentRecipeResolverDependencies = {
   context7Requested?: () => boolean;
   /** JSON-only MCP definitions captured before queue serialization. */
   context7ToolDefinitions?: () => Promise<readonly ToolDefinition[]>;
+  resolveUserEnhancements?: (
+    db: UserEnhancementDb,
+    userId: string,
+    selection: { skillIds: string[]; mcpServerIds: string[] },
+  ) => Promise<{
+    userSkills: { id: string; name: string; description: string; bodyMd: string }[];
+    userMcp: {
+      id: string;
+      name: string;
+      url: string;
+      allowedTools: string[];
+      toolDefinitions: { name: string; description: string; parameters: Record<string, unknown> }[];
+    }[];
+  }>;
 };
 
 export type ResolveChatAgentRecipeInput = {
@@ -633,6 +652,8 @@ export type ResolveChatAgentRecipeInput = {
   webSearchEnabled?: boolean;
   imageGenerationEnabled?: boolean;
   deepResearchEnabled?: boolean;
+  skillIds?: string[];
+  mcpServerIds?: string[];
   imageGenSettings?: unknown;
   traceId: string;
   streamId?: string;
@@ -699,6 +720,8 @@ export async function resolveChatAgentRecipe(
   const readContext7ToolDefinitions =
     dependencies?.context7ToolDefinitions ??
     (async () => CONTEXT7_TOOL_DEFINITIONS);
+  const readUserEnhancements =
+    dependencies?.resolveUserEnhancements ?? resolveUserEnhancements;
   // This is an authenticated capability snapshot. Read it exactly once so a
   // changing env/config source cannot produce a recipe with mixed semantics.
   const context7Requested = readContext7Requested();
@@ -931,9 +954,20 @@ export async function resolveChatAgentRecipe(
   }
 
   const limits = readDeepResearchLimits();
+  const userEnhancements = await readUserEnhancements(
+    // resolverPrisma is narrowed to the delegates each resolver needs; the
+    // real client carries userSkill/userMcpServer, test doubles inject the
+    // resolveUserEnhancements stub instead (see behavior tests).
+    resolverPrisma as unknown as UserEnhancementDb,
+    input.userId,
+    {
+      skillIds: input.skillIds ?? [],
+      mcpServerIds: input.mcpServerIds ?? [],
+    },
+  );
   try {
     const recipe = createChatAgentRecipe({
-    version: 2,
+    version: CHAT_AGENT_RECIPE_VERSION,
     agentId: CHAT_AGENT_ID,
     identity: {
       sessionId: input.sessionId,
@@ -951,6 +985,8 @@ export async function resolveChatAgentRecipe(
       imageGenerationEnabled: input.imageGenerationEnabled ?? false,
       deepResearchEnabled: input.deepResearchEnabled ?? false,
     },
+    userSkills: userEnhancements.userSkills,
+    userMcp: userEnhancements.userMcp,
     imageGenSettings:
       input.imageGenSettings === null || input.imageGenSettings === undefined
         ? null
