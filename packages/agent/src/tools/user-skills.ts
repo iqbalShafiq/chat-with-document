@@ -14,6 +14,7 @@ export type UserSkillsToolDeps = {
     name: string;
     description: string;
     bodyMd: string;
+    status?: "draft";
   }): Promise<{ id: string; name: string }>;
   update(
     id: string,
@@ -71,6 +72,7 @@ export function createUserSkillsTools(deps: UserSkillsToolDeps): AnyTool[] {
                 name: args.name ?? "",
                 description: args.description ?? "",
                 bodyMd: args.bodyMd ?? "",
+                status: "draft",
               });
               return { ok: true, ...created, draft: true };
             }

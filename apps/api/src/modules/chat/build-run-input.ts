@@ -1626,7 +1626,10 @@ export async function reconstructChatRunInput(input: {
         }));
       },
       create: async (input) =>
-        (await createSkill(prisma, userId, input)) as { id: string; name: string },
+        (await createSkill(prisma, userId, { ...input, status: "draft" })) as {
+          id: string;
+          name: string;
+        },
       update: async (id, input) =>
         (await updateSkill(prisma, userId, id, input)) as { id: string },
       remove: async (id) => {

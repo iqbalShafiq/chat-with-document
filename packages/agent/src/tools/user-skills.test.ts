@@ -55,6 +55,7 @@ describe("manage_user_skills", () => {
       name: "brief",
       description: "d",
       bodyMd: expect.stringContaining("brief"),
+      status: "draft",
     });
     expect(normalizeToolResultOutput(output)).toEqual({
       type: "json",

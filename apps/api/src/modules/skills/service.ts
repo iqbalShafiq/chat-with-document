@@ -121,24 +121,27 @@ export async function listSkills(db: SkillsDb, userId: string) {
 export async function createSkill(
   db: SkillsDb,
   userId: string,
-  input: SkillInput,
+  input: SkillInput & { status?: "draft" },
 ) {
   const validated = validateSkillInput(input);
   if (!validated.ok) throw new SkillInputError(validated.issues);
-  const activeCount = await db.userSkill.count({
-    where: { userId, isEnabled: true, status: "active" },
-  });
-  if (activeCount >= MAX_ACTIVE_SKILLS) {
-    throw new SkillInputError([
-      { path: "name", message: `Skill limit reached (${MAX_ACTIVE_SKILLS} active)` },
-    ]);
+  const draft = input.status === "draft";
+  if (!draft) {
+    const activeCount = await db.userSkill.count({
+      where: { userId, isEnabled: true, status: "active" },
+    });
+    if (activeCount >= MAX_ACTIVE_SKILLS) {
+      throw new SkillInputError([
+        { path: "name", message: `Skill limit reached (${MAX_ACTIVE_SKILLS} active)` },
+      ]);
+    }
   }
   return db.userSkill.create({
     data: {
       userId,
       ...validated.value,
-      isEnabled: true,
-      status: "active",
+      isEnabled: !draft,
+      status: draft ? "draft" : "active",
       version: 1,
     },
   });

@@ -79,6 +79,16 @@ describe("createSkill", () => {
     expect(db.userSkill.create).not.toHaveBeenCalled();
   });
 
+  it("creates drafts disabled when asked", async () => {
+    const { db } = setup();
+    const created = (await createSkill(db, "u1", { ...VALID, status: "draft" })) as {
+      status: string;
+      isEnabled: boolean;
+    };
+    expect(created.status).toBe("draft");
+    expect(created.isEnabled).toBe(false);
+  });
+
   it("refuses when the active skill cap is reached", async () => {
     const { db } = setup();
     db.userSkill.count.mockResolvedValueOnce(20);
