@@ -50,6 +50,8 @@ export function SkillsModal({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const contentScrollRef = useRef<HTMLDivElement>(null);
+  const editorSaveRef = useRef<() => void>(() => {});
+  const [editorBusy, setEditorBusy] = useState(false);
 
   const closeEditor = () => {
     setEditingId(undefined);
@@ -74,6 +76,28 @@ export function SkillsModal({
       description="Reusable procedures your agent loads when the task fits."
       size="lg"
       heightMode="viewport"
+      footer={
+        editingId !== undefined ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={closeEditor}
+              disabled={editorBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => editorSaveRef.current()}
+              disabled={editorBusy}
+            >
+              {editorBusy ? "Saving…" : editingId ? "Save" : "Create"}
+            </Button>
+          </>
+        ) : undefined
+      }
     >
       <div className="relative min-h-0 min-w-0 flex-1">
         <div
@@ -99,7 +123,8 @@ export function SkillsModal({
                     : null
                 }
                 saving={skills.saving}
-                onCancel={closeEditor}
+                saveRef={editorSaveRef}
+                onBusyChange={setEditorBusy}
                 onSave={async (input) => {
                   await skills.save(editingId ?? null, input);
                   handleChanged();
@@ -183,12 +208,14 @@ export function SkillsModal({
 function SkillEditor({
   initial,
   saving,
-  onCancel,
+  saveRef,
+  onBusyChange,
   onSave,
 }: {
   initial: UserSkill | null;
   saving: boolean;
-  onCancel: () => void;
+  saveRef: { current: () => void };
+  onBusyChange: (busy: boolean) => void;
   onSave: (input: SkillInput) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
@@ -220,6 +247,11 @@ function SkillEditor({
       setErrors(issuesToFieldErrors(issuesFromError(error)));
     }
   };
+
+  saveRef.current = () => void submit();
+  useEffect(() => {
+    onBusyChange(saving);
+  }, [saving, onBusyChange]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -277,14 +309,6 @@ function SkillEditor({
           {errors.form}
         </p>
       ) : null}
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" onClick={() => void submit()} disabled={saving}>
-          {saving ? "Saving…" : initial ? "Save" : "Create"}
-        </Button>
-      </div>
     </div>
   );
 }

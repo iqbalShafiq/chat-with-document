@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Button } from "#/components/ui/button";
@@ -32,6 +32,8 @@ export function McpModal({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const contentScrollRef = useRef<HTMLDivElement>(null);
+  const editorSaveRef = useRef<() => void>(() => {});
+  const [editorBusy, setEditorBusy] = useState(false);
 
   const handleChanged = () => {
     setEditingId(undefined);
@@ -52,6 +54,28 @@ export function McpModal({
       description="Connect external tools over Streamable HTTP. Test before saving."
       size="lg"
       heightMode="viewport"
+      footer={
+        editingId !== undefined ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditingId(undefined)}
+              disabled={editorBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => editorSaveRef.current()}
+              disabled={editorBusy}
+            >
+              {editorBusy ? "Saving…" : editingId ? "Save" : "Add server"}
+            </Button>
+          </>
+        ) : undefined
+      }
     >
       <div className="relative min-h-0 min-w-0 flex-1">
         <div
@@ -79,7 +103,8 @@ export function McpModal({
                 saving={servers.saving}
                 testing={servers.testing}
                 onTest={(input) => servers.test(input)}
-                onCancel={() => setEditingId(undefined)}
+                saveRef={editorSaveRef}
+                onBusyChange={setEditorBusy}
                 onSave={async (input, review) => {
                   await servers.save(editingId ?? null, {
                     ...input,
@@ -187,14 +212,16 @@ function McpEditor({
   saving,
   testing,
   onTest,
-  onCancel,
+  saveRef,
+  onBusyChange,
   onSave,
 }: {
   initial: UserMcpServer | null;
   saving: boolean;
   testing: boolean;
   onTest: (input: McpServerInput) => Promise<McpTestResult>;
-  onCancel: () => void;
+  saveRef: { current: () => void };
+  onBusyChange: (busy: boolean) => void;
   onSave: (
     input: McpServerInput,
     review: { checked: string[]; tools: McpTestTool[] } | null,
@@ -273,6 +300,11 @@ function McpEditor({
       setErrors(issuesToFieldErrors(issuesFromError(error)));
     }
   };
+
+  saveRef.current = () => void submit();
+  useEffect(() => {
+    onBusyChange(saving || testing);
+  }, [saving, testing, onBusyChange]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -380,14 +412,6 @@ function McpEditor({
           {errors.form}
         </p>
       ) : null}
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving || testing}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" onClick={() => void submit()} disabled={saving || testing}>
-          {saving ? "Saving…" : initial ? "Save" : "Add server"}
-        </Button>
-      </div>
     </div>
   );
 }

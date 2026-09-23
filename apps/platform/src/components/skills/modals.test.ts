@@ -21,6 +21,7 @@ describe("Enhancement modals", () => {
       expect(modal).toContain("onChanged");
       expect(modal).toContain("InsetScrollbar");
       expect(modal).toContain("chat-scroll-bleed");
+      expect(modal).toContain("footer={");
     }
     expect(skills).toContain("FormTextAreaField");
     expect(mcp).toContain("Test connection");
