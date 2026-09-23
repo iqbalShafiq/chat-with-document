@@ -23,6 +23,22 @@ function notFound() {
   return { error: "Skill not found", code: "SKILL_NOT_FOUND" };
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
+}
+
+function duplicateName() {
+  return {
+    error: "A skill with this name already exists",
+    issues: [{ path: "name", message: "A skill with this name already exists" }],
+  };
+}
+
 export const skillsRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/", async (c) => {
@@ -43,6 +59,9 @@ export const skillsRouter = new Hono<{ Variables: AuthVariables }>()
           { error: error.message, issues: error.issues },
           400,
         );
+      }
+      if (isUniqueViolation(error)) {
+        return c.json(duplicateName(), 400);
       }
       throw error;
     }
@@ -74,6 +93,9 @@ export const skillsRouter = new Hono<{ Variables: AuthVariables }>()
             : { error: error.message, issues: error.issues },
           status,
         );
+      }
+      if (isUniqueViolation(error)) {
+        return c.json(duplicateName(), 400);
       }
       throw error;
     }

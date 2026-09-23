@@ -87,6 +87,18 @@ describe("mcp crud", () => {
       }),
     ).rejects.toThrow("Tool name");
   });
+
+  it("rejects allowed tools missing from the reviewed definitions", async () => {
+    const { db } = setup();
+    db.userMcpServer.findFirst.mockResolvedValueOnce({ id: "m1" });
+    await expect(
+      setMcpReview(db, "u1", "m1", {
+        allowedTools: ["ghost"],
+        tools: [{ name: "real", description: "", parameters: {} }],
+      }),
+    ).rejects.toThrow("ghost");
+    expect(db.userMcpServer.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("validateMcpUrl", () => {
@@ -99,5 +111,19 @@ describe("validateMcpUrl", () => {
   it("rejects loopback and private hosts", () => {
     expect(validateMcpUrl("https://127.0.0.1/mcp")).not.toBeNull();
     expect(validateMcpUrl("https://192.168.1.10/mcp")).not.toBeNull();
+  });
+
+  it("tells the user only public https hosts are allowed", () => {
+    expect(validateMcpUrl("http://mcp.example.com/mcp")).toContain("https");
+    expect(validateMcpUrl("https://10.0.0.5/mcp")).toContain("https");
+  });
+
+  it("blocks unspecified, ipv6 loopback, mapped, dotted, and malformed numeric hosts", () => {
+    expect(validateMcpUrl("https://0.0.0.0/mcp")).not.toBeNull();
+    expect(validateMcpUrl("https://[::1]/mcp")).not.toBeNull();
+    expect(validateMcpUrl("https://[::]/mcp")).not.toBeNull();
+    expect(validateMcpUrl("https://[::ffff:127.0.0.1]/mcp")).not.toBeNull();
+    expect(validateMcpUrl("https://localhost./mcp")).not.toBeNull();
+    expect(validateMcpUrl("https://999.1.1.1/mcp")).not.toBeNull();
   });
 });

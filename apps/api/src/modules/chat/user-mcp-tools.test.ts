@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertMcpEntryReviewed,
   selectReviewedTools,
   unprefixToolName,
 } from "./build-run-input.js";
@@ -22,5 +23,13 @@ describe("selectReviewedTools", () => {
   it("keeps everything when the allow-list is empty", () => {
     const live = [{ name: "e2e_docs_search" }];
     expect(selectReviewedTools(live, new Set<string>(), "e2e_docs_")).toEqual(live);
+  });
+});
+
+describe("assertMcpEntryReviewed", () => {
+  it("fails closed on an empty frozen review", () => {
+    expect(() => assertMcpEntryReviewed({ name: "docs", toolDefinitions: [] })).toThrow(
+      'MCP server "docs" has no reviewed tools',
+    );
   });
 });

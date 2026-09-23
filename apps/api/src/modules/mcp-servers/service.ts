@@ -16,7 +16,7 @@ export class McpInputError extends Error {
 }
 
 const BLOCKED_HOST_RE =
-  /^(localhost|.*\.localhost|.*\.local|.*\.internal|\[?::1\]?)$/i;
+  /^(localhost|.*\.localhost|.*\.local|.*\.internal|\[?::1\]?|\[?::\]?|\[?::ffff:[^\]]*\]?)$/i;
 
 function isPrivateIpv4(host: string): boolean {
   const parts = host.split(".");
@@ -30,6 +30,19 @@ function isPrivateIpv4(host: string): boolean {
     (a === 172 && (b as number) >= 16 && (b as number) <= 31) ||
     (a === 192 && b === 168) ||
     (a === 169 && b === 254)
+  );
+}
+
+/** Dotted quads with out-of-range octets never resolve safely — reject. */
+function isMalformedNumericHost(host: string): boolean {
+  return /^\d+\.\d+\.\d+\.\d+$/.test(host) && !isStrictIpv4(host);
+}
+
+function isStrictIpv4(host: string): boolean {
+  const parts = host.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
   );
 }
 
@@ -48,9 +61,14 @@ export function validateMcpUrl(raw: string): string | null {
   if (parsed.protocol !== "https:") {
     return "MCP URL must use public https (http and private hosts are blocked)";
   }
-  const host = parsed.hostname.toLowerCase();
-  if (BLOCKED_HOST_RE.test(host) || isPrivateIpv4(host)) {
-    return "MCP URL must be a public host (local and private addresses are blocked)";
+  const host = parsed.hostname.toLowerCase().replace(/\.*$/, "");
+  if (
+    host === "0.0.0.0" ||
+    BLOCKED_HOST_RE.test(host) ||
+    isPrivateIpv4(host) ||
+    isMalformedNumericHost(host)
+  ) {
+    return "MCP URL must use public https — local and private addresses are blocked";
   }
   return null;
 }
@@ -125,6 +143,14 @@ function validateReviewTools(
         ? (record.parameters as Record<string, unknown>)
         : {};
     clean.push({ name: record.name, description: record.description, parameters });
+  }
+  const known = new Set(clean.map((tool) => tool.name));
+  for (const name of allowedTools as string[]) {
+    if (!known.has(name)) {
+      throw new McpInputError([
+        { path: "name", message: `Allowed tool "${name}" is missing from the reviewed definitions` },
+      ]);
+    }
   }
   return { allowedTools: allowedTools as string[], tools: clean };
 }

@@ -119,6 +119,7 @@ type McpRow = {
   id: string;
   name: string;
   url: string;
+  status: string;
   allowedToolsJson: unknown;
   toolsJson: unknown;
 };
@@ -141,9 +142,17 @@ export async function resolveUserEnhancements(
   const skillRows = (await db.userSkill.findMany({
     where: { userId, isEnabled: true, status: "active" },
   })) as SkillRow[];
-  const mcpRows = (await db.userMcpServer.findMany({
-    where: { userId, isEnabled: true, status: { not: "error" } },
-  })) as McpRow[];
+  // Fail-closed trust boundary: only servers with a successful test review
+  // (status ok + frozen definitions) reach a run. Anything else is dropped
+  // and reported so the client can refresh. The code-level filter mirrors
+  // the query so any store counts, not just Prisma.
+  const mcpRows = (
+    (await db.userMcpServer.findMany({
+      where: { userId, isEnabled: true, status: "ok" },
+    })) as McpRow[]
+  ).filter(
+    (row) => row.status === "ok" && toolDefinitions(row.toolsJson).length > 0,
+  );
 
   const skillsById = new Map(skillRows.map((row) => [row.id, row]));
   const mcpById = new Map(mcpRows.map((row) => [row.id, row]));

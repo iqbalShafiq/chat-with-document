@@ -26,6 +26,7 @@ function setup() {
             userId: "u1",
             name: "docs",
             url: "https://mcp.example.com/mcp",
+            status: "ok",
             allowedToolsJson: ["search_docs"],
             toolsJson: [
               { name: "search_docs", description: "Search", parameters: { type: "object" } },
@@ -60,5 +61,35 @@ describe("resolveUserEnhancements", () => {
       "search_docs",
     ]);
     expect(result.droppedMcpServerIds).toEqual(["ghost-mcp"]);
+  });
+
+  it("drops untested servers and ones without reviewed tools", async () => {
+    const { db } = setup();
+    db.userMcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "m-untested",
+        userId: "u1",
+        name: "fresh",
+        url: "https://mcp.example.com/mcp",
+        status: "untested",
+        allowedToolsJson: [],
+        toolsJson: [],
+      },
+      {
+        id: "m-err",
+        userId: "u1",
+        name: "broken",
+        url: "https://mcp.example.com/mcp",
+        status: "error",
+        allowedToolsJson: ["a"],
+        toolsJson: [{ name: "a", description: "", parameters: {} }],
+      },
+    ]);
+    const result = await resolveUserEnhancements(db, "u1", {
+      skillIds: [],
+      mcpServerIds: ["m-untested", "m-err"],
+    });
+    expect(result.userMcp).toEqual([]);
+    expect(result.droppedMcpServerIds).toEqual(["m-untested", "m-err"]);
   });
 });

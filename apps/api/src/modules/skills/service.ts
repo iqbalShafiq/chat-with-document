@@ -52,14 +52,14 @@ export function validateSkillInput(input: SkillInput):
         message: "SKILL.md must start with a YAML frontmatter block between --- lines",
       });
     } else {
-      const fmName = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-      const fmDescription = frontmatter
-        .match(/^description:\s*(.+)$/m)?.[1]
-        ?.trim();
+      const fmName = stripYamlQuotes(frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim());
+      const fmDescription = stripYamlQuotes(
+        frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim(),
+      );
       if (fmName !== name) {
         issues.push({
           path: "bodyMd",
-          message: `Frontmatter name: must equal the skill name ("${name}")`,
+          message: `Frontmatter name: "${fmName ?? "missing"}" must equal the skill name ("${name}")`,
         });
       }
       if (fmDescription !== description) {
@@ -72,6 +72,19 @@ export function validateSkillInput(input: SkillInput):
   }
   if (issues.length > 0) return { ok: false as const, issues };
   return { ok: true as const, value: { name, description, bodyMd } };
+}
+
+/** Strip one layer of YAML single/double quotes from a scalar. */
+function stripYamlQuotes(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 function extractFrontmatter(bodyMd: string): string | null {
@@ -161,7 +174,24 @@ export async function setSkillEnabled(
   id: string,
   isEnabled: boolean,
 ) {
-  const existing = await db.userSkill.findFirst({ where: { id, userId } });
+  const existing = (await db.userSkill.findFirst({ where: { id, userId } })) as {
+    status?: unknown;
+  } | null;
   if (!existing) throw new SkillInputError([{ path: "name", message: "Skill not found" }]);
+  if (isEnabled) {
+    if (existing.status !== "active") {
+      throw new SkillInputError([
+        { path: "name", message: "Fix the skill before enabling it" },
+      ]);
+    }
+    const activeCount = await db.userSkill.count({
+      where: { userId, isEnabled: true, status: "active", id: { not: id } },
+    });
+    if (activeCount >= MAX_ACTIVE_SKILLS) {
+      throw new SkillInputError([
+        { path: "name", message: `Skill limit reached (${MAX_ACTIVE_SKILLS} active)` },
+      ]);
+    }
+  }
   return db.userSkill.update({ where: { id }, data: { isEnabled } });
 }

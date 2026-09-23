@@ -1,7 +1,7 @@
 import { createMiddleware } from "@anvia/core/tool";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve as resolvePath } from "node:path";
+import { resolve as resolvePath, sep } from "node:path";
 import { McpClient } from "@anvia/mcp";
 import { loadSkills, skill } from "@anvia/core/skills";
 import { prisma } from "../../utils/prisma.js";
@@ -300,7 +300,11 @@ export function slugForMcpPrefix(name: string, fallback: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  return `${(slug || fallback).slice(0, 32)}_`;
+  // Suffix an id fragment: distinct servers named "My Docs"/"my_docs" must
+  // not share a prefix, or Agent construction throws on duplicate tools.
+  const base = (slug || fallback).slice(0, 24);
+  const fragment = fallback.slice(-6).replace(/[^a-z0-9]/gi, "") || "srv";
+  return `${base}_${fragment}_`;
 }
 
 /**
@@ -323,6 +327,28 @@ export function selectReviewedTools<T extends { name: string }>(
   return liveTools.filter((tool) => allowed.has(unprefixToolName(tool.name, prefix)));
 }
 
+/** Fail-closed guard: a run needs frozen reviewed definitions, never an empty review. */
+export function assertMcpEntryReviewed(entry: {
+  name: string;
+  toolDefinitions: readonly unknown[];
+}): void {
+  if (entry.toolDefinitions.length === 0) {
+    throw new Error(`MCP server "${entry.name}" has no reviewed tools`);
+  }
+}
+
+/**
+ * Order tool definitions by name so frozen (test-time order) and live
+ * (server return order) surfaces compare equal in parity. Returns a copy.
+ */
+export function sortToolDefinitionsByName<T extends { name: string }>(
+  definitions: readonly T[],
+): T[] {
+  return [...definitions].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
 function timeoutError(message: string): Promise<never> {
   return new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(message)), USER_MCP_CONNECT_TIMEOUT_MS),
@@ -335,9 +361,13 @@ export async function materializeRecipeSkills(
 ): Promise<void> {
   // Directory MUST equal the frontmatter name: the native loader rejects
   // anything else ("name must match the skill directory name"). Names are
-  // validated slugs (lowercase-hyphen), so they are path-safe.
+  // validated slugs (lowercase-hyphen), so they are path-safe — and the
+  // containment assert below pins that even for hand-built recipes.
   for (const entry of skills) {
     const dir = resolvePath(rootDir, entry.name);
+    if (dir !== rootDir && !dir.startsWith(rootDir + sep)) {
+      throw new Error(`skill directory escapes outside the skill root: ${entry.name}`);
+    }
     await mkdir(dir, { recursive: true });
     await writeFile(resolvePath(dir, "SKILL.md"), `${entry.bodyMd.trim()}\n`, "utf8");
   }
@@ -964,8 +994,9 @@ export async function resolveChatAgentRecipe(
   // Frozen user-MCP definitions ride the same parity point as Context7 (see
   // orderReconstructedToolDefinitions): the worker intersects them with the
   // live server tools by name and fails closed on an empty intersection.
-  const userMcpToolDefinitions = userEnhancements.userMcp.flatMap(
-    (server) => server.toolDefinitions,
+  // Sorted by name so server return order never breaks parity.
+  const userMcpToolDefinitions = sortToolDefinitionsByName(
+    userEnhancements.userMcp.flatMap((server) => server.toolDefinitions),
   ) as unknown as ToolDefinition[];
   const contextBlocksForStaticSurface = [
     ...contextDescriptors,
@@ -1580,6 +1611,7 @@ export async function reconstructChatRunInput(input: {
       userSkillSet = await loadSkills(skill.local(userSkillDir));
     }
     for (const entry of recipe.userMcp) {
+      assertMcpEntryReviewed(entry);
       const stored = await prisma.userMcpServer.findFirst({
         where: { id: entry.id, userId },
         select: { authType: true, credentialsRef: true, isEnabled: true },
@@ -1692,7 +1724,7 @@ export async function reconstructChatRunInput(input: {
   const actualToolDefinitions = orderReconstructedToolDefinitions({
     toolDefinitions: reconstructedToolDefinitions,
     context7ToolDefinitions,
-    userMcpToolDefinitions: liveUserMcpToolDefinitions,
+    userMcpToolDefinitions: sortToolDefinitionsByName(liveUserMcpToolDefinitions),
   });
   assertNativeStaticContextMatches({
     expected: recipe.staticContext as any,

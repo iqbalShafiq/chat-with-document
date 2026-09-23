@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   SkillInputError,
   createSkill,
+  setSkillEnabled,
   updateSkill,
   validateSkillInput,
 } from "./service.js";
@@ -48,11 +49,20 @@ describe("validateSkillInput", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.issues.some((issue) => issue.path === "bodyMd")).toBe(true);
+      expect(result.issues.some((issue) => issue.message.includes('"other"'))).toBe(true);
     }
   });
 
   it("accepts a well-formed skill", () => {
     expect(validateSkillInput(VALID)).toEqual({ ok: true, value: VALID });
+  });
+
+  it("accepts quoted frontmatter values", () => {
+    const result = validateSkillInput({
+      ...VALID,
+      bodyMd: '---\nname: "brief"\ndescription: "Write a morning brief"\n---\nbody',
+    });
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -86,5 +96,32 @@ describe("updateSkill", () => {
       version: number;
     };
     expect(updated.version).toBe(3);
+  });
+});
+
+describe("setSkillEnabled", () => {
+  it("refuses to enable past the active cap", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValueOnce({ id: "s1", status: "active" });
+    db.userSkill.count.mockResolvedValueOnce(20);
+    await expect(setSkillEnabled(db, "u1", "s1", true)).rejects.toThrow(
+      "Skill limit reached",
+    );
+    expect(db.userSkill.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses to enable an invalid skill", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValueOnce({ id: "s1", status: "invalid" });
+    await expect(setSkillEnabled(db, "u1", "s1", true)).rejects.toThrow(
+      "Fix the skill before enabling",
+    );
+  });
+
+  it("disabling never hits the cap", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValueOnce({ id: "s1", status: "active" });
+    await setSkillEnabled(db, "u1", "s1", false);
+    expect(db.userSkill.update).toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mcpServersRouter } from "./router.js";
+import { createMcpServer } from "./service.js";
 
 vi.mock("../auth/middleware.js", () => ({
   requireUser: async (c: { set: (k: string, v: unknown) => void }, next: () => Promise<void>) => {
@@ -13,6 +14,7 @@ vi.mock("./service.js", async (importOriginal) => {
   return {
     ...original,
     listMcpServers: vi.fn(async () => []),
+    createMcpServer: vi.fn(async () => ({ id: "m1" })),
   };
 });
 
@@ -44,5 +46,19 @@ describe("mcpServersRouter", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { ok: boolean; error?: string };
     expect(body).toEqual({ ok: false, error: expect.stringContaining("https") });
+  });
+
+  it("maps duplicate names to a 400 field error, not a 500", async () => {
+    (createMcpServer as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint"), { code: "P2002" }),
+    );
+    const response = await mcpServersRouter.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "docs", url: "https://mcp.example.com/mcp", authType: "none" }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { issues: { path: string }[] };
+    expect(body.issues[0]?.path).toBe("name");
   });
 });

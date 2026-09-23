@@ -41,6 +41,22 @@ function notFound() {
   return { error: "MCP server not found", code: "MCP_SERVER_NOT_FOUND" };
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
+}
+
+function duplicateName() {
+  return {
+    error: "An MCP server with this name already exists",
+    issues: [{ path: "name", message: "An MCP server with this name already exists" }],
+  };
+}
+
 export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/", async (c) => {
@@ -77,6 +93,9 @@ export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
     } catch (error) {
       if (error instanceof McpInputError) {
         return c.json({ error: error.message, issues: error.issues }, 400);
+      }
+      if (isUniqueViolation(error)) {
+        return c.json(duplicateName(), 400);
       }
       throw error;
     }
@@ -141,6 +160,9 @@ export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
           status === 404 ? notFound() : { error: error.message, issues: error.issues },
           status,
         );
+      }
+      if (isUniqueViolation(error)) {
+        return c.json(duplicateName(), 400);
       }
       throw error;
     }

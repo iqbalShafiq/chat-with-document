@@ -130,6 +130,12 @@ describe("ChatAgentRecipe", () => {
     expect(first).toEqual(fixture);
   });
 
+  it("rejects a stale recipe version with a readable error", () => {
+    expect(() => parseChatAgentRecipe({ ...fixture, version: 2 })).toThrow(
+      "no longer supported",
+    );
+  });
+
   it("rejects invalid identity, version, agent id, unknown fields, and secrets", () => {
     expect(() => parseChatAgentRecipe({ ...fixture, version: 4 })).toThrow();
     expect(() => parseChatAgentRecipe({ ...fixture, agentId: "my-agent" })).toThrow();
