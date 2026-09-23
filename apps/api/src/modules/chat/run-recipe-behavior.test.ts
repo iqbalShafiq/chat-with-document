@@ -15,6 +15,8 @@ import {
   PROFILE_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
 } from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
@@ -107,6 +109,8 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...(capabilities.imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
     ...(!capabilities.modelAcceptsImage
       ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
       : []),

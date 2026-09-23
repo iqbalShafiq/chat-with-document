@@ -5,6 +5,21 @@ import { resolve as resolvePath, sep } from "node:path";
 import { McpClient } from "@anvia/mcp";
 import { loadSkills, skill } from "@anvia/core/skills";
 import { getMcpCredentials, getMcpHeaders } from "../mcp-servers/service.js";
+import {
+  createSkill,
+  deleteSkill,
+  listSkills,
+  setSkillEnabled,
+  updateSkill,
+} from "../skills/service.js";
+import {
+  createMcpServer,
+  deleteMcpServer,
+  listMcpServers,
+  setMcpServerEnabled,
+  updateMcpServer,
+} from "../mcp-servers/service.js";
+import { testMcpConnection } from "../mcp-servers/test-connection.js";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -30,6 +45,8 @@ import {
   createChartTools,
   createDerivedDatasetTools,
   createTavilyClient,
+  createUserMcpTools,
+  createUserSkillsTools,
   createWebSearchTools,
   deepResearchLimits,
   DATASET_INSTRUCTION,
@@ -48,6 +65,8 @@ import {
   TABULAR_TOOL_DEFINITIONS,
   CHART_TOOL_DEFINITIONS,
   DERIVED_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
@@ -1044,6 +1063,8 @@ export async function resolveChatAgentRecipe(
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
     ...userMcpToolDefinitions,
     ...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : []),
@@ -1579,6 +1600,77 @@ export async function reconstructChatRunInput(input: {
         }),
       readActiveSite: () => readActiveSiteTitle(sessionId),
       enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),
+    }),
+  );
+  // User-owned skills/servers are managed through the same v1 services as
+  // the routers (ownership + validation inside); secrets never cross.
+  // Position mirrors the frozen surface: clarification, site build, then
+  // these two (see the toolDefinitions array in resolveChatAgentRecipe).
+  tools.push(
+    ...createUserSkillsTools({
+      userId,
+      list: async () => {
+        const rows = (await listSkills(prisma, userId)) as {
+          id: string;
+          name: string;
+          description: string;
+          isEnabled: boolean;
+          status: string;
+        }[];
+        return rows.map(({ id, name, description, isEnabled, status }) => ({
+          id,
+          name,
+          description,
+          isEnabled,
+          status,
+        }));
+      },
+      create: async (input) =>
+        (await createSkill(prisma, userId, input)) as { id: string; name: string },
+      update: async (id, input) =>
+        (await updateSkill(prisma, userId, id, input)) as { id: string },
+      remove: async (id) => {
+        await deleteSkill(prisma, userId, id);
+      },
+      setEnabled: async (id, isEnabled) => {
+        await setSkillEnabled(prisma, userId, id, isEnabled);
+      },
+    }),
+    ...createUserMcpTools({
+      userId,
+      list: async () => {
+        const rows = (await listMcpServers(prisma, userId)) as unknown as {
+          id: string;
+          name: string;
+          url: string;
+          authType: string;
+          isEnabled: boolean;
+          status: string;
+          allowedToolsJson?: unknown;
+        }[];
+        return rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          url: row.url,
+          authType: row.authType,
+          isEnabled: row.isEnabled,
+          status: row.status,
+          allowedTools: Array.isArray(row.allowedToolsJson)
+            ? (row.allowedToolsJson as string[])
+            : [],
+        }));
+      },
+      create: async (input) =>
+        (await createMcpServer(prisma, userId, input)) as { id: string; name: string },
+      update: async (id, input) =>
+        (await updateMcpServer(prisma, userId, id, input)) as { id: string },
+      remove: async (id) => {
+        await deleteMcpServer(prisma, userId, id);
+      },
+      setEnabled: async (id, isEnabled) => {
+        await setMcpServerEnabled(prisma, userId, id, isEnabled);
+      },
+      test: async (input) => testMcpConnection(input),
     }),
   );
   const waitRegistry = runtime?.waitRegistry ?? new InFlightToolRegistry();

@@ -6,6 +6,8 @@ import {
   DERIVED_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
 } from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
 import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
@@ -120,6 +122,8 @@ function boundRecipe() {
     ...DERIVED_TOOL_DEFINITIONS,
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
   ];
   const staticContext = createNativeStaticContext({
     baseInstructions: BASE_INSTRUCTIONS,

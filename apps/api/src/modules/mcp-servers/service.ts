@@ -279,10 +279,13 @@ export async function listMcpServers(db: McpDb, userId: string) {
     where: { userId },
     orderBy: { updatedAt: "desc" },
   })) as Record<string, unknown>[];
+  // allowedToolsJson holds tool NAMES (public); credentialsRef/headersRef
+  // hold secrets and never leave the server.
   return rows.map((row) => {
     const { credentialsRef: _c, headersRef: _h, ...rest } = row;
     return {
       ...rest,
+      allowedToolsJson: Array.isArray(row.allowedToolsJson) ? row.allowedToolsJson : [],
       hasCredentials:
         typeof _c === "string" && (_c as string).length > 0,
       hasHeaders: typeof _h === "string" && (_h as string).length > 0,
