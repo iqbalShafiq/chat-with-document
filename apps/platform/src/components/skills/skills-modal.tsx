@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
+import { ManagementRow } from "#/components/ui/management-row";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import type { SkillInput, UserSkill } from "#/lib/api";
 import { issuesFromError, issuesToFieldErrors, type FieldErrors } from "./skill-issues";
@@ -105,51 +106,23 @@ export function SkillsModal({
             </div>
             <ul className="flex flex-col gap-2">
               {(skills.data ?? []).map((skill) => (
-                <li
+                <ManagementRow
                   key={skill.id}
-                  className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-text">{skill.name}</p>
-                    <p className="truncate text-[11px] text-text-faint">
-                      {skill.status === "active" ? skill.description : "Invalid — edit to fix"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={skill.isEnabled}
-                    aria-label={`Enable ${skill.name}`}
-                    title={skill.isEnabled ? "Enabled" : "Disabled"}
-                    onClick={() => {
-                      void skills.toggle(skill.id, !skill.isEnabled).then(onChanged);
-                    }}
-                    className={`relative h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring ${skill.isEnabled ? "bg-accent/80" : "bg-white/12"}`}
-                  >
-                    <span
-                      aria-hidden
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ${skill.isEnabled ? "translate-x-3.5" : "translate-x-0.5"}`}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Edit ${skill.name}`}
-                    title="Edit"
-                    onClick={() => setEditingId(skill.id)}
-                    className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/[0.06] hover:text-text active:scale-[0.96]"
-                  >
-                    <Pencil className="size-4" strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${skill.name}`}
-                    title="Delete"
-                    onClick={() => setDeleteId(skill.id)}
-                    className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-danger-soft hover:text-danger active:scale-[0.96]"
-                  >
-                    <Trash2 className="size-4" strokeWidth={1.75} />
-                  </button>
-                </li>
+                  title={skill.name}
+                  subtitle={
+                    skill.status === "active" ? skill.description : "Invalid — edit to fix"
+                  }
+                  enabled={skill.isEnabled}
+                  onToggle={() => {
+                    void skills.toggle(skill.id, !skill.isEnabled).then(onChanged);
+                  }}
+                  toggleLabel={`Enable ${skill.name}`}
+                  toggleTitle={skill.isEnabled ? "Enabled" : "Disabled"}
+                  onEdit={() => setEditingId(skill.id)}
+                  editLabel={`Edit ${skill.name}`}
+                  onDelete={() => setDeleteId(skill.id)}
+                  deleteLabel={`Delete ${skill.name}`}
+                />
               ))}
             </ul>
             {skills.error ? (

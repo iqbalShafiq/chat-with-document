@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import { FormTextField } from "#/components/ui/form-field";
+import { ManagementRow } from "#/components/ui/management-row";
 import { Select } from "#/components/ui/select";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
 import type { McpServerInput, McpTestResult, McpTestTool, UserMcpServer } from "#/lib/api";
@@ -99,57 +100,31 @@ export function McpModal({
             </div>
             <ul className="flex flex-col gap-2">
               {(servers.data ?? []).map((server) => (
-                <li
+                <ManagementRow
                   key={server.id}
-                  className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5"
-                >
-                  <span
-                    aria-hidden
-                    className={`size-2 shrink-0 rounded-full ${server.status === "ok" ? "bg-emerald-400/80" : server.status === "error" ? "bg-danger" : "bg-white/30"}`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-text">{server.name}</p>
-                    <p className="truncate text-[11px] text-text-faint">
-                      {server.status === "error" && server.lastError
-                        ? server.lastError
-                        : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={server.isEnabled}
-                    aria-label={`Enable ${server.name}`}
-                    title={server.isEnabled ? "Enabled" : "Disabled"}
-                    onClick={() => {
-                      void servers.toggle(server.id, !server.isEnabled).then(onChanged);
-                    }}
-                    className={`relative h-4 w-7 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring ${server.isEnabled ? "bg-accent/80" : "bg-white/12"}`}
-                  >
+                  title={server.name}
+                  subtitle={
+                    server.status === "error" && server.lastError
+                      ? server.lastError
+                      : `${server.allowedTools.length} tools · ${server.isEnabled ? "enabled" : "disabled"}`
+                  }
+                  leading={
                     <span
                       aria-hidden
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ${server.isEnabled ? "translate-x-3.5" : "translate-x-0.5"}`}
+                      className={`size-2 shrink-0 rounded-full ${server.status === "ok" ? "bg-emerald-400/80" : server.status === "error" ? "bg-danger" : "bg-white/30"}`}
                     />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Edit ${server.name}`}
-                    title="Edit"
-                    onClick={() => setEditingId(server.id)}
-                    className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/[0.06] hover:text-text active:scale-[0.96]"
-                  >
-                    <Pencil className="size-4" strokeWidth={1.75} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${server.name}`}
-                    title="Delete"
-                    onClick={() => setDeleteId(server.id)}
-                    className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-danger-soft hover:text-danger active:scale-[0.96]"
-                  >
-                    <Trash2 className="size-4" strokeWidth={1.75} />
-                  </button>
-                </li>
+                  }
+                  enabled={server.isEnabled}
+                  onToggle={() => {
+                    void servers.toggle(server.id, !server.isEnabled).then(onChanged);
+                  }}
+                  toggleLabel={`Enable ${server.name}`}
+                  toggleTitle={server.isEnabled ? "Enabled" : "Disabled"}
+                  onEdit={() => setEditingId(server.id)}
+                  editLabel={`Edit ${server.name}`}
+                  onDelete={() => setDeleteId(server.id)}
+                  deleteLabel={`Delete ${server.name}`}
+                />
               ))}
             </ul>
             {servers.error ? (
