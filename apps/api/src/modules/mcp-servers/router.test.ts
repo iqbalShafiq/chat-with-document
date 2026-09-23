@@ -34,4 +34,15 @@ describe("mcpServersRouter", () => {
     expect(body.ok).toBe(false);
     expect(body.error).toContain("https");
   });
+
+  it("tolerates extra keys in the test body", async () => {
+    const response = await mcpServersRouter.request("/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "docs", url: "http://mcp.example.com/mcp", authType: "none" }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { ok: boolean; error?: string };
+    expect(body).toEqual({ ok: false, error: expect.stringContaining("https") });
+  });
 });

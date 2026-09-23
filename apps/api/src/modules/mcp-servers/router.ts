@@ -81,8 +81,14 @@ export const mcpServersRouter = new Hono<{ Variables: AuthVariables }>()
     }
   })
   .post("/test", async (c) => {
-    const parsed = mcpBodySchema
-      .pick({ url: true, authType: true, token: true })
+    // Dedicated non-strict schema: callers may include editor fields
+    // (e.g. name) that the test itself does not need.
+    const parsed = z
+      .object({
+        url: z.string().max(520),
+        authType: z.enum(["none", "bearer"]),
+        token: z.string().max(2048).optional(),
+      })
       .safeParse(await c.req.json());
     if (!parsed.success) {
       return c.json({ ok: false, error: "Invalid test body" });
