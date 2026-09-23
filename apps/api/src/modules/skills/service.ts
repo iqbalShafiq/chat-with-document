@@ -179,6 +179,11 @@ export async function setSkillEnabled(
   } | null;
   if (!existing) throw new SkillInputError([{ path: "name", message: "Skill not found" }]);
   if (isEnabled) {
+    if (existing.status === "draft") {
+      throw new SkillInputError([
+        { path: "name", message: "Review the skill in the Skills modal before enabling it" },
+      ]);
+    }
     if (existing.status !== "active") {
       throw new SkillInputError([
         { path: "name", message: "Fix the skill before enabling it" },

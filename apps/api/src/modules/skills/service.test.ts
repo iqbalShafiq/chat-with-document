@@ -124,4 +124,20 @@ describe("setSkillEnabled", () => {
     await setSkillEnabled(db, "u1", "s1", false);
     expect(db.userSkill.update).toHaveBeenCalled();
   });
+
+  it("refuses to enable a draft skill", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValueOnce({ id: "s1", status: "draft" });
+    await expect(setSkillEnabled(db, "u1", "s1", true)).rejects.toThrow(
+      "Review the skill",
+    );
+    expect(db.userSkill.update).not.toHaveBeenCalled();
+  });
+
+  it("still allows disabling a draft", async () => {
+    const { db } = setup();
+    db.userSkill.findFirst.mockResolvedValueOnce({ id: "s1", status: "draft" });
+    await setSkillEnabled(db, "u1", "s1", false);
+    expect(db.userSkill.update).toHaveBeenCalled();
+  });
 });
