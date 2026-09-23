@@ -6,7 +6,8 @@ const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = resolve(E2E_DIR, ".auth");
 const STORAGE_STATE_PATH = resolve(AUTH_DIR, "real-llm-user.json");
 
-const API_ORIGIN = "http://localhost:3001";
+const API_ORIGIN =
+  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:3001";
 const HEALTH_URL = `${API_ORIGIN}/api/auth/get-session`;
 const SIGN_UP_URL = `${API_ORIGIN}/api/auth/sign-up/email`;
 const MODELS_URL = `${API_ORIGIN}/api/models`;

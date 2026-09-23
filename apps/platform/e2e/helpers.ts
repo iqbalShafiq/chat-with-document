@@ -5,7 +5,8 @@
 import { expect, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
-export const API_ORIGIN = "http://localhost:3001";
+export const API_ORIGIN =
+  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:3001";
 export const REAL_LLM_MODEL = "meta/muse-spark-1.3-contributor";
 export const REAL_LLM_REASONING_EFFORT = "high";
 

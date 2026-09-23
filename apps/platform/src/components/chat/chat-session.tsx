@@ -474,9 +474,13 @@ export function ChatSession({
 
   // First catalog load decides the per-chat default: stored selection when
   // the user chose before, every enabled item otherwise. Later catalog
-  // refreshes only drop ids that no longer exist.
+  // refreshes drop ids that no longer exist and adopt newly enabled ids
+  // (a fresh skill/server starts on, matching its global default).
+  const prevEnabledSkillsRef = useRef<string[]>([]);
+  const prevEnabledMcpRef = useRef<string[]>([]);
   useEffect(() => {
     if (!userSkillsCatalog.data || activeSkillIds !== null) return;
+    prevEnabledSkillsRef.current = enabledSkillIds;
     setActiveSkillIds(
       hasStoredSelection(SKILLS_SELECTION_KEY)
         ? intersectWithCatalog(loadIdSelection(SKILLS_SELECTION_KEY), enabledSkillIds)
@@ -485,6 +489,7 @@ export function ChatSession({
   }, [userSkillsCatalog.data, activeSkillIds, enabledSkillIds]);
   useEffect(() => {
     if (!userMcpCatalog.data || activeMcpIds !== null) return;
+    prevEnabledMcpRef.current = enabledMcpIds;
     setActiveMcpIds(
       hasStoredSelection(MCP_SELECTION_KEY)
         ? intersectWithCatalog(loadIdSelection(MCP_SELECTION_KEY), enabledMcpIds)
@@ -493,13 +498,29 @@ export function ChatSession({
   }, [userMcpCatalog.data, activeMcpIds, enabledMcpIds]);
   useEffect(() => {
     if (activeSkillIds === null) return;
-    const next = intersectWithCatalog(activeSkillIds, enabledSkillIds);
-    if (next.length !== activeSkillIds.length) setActiveSkillIds(next);
+    const prev = prevEnabledSkillsRef.current;
+    prevEnabledSkillsRef.current = enabledSkillIds;
+    const kept = activeSkillIds.filter((id) => enabledSkillIds.includes(id));
+    const added = enabledSkillIds.filter(
+      (id) => !prev.includes(id) && !kept.includes(id),
+    );
+    const next = [...kept, ...added];
+    if (next.length !== activeSkillIds.length || next.some((id, index) => id !== activeSkillIds[index])) {
+      setActiveSkillIds(next);
+    }
   }, [activeSkillIds, enabledSkillIds]);
   useEffect(() => {
     if (activeMcpIds === null) return;
-    const next = intersectWithCatalog(activeMcpIds, enabledMcpIds);
-    if (next.length !== activeMcpIds.length) setActiveMcpIds(next);
+    const prev = prevEnabledMcpRef.current;
+    prevEnabledMcpRef.current = enabledMcpIds;
+    const kept = activeMcpIds.filter((id) => enabledMcpIds.includes(id));
+    const added = enabledMcpIds.filter(
+      (id) => !prev.includes(id) && !kept.includes(id),
+    );
+    const next = [...kept, ...added];
+    if (next.length !== activeMcpIds.length || next.some((id, index) => id !== activeMcpIds[index])) {
+      setActiveMcpIds(next);
+    }
   }, [activeMcpIds, enabledMcpIds]);
 
   const skillsSummary = useMemo(
