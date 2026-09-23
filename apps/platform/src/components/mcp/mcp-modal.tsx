@@ -10,6 +10,7 @@ import { Select } from "#/components/ui/select";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
 import type { McpServerInput, McpTestResult, McpTestTool, UserMcpServer } from "#/lib/api";
 import { issuesFromError, issuesToFieldErrors, type FieldErrors } from "#/components/skills/skill-issues";
+import { shouldReturnToList } from "#/components/skills/modal-navigation";
 
 type ReviewState = {
   tools: McpTestTool[];
@@ -40,7 +41,13 @@ export function McpModal({
   return (
     <DialogShell
       open={open}
-      onClose={onClose}
+      onClose={() => {
+        if (shouldReturnToList(editingId)) {
+          setEditingId(undefined);
+        } else {
+          onClose();
+        }
+      }}
       title="MCP servers"
       description="Connect external tools over Streamable HTTP. Test before saving."
       size="lg"

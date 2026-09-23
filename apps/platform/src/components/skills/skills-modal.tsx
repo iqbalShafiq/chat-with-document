@@ -9,6 +9,7 @@ import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import type { SkillInput, UserSkill } from "#/lib/api";
 import { issuesFromError, issuesToFieldErrors, type FieldErrors } from "./skill-issues";
+import { shouldReturnToList } from "./modal-navigation";
 
 const SKILL_TEMPLATE = `---
 name: my-skill
@@ -62,7 +63,13 @@ export function SkillsModal({
   return (
     <DialogShell
       open={open}
-      onClose={onClose}
+      onClose={() => {
+        if (shouldReturnToList(editingId)) {
+          closeEditor();
+        } else {
+          onClose();
+        }
+      }}
       title="Skills"
       description="Reusable procedures your agent loads when the task fits."
       size="lg"
