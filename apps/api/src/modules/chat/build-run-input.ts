@@ -303,6 +303,26 @@ export function slugForMcpPrefix(name: string, fallback: string): string {
   return `${(slug || fallback).slice(0, 32)}_`;
 }
 
+/**
+ * Live MCP tool names carry the per-server prefix (collision guard); the
+ * frozen allow-list stores bare names. Strip one known prefix for comparison
+ * and parity — never guess at unknown prefixes.
+ */
+export function unprefixToolName(name: string, prefix: string): string {
+  if (prefix && name.startsWith(prefix)) return name.slice(prefix.length);
+  return name;
+}
+
+/** Intersect live (possibly prefixed) tools with the frozen allow-list. */
+export function selectReviewedTools<T extends { name: string }>(
+  liveTools: readonly T[],
+  allowed: ReadonlySet<string>,
+  prefix: string,
+): T[] {
+  if (allowed.size === 0) return [...liveTools];
+  return liveTools.filter((tool) => allowed.has(unprefixToolName(tool.name, prefix)));
+}
+
 function timeoutError(message: string): Promise<never> {
   return new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(message)), USER_MCP_CONNECT_TIMEOUT_MS),
@@ -1567,9 +1587,10 @@ export async function reconstructChatRunInput(input: {
       if (!stored || !stored.isEnabled) {
         throw new Error(`MCP server "${entry.name}" is no longer available`);
       }
+      const prefix = slugForMcpPrefix(entry.name, entry.id);
       const client = new McpClient({
         name: `user-mcp-${entry.id}`,
-        tools: { prefix: slugForMcpPrefix(entry.name, entry.id) },
+        tools: { prefix },
         transport: {
           type: "streamableHttp",
           url: entry.url,
@@ -1585,17 +1606,20 @@ export async function reconstructChatRunInput(input: {
           client.connect(),
           timeoutError(`MCP server "${entry.name}" did not answer within 15s`),
         ]);
-        const allowed = new Set(entry.allowedTools);
-        const reviewed = server.tools.filter(
-          (tool) => allowed.size === 0 || allowed.has(tool.name),
-        );
+        const reviewed = selectReviewedTools(server.tools, new Set(entry.allowedTools), prefix);
         if (reviewed.length === 0) {
           throw new Error(`MCP server "${entry.name}" offers none of the reviewed tools`);
         }
         userMcpClients.push(client);
         userMcpServers.push({ name: server.name, tools: reviewed });
         for (const tool of reviewed) {
-          liveUserMcpToolDefinitions.push(await tool.definition(""));
+          const definition = await tool.definition("");
+          // Parity compares bare names (see orderReconstructedToolDefinitions);
+          // the registered runtime tools keep their prefixed names.
+          liveUserMcpToolDefinitions.push({
+            ...definition,
+            name: unprefixToolName(tool.name, prefix),
+          });
         }
       } catch (error) {
         await client.close().catch(() => undefined);
