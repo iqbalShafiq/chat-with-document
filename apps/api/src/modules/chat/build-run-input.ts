@@ -1,4 +1,9 @@
 import { createMiddleware } from "@anvia/core/tool";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve as resolvePath } from "node:path";
+import { McpClient } from "@anvia/mcp";
+import { loadSkills, skill } from "@anvia/core/skills";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -284,7 +289,36 @@ export type ChatRunInput = {
   activeContextSnippet: ChatAgentSnippetDescriptor | null;
   /** Per-run in-flight tool jobs (wait-budget). */
   waitRegistry: InFlightToolRegistry;
+  /** Close per-run user MCP clients and remove materialized skill dirs. */
+  cleanup?: () => Promise<void>;
 };
+
+const USER_MCP_CONNECT_TIMEOUT_MS = 15_000;
+
+function slugForMcpPrefix(name: string, fallback: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `${(slug || fallback).slice(0, 32)}_`;
+}
+
+function timeoutError(message: string): Promise<never> {
+  return new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(message)), USER_MCP_CONNECT_TIMEOUT_MS),
+  );
+}
+
+async function materializeRecipeSkills(
+  skills: { id: string; bodyMd: string }[],
+  rootDir: string,
+): Promise<void> {
+  for (const entry of skills) {
+    const dir = resolvePath(rootDir, entry.id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(resolvePath(dir, "SKILL.md"), `${entry.bodyMd.trim()}\n`, "utf8");
+  }
+}
 
 /**
  * Client message id of the run's prompt (used for fact provenance). Falls back
@@ -579,13 +613,15 @@ type RecipeDocumentResolution = {
 
 /**
  * Keep the JSON tool surface in the same order as the recipe resolver:
- * application tools, Context7 MCP tools, then the optional view_image helper.
- * Anvia receives Context7 through mcpServers at runtime, but the serialized
- * static surface still needs deterministic parity across queue reconstruction.
+ * application tools, Context7 MCP tools, user MCP tools, then the optional
+ * view_image helper. Anvia receives MCP tools through mcpServers at runtime,
+ * but the serialized static surface still needs deterministic parity across
+ * queue reconstruction.
  */
 export function orderReconstructedToolDefinitions(input: {
   toolDefinitions: readonly ToolDefinition[];
   context7ToolDefinitions: readonly ToolDefinition[];
+  userMcpToolDefinitions?: readonly ToolDefinition[];
 }): ToolDefinition[] {
   const viewImage = input.toolDefinitions.filter(
     (definition) => definition.name === "view_image",
@@ -596,6 +632,7 @@ export function orderReconstructedToolDefinitions(input: {
   return [
     ...applicationTools,
     ...input.context7ToolDefinitions,
+    ...(input.userMcpToolDefinitions ?? []),
     ...viewImage,
   ];
 }
@@ -725,6 +762,19 @@ export async function resolveChatAgentRecipe(
   // This is an authenticated capability snapshot. Read it exactly once so a
   // changing env/config source cannot produce a recipe with mixed semantics.
   const context7Requested = readContext7Requested();
+  // User enhancements resolve alongside capabilities so the frozen static
+  // surface (context + tool definitions) already contains them below.
+  // resolverPrisma is narrowed to the delegates each resolver needs; the
+  // real client carries userSkill/userMcpServer, test doubles inject the
+  // resolveUserEnhancements stub instead (see behavior tests).
+  const userEnhancements = await readUserEnhancements(
+    resolverPrisma as unknown as UserEnhancementDb,
+    input.userId,
+    {
+      skillIds: input.skillIds ?? [],
+      mcpServerIds: input.mcpServerIds ?? [],
+    },
+  );
 
   const normalizedPrompt = input.promptMessage
     ? parseMessage(input.promptMessage)
@@ -808,6 +858,20 @@ export async function resolveChatAgentRecipe(
     }
   }
 
+  // Active user-skill catalog (names + descriptions only; bodies stay behind
+  // the generated skill tools). Keeps the token estimate honest and the
+  // catalog visible in one frozen place.
+  if (userEnhancements.userSkills.length > 0) {
+    contextDescriptors.push({
+      id: "user_skill_catalog",
+      text:
+        "Active user skills\nThe user enabled these skills for this chat. Follow the matching skill's procedure when the task fits:\n" +
+        userEnhancements.userSkills
+          .map((entry) => `- ${entry.name}: ${entry.description}`)
+          .join("\n"),
+    });
+  }
+
   const tavilyConfig = readWebSearchConfig();
   const webSearchAvailable = tavilyConfig !== null;
   if (webSearchAvailable) {
@@ -874,6 +938,12 @@ export async function resolveChatAgentRecipe(
   if (context7Requested && context7ToolDefinitions.length === 0) {
     throw new Error("context7 static tool definitions are unavailable");
   }
+  // Frozen user-MCP definitions ride the same parity point as Context7 (see
+  // orderReconstructedToolDefinitions): the worker intersects them with the
+  // live server tools by name and fails closed on an empty intersection.
+  const userMcpToolDefinitions = userEnhancements.userMcp.flatMap(
+    (server) => server.toolDefinitions,
+  ) as unknown as ToolDefinition[];
   const contextBlocksForStaticSurface = [
     ...contextDescriptors,
     ...(activeImages.length > 0
@@ -920,6 +990,7 @@ export async function resolveChatAgentRecipe(
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
+    ...userMcpToolDefinitions,
     ...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : []),
   ];
   const modelBudget = resolveModelTokenBudget({
@@ -954,17 +1025,6 @@ export async function resolveChatAgentRecipe(
   }
 
   const limits = readDeepResearchLimits();
-  const userEnhancements = await readUserEnhancements(
-    // resolverPrisma is narrowed to the delegates each resolver needs; the
-    // real client carries userSkill/userMcpServer, test doubles inject the
-    // resolveUserEnhancements stub instead (see behavior tests).
-    resolverPrisma as unknown as UserEnhancementDb,
-    input.userId,
-    {
-      skillIds: input.skillIds ?? [],
-      mcpServerIds: input.mcpServerIds ?? [],
-    },
-  );
   try {
     const recipe = createChatAgentRecipe({
     version: CHAT_AGENT_RECIPE_VERSION,
@@ -1471,6 +1531,86 @@ export async function reconstructChatRunInput(input: {
   const waitProgress = runtime?.onToolWaitProgress;
   const context7Available = recipe.capabilities.context7Requested;
 
+  // User skills: re-materialize the frozen snapshots (the worker hot path
+  // reads no skill rows beyond credentials) and load them natively.
+  let userSkillSet: Awaited<ReturnType<typeof loadSkills>> | undefined;
+  const userSkillDir =
+    recipe.userSkills.length > 0
+      ? resolvePath(tmpdir(), `anreal-skills-${recipe.trace.traceId}`)
+      : "";
+  // User MCP: per-run connections under the frozen allow-list. Credentials
+  // never cross the queue; the worker re-reads them server-side by id.
+  const userMcpClients: McpClient[] = [];
+  const userMcpServers: McpServer[] = [];
+  const liveUserMcpToolDefinitions: ToolDefinition[] = [];
+  const closeUserEnhancements = async (): Promise<void> => {
+    await Promise.allSettled(userMcpClients.map((client) => client.close()));
+    if (userSkillDir) {
+      await rm(userSkillDir, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  };
+  try {
+    if (recipe.userSkills.length > 0) {
+      await materializeRecipeSkills(recipe.userSkills, userSkillDir);
+      userSkillSet = await loadSkills(skill.local(userSkillDir));
+    }
+    for (const entry of recipe.userMcp) {
+      const stored = await prisma.userMcpServer.findFirst({
+        where: { id: entry.id, userId },
+        select: { authType: true, credentialsRef: true, isEnabled: true },
+      });
+      if (!stored || !stored.isEnabled) {
+        throw new Error(`MCP server "${entry.name}" is no longer available`);
+      }
+      const client = new McpClient({
+        name: `user-mcp-${entry.id}`,
+        tools: { prefix: slugForMcpPrefix(entry.name, entry.id) },
+        transport: {
+          type: "streamableHttp",
+          url: entry.url,
+          ssrfProtection: "strict",
+          ...(stored.authType === "bearer" && stored.credentialsRef
+            ? { headers: { authorization: `Bearer ${stored.credentialsRef}` } }
+            : {}),
+        },
+        versionNegotiation: { mode: "auto" },
+      });
+      try {
+        const server = await Promise.race([
+          client.connect(),
+          timeoutError(`MCP server "${entry.name}" did not answer within 15s`),
+        ]);
+        const allowed = new Set(entry.allowedTools);
+        const reviewed = server.tools.filter(
+          (tool) => allowed.size === 0 || allowed.has(tool.name),
+        );
+        if (reviewed.length === 0) {
+          throw new Error(`MCP server "${entry.name}" offers none of the reviewed tools`);
+        }
+        userMcpClients.push(client);
+        userMcpServers.push({ name: server.name, tools: reviewed });
+        for (const tool of reviewed) {
+          liveUserMcpToolDefinitions.push(await tool.definition(""));
+        }
+      } catch (error) {
+        await client.close().catch(() => undefined);
+        throw error instanceof Error
+          ? error
+          : new Error(`MCP server "${entry.name}" failed to connect`);
+      }
+    }
+  } catch (error) {
+    await closeUserEnhancements();
+    throw error;
+  }
+
+  const mcpServers = [
+    ...(context7Available && context7Server ? [context7Server] : []),
+    ...userMcpServers,
+  ];
+
   // view_image is a text-only helper. Vision models receive image bytes
   // natively (document tools, pinned context, web_search/web_fetch attach).
   // Reconstruction follows the frozen tool surface so in-flight recipes that
@@ -1525,6 +1665,7 @@ export async function reconstructChatRunInput(input: {
   const actualToolDefinitions = orderReconstructedToolDefinitions({
     toolDefinitions: reconstructedToolDefinitions,
     context7ToolDefinitions,
+    userMcpToolDefinitions: liveUserMcpToolDefinitions,
   });
   assertNativeStaticContextMatches({
     expected: recipe.staticContext as any,
@@ -1568,9 +1709,8 @@ export async function reconstructChatRunInput(input: {
         },
       }),
     ],
-    ...(context7Available && context7Server
-      ? { mcpServers: [context7Server] }
-      : {}),
+    ...(mcpServers.length > 0 ? { mcpServers } : {}),
+    ...(userSkillSet ? { skills: userSkillSet } : {}),
     memory: nativeMemoryOptions,
   });
 
@@ -1601,5 +1741,8 @@ export async function reconstructChatRunInput(input: {
     /** The single text snippet pinned as additional context (null if none). */
     activeContextSnippet,
     waitRegistry,
+    cleanup: async () => {
+      await closeUserEnhancements();
+    },
   };
 }

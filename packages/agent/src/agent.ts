@@ -10,6 +10,7 @@ import type { AgentMiddleware } from "@anvia/core/tool";
 import type { AgentObservabilityOptions } from "@anvia/core/observability";
 import type { AgentContextInput as NativeAgentContextInput } from "@anvia/core/agent";
 import type { McpServer } from "@anvia/core/mcp";
+import type { SkillSet } from "@anvia/core/skills";
 import {
   DEFAULT_REASONING_EFFORT,
   defaultModel,
@@ -49,6 +50,7 @@ export interface CreateAgentOptions {
   guardrails?: GuardrailPolicyInput;
   memory?: MemoryStore | CreateAgentMemoryOptions;
   mcpServers?: McpServer[];
+  skills?: SkillSet;
   middlewares?: readonly AgentMiddleware[];
 }
 
@@ -100,6 +102,7 @@ export function createAgent(opts: CreateAgentOptions): Agent {
     maxTurns: opts.maxTurns ?? DEFAULT_AGENT_MAX_TURNS,
     ...(memory ? { memory } : {}),
     ...(opts.mcpServers?.length ? { mcpServers: [...opts.mcpServers] } : {}),
+    ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.observability ? { observability: opts.observability } : {}),
     ...(opts.guardrails !== undefined ? { guardrails: opts.guardrails } : {}),
     ...(opts.middlewares?.length ? { middlewares: [...opts.middlewares] } : {}),

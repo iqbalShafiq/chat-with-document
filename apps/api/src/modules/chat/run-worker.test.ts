@@ -307,6 +307,27 @@ describe("Anvia v1 chat worker", () => {
     expect(h.streamCalls[0]).not.toHaveProperty("continuation");
   });
 
+  it("runs reconstructed cleanup after the run ends", async () => {
+    const stream = fakeStream([responseEvent()]);
+    const cleanup = vi.fn(async () => undefined);
+    const h = createDependencies(stream, {
+      reconstruct: (async () => ({
+        agent: {
+          stream() {
+            return stream;
+          },
+        },
+        projectId: null,
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        waitRegistry: { abortAll() {} },
+        cleanup,
+      })) as never,
+    });
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("resumes with only the official continuation and response shape", async () => {
     const stream = fakeStream([responseEvent("native-run-1")]);
     const h = createDependencies(stream);
