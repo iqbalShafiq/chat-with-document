@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CountBadge } from "#/components/ui/count-badge";
+import { SegmentedTabs } from "#/components/ui/segmented-tabs";
 import {
   listArtifacts,
   type ArtifactListItem,
@@ -51,25 +52,16 @@ export function ArtifactsRail({ sessionId }: { sessionId: string }) {
 
   return (
     <section aria-label="Artifacts" className="flex min-h-0 flex-col gap-2">
-      <div role="tablist" aria-label="Artifact types" className="flex flex-wrap gap-1.5">
-        {TABS.map((t) => (
-          <button
-            key={t.type}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.type}
-            onClick={() => setTab(t.type)}
-            className={
-              tab === t.type
-                ? "inline-flex h-7 items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 text-[11px] font-medium text-accent"
-                : "inline-flex h-7 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted hover:text-text"
-            }
-          >
-            {t.label}
-            <CountBadge count={counts[t.type] ?? 0} label={`${t.label} artifacts`} />
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs
+        label="Artifact types"
+        value={tab}
+        onSelect={setTab}
+        options={TABS.map((t) => ({
+          value: t.type,
+          label: t.label,
+          badge: <CountBadge count={counts[t.type] ?? 0} label={`${t.label} artifacts`} />,
+        }))}
+      />
       {error ? (
         <p role="alert" className="text-[11px] text-danger">
           {error}

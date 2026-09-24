@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DialogShell } from "#/components/ui/dialog-shell";
+import { SegmentedTabs } from "#/components/ui/segmented-tabs";
 import { TasksPanel } from "#/components/tasks/tasks-panel";
 import { SchedulesPanel } from "#/components/tasks/schedules-panel";
 
@@ -30,24 +31,15 @@ export function TasksModal({
       <div className="relative min-h-0 min-w-0 flex-1">
         <div className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4">
           <div className="flex flex-col gap-3">
-      <div role="tablist" aria-label="Tasks and schedules" className="flex gap-1.5">
-        {(["tasks", "schedules"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={
-              tab === t
-                ? "inline-flex h-7 items-center rounded-lg border border-accent/40 bg-accent/10 px-2.5 text-[11px] font-medium capitalize text-accent"
-                : "inline-flex h-7 items-center rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium capitalize text-text-muted hover:text-text"
-            }
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs
+        label="Tasks and schedules"
+        value={tab}
+        onSelect={setTab}
+        options={[
+          { value: "tasks", label: "Tasks" },
+          { value: "schedules", label: "Schedules" },
+        ]}
+      />
       {sessionId ? (
         tab === "tasks" ? (
           <TasksPanel sessionId={sessionId} />
