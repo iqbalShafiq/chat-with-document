@@ -32,7 +32,7 @@ describe("tasksRouter", () => {
     const response = await tasksRouter.request("/t1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "done" }),
+      body: JSON.stringify({ sessionId: "s1", status: "done" }),
     });
     expect(response.status).toBe(200);
     expect(((await response.json()) as { status: string }).status).toBe("done");

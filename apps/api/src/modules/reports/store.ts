@@ -54,3 +54,48 @@ export async function createReport(input: {
   });
   return { documentId: doc.id, filename: doc.filename };
 }
+
+/**
+ * Revise a report in place: same documentId, re-rendered bytes.
+ * Cross-scope ids yield not-found (never reveal other scopes).
+ */
+export async function editReport(input: {
+  userId: string;
+  sessionId: string;
+  documentId: string;
+  title?: string;
+  markdown?: string;
+  svgAssets?: string[];
+  citationMap?: ReportCitation[];
+}): Promise<{ documentId: string; filename: string }> {
+  const session = await prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { id: true, projectId: true },
+  });
+  if (!session) throw new Error("Session not found");
+  const scope = artifactWhere(input.userId, session.projectId ?? null);
+  const existing = await prisma.document.findFirst({
+    where: { ...scope, id: input.documentId, kind: "report" },
+  });
+  if (!existing) throw new Error("Report not found");
+  const title = input.title?.trim() || existing.filename.replace(/\.pdf$/, "");
+  const markdown = input.markdown ?? "";
+  const pdf = await buildReportPdf({
+    title,
+    markdown,
+    svgAssets: input.svgAssets,
+    citationMap: input.citationMap,
+  });
+  await putObject(existing.r2Key, Buffer.from(pdf), "application/pdf");
+  const doc = await prisma.document.update({
+    where: { id: existing.id },
+    data: {
+      sizeBytes: pdf.byteLength,
+      summary: title.slice(0, 500),
+      firstPageSummary: title.slice(0, 500),
+      ...(input.citationMap ? { citationMap: input.citationMap } : {}),
+    },
+    select: { id: true, filename: true },
+  });
+  return { documentId: doc.id, filename: doc.filename };
+}

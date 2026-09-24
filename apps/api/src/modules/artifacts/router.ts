@@ -57,20 +57,27 @@ export const artifactsRouter = new Hono<{ Variables: AuthVariables }>()
   })
   .patch("/images/:id", async (c) => {
     const user = c.get("user");
-    const body = (await c.req.json().catch(() => null)) as { caption?: unknown } | null;
+    const body = (await c.req.json().catch(() => null)) as {
+      caption?: unknown;
+      sessionId?: unknown;
+    } | null;
     if (typeof body?.caption !== "string") {
       return c.json({ error: "caption is required" }, 400);
+    }
+    if (typeof body?.sessionId !== "string" || !body.sessionId.trim()) {
+      return c.json({ error: "sessionId is required" }, 400);
     }
     try {
       const updated = await updateImageCaption({
         userId: user.id,
+        sessionId: body.sessionId,
         imageId: c.req.param("id"),
         caption: body.caption,
       });
       return c.json(updated);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Update failed";
-      if (message === "Image not found") {
+      if (message === "Image not found" || message === "Session not found") {
         return c.json({ error: message, code: "IMAGE_NOT_FOUND" }, 404);
       }
       return c.json({ error: message }, 400);

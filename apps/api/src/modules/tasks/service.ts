@@ -53,12 +53,14 @@ export async function createTask(input: {
 
 export async function updateTask(input: {
   userId: string;
+  sessionId: string;
   id: string;
   status?: TaskStatus;
   title?: string;
 }): Promise<{ id: string; title: string; status: string }> {
+  const scope = await resolveScope(input.userId, input.sessionId);
   const existing = await prisma.workspaceTask.findFirst({
-    where: { id: input.id, userId: input.userId },
+    where: { id: input.id, userId: input.userId, projectId: scope },
     select: { id: true },
   });
   if (!existing) throw new Error("Task not found");

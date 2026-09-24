@@ -10,7 +10,7 @@ const listArtifactsSpec = {
   description:
     "List workspace artifacts in the current session scope (standalone sees only standalone, project sees only that project). Filter by type and search query.",
   inputSchema: z.object({
-    type: z.enum(["document", "image", "web_bundle", "task", "schedule", "session"]).optional(),
+    type: z.enum(["document", "image", "site", "web_bundle", "task", "schedule", "session"]).optional(),
     q: z.string().max(200).optional(),
   }),
 } as const;
@@ -33,10 +33,32 @@ const listSessionsSpec = {
   }),
 } as const;
 
+const getArtifactSpec = {
+  name: "get_artifact",
+  description:
+    "Fetch one artifact's full detail by type and id (detail-on-demand after listing). Out-of-scope ids yield not-found.",
+  inputSchema: z.object({
+    type: z.enum(["document", "image", "site", "web_bundle", "task", "schedule", "session"]),
+    id: z.string().min(1).max(120),
+  }),
+} as const;
+
+const getSessionExcerptSpec = {
+  name: "get_session_excerpt",
+  description:
+    "Read the last turns of a sibling session in the same scope (bounded excerpt, never a full dump).",
+  inputSchema: z.object({
+    sessionId: z.string().min(1).max(120),
+    limit: z.number().int().min(1).max(20).optional().default(6),
+  }),
+} as const;
+
 export const ARTIFACT_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(listArtifactsSpec),
   createStaticToolDefinition(findImagesSpec),
   createStaticToolDefinition(listSessionsSpec),
+  createStaticToolDefinition(getArtifactSpec),
+  createStaticToolDefinition(getSessionExcerptSpec),
 ];
 
 /**
@@ -90,6 +112,7 @@ function toJson<T>(value: T): JsonOutput {
 export type ArtifactServiceDeps = {
   list(input: { type?: string; q?: string }): Promise<{ items: unknown[] }>;
   get(input: { type: string; id: string }): Promise<unknown>;
+  getExcerpt(input: { sessionId: string; limit: number }): Promise<unknown>;
 };
 
 export function createArtifactTools(
@@ -132,5 +155,23 @@ export function createArtifactTools(
       );
     },
   });
-  return [listArtifacts, findImages, listSessions];
+  const getArtifact = createTool({
+    ...getArtifactSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ type, id }): Promise<JsonOutput> => {
+      const artifact = await deps.get({ type, id });
+      if (!artifact) throw new Error("Artifact not found in the current scope.");
+      return toJson(artifact);
+    },
+  });
+  const getSessionExcerpt = createTool({
+    ...getSessionExcerptSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ sessionId, limit }): Promise<JsonOutput> => {
+      const excerpt = await deps.getExcerpt({ sessionId, limit });
+      if (!excerpt) throw new Error("Session not found in the current scope.");
+      return toJson(excerpt);
+    },
+  });
+  return [listArtifacts, findImages, listSessions, getArtifact, getSessionExcerpt];
 }

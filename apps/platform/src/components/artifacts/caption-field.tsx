@@ -5,10 +5,12 @@ import { updateImageCaption } from "#/lib/api-artifacts";
 /** Inline caption editor for a single image asset. */
 export function CaptionField({
   imageId,
+  sessionId,
   caption,
   onSaved,
 }: {
   imageId: string;
+  sessionId: string;
   caption: string;
   onSaved?: (caption: string) => void;
 }) {
@@ -44,7 +46,7 @@ export function CaptionField({
         if (saving || !draft.trim() || draft.length > 280) return;
         setSaving(true);
         setError(null);
-        void updateImageCaption({ imageId, caption: draft.trim() })
+        void updateImageCaption({ imageId, sessionId, caption: draft.trim() })
           .then((saved) => {
             setSaving(false);
             setEditing(false);

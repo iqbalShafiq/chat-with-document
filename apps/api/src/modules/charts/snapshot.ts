@@ -5,6 +5,71 @@ export type ChartSpecInput =
   | { kind: "scatter"; points: Array<{ x: number; y: number }>; xLabel?: string; yLabel?: string; title?: string }
   | { kind: "histogram"; bins: number[]; label?: string; title?: string };
 
+/** Loud validation for chart specs: finite numbers only, shapes intact. */
+export function assertValidChartSpec(spec: unknown): asserts spec is ChartSpecInput {
+  const fail = () => {
+    throw new Error("Invalid chart spec");
+  };
+  if (typeof spec !== "object" || spec === null) fail();
+  const s = spec as Record<string, unknown>;
+  if (s.kind !== "bar" && s.kind !== "line" && s.kind !== "pie" && s.kind !== "scatter" && s.kind !== "histogram") {
+    fail();
+  }
+  const finiteArray = (v: unknown): v is number[] =>
+    Array.isArray(v) && v.every((n) => typeof n === "number" && Number.isFinite(n));
+  const strArray = (v: unknown): v is string[] =>
+    Array.isArray(v) && v.every((n) => typeof n === "string");
+  switch (s.kind) {
+    case "bar":
+    case "line": {
+      const o = s as { labels?: unknown; series?: unknown };
+      if (!strArray(o.labels)) fail();
+      if (
+        !Array.isArray(o.series) ||
+        o.series.length < 1 ||
+        !o.series.every(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as { name?: unknown }).name === "string" &&
+            finiteArray((item as { values?: unknown }).values),
+        )
+      ) {
+        fail();
+      }
+      return;
+    }
+    case "pie": {
+      const o = s as { labels?: unknown; values?: unknown };
+      if (!strArray(o.labels) || !finiteArray(o.values)) fail();
+      return;
+    }
+    case "scatter": {
+      const o = s as { points?: unknown };
+      if (
+        !Array.isArray(o.points) ||
+        !o.points.every(
+          (p) =>
+            typeof p === "object" &&
+            p !== null &&
+            typeof (p as { x?: unknown }).x === "number" &&
+            Number.isFinite((p as { x: number }).x) &&
+            typeof (p as { y?: unknown }).y === "number" &&
+            Number.isFinite((p as { y: number }).y),
+        )
+      ) {
+        fail();
+      }
+      return;
+    }
+    case "histogram": {
+      const o = s as { bins?: unknown };
+      if (!finiteArray(o.bins)) fail();
+      return;
+    }
+  }
+}
+
 function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -14,6 +79,7 @@ const H = 360;
 const PAD = 44;
 
 export function chartSpecToSvg(spec: ChartSpecInput): string {
+  assertValidChartSpec(spec);
   const title = spec.kind === "pie"
     ? (spec.title ?? spec.name ?? "")
     : "title" in spec

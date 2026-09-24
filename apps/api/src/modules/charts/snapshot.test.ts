@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartSpecToSvg } from "./snapshot.js";
+import { assertValidChartSpec, chartSpecToSvg } from "./snapshot.js";
 
 describe("chartSpecToSvg", () => {
   it("renders a bar chart spec to SVG", () => {
@@ -22,5 +22,15 @@ describe("chartSpecToSvg", () => {
     });
     expect(svg).not.toContain("<script>");
     expect(svg).toContain("&lt;script&gt;");
+  });
+
+  it("rejects request-shaped and non-finite specs loudly", () => {
+    expect(() =>
+      assertValidChartSpec({ kind: "bar", x: "region", series: [{ column: "revenue", fn: "sum" }] }),
+    ).toThrow("Invalid chart spec");
+    expect(() =>
+      assertValidChartSpec({ kind: "pie", labels: ["a"], values: [Number.NaN] }),
+    ).toThrow("Invalid chart spec");
+    expect(() => assertValidChartSpec(null)).toThrow("Invalid chart spec");
   });
 });

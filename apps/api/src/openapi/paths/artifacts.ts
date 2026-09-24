@@ -108,6 +108,29 @@ export const artifactsPaths = {
       },
     },
   },
+  "/api/reports/{id}": {
+    patch: {
+      operationId: "editReport",
+      tags: ["Artifacts"],
+      summary: "Revise a report in place",
+      description: "Re-renders the same document; edits never mint duplicates.",
+      security: bearerOrCookie,
+      responses: {
+        "200": jsonResponse(
+          "Revised report.",
+          {
+            type: "object",
+            required: ["documentId", "filename"],
+            properties: { documentId: { type: "string" }, filename: { type: "string" } },
+          },
+          ex("Report", { documentId: "cuid123", filename: "report.pdf" }),
+        ),
+        "400": badRequest({ error: "Invalid report payload" }),
+        "401": unauthorized,
+        "404": notFound({ error: "Report not found", code: "REPORT_NOT_FOUND" }),
+      },
+    },
+  },
   "/api/charts/snapshot": {
     post: {
       operationId: "snapshotChart",
@@ -195,6 +218,23 @@ export const artifactsPaths = {
           ex("Task", { type: "task", id: "cuid123", title: "Review v2" }),
         ),
         "400": badRequest({ error: "Nothing to update." }),
+        "401": unauthorized,
+        "404": notFound({ error: "Task not found", code: "TASK_NOT_FOUND" }),
+      },
+    },
+    delete: {
+      operationId: "deleteTask",
+      tags: ["Artifacts"],
+      summary: "Delete a task",
+      description: "Scoped delete; out-of-scope ids yield 404.",
+      security: bearerOrCookie,
+      responses: {
+        "200": jsonResponse(
+          "Deleted.",
+          { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } },
+          ex("Deleted", { ok: true }),
+        ),
+        "400": badRequest({ error: "sessionId is required" }),
         "401": unauthorized,
         "404": notFound({ error: "Task not found", code: "TASK_NOT_FOUND" }),
       },

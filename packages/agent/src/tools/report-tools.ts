@@ -4,7 +4,53 @@ import {
   createStaticToolDefinition,
   type ToolDefinition,
 } from "./static-definition.js";
-import { chartRequestSchema } from "./tabular/chart-tools.js";
+
+/**
+ * Rendered chart shapes (outputs of create_chart/analyze_dataset), NOT the
+ * dataset-query request shape. The renderer draws these directly.
+ */
+const renderedChartSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("bar"),
+    labels: z.array(z.string()).max(100),
+    series: z
+      .array(z.object({ name: z.string(), values: z.array(z.number().finite()).max(500) }))
+      .min(1)
+      .max(8),
+    title: z.string().max(120).optional(),
+  }),
+  z.object({
+    kind: z.literal("line"),
+    labels: z.array(z.string()).max(100),
+    series: z
+      .array(z.object({ name: z.string(), values: z.array(z.number().finite()).max(500) }))
+      .min(1)
+      .max(8),
+    title: z.string().max(120).optional(),
+  }),
+  z.object({
+    kind: z.literal("scatter"),
+    points: z
+      .array(z.object({ x: z.number().finite(), y: z.number().finite() }))
+      .max(500),
+    xLabel: z.string().max(80).optional(),
+    yLabel: z.string().max(80).optional(),
+    title: z.string().max(120).optional(),
+  }),
+  z.object({
+    kind: z.literal("histogram"),
+    bins: z.array(z.number().finite()).max(200),
+    label: z.string().max(80).optional(),
+    title: z.string().max(120).optional(),
+  }),
+  z.object({
+    kind: z.literal("pie"),
+    labels: z.array(z.string()).max(30),
+    values: z.array(z.number().finite()).max(30),
+    name: z.string().max(80).optional(),
+    title: z.string().max(120).optional(),
+  }),
+]);
 
 const createPdfReportSpec = {
   name: "create_pdf_report",
@@ -32,10 +78,10 @@ const createPdfReportSpec = {
 const snapshotChartSpec = {
   name: "snapshot_chart",
   description:
-    "Freeze a create_chart/analyze_dataset chart spec into a reusable image asset (captioned) for PDFs and sites.",
+    "Freeze a rendered chart (the chart object from create_chart or analyze_dataset output) into a reusable captioned image asset for PDFs and sites. Pass the chart object itself, not the dataset query.",
   inputSchema: z.object({
     caption: z.string().min(1).max(280),
-    chart: chartRequestSchema.describe("Chart spec from create_chart or analyze_dataset"),
+    chart: renderedChartSchema,
   }),
 } as const;
 
@@ -48,8 +94,20 @@ const freezeWebBundleSpec = {
   }),
 } as const;
 
+const editPdfReportSpec = {
+  name: "edit_pdf_report",
+  description:
+    "Revise an existing PDF report in place (same document, re-rendered). Never creates a duplicate for edits.",
+  inputSchema: z.object({
+    documentId: z.string().min(1).max(120),
+    title: z.string().min(1).max(120).optional(),
+    markdown: z.string().min(1).max(100_000).optional(),
+  }),
+} as const;
+
 export const REPORT_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(createPdfReportSpec),
+  createStaticToolDefinition(editPdfReportSpec),
   createStaticToolDefinition(snapshotChartSpec),
   createStaticToolDefinition(freezeWebBundleSpec),
 ];
@@ -60,6 +118,11 @@ export function createReportTools(deps: {
     markdown: string;
     assetIds?: string[];
     citationMap?: Array<Record<string, unknown>>;
+  }): Promise<{ documentId: string; filename: string }>;
+  editReport(input: {
+    documentId: string;
+    title?: string;
+    markdown?: string;
   }): Promise<{ documentId: string; filename: string }>;
   snapshotChart(input: { caption: string; chart: unknown }): Promise<{ imageId: string }>;
   freezeBundle(input: {
@@ -104,5 +167,22 @@ export function createReportTools(deps: {
       return jsonOutputSchema.parse({ ...result });
     },
   });
-  return [createPdfReport, snapshotChart, freezeWebBundle];
+  const editPdfReport = createTool({
+    ...editPdfReportSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ documentId, title, markdown }): Promise<JsonOutput> => {
+      const result = await deps.editReport({
+        documentId,
+        ...(title ? { title } : {}),
+        ...(markdown ? { markdown } : {}),
+      });
+      deps.onFocus?.({
+        artifactId: result.documentId,
+        artifactType: "document",
+        ...(title ? { label: title } : {}),
+      });
+      return jsonOutputSchema.parse({ ...result });
+    },
+  });
+  return [createPdfReport, editPdfReport, snapshotChart, freezeWebBundle];
 }

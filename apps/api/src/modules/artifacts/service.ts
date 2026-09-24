@@ -1,9 +1,12 @@
 import { prisma } from "../../utils/prisma.js";
 import { artifactWhere } from "./scope.js";
+import { createDefaultMemoryScopeKey } from "../chat/memory-scope.js";
+import { getScopedSite, listSitesByScope } from "../static-sites/service.js";
 
 export const ARTIFACT_TYPES = [
   "document",
   "image",
+  "site",
   "web_bundle",
   "task",
   "schedule",
@@ -27,6 +30,8 @@ type PrismaSurface = Pick<
   | "workspaceTask"
   | "workspaceSchedule"
   | "chatSession"
+  | "agentMemorySession"
+  | "agentMemoryMessage"
 >;
 
 export async function resolveSessionScope(
@@ -97,6 +102,13 @@ export async function listArtifacts(
     });
     for (const i of images) items.push({ type: "image", ...i });
   }
+  if (types.includes("site")) {
+    const sites = await listSitesByScope(input.userId, input.sessionProjectId);
+    for (const s of sites) {
+      if (q && !s.siteId.toLowerCase().includes(q.toLowerCase())) continue;
+      items.push({ type: "site", id: s.siteId, ...s });
+    }
+  }
   if (types.includes("web_bundle")) {
     const bundles = await deps.prisma.webBundle.findMany({
       where: { ...where, ...(q ? { title: { contains: q, mode: "insensitive" } } : {}) },
@@ -136,15 +148,21 @@ export async function listArtifacts(
 }
 
 export async function updateImageCaption(
-  input: { userId: string; imageId: string; caption: string },
-  deps: { prisma: Pick<typeof prisma, "generatedImage"> } = { prisma },
+  input: { userId: string; sessionId: string; imageId: string; caption: string },
+  deps: { prisma: Pick<typeof prisma, "generatedImage" | "chatSession"> } = { prisma },
 ): Promise<{ id: string; caption: string }> {
   const caption = input.caption.trim();
   if (caption.length < 1 || caption.length > 280) {
     throw new Error("Caption must be 1-280 characters.");
   }
+  const session = await deps.prisma.chatSession.findFirst({
+    where: { id: input.sessionId, userId: input.userId },
+    select: { projectId: true },
+  });
+  if (!session) throw new Error("Session not found");
+  const scope = artifactWhere(input.userId, session.projectId ?? null);
   const image = await deps.prisma.generatedImage.findFirst({
-    where: { id: input.imageId, userId: input.userId },
+    where: { ...scope, id: input.imageId },
     select: { id: true },
   });
   if (!image) throw new Error("Image not found");
@@ -197,6 +215,21 @@ export async function getArtifact(
       });
       return image ? { type: "image", ...image } : null;
     }
+    case "site": {
+      const manifest = await getScopedSite(input.userId, input.sessionProjectId, input.id);
+      return manifest
+        ? {
+            type: "site",
+            id: manifest.siteId,
+            siteId: manifest.siteId,
+            version: manifest.version,
+            status: manifest.status,
+            previewUrl: manifest.previewUrl,
+            projectId: input.sessionProjectId,
+            updatedAt: manifest.updatedAt,
+          }
+        : null;
+    }
     case "web_bundle": {
       const bundle = await deps.prisma.webBundle.findFirst({
         where: { ...where, id: input.id },
@@ -225,4 +258,46 @@ export async function getArtifact(
       return session ? { type: "session", sessionId: session.id, ...session } : null;
     }
   }
+}
+
+function excerptText(message: unknown): string {
+  try {
+    const text = JSON.stringify(message);
+    return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Last-N-turn excerpt of a sibling session (same scope only). Bounded,
+ * read-only, never a full dump.
+ */
+export async function getSessionExcerpt(
+  input: { userId: string; sessionProjectId: string | null; sessionId: string; limit?: number },
+  deps: { prisma: PrismaSurface } = { prisma },
+): Promise<{ sessionId: string; title: string | null; messages: Array<{ role: string; text: string }> } | null> {
+  const session = await deps.prisma.chatSession.findFirst({
+    where: input.sessionProjectId
+      ? { id: input.sessionId, userId: input.userId, projectId: input.sessionProjectId }
+      : { id: input.sessionId, userId: input.userId, projectId: null },
+    select: { id: true, title: true },
+  });
+  if (!session) return null;
+  const memory = await deps.prisma.agentMemorySession.findFirst({
+    where: { scopeKey: createDefaultMemoryScopeKey(input.sessionId, input.userId) },
+    select: { id: true },
+  });
+  if (!memory) return { sessionId: session.id, title: session.title, messages: [] };
+  const rows = await deps.prisma.agentMemoryMessage.findMany({
+    where: { memorySessionId: memory.id },
+    orderBy: { position: "desc" },
+    take: Math.min(Math.max(input.limit ?? 6, 1), 20),
+    select: { role: true, message: true },
+  });
+  return {
+    sessionId: session.id,
+    title: session.title,
+    messages: rows.reverse().map((row) => ({ role: row.role, text: excerptText(row.message) })),
+  };
 }

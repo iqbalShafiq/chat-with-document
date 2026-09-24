@@ -81,7 +81,7 @@ export function SchedulesPanel({ sessionId }: { sessionId: string }) {
                 type="button"
                 aria-label={`Cancel ${schedule.title}`}
                 onClick={() => {
-                  void cancelSchedule(schedule.id).then(refresh);
+                  void cancelSchedule(schedule.id, sessionId).then(refresh);
                 }}
                 className="h-7 shrink-0 cursor-pointer rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-text-muted transition hover:bg-white/10 hover:text-text active:scale-95"
               >

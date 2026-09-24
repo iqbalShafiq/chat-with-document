@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
-import { createReport } from "./store.js";
+import { createReport, editReport } from "./store.js";
 
 const citationSchema = z.object({
   claim: z.string().min(1).max(500),
@@ -32,6 +32,33 @@ export const reportsRouter = new Hono<{ Variables: AuthVariables }>()
       const message = error instanceof Error ? error.message : "Create failed";
       if (message === "Session not found") {
         return c.json({ error: message, code: "SESSION_NOT_FOUND" }, 404);
+      }
+      return c.json({ error: message }, 400);
+    }
+  })
+  .patch("/:id", async (c) => {
+    const user = c.get("user");
+    const parsed = z
+      .object({
+        sessionId: z.string().min(1).max(120),
+        title: z.string().trim().min(1).max(120).optional(),
+        markdown: z.string().min(1).max(100_000).optional(),
+        svgAssets: z.array(z.string().max(200_000)).max(10).optional(),
+        citationMap: z.array(citationSchema).max(100).optional(),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid report payload" }, 400);
+    try {
+      const result = await editReport({
+        userId: user.id,
+        documentId: c.req.param("id"),
+        ...parsed.data,
+      });
+      return c.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Update failed";
+      if (message === "Session not found" || message === "Report not found") {
+        return c.json({ error: message, code: "REPORT_NOT_FOUND" }, 404);
       }
       return c.json({ error: message }, 400);
     }

@@ -174,6 +174,29 @@ export async function listSitesByScope(
   return out;
 }
 
+/**
+ * Single scoped manifest read: membership in the caller's scope index plus
+ * userId match. Anything else is null (callers map to generic 404).
+ */
+export async function getScopedSite(
+  userId: string,
+  projectId: string | null,
+  siteId: string,
+  dirOverride?: string,
+): Promise<SiteManifest | null> {
+  try {
+    assertSafeSiteId(siteId);
+  } catch {
+    return null;
+  }
+  const index = await readScopeIndex(dirOverride);
+  const listed = (index[scopeKey(userId, projectId)] ?? []).some((e) => e.siteId === siteId);
+  if (!listed) return null;
+  const manifest = await readSiteManifest(siteId, dirOverride);
+  if (!manifest || manifest.userId !== userId) return null;
+  return manifest;
+}
+
 export async function listSitesBySession(
   sessionId: string,
   dirOverride?: string,

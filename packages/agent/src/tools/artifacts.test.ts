@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ARTIFACT_TOOL_DEFINITIONS, createArtifactTools, decodeArtifactChoice, encodeArtifactChoice } from "./artifacts.js";
 
 describe("ARTIFACT_TOOL_DEFINITIONS", () => {
-  it("exposes list_artifacts, find_images, list_sessions", () => {
+  it("exposes list, find, sessions, get, and excerpt tools", () => {
     expect(ARTIFACT_TOOL_DEFINITIONS.map((d) => d.name).sort()).toEqual(
-      ["find_images", "list_artifacts", "list_sessions"].sort(),
+      ["find_images", "get_artifact", "get_session_excerpt", "list_artifacts", "list_sessions"].sort(),
     );
   });
 });
@@ -25,6 +25,7 @@ describe("createArtifactTools", () => {
     const tools = createArtifactTools({
       list: async () => ({ items: [{ id: "img-1", caption: "hero logo" }] }),
       get: async () => null,
+      getExcerpt: async () => null,
       onFocus: (f) => {
         focused.push(f.artifactId);
       },

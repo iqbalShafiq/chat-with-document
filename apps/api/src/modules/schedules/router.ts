@@ -34,13 +34,11 @@ export const schedulesRouter = new Hono<{ Variables: AuthVariables }>()
     const user = c.get("user");
     const parsed = createSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Invalid schedule payload" }, 400);
-    const scope = await resolveScope(user.id, parsed.data.sessionId).catch(() => null);
-    if (scope === null && parsed.data.sessionId) {
-      const exists = await prisma.chatSession.findFirst({
-        where: { id: parsed.data.sessionId, userId: user.id },
-        select: { id: true },
-      });
-      if (!exists) return c.json({ error: "Session not found", code: "SESSION_NOT_FOUND" }, 404);
+    let scope: string | null;
+    try {
+      scope = await resolveScope(user.id, parsed.data.sessionId);
+    } catch {
+      return c.json({ error: "Session not found", code: "SESSION_NOT_FOUND" }, 404);
     }
     const firstRun = parsed.data.runAt ? new Date(parsed.data.runAt) : nextRunAt(parsed.data.freq);
     const schedule = await prisma.workspaceSchedule.create({
@@ -65,8 +63,18 @@ export const schedulesRouter = new Hono<{ Variables: AuthVariables }>()
   })
   .delete("/:id", async (c) => {
     const user = c.get("user");
+    const sessionId = c.req.query("sessionId") ?? "";
+    if (!sessionId.trim()) {
+      return c.json({ error: "sessionId is required" }, 400);
+    }
+    let scope: string | null;
+    try {
+      scope = await resolveScope(user.id, sessionId);
+    } catch {
+      return c.json({ error: "Session not found", code: "SCHEDULE_NOT_FOUND" }, 404);
+    }
     const existing = await prisma.workspaceSchedule.findFirst({
-      where: { id: c.req.param("id"), userId: user.id },
+      where: { id: c.req.param("id"), userId: user.id, projectId: scope },
       select: { id: true },
     });
     if (!existing) return c.json({ error: "Schedule not found", code: "SCHEDULE_NOT_FOUND" }, 404);

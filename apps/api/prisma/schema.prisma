@@ -444,6 +444,7 @@ model GeneratedImage {
   @@index([userId, projectId])
   @@index([sessionId])
   @@index([sessionId, source])
+  @@index([userId, caption])
   @@map("generated_image")
 }
 

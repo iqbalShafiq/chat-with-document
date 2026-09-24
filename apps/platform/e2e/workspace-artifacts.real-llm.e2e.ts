@@ -19,6 +19,7 @@ import {
   REAL_LLM_REASONING_EFFORT,
   sendMessage,
   setReasoningEffort,
+  uploadAndAsk,
   waitForRunDone,
 } from "./helpers";
 
@@ -71,11 +72,11 @@ async function ensureTestUser(page: Page): Promise<void> {
 }
 
 async function openFreshChatExact(page: Page): Promise<string> {
-  const draft = await page.request.post(`${API_ORIGIN}/api/chat/sessions/draft`, {
-    data: { projectId: null },
+  const sessionId = crypto.randomUUID();
+  const created = await page.request.post(`${API_ORIGIN}/api/chat/sessions`, {
+    data: { sessionId, projectId: null },
   });
-  expect(draft.ok()).toBe(true);
-  const { sessionId } = (await draft.json()) as { sessionId: string };
+  expect(created.ok()).toBe(true);
   await page.goto(`/chat/${encodeURIComponent(sessionId)}`);
   await expect(page.getByRole("heading", { name: /trying to understand/i })).toBeVisible({
     timeout: 30_000,
@@ -168,6 +169,48 @@ test.describe.serial("workspace artifacts", () => {
     expect(docs.id).toBeTruthy();
     expect(sessionId).toBeTruthy();
     await saveEvidence(page, "report-created");
+  });
+
+  test("agent charts sales data and embeds it in a PDF report", async ({ page }) => {
+    await ensureTestUser(page);
+
+    // Watch-mode dev restarts can drop one upload/send; retry once on a
+    // guaranteed-fresh session (no queue pollution from the first attempt).
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await openFreshChatWithModel(page);
+      try {
+        await uploadAndAsk(
+          page,
+          "sales.csv",
+          "Analisis E2EARTIFACTCHART: aggregate total revenue per region, buat bar chart-nya, snapshot chart itu, lalu buatkan laporan PDF berjudul E2EARTIFACTCHART yang memuat chart tersebut",
+        );
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
+
+    const docs = await pollFor(
+      async () => {
+        const res = await page.request.get(`${API_ORIGIN}/api/documents/library?scope=attach`);
+        expect(res.ok()).toBe(true);
+        return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
+      },
+      (d) => d.filename.includes("E2EARTIFACTCHART"),
+      420_000,
+    );
+    expect(docs.id).toBeTruthy();
+
+    const charts = await page.request.get(`${API_ORIGIN}/api/artifacts?type=image`);
+    expect(charts.ok()).toBe(true);
+    const chartBody = (await charts.json()) as {
+      items: { id: string; caption?: string; source?: string }[];
+    };
+    expect(chartBody.items.some((i) => i.source === "chart")).toBe(true);
+    await saveEvidence(page, "chart-report-created");
   });
 
   test("standalone scope excludes project artifacts", async ({ page }) => {

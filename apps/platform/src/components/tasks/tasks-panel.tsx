@@ -3,6 +3,7 @@ import { ManagementRow } from "#/components/ui/management-row";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import {
   createTask,
+  deleteTask,
   listTasks,
   updateTask,
   type WorkspaceTask,
@@ -15,6 +16,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [confirmDoneId, setConfirmDoneId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
@@ -109,7 +111,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     if (!renameDraft.trim()) return;
                     const title = renameDraft.trim();
                     setRenamingId(null);
-                    void updateTask(task.id, { title }).then(refresh);
+                    void updateTask(task.id, { sessionId, title }).then(refresh);
                   }}
                 >
                   <input
@@ -143,7 +145,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     setConfirmDoneId(task.id);
                     return;
                   }
-                  void updateTask(task.id, { status: next }).then(refresh);
+                  void updateTask(task.id, { sessionId, status: next }).then(refresh);
                 }}
                 toggleLabel={`Mark ${task.title} done`}
                 onEdit={() => {
@@ -152,9 +154,9 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                 }}
                 editLabel={`Rename ${task.title}`}
                 onDelete={() => {
-                  void updateTask(task.id, { status: "done" }).then(refresh);
+                  setConfirmDeleteId(task.id);
                 }}
-                deleteLabel={`Complete ${task.title}`}
+                deleteLabel={`Delete ${task.title}`}
               />
             ),
           )}
@@ -169,7 +171,19 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
         onConfirm={() => {
           const id = confirmDoneId;
           setConfirmDoneId(null);
-          if (id) void updateTask(id, { status: "done" }).then(refresh);
+          if (id) void updateTask(id, { sessionId, status: "done" }).then(refresh);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Delete task?"
+        description="This permanently removes the task for you and the agent."
+        confirmLabel="Delete"
+        onCancel={() => setConfirmDeleteId(null)}
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          setConfirmDeleteId(null);
+          if (id) void deleteTask(id, sessionId).then(refresh);
         }}
       />
     </section>

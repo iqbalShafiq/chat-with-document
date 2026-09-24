@@ -175,10 +175,10 @@ import {
   readActiveSiteTitle,
   siteBuildConfig,
 } from "../static-sites/service.js";
-import { getArtifact, listArtifacts } from "../artifacts/service.js";
+import { getArtifact, getSessionExcerpt, listArtifacts } from "../artifacts/service.js";
 import { chartSpecToSvg } from "../charts/snapshot.js";
 import { buildReportPdf } from "../reports/service.js";
-import { createReport } from "../reports/store.js";
+import { createReport, editReport } from "../reports/store.js";
 import { publishArtifactFocus } from "./artifact-events.js";
 import { createTask, listTasks, updateTask } from "../tasks/service.js";
 
@@ -1398,19 +1398,35 @@ export async function reconstructChatRunInput(input: {
         }) as Promise<{ items: unknown[] }>,
       get: ({ type, id }) =>
         getArtifact({ userId, sessionProjectId: projectId, type: type as never, id }) as Promise<unknown>,
+      getExcerpt: ({ sessionId: excerptSessionId, limit }) =>
+        getSessionExcerpt({
+          userId,
+          sessionProjectId: projectId,
+          sessionId: excerptSessionId,
+          limit,
+        }) as Promise<unknown>,
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
     ...createReportTools({
       createReport: async ({ title, markdown, assetIds, citationMap }) => {
         const svgAssets: string[] = [];
+        const rejected: string[] = [];
         for (const assetId of assetIds ?? []) {
           const image = await prisma.generatedImage.findFirst({
-            where: { id: assetId, userId },
+            where: { id: assetId, userId, projectId },
             select: { r2Key: true, mediaType: true },
           });
-          if (!image || image.mediaType !== "image/svg+xml") continue;
+          if (!image || image.mediaType !== "image/svg+xml") {
+            rejected.push(assetId);
+            continue;
+          }
           const bytes = await getObjectBuffer(image.r2Key);
           svgAssets.push(new TextDecoder().decode(bytes));
+        }
+        if (rejected.length > 0) {
+          throw new Error(
+            `Unknown or out-of-scope chart assets: ${rejected.join(", ")}. List them with find_images first.`,
+          );
         }
         return createReport({
           userId,
@@ -1421,6 +1437,14 @@ export async function reconstructChatRunInput(input: {
           ...(citationMap ? { citationMap: citationMap as never } : {}),
         });
       },
+      editReport: async ({ documentId, title, markdown }) =>
+        editReport({
+          userId,
+          sessionId,
+          documentId,
+          ...(title ? { title } : {}),
+          ...(markdown ? { markdown } : {}),
+        }),
       snapshotChart: async ({ caption, chart }) => {
         const svg = chartSpecToSvg(chart as never);
         const bytes = new TextEncoder().encode(svg);
@@ -1460,6 +1484,7 @@ export async function reconstructChatRunInput(input: {
         update: ({ id, status, title }) =>
           updateTask({
             userId,
+            sessionId,
             id,
             ...(status ? { status: status as never } : {}),
             ...(title ? { title } : {}),
@@ -1492,8 +1517,10 @@ export async function reconstructChatRunInput(input: {
           return { id: schedule.id };
         },
         cancel: async ({ id }) => {
+          const { resolveScope } = await import("../tasks/service.js");
+          const scope = await resolveScope(userId, sessionId);
           const existing = await prisma.workspaceSchedule.findFirst({
-            where: { id, userId },
+            where: { id, userId, projectId: scope },
             select: { id: true },
           });
           if (!existing) throw new Error("Schedule not found");

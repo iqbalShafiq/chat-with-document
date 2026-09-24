@@ -59,6 +59,7 @@ export async function getArtifact(input: {
 
 export async function updateImageCaption(input: {
   imageId: string;
+  sessionId: string;
   caption: string;
 }): Promise<{ id: string; caption: string }> {
   const response = await apiFetch(
@@ -66,7 +67,7 @@ export async function updateImageCaption(input: {
     {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ caption: input.caption }),
+      body: JSON.stringify({ caption: input.caption, sessionId: input.sessionId }),
     },
   );
   if (!response.ok) {
@@ -112,7 +113,7 @@ export async function createTask(input: {
 
 export async function updateTask(
   id: string,
-  input: { status?: WorkspaceTask["status"]; title?: string },
+  input: { sessionId: string; status?: WorkspaceTask["status"]; title?: string },
 ): Promise<WorkspaceTask> {
   const response = await apiFetch(`${API_BASE}/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -121,6 +122,15 @@ export async function updateTask(
   });
   if (!response.ok) throw new Error("Failed to update task");
   return (await response.json()) as WorkspaceTask;
+}
+
+export async function deleteTask(id: string, sessionId: string): Promise<void> {
+  const params = new URLSearchParams({ sessionId });
+  const response = await apiFetch(
+    `${API_BASE}/api/tasks/${encodeURIComponent(id)}?${params.toString()}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error("Failed to delete task");
 }
 
 export type WorkspaceSchedule = {
@@ -158,10 +168,12 @@ export async function createSchedule(input: {
   return (await response.json()) as WorkspaceSchedule;
 }
 
-export async function cancelSchedule(id: string): Promise<void> {
-  const response = await apiFetch(`${API_BASE}/api/schedules/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+export async function cancelSchedule(id: string, sessionId: string): Promise<void> {
+  const params = new URLSearchParams({ sessionId });
+  const response = await apiFetch(
+    `${API_BASE}/api/schedules/${encodeURIComponent(id)}?${params.toString()}`,
+    { method: "DELETE" },
+  );
   if (!response.ok) throw new Error("Failed to cancel schedule");
 }
 
