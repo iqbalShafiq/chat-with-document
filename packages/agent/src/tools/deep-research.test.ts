@@ -551,7 +551,7 @@ describe("boundDeepResearchTools", () => {
     const stats = progress.filter((event) => event.stats).map((event) => event.stats!.retrievalCalls);
     expect(stats).toContain(1);
     expect(JSON.stringify(progress)).toContain("Fetching a dataset from URL");
-    expect(JSON.stringify(progress)).toContain("Creating a derived dataset");
+    expect(JSON.stringify(progress)).toContain("Creating a dataset");
   });
 
   it("reports safe retrieval activity without exposing tool arguments", async () => {

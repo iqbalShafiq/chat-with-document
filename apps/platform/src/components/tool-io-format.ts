@@ -702,7 +702,7 @@ function formatCreateDatasetOutput(output: unknown): FormattedSection {
     { label: "Status", value: asString(record.status) ?? "queued" },
   ];
   const parent = asString(record.parentDocumentId);
-  if (parent) fields.push({ label: "Derived from", value: shortId(parent) });
+  if (parent) fields.push({ label: "Based on", value: shortId(parent) });
   return {
     title: "Result",
     summary: `Dataset created: ${filename} · ${rowCount} rows`,

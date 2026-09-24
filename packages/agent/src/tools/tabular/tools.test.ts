@@ -34,7 +34,7 @@ function makeWriter() {
     calls,
     createDerived: async (input: never) => {
       calls.push(input);
-      return { documentId: "d-saved", filename: "[derived] x.csv", origin: "created" as const, status: "queued" };
+      return { documentId: "d-saved", filename: "[assistant] x.csv", origin: "created" as const, status: "queued" };
     },
     countDerived: async () => calls.length,
   };

@@ -138,7 +138,7 @@ describe("tabular resolver", () => {
           return [
             {
               id: "d-derived",
-              filename: "[derived] ringkas.csv",
+              filename: "[assistant] ringkas.csv",
               tabularData: { sheets: [{ name: "ringkas", columns: [], rows: [] }] },
               origin: "created",
               parentDocumentId: "d1",
@@ -150,7 +150,7 @@ describe("tabular resolver", () => {
           if (args.where.origin !== undefined) return { id: "d-derived" };
           return {
             id: "d-derived",
-            filename: "[derived] ringkas.csv",
+            filename: "[assistant] ringkas.csv",
             status: "ready",
             tabularData: { sheets: [{ name: "ringkas", columns: [{ name: "region", type: "string" }], rows: [["east"]] }] },
           };
@@ -178,7 +178,7 @@ describe("tabular resolver", () => {
   it("reports a not-ready dataset distinctly from a missing one", async () => {
     const prisma = prismaMock({
       document: {
-        findFirst: async () => ({ id: "d-new", filename: "[synthetic] x.csv", status: "queued", tabularData: null }),
+        findFirst: async () => ({ id: "d-new", filename: "[sample] x.csv", status: "queued", tabularData: null }),
       },
       documentSession: { findMany: async () => [] },
     });

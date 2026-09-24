@@ -41,9 +41,9 @@ beforeEach(() => {
 });
 
 describe("prefixDerivedFilename", () => {
-  it("marks synthetic, derived, and downloaded files", () => {
-    expect(prefixDerivedFilename("a.csv", "created", true)).toBe("[synthetic] a.csv");
-    expect(prefixDerivedFilename("a.csv", "created", false)).toBe("[derived] a.csv");
+  it("marks sample, assistant-made, and downloaded files", () => {
+    expect(prefixDerivedFilename("a.csv", "created", true)).toBe("[sample] a.csv");
+    expect(prefixDerivedFilename("a.csv", "created", false)).toBe("[assistant] a.csv");
     expect(prefixDerivedFilename("a.csv", "fetched", false)).toBe("[downloaded] a.csv");
   });
 });
@@ -61,7 +61,7 @@ describe("createDerivedDocument", () => {
       sourceNote: "derived for test",
     });
     expect(result).toMatchObject({ id: "d-new", origin: "created", parentDocumentId: "d-parent" });
-    expect(result.filename).toBe("[derived] ringkas.csv");
+    expect(result.filename).toBe("[assistant] ringkas.csv");
     const created = prismaMock.document.create.mock.calls[0]![0];
     expect(created.data).toMatchObject({
       origin: "created",
@@ -112,7 +112,7 @@ describe("createDerivedDocument", () => {
         data: new Uint8Array([1]),
         origin: "created",
       }),
-    ).rejects.toThrow("Too many derived datasets");
+    ).rejects.toThrow("Too many assistant-made tables");
     expect(prismaMock.document.create).not.toHaveBeenCalled();
   });
 
