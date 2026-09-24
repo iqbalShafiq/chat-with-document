@@ -163,7 +163,6 @@ test.describe.serial("workspace full workflow", () => {
     await setSwitch(page, "Web search", true);
 
     await attachFile(page, "sales.csv");
-    await attachFile(page, "table-rich.pdf");
     await sendMessage(
       page,
       `Analisis ${TAG}: aggregate total revenue per region dari sales.csv, buat bar chart-nya, snapshot chart itu, cari konteks pasar kopi singkat via web search, lalu buatkan laporan PDF berjudul ${TAG} minimal 2 paragraf yang memuat angka, chart, dan sitasi`,
