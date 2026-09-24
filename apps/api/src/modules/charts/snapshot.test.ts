@@ -12,4 +12,15 @@ describe("chartSpecToSvg", () => {
     expect(svg).toContain("<svg");
     expect(svg).toContain("A");
   });
+
+  it("escapes titles so captions cannot break markup", () => {
+    const svg = chartSpecToSvg({
+      kind: "pie",
+      labels: ["<b>X</b>"],
+      values: [5],
+      title: "<script>",
+    });
+    expect(svg).not.toContain("<script>");
+    expect(svg).toContain("&lt;script&gt;");
+  });
 });
