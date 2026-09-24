@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createAppCors } from "./lib/cors.js";
+import { artifactsRouter } from "./modules/artifacts/router.js";
 import { auth } from "./modules/auth/auth.js";
 import { publicShareRouter } from "./modules/chat/public-share-router.js";
 import { chatRouter } from "./modules/chat/router.js";
@@ -19,6 +20,7 @@ export function createApp() {
     .use(createAppCors())
     .get("/health", (c) => c.json({ ok: true }))
     .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+    .route("/api/artifacts", artifactsRouter)
     .route("/api/chat", chatRouter)
     .route("/api/shares", publicShareRouter)
     .route("/api/documents", documentsRouter)
