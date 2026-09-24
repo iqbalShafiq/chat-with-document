@@ -247,6 +247,10 @@ model Document {
   firstPageSummary String            @default("") @db.Text
   /// Structured tabular data for CSV/XLSX: { sheets: TabularSheet[] }.
   tabularData      Json?
+  /// "source" (upload/fetched) | "report" (agent-created PDF report).
+  kind             String            @default("source")
+  /// For kind "report": [{ claim, documentId?, pageIndex?, webBundleId?, url? }].
+  citationMap      Json?
   /// Provenance: "upload" (user upload) | "created" (agent create_dataset) | "fetched" (agent fetch_dataset_from_url).
   origin           String            @default("upload")
   /// For origin "created": source Document id this was derived from, if any.
@@ -431,6 +435,8 @@ model GeneratedImage {
   /// "generated" (image tools) or "web" (view_image of a public web URL).
   source     String  @default("generated")
   sourceUrl  String?
+  /// Searchable caption: prompt for generated, filename for uploads, description for web-cached.
+  caption    String  @default("")
   createdAt DateTime @default(now())
 
   sessionContexts SessionImageContext[]
@@ -473,6 +479,50 @@ model SessionContextSnippet {
   @@index([userId])
   @@index([claimId, claimedAt])
   @@map("session_context_snippet")
+}
+
+// ─── Workspace artifacts (Spec A) ───────────────────────────────────────────
+
+model WebBundle {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String?
+  title     String
+  sources   Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, projectId, createdAt])
+  @@map("web_bundle")
+}
+
+model WorkspaceTask {
+  id              String    @id @default(cuid())
+  userId          String
+  projectId       String?
+  title           String
+  status          String    @default("inbox")
+  sourceSessionId String?
+  dueAt           DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, projectId, status])
+  @@map("workspace_task")
+}
+
+model WorkspaceSchedule {
+  id        String    @id @default(cuid())
+  userId    String
+  projectId String?
+  title     String
+  prompt    String    @db.Text
+  freq      String    @default("once")
+  nextRunAt DateTime?
+  status    String    @default("active")
+  createdAt DateTime  @default(now())
+
+  @@index([userId, status, nextRunAt])
+  @@map("workspace_schedule")
 }
 
 // ─── User skills (self-serve agent procedures; single SKILL.md body) ────────
