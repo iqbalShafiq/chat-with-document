@@ -273,10 +273,8 @@ export function ChatSidebar({
           >
             <Images className="size-4 shrink-0" strokeWidth={1.75} />
             <span className="min-w-0 flex-1 truncate font-medium">Images</span>
-            {imageCount && imageCount > 0 ? (
-              <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-text-muted">
-                {imageCount}
-              </span>
+            {imageCount !== null && imageCount > 0 ? (
+              <CountBadge count={imageCount} label="images" />
             ) : null}
           </button>
 
