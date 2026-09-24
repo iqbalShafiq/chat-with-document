@@ -170,6 +170,21 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                         : task.title
                     }
                     subtitle={task.description ?? task.status}
+                    leading={
+                      task.subtasks.length > 0 || task.description ? (
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
+                          onClick={() => setExpandedId(expanded ? null : task.id)}
+                          className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.08] hover:text-text"
+                        >
+                          <ChevronDown
+                            className={`size-4 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+                          />
+                        </button>
+                      ) : undefined
+                    }
                     enabled={task.status === "done"}
                     onToggle={() => {
                       const next = task.status === "done" ? "inbox" : "done";
@@ -191,20 +206,6 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     }}
                     deleteLabel={`Delete ${task.title}`}
                   />
-                )}
-                {(task.subtasks.length > 0 || task.description) && (
-                  <button
-                    type="button"
-                    aria-expanded={expanded}
-                    aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
-                    onClick={() => setExpandedId(expanded ? null : task.id)}
-                    className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-white/[0.06] hover:text-text"
-                  >
-                    <ChevronDown
-                      className={`size-3 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
-                    />
-                    {expanded ? "Hide details" : `Details (${task.subtasks.length})`}
-                  </button>
                 )}
                 {expanded && (
                   <div className="ml-2 flex flex-col gap-1 border-l border-white/[0.08] pl-2.5">
