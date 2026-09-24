@@ -257,7 +257,7 @@ export function FeaturesPopover({
     <div className="relative inline-flex">
       {anyEnabled ? (
       <div
-        className="glass inline-flex h-9 items-stretch gap-0.5 overflow-hidden rounded-xl px-1 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        className="glass inline-flex h-9 items-stretch overflow-hidden rounded-xl px-1 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <button
           ref={buttonRef}
@@ -279,11 +279,11 @@ export function FeaturesPopover({
 
           <>
             <span
-              className="my-1.5 w-px shrink-0 self-stretch bg-white/[0.1]"
+              className="mx-1 my-1.5 w-px shrink-0 self-stretch bg-white/[0.1]"
               aria-hidden
             />
             <span
-              className="inline-flex items-center gap-1 rounded-r-xl px-1"
+              className="inline-flex items-center gap-1 rounded-r-xl"
               aria-label="Active features"
             >
               {webSearchEnabled ? (
