@@ -25,6 +25,21 @@ export function decodeArtifactChoice(value: string): {
 }
 
 /**
+ * Empty-state copy: distinguishes "scope is empty" from "the offered
+ * choices could not be loaded" (usually an agent scoping error).
+ */
+export function describeEmptyArtifacts(input: {
+  artifactType: ArtifactType;
+  offeredCount: number;
+  loadedCount: number;
+}): string {
+  if (input.offeredCount > 0 && input.loadedCount === 0) {
+    return `Couldn't load the offered ${input.artifactType} choices — they may be out of scope.`;
+  }
+  return `No ${input.artifactType} artifacts in this scope yet.`;
+}
+
+/**
  * Visual artifact picker: radio list with thumbnails/labels for images,
  * documents, sites, and tasks. Used standalone and inside clarification
  * cards when the agent offers `artifact:<type>:<id>` choices.
@@ -91,7 +106,11 @@ export function ArtifactPicker({
   if (items.length === 0) {
     return (
       <p className="text-[11px] text-text-faint">
-        No {artifactType} artifacts in this scope yet.
+        {describeEmptyArtifacts({
+          artifactType,
+          offeredCount: candidates?.length ?? 0,
+          loadedCount: 0,
+        })}
       </p>
     );
   }

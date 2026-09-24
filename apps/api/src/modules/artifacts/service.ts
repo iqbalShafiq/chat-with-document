@@ -136,8 +136,16 @@ export async function listArtifacts(
   if (types.includes("session")) {
     const sessions = await deps.prisma.chatSession.findMany({
       where: input.sessionProjectId
-        ? { userId: input.userId, projectId: input.sessionProjectId }
-        : { userId: input.userId, projectId: null },
+        ? {
+            userId: input.userId,
+            projectId: input.sessionProjectId,
+            ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+          }
+        : {
+            userId: input.userId,
+            projectId: null,
+            ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+          },
       orderBy: { updatedAt: "desc" },
       take: 50,
       select: { id: true, title: true, projectId: true, updatedAt: true },

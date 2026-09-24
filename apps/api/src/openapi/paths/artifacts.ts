@@ -171,6 +171,26 @@ export const artifactsPaths = {
       },
     },
   },
+  "/api/sites": {
+    get: {
+      operationId: "listScopeSites",
+      tags: ["Artifacts"],
+      summary: "List sites in the session scope",
+      description:
+        "Cross-session site registry: edits from any session in scope bump the version, never mint a new site.",
+      security: bearerOrCookie,
+      responses: {
+        "200": jsonResponse(
+          "Sites.",
+          { type: "object", properties: { sites: { type: "array", items: artifactItem } } },
+          ex("Sites", { sites: [{ type: "site", siteId: "cuid123", version: 2 }] }),
+        ),
+        "400": badRequest({ error: "sessionId is required" }),
+        "401": unauthorized,
+        "404": notFound({ error: "Session not found" }),
+      },
+    },
+  },
   "/api/tasks": {
     get: {
       operationId: "listTasks",
