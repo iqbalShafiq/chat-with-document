@@ -210,7 +210,7 @@ test.describe.serial("workspace artifacts", () => {
   test("agent charts sales data and embeds it in a PDF report", async ({ page }) => {
     test.setTimeout(900_000);
     await ensureTestUser(page);
-    const stamp = new Date().toISOString().slice(5, 16).replace("T", "-");
+    const stamp = new Date().toISOString().slice(5, 16).replace(/[:T]/g, "-");
     const reportTag = `analisis-penjualan-${stamp}`;
 
     // Watch-mode dev restarts can drop one upload/send; retry once on a
