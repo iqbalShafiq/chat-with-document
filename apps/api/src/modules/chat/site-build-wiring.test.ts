@@ -185,6 +185,7 @@ describe("site build recipe identity binding", () => {
       siteId: null,
       sessionId: RECIPE_SESSION,
       userId: RECIPE_USER,
+      projectId: null,
       prompt: "bikinkan landing kopi",
       brief: BRIEF,
     });

@@ -3,9 +3,11 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { z } from "zod";
 import { requireUser } from "../auth/middleware.js";
+import { prisma } from "../../utils/prisma.js";
 import { enqueueSiteBuild } from "./queue.js";
 import {
   assertSafeSiteId,
+  listSitesByScope,
   listSitesBySession,
   readSiteManifest,
   siteDataDir,
@@ -79,6 +81,21 @@ siteDownloadRouter.post("/:siteId/retry", requireUser, async (c) => {
     version: manifest.version,
   }).catch(() => undefined);
   return c.json({ siteId, version: manifest.version, status: "queued" }, 202);
+});
+
+siteDownloadRouter.get("/", requireUser, async (c) => {
+  const user = c.get("user") as { id: string };
+  const sessionId = c.req.query("sessionId") ?? "";
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(sessionId)) {
+    return c.json({ error: "sessionId is required" }, 400);
+  }
+  const session = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId: user.id },
+    select: { projectId: true },
+  });
+  if (!session) return c.json({ error: "Session not found" }, 404);
+  const sites = await listSitesByScope(user.id, session.projectId ?? null);
+  return c.json({ sites });
 });
 
 siteDownloadRouter.get("/by-session/:sessionId", requireUser, async (c) => {

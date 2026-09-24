@@ -119,6 +119,61 @@ export type SessionSiteEntry = {
   updatedAt: string;
 };
 
+function sitesScopeIndexPath(dirOverride?: string): string {
+  return join(dirOverride ?? siteDataDir(), "sites-scope-index.json");
+}
+
+type ScopeIndexEntry = { siteId: string; siteName: string; updatedAt: string };
+
+function scopeKey(userId: string, projectId: string | null): string {
+  return `${userId}:${projectId ?? "standalone"}`;
+}
+
+async function readScopeIndex(
+  dirOverride?: string,
+): Promise<Record<string, ScopeIndexEntry[]>> {
+  try {
+    const raw = await readFile(sitesScopeIndexPath(dirOverride), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return parsed as Record<string, ScopeIndexEntry[]>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+    console.warn("[sites] scope index read failed", error);
+    return {};
+  }
+}
+
+export async function listSitesByScope(
+  userId: string,
+  projectId: string | null,
+  opts?: { dir?: string },
+): Promise<SessionSiteEntry[]> {
+  const dirOverride = opts?.dir;
+  const index = await readScopeIndex(dirOverride);
+  const entries = index[scopeKey(userId, projectId)] ?? [];
+  const out: SessionSiteEntry[] = [];
+  for (const entry of entries) {
+    try {
+      assertSafeSiteId(entry.siteId);
+    } catch {
+      continue;
+    }
+    const manifest = await readSiteManifest(entry.siteId, dirOverride);
+    if (!manifest || manifest.userId !== userId) continue;
+    out.push({
+      siteId: manifest.siteId,
+      version: manifest.version,
+      stableVersion: manifest.stableVersion,
+      status: manifest.status,
+      previewUrl: manifest.previewUrl,
+      downloadUrl: `/api/sites/${manifest.siteId}/v${manifest.version}/download`,
+      updatedAt: manifest.updatedAt,
+    });
+  }
+  return out;
+}
+
 export async function listSitesBySession(
   sessionId: string,
   dirOverride?: string,
@@ -180,6 +235,7 @@ export async function enqueueSiteBuildFromTool(
     siteId: string | null;
     sessionId: string;
     userId: string;
+    projectId?: string | null;
     prompt: string;
     brief: SiteBrief;
   },
@@ -235,6 +291,19 @@ export async function enqueueSiteBuildFromTool(
       await writeFile(path, JSON.stringify(index, null, 2), "utf8");
     } catch (error) {
       console.warn("[sites] index write failed", error);
+    }
+    try {
+      const scopePath = sitesScopeIndexPath(dirOverride);
+      const scopeIndex = await readScopeIndex(dirOverride);
+      const key = scopeKey(input.userId, input.projectId ?? null);
+      const existing = scopeIndex[key] ?? [];
+      const without = existing.filter((e) => e.siteId !== siteId);
+      without.unshift({ siteId, siteName: input.brief.siteName, updatedAt });
+      scopeIndex[key] = without.slice(0, 50);
+      await mkdir(join(scopePath, ".."), { recursive: true });
+      await writeFile(scopePath, JSON.stringify(scopeIndex, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[sites] scope index write failed", error);
     }
   }
   const { enqueueSiteBuild } = await import("./queue.js");

@@ -1599,7 +1599,8 @@ export async function reconstructChatRunInput(input: {
           ...(args.contextSiteName ? { contextSiteName: args.contextSiteName } : {}),
         }),
       readActiveSite: () => readActiveSiteTitle(sessionId),
-      enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),
+      enqueueBuild: (args) =>
+        enqueueSiteBuildFromTool({ ...args, sessionId, userId, projectId }),
     }),
   );
   // User-owned skills/servers are managed through the same v1 services as
