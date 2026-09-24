@@ -10,7 +10,7 @@ import {
   type ScopeSite,
 } from "#/lib/api-artifacts";
 import { queueShareForkDraft } from "#/lib/chat/queued-messages";
-import { sessionUrl } from "#/lib/workspace-urls";
+import { sessionNavigate } from "#/lib/workspace-urls";
 
 /**
  * Sidebar sites entry: every static site in the active session scope
@@ -33,19 +33,24 @@ export function SitesBrowser({
   const [chatError, setChatError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!open) {
+      setChatTarget(null);
+      setChatError(null);
+      setChatBusy(false);
+    }
+  }, [open]);
+
   const openChatInOriginSession = async (site: ScopeSite) => {
     setChatBusy(true);
     setChatError(null);
     try {
       // Site manifests only carry their origin session; resolve its project
       // for the canonical URL (standalone vs project room).
-      const origin = await getChatSessionDetail(site.sessionId).catch(() => null);
-      const projectId = origin?.projectId ?? null;
-      const known = await listScopeSites(sessionId)
-        .then((rows) => rows.some((row) => row.siteId === site.siteId))
-        .catch(() => true);
-      if (!known) throw new Error("Site is no longer in this scope");
-      void navigate(sessionUrl({ sessionId: site.sessionId, projectId }) as never);
+      const origin = await getChatSessionDetail(site.sessionId);
+      await navigate(sessionNavigate({ sessionId: site.sessionId, projectId: origin.projectId }));
+      setChatTarget(null);
+      setChatError(null);
       onClose();
     } catch (fetchError) {
       setChatError(fetchError instanceof Error ? fetchError.message : "Could not open chat");
@@ -65,9 +70,11 @@ export function SitesBrowser({
         attachments: [],
         autoSend: false,
       });
-      void navigate(
-        sessionUrl({ sessionId: created.sessionId, projectId: created.projectId }) as never,
+      await navigate(
+        sessionNavigate({ sessionId: created.sessionId, projectId: created.projectId }),
       );
+      setChatTarget(null);
+      setChatError(null);
       onClose();
     } catch (fetchError) {
       setChatError(fetchError instanceof Error ? fetchError.message : "Could not open chat");
