@@ -7,4 +7,12 @@ describe("REPORT_TOOL_DEFINITIONS", () => {
       ["create_pdf_report", "freeze_web_bundle", "snapshot_chart"].sort(),
     );
   });
+
+  it("gives snapshot_chart a provider-safe object schema (no bare JSON)", async () => {
+    const def = REPORT_TOOL_DEFINITIONS.find((d) => d.name === "snapshot_chart")!;
+    const params = def.parameters as Record<string, unknown>;
+    expect(params.type).toBe("object");
+    const props = params.properties as Record<string, { type?: string; oneOf?: unknown[] }>;
+    expect(props.chart?.type ?? props.chart?.oneOf).toBeTruthy();
+  });
 });

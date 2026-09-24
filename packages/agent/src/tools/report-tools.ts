@@ -4,6 +4,7 @@ import {
   createStaticToolDefinition,
   type ToolDefinition,
 } from "./static-definition.js";
+import { chartRequestSchema } from "./tabular/chart-tools.js";
 
 const createPdfReportSpec = {
   name: "create_pdf_report",
@@ -34,7 +35,7 @@ const snapshotChartSpec = {
     "Freeze a create_chart/analyze_dataset chart spec into a reusable image asset (captioned) for PDFs and sites.",
   inputSchema: z.object({
     caption: z.string().min(1).max(280),
-    chart: z.json(),
+    chart: chartRequestSchema.describe("Chart spec from create_chart or analyze_dataset"),
   }),
 } as const;
 
