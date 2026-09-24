@@ -209,6 +209,7 @@ export function SitesBrowser({
       size="sm"
       heightMode="content"
     >
+      <div className="p-4">
       <div className="flex flex-col gap-2">
         {chatError ? (
           <p role="alert" className="text-[11px] text-danger">
@@ -237,6 +238,7 @@ export function SitesBrowser({
             Clean room with the site pinned for the agent.
           </span>
         </button>
+      </div>
       </div>
     </DialogShell>
     </>
