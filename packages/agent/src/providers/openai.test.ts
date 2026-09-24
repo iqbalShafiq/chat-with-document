@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const streamingModel = {
     provider: "openai",
-    modelId: "openai/gpt-5.6-luna",
+    modelId: "openai/gpt-6-luna",
     streamCompletion: vi.fn(),
   };
 
@@ -74,9 +74,9 @@ describe("OpenAI provider", () => {
       api: "chat",
     });
     mocks.completionModel.mockClear();
-    openaiProvider.createCompletionModel("openai/gpt-5.6-luna");
+    openaiProvider.createCompletionModel("openai/gpt-6-luna");
     expect(mocks.completionModel).toHaveBeenCalledWith({
-      modelId: "openai/gpt-5.6-luna",
+      modelId: "openai/gpt-6-luna",
       api: "responses",
     });
   });

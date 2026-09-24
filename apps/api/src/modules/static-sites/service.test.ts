@@ -86,9 +86,9 @@ describe("siteBuildConfig", () => {
 
   it("honors SITE_ENABLED=false and custom model", () => {
     vi.stubEnv("SITE_ENABLED", "false");
-    vi.stubEnv("SITE_MODEL", "openai/gpt-5.6-luna");
+    vi.stubEnv("SITE_MODEL", "openai/gpt-6-luna");
     expect(siteBuildEnabled()).toBe(false);
-    expect(siteBuildConfig().modelId).toBe("openai/gpt-5.6-luna");
+    expect(siteBuildConfig().modelId).toBe("openai/gpt-6-luna");
   });
 });
 

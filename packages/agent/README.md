@@ -11,7 +11,7 @@ clarifications, groundedness, document tools, and `view_image` handling.
 
 Every case makes real model calls to `EVAL_MODEL` (default
 `deepseek/deepseek-v4-flash-0731` at effort `max`); the judge model
-(`EVAL_JUDGE_MODEL`, default `openai/gpt-5.6-luna` at effort `high`) is used
+(`EVAL_JUDGE_MODEL`, default `openai/gpt-6-luna` at effort `high`) is used
 only by the groundedness suite's `no_fabricated_bonus_policy` metric.
 
 ### Run
@@ -47,7 +47,7 @@ judge only grades the no-fabrication case, which expectations cannot express.
 Cases run on `EVAL_MODEL` by default. A case can pin its own model with
 `sessionConfig.models` (first entry wins); `createBehaviorTarget` falls back
 to `EVAL_MODEL` when unset. The `document-tools` suite uses this to run the
-vision-capable `view_image` case on `openai/gpt-5.6-luna` while the text-only
+vision-capable `view_image` case on `openai/gpt-6-luna` while the text-only
 case stays on the default model.
 
 ### Suites
@@ -69,7 +69,7 @@ case stays on the default model.
 | --- | --- | --- |
 | `EVAL_MODEL` | `deepseek/deepseek-v4-flash-0731` | model id used by the agent under test |
 | `EVAL_MODEL_EFFORT` | `max` | reasoning effort for the model under test (`low`/`high`/`max` for the deepseek-v4-flash seed) |
-| `EVAL_JUDGE_MODEL` | `openai/gpt-5.6-luna` | model id used by judge metrics (groundedness) |
+| `EVAL_JUDGE_MODEL` | `openai/gpt-6-luna` | model id used by judge metrics (groundedness) |
 | `EVAL_JUDGE_EFFORT` | `high` | reasoning effort for judge metrics |
 | `EVAL_CONCURRENCY` | `2` | cases per suite run in parallel |
 | `EVAL_TIMEOUT_MS` | `120000` | per-case timeout; a timed-out case is marked invalid |

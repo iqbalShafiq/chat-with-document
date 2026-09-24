@@ -6,7 +6,7 @@ export const evalConfig = {
     return process.env.EVAL_MODEL_EFFORT?.trim() || "max";
   },
   get judgeModel() {
-    return process.env.EVAL_JUDGE_MODEL?.trim() || "openai/gpt-5.6-luna";
+    return process.env.EVAL_JUDGE_MODEL?.trim() || "openai/gpt-6-luna";
   },
   get judgeEffort() {
     return process.env.EVAL_JUDGE_EFFORT?.trim() || "high";
