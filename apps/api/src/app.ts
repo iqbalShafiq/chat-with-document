@@ -10,6 +10,8 @@ import { imagesRouter } from "./modules/images/router.js";
 import { modelsRouter } from "./modules/models/router.js";
 import { mcpServersRouter } from "./modules/mcp-servers/router.js";
 import { reportsRouter } from "./modules/reports/router.js";
+import { schedulesRouter } from "./modules/schedules/router.js";
+import { tasksRouter } from "./modules/tasks/router.js";
 import { webBundlesRouter } from "./modules/web-bundles/router.js";
 import { profilingRouter } from "./modules/profiling/router.js";
 import { projectsRouter } from "./modules/projects/router.js";
@@ -25,6 +27,8 @@ export function createApp() {
     .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
     .route("/api/artifacts", artifactsRouter)
     .route("/api/reports", reportsRouter)
+    .route("/api/tasks", tasksRouter)
+    .route("/api/schedules", schedulesRouter)
     .route("/api/charts", chartsRouter)
     .route("/api/web-bundles", webBundlesRouter)
     .route("/api/chat", chatRouter)
