@@ -339,6 +339,17 @@ body {
   backdrop-filter: blur(24px) saturate(1.2);
 }
 
+/*
+  Floating menus/panels sit over dense content (chat text). Wherever the
+  compositor cannot render backdrop blur, the translucent base alone lets
+  text bleed through unreadably — so menus carry a denser base. Where blur
+  works, the look stays frosted glass.
+*/
+[role="menu"].glass-popover,
+[role="dialog"].glass-popover {
+  background: rgb(8 8 8 / 0.94);
+}
+
 .glass-field {
   transition:
     border-color 200ms var(--ease-out-premium),
