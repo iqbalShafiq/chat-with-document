@@ -51,6 +51,8 @@ export function ArtifactPicker({
   onSelect,
   autoLoad = true,
   candidates,
+  filter,
+  emptyHint,
 }: {
   sessionId: string;
   artifactType: ArtifactType;
@@ -59,6 +61,10 @@ export function ArtifactPicker({
   autoLoad?: boolean;
   /** Explicit candidate ids (e.g. from agent clarification choices). */
   candidates?: string[];
+  /** Client-side narrowing (e.g. reports only inside documents). */
+  filter?: (item: ArtifactListItem) => boolean;
+  /** Override for the empty-scope message. */
+  emptyHint?: string;
 }) {
   const [items, setItems] = useState<ArtifactListItem[] | null>(autoLoad || candidates ? null : []);
   const [error, setError] = useState<string | null>(null);
@@ -103,20 +109,22 @@ export function ArtifactPicker({
       </div>
     );
   }
-  if (items.length === 0) {
+  const shown = items === null ? null : filter ? items.filter(filter) : items;
+  if (shown !== null && shown.length === 0) {
     return (
       <p className="text-[11px] text-text-faint">
-        {describeEmptyArtifacts({
-          artifactType,
-          offeredCount: candidates?.length ?? 0,
-          loadedCount: 0,
-        })}
+        {emptyHint ??
+          describeEmptyArtifacts({
+            artifactType,
+            offeredCount: candidates?.length ?? 0,
+            loadedCount: 0,
+          })}
       </p>
     );
   }
   return (
     <div role="radiogroup" aria-label={`Choose ${artifactType}`} className="flex flex-col gap-1.5">
-      {items.map((item) => {
+      {(shown ?? []).map((item) => {
         const id = item.id ?? item.sessionId ?? "";
         const selected = value === id;
         const label =

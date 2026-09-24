@@ -221,12 +221,17 @@ export function ComposerAttachControl({
         size="md"
         heightMode="viewport"
       >
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4">
+            <div className="flex flex-col gap-3">
         {pinType ? (
           <ArtifactPicker
             sessionId={sessionId}
             artifactType={pinType}
             value={null}
             candidates={undefined}
+            filter={pinType === "document" ? (item) => item.kind === "report" : undefined}
+            emptyHint="No PDF reports in this scope yet — ask the agent to build one."
             onSelect={(id) => {
               void getArtifact({ id, type: pinType, sessionId }).then(
                 (artifact) => {
@@ -240,6 +245,9 @@ export function ComposerAttachControl({
             }}
           />
         ) : null}
+            </div>
+          </div>
+        </div>
       </DialogShell>
     </>
   );

@@ -35,6 +35,7 @@ export type ArtifactListItem = {
   filename?: string;
   caption?: string;
   prompt?: string;
+  kind?: string;
   projectId?: string | null;
   createdAt?: string;
   updatedAt?: string;
