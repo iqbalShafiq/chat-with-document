@@ -255,10 +255,9 @@ export function FeaturesPopover({
 
   return (
     <div className="relative inline-flex">
+      {anyEnabled ? (
       <div
-        className={`glass inline-flex h-9 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          anyEnabled ? "" : ""
-        }`}
+        className="glass inline-flex h-9 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <button
           ref={buttonRef}
@@ -273,14 +272,11 @@ export function FeaturesPopover({
           aria-expanded={open}
           disabled={!anyAvailable}
           onClick={toggle}
-          className={`inline-flex size-9 shrink-0 cursor-pointer items-center justify-center transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
-            anyEnabled ? "rounded-l-xl text-accent" : "rounded-xl text-text-muted"
-          }`}
+          className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-l-xl text-accent transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
         >
           <Plus className="size-4" strokeWidth={1.75} />
         </button>
 
-        {anyEnabled ? (
           <>
             <span
               className="my-1.5 w-px shrink-0 self-stretch bg-white/[0.1]"
@@ -425,8 +421,26 @@ export function FeaturesPopover({
               ) : null}
             </span>
           </>
-        ) : null}
       </div>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label="Additional features"
+          title={
+            anyAvailable
+              ? "Additional features"
+              : "No additional features available on this server"
+          }
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          disabled={!anyAvailable}
+          onClick={toggle}
+          className="glass glass-interactive inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+        >
+          <Plus className="size-4" strokeWidth={1.75} />
+        </button>
+      )}
 
       {open && menuPos
         ? createPortal(
