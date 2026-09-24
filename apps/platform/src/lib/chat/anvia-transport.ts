@@ -23,6 +23,8 @@ export type ChatRequestMetadata = {
   webSearchEnabled: boolean;
   imageGenerationEnabled: boolean;
   deepResearchEnabled: boolean;
+  skillIds: readonly string[];
+  mcpServerIds: readonly string[];
   imageGenSettings: ImageGenSettings | null;
 };
 
@@ -102,6 +104,8 @@ export function assertChatRequestMetadata(
     "webSearchEnabled",
     "imageGenerationEnabled",
     "deepResearchEnabled",
+    "skillIds",
+    "mcpServerIds",
     "imageGenSettings",
   ])) {
     throw new Error("Chat request metadata is invalid.");
@@ -121,11 +125,22 @@ export function assertChatRequestMetadata(
     typeof value.webSearchEnabled !== "boolean" ||
     typeof value.imageGenerationEnabled !== "boolean" ||
     typeof value.deepResearchEnabled !== "boolean" ||
+    !validIdList(value.skillIds, 20) ||
+    !validIdList(value.mcpServerIds, 5) ||
     (value.imageGenSettings !== null && !validImageSettings(value.imageGenSettings)) ||
     (!value.imageGenerationEnabled && value.imageGenSettings !== null)
   ) {
     throw new Error("Chat request metadata is invalid.");
   }
+}
+
+function validIdList(value: unknown, max: number): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= max &&
+    new Set(value).size === value.length &&
+    value.every((id) => nonBlankString(id, MAX_IDENTIFIER_LENGTH))
+  );
 }
 
 /** Replace persisted v3 metadata without copying any stale/unknown fields. */

@@ -6,6 +6,8 @@ import {
   DERIVED_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
 } from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
 import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
@@ -61,7 +63,7 @@ const RECIPE_MODEL = "openai/gpt-5.6-luna";
 
 function boundRecipe() {
   const value = {
-    version: 2,
+    version: 3,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: RECIPE_SESSION, userId: RECIPE_USER, projectId: null },
     model: { id: RECIPE_MODEL, reasoningEffort: null },
@@ -120,6 +122,8 @@ function boundRecipe() {
     ...DERIVED_TOOL_DEFINITIONS,
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
   ];
   const staticContext = createNativeStaticContext({
     baseInstructions: BASE_INSTRUCTIONS,

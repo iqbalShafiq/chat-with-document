@@ -72,7 +72,7 @@ function staticContext() {
 
 function recipeWithContext(context = staticContext()) {
   return parseChatAgentRecipe({
-    version: 2,
+    version: 3,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
     model: { id: MODEL_ID, reasoningEffort: "max" },

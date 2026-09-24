@@ -54,6 +54,7 @@ import {
   validateSanitizedMemoryStore,
 } from "./modules/chat/memory-sanitizer.js";
 import { closeContext7Mcp } from "./lib/context7-server.js";
+import { resolveCredentialsKey } from "./modules/mcp-servers/credentials.js";
 import { closeRedis } from "./lib/redis.js";
 import { getActiveRunRegistry } from "./modules/chat/run-worker.js";
 import { createWorkerShutdownCoordinator } from "./worker-lifecycle.js";
@@ -112,6 +113,9 @@ async function embedWithBudget(
 }
 
 console.log("[worker] boot");
+
+// Fail fast in production when the MCP credential vault has no key.
+resolveCredentialsKey();
 
 const TABULAR_MIME_TYPES = new Set([
   "text/csv",

@@ -15,6 +15,8 @@ import {
   PROFILE_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
 } from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
@@ -23,7 +25,7 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 2,
+    version: 3,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
     model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
@@ -107,6 +109,8 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...(capabilities.imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
     ...(!capabilities.modelAcceptsImage
       ? [VIEW_IMAGE_TOOL_DEFINITIONS.description]
       : []),
@@ -340,6 +344,12 @@ describe("run recipe reconstruction capability boundary", () => {
         imageGenerationConfig: () => null,
         profilingEnabled: () => false,
         deepResearchLimits: () => ({ maxTurns: 8, maxSearches: 12, maxDurationMs: 360_000 }),
+        resolveUserEnhancements: async () => ({
+          userSkills: [],
+          userMcp: [],
+          droppedSkillIds: [],
+          droppedMcpServerIds: [],
+        }),
         context7Requested: () => {
           context7Reads += 1;
           return false;

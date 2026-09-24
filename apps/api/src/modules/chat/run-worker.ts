@@ -589,6 +589,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let policyConsumed = false;
     let resumeOverrideTaken = false;
     let interactionPersistenceFailed = false;
+    let runCleanup: (() => Promise<void>) | null = null;
     try {
       startOwnerWal();
       monitorStop();
@@ -665,6 +666,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       }
       const runInput = reconstructed.value;
       waitRegistry = runInput.waitRegistry;
+      runCleanup = runInput.cleanup ?? null;
       if (cancelled) cancelOwnedWaitJobs(cancelReason);
       if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
         throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
@@ -840,6 +842,9 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       throw safeError(error);
     } finally {
       stopOwnerWal();
+      await runCleanup?.().catch((error) => {
+        console.error("[chat-run] user enhancement cleanup failed", error);
+      });
       cancelOwnedWaitJobs(cancelled ? cancelReason : "run ended");
       stopMonitorDone = true;
       if (stopTimer) clearTimeout(stopTimer);

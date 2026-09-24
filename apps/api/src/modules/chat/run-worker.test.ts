@@ -23,7 +23,7 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = {
-  version: 2 as const,
+  version: 3 as const,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: "deepseek/deepseek-v4-flash-0731", reasoningEffort: "max" as const },
@@ -53,6 +53,8 @@ const recipe = {
     imageGenerationEnabled: false,
     deepResearchEnabled: false,
   },
+  userSkills: [],
+  userMcp: [],
   imageGenSettings: null,
   budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
   documents: { ids: [], catalog: [] },
@@ -303,6 +305,27 @@ describe("Anvia v1 chat worker", () => {
       abortSignal: expect.any(AbortSignal),
     });
     expect(h.streamCalls[0]).not.toHaveProperty("continuation");
+  });
+
+  it("runs reconstructed cleanup after the run ends", async () => {
+    const stream = fakeStream([responseEvent()]);
+    const cleanup = vi.fn(async () => undefined);
+    const h = createDependencies(stream, {
+      reconstruct: (async () => ({
+        agent: {
+          stream() {
+            return stream;
+          },
+        },
+        projectId: null,
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        waitRegistry: { abortAll() {} },
+        cleanup,
+      })) as never,
+    });
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("resumes with only the official continuation and response shape", async () => {

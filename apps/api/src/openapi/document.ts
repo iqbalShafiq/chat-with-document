@@ -5,9 +5,11 @@ import { chatPaths } from "./paths/chat.js";
 import { documentsPaths } from "./paths/documents.js";
 import { healthPaths } from "./paths/health.js";
 import { imagesPaths } from "./paths/images.js";
+import { mcpServersPaths } from "./paths/mcp-servers.js";
 import { modelsPaths } from "./paths/models.js";
 import { profilingPaths } from "./paths/profiling.js";
 import { projectsPaths } from "./paths/projects.js";
+import { skillsPaths } from "./paths/skills.js";
 import { usagePaths } from "./paths/usage.js";
 
 export const OPENAPI_SPEC_VERSION = "1.1.0";
@@ -97,8 +99,10 @@ export function buildOpenApiDocument(input?: {
       { name: "Documents", description: "Upload, library, attach, preview, delete." },
       { name: "Images", description: "Generated and uploaded images + session pins." },
       { name: "Models", description: "Text and image model catalog." },
+      { name: "McpServers", description: "User-owned MCP server connections." },
       { name: "Projects", description: "Project CRUD and last-opened." },
       { name: "Profiling", description: "User / project personalization profiles." },
+      { name: "Skills", description: "User-owned agent skills (SKILL.md)." },
       { name: "Usage", description: "Token and storage aggregates." },
     ],
     paths: {
@@ -108,8 +112,10 @@ export function buildOpenApiDocument(input?: {
       ...documentsPaths,
       ...imagesPaths,
       ...modelsPaths,
+      ...mcpServersPaths,
       ...projectsPaths,
       ...profilingPaths,
+      ...skillsPaths,
       ...usagePaths,
     },
     components: openApiComponents,

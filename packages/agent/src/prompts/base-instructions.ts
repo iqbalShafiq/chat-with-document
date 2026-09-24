@@ -1,4 +1,5 @@
 import { CITATION_INSTRUCTIONS } from "./citation-instructions.js";
+import { SKILL_MANAGEMENT_INSTRUCTION } from "./skill-management-instructions.js";
 
 export const BASE_INSTRUCTIONS = `
 You are a helpful assistant that can answer questions and help with tasks.
@@ -13,4 +14,6 @@ When the user asks about uploaded documents, prefer grounded answers from docume
 Do not invent document content.
 
 ${CITATION_INSTRUCTIONS}
+
+${SKILL_MANAGEMENT_INSTRUCTION}
 `;

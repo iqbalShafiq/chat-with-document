@@ -1345,11 +1345,21 @@ export const chatPaths = {
               "deepResearchAvailable",
               "imageGenerationAvailable",
               "context7Configured",
+              "userSkillsCount",
+              "userMcpCount",
             ],
             properties: {
               webSearchAvailable: { type: "boolean" },
               deepResearchAvailable: { type: "boolean" },
               imageGenerationAvailable: { type: "boolean" },
+              userSkillsCount: {
+                type: "integer",
+                description: "Owned skills (count only, no content).",
+              },
+              userMcpCount: {
+                type: "integer",
+                description: "Configured MCP servers (count only, no urls).",
+              },
               context7Configured: {
                 type: "boolean",
                 description:
@@ -1365,6 +1375,8 @@ export const chatPaths = {
                 deepResearchAvailable: true,
                 imageGenerationAvailable: true,
                 context7Configured: false,
+                userSkillsCount: 0,
+                userMcpCount: 0,
               },
             },
           },

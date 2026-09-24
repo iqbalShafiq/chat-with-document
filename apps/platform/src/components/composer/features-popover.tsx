@@ -1,13 +1,20 @@
-import { Globe, ImagePlus, Plus, Search } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Brain, Globe, ImagePlus, Plug, Plus, Search, Settings2 } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ImageGenParamsEditor } from "#/components/composer/image-gen-params-editor";
+import { CountBadge } from "#/components/ui/count-badge";
+import { Switch } from "#/components/ui/switch";
 import { HoverCard } from "#/components/ui/hover-card";
 import {
   fetchImageModels,
   type ImageGenSettings,
   type ImageModelCatalogItem,
 } from "#/lib/api";
+
+export type FeatureCountSummary = {
+  active: number;
+  total: number;
+};
 
 type FeaturesPopoverProps = {
   webSearchEnabled: boolean;
@@ -21,12 +28,77 @@ type FeaturesPopoverProps = {
   imageGenerationAvailable: boolean;
   settings: ImageGenSettings;
   onSettingsChange: (settings: ImageGenSettings) => void;
+  /** Null while the catalog is still loading. */
+  skillsSummary?: FeatureCountSummary | null;
+  mcpSummary?: FeatureCountSummary | null;
+  skillsPerChatEnabled?: boolean;
+  mcpPerChatEnabled?: boolean;
+  onSkillsToggle?: (enabled: boolean) => void;
+  onMcpToggle?: (enabled: boolean) => void;
+  onOpenSkills?: () => void;
+  onOpenMcp?: () => void;
 };
 
 type ImageModelsState =
   | { status: "loading"; items: [] }
   | { status: "error"; items: [] }
   | { status: "success"; items: ImageModelCatalogItem[] };
+
+/**
+ * Switch row with a count badge and a manage entry point. The switch flips
+ * per-chat state; the gear opens the full management modal.
+ */
+function EnhancementRow({
+  icon,
+  label,
+  activeLabel,
+  inactiveLabel,
+  enabled,
+  onToggle,
+  toggleDisabled,
+  badge,
+  onOpen,
+  openLabel,
+}: {
+  icon: ReactNode;
+  label: string;
+  activeLabel: string;
+  inactiveLabel: string;
+  enabled: boolean;
+  onToggle: () => void;
+  toggleDisabled: boolean;
+  badge: ReactNode;
+  onOpen: () => void;
+  openLabel: string;
+}) {
+  return (
+    <div className="group flex w-full items-center gap-1 rounded-lg transition duration-150 hover:bg-white/[0.07] focus-within:bg-white/[0.07]">
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2">
+        <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-text">
+          {icon}
+          {label}
+          {badge}
+        </span>
+        <Switch
+          checked={enabled}
+          onToggle={onToggle}
+          label={label}
+          title={enabled ? activeLabel : inactiveLabel}
+          disabled={toggleDisabled}
+        />
+      </div>
+      <button
+        type="button"
+        aria-label={openLabel}
+        title={openLabel}
+        onClick={onOpen}
+        className="mr-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+      >
+        <Settings2 className="size-4" strokeWidth={1.75} />
+      </button>
+    </div>
+  );
+}
 
 /**
  * Plus-button popover hosting the web search + image generator toggles and
@@ -52,6 +124,14 @@ export function FeaturesPopover({
   imageGenerationAvailable,
   settings,
   onSettingsChange,
+  skillsSummary = null,
+  mcpSummary = null,
+  skillsPerChatEnabled = false,
+  mcpPerChatEnabled = false,
+  onSkillsToggle = () => {},
+  onMcpToggle = () => {},
+  onOpenSkills = () => {},
+  onOpenMcp = () => {},
 }: FeaturesPopoverProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -69,11 +149,15 @@ export function FeaturesPopover({
   const anyAvailable =
     webSearchAvailable ||
     deepResearchAvailable ||
-    imageGenerationAvailable;
+    imageGenerationAvailable ||
+    skillsSummary !== null ||
+    mcpSummary !== null;
   const anyEnabled =
     webSearchEnabled ||
     deepResearchEnabled ||
-    imageGenerationEnabled;
+    imageGenerationEnabled ||
+    skillsPerChatEnabled ||
+    mcpPerChatEnabled;
 
   const loadImageModels = () => {
     setModels({ status: "loading", items: [] });
@@ -291,6 +375,54 @@ export function FeaturesPopover({
                   </button>
                 </HoverCard>
               ) : null}
+              {skillsPerChatEnabled ? (
+                <HoverCard
+                  disabled={open}
+                  variant="tooltip"
+                  content={
+                    skillsSummary
+                      ? `${skillsSummary.active} of ${skillsSummary.total} skills active for this chat`
+                      : "Skills on for this chat"
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label="Open skills settings"
+                    title="Skills on"
+                    onClick={openFromIcon}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                  >
+                    <Brain
+                      className="size-4 text-accent"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </HoverCard>
+              ) : null}
+              {mcpPerChatEnabled ? (
+                <HoverCard
+                  disabled={open}
+                  variant="tooltip"
+                  content={
+                    mcpSummary
+                      ? `${mcpSummary.active} of ${mcpSummary.total} MCP servers active for this chat`
+                      : "MCP on for this chat"
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label="Open MCP settings"
+                    title="MCP on"
+                    onClick={openFromIcon}
+                    className="inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition duration-150 hover:bg-white/12 hover:text-text active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+                  >
+                    <Plug
+                      className="size-4 text-accent"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </HoverCard>
+              ) : null}
             </span>
           </>
         ) : null}
@@ -341,7 +473,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         webSearchEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
@@ -386,7 +518,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         deepResearchEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
@@ -435,7 +567,7 @@ export function FeaturesPopover({
                     aria-hidden
                   >
                     <span
-                      className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                      className={`absolute left-0 top-0.5 size-3 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                         imageGenerationEnabled
                           ? "translate-x-3.5"
                           : "translate-x-0.5"
@@ -443,6 +575,74 @@ export function FeaturesPopover({
                     />
                   </span>
                 </button>
+
+                {skillsSummary !== null ? (
+                  <EnhancementRow
+                    icon={
+                      <Brain
+                        className={`size-4 shrink-0 transition-colors duration-200 ${
+                          skillsPerChatEnabled
+                            ? "text-accent"
+                            : "text-text-muted group-hover:text-text"
+                        }`}
+                        strokeWidth={1.75}
+                      />
+                    }
+                    label="Skills"
+                    activeLabel="Skills on — the agent follows your enabled skills"
+                    inactiveLabel={
+                      skillsSummary.total === 0
+                        ? "No skills yet — open Skills to write the first one"
+                        : "Skills off for this chat"
+                    }
+                    enabled={skillsPerChatEnabled}
+                    onToggle={() => onSkillsToggle(!skillsPerChatEnabled)}
+                    toggleDisabled={skillsSummary.total === 0}
+                    badge={
+                      <CountBadge
+                        count={skillsSummary.active}
+                        label="skills active"
+                        tone={skillsPerChatEnabled ? "accent" : "neutral"}
+                      />
+                    }
+                    onOpen={onOpenSkills}
+                    openLabel="Manage skills"
+                  />
+                ) : null}
+
+                {mcpSummary !== null ? (
+                  <EnhancementRow
+                    icon={
+                      <Plug
+                        className={`size-4 shrink-0 transition-colors duration-200 ${
+                          mcpPerChatEnabled
+                            ? "text-accent"
+                            : "text-text-muted group-hover:text-text"
+                        }`}
+                        strokeWidth={1.75}
+                      />
+                    }
+                    label="MCP"
+                    activeLabel="MCP on — the agent can use your connected servers"
+                    inactiveLabel={
+                      mcpSummary.total === 0
+                        ? "No servers yet — open MCP to connect the first one"
+                        : "MCP off for this chat"
+                    }
+                    enabled={mcpPerChatEnabled}
+                    onToggle={() => onMcpToggle(!mcpPerChatEnabled)}
+                    toggleDisabled={mcpSummary.total === 0}
+                    badge={
+                      <CountBadge
+                        count={mcpSummary.active}
+                        label="MCP servers active"
+                        tone={mcpPerChatEnabled ? "accent" : "neutral"}
+                      />
+                    }
+                    onOpen={onOpenMcp}
+                    openLabel="Manage MCP servers"
+                  />
+                ) : null}
               </div>
 
               {imageGenerationEnabled ? (

@@ -119,18 +119,22 @@ export function Select({
       const gap = 6;
       // Match max-h-[16rem] on the list — used only to pick open direction.
       const estimatedListH = Math.min(options.length * 44 + 8, 16 * 16);
-      const spaceBelow = window.innerHeight - rect.bottom - gap;
-      const spaceAbove = rect.top - gap;
+      // Inside a dialog the list is clipped by its overflow-hidden box, so
+      // measure space against the dialog — not the viewport.
+      const targetRect = dialogPortal?.getBoundingClientRect() ?? null;
+      const containerBottom = targetRect ? targetRect.bottom : window.innerHeight;
+      const containerRight = targetRect ? targetRect.right : window.innerWidth;
+      const spaceBelow = containerBottom - rect.bottom - gap;
+      const spaceAbove = rect.top - (targetRect ? targetRect.top : 0) - gap;
       const openUp =
         spaceBelow < Math.min(estimatedListH, 160) && spaceAbove > spaceBelow;
 
       const width = Math.max(rect.width, 200);
-      const maxLeft = window.innerWidth - width - 8;
+      const maxLeft = containerRight - width - 8;
       const leftViewport = Math.max(8, Math.min(rect.left, maxLeft));
 
-      if (dialogPortal) {
+      if (dialogPortal && targetRect) {
         // Coords relative to the dialog box (list is portaled into it).
-        const targetRect = dialogPortal.getBoundingClientRect();
         setListPos({
           top: openUp
             ? rect.top - gap - targetRect.top
@@ -232,7 +236,11 @@ export function Select({
     open && listPos && portalTarget
       ? createPortal(
           <div
-            className="fixed z-[90]"
+            // Inside a native <dialog> (top layer) a body-portaled menu hides
+            // behind the modal, so the list lives in the dialog instead — and
+            // must be `absolute` (dialog box is the containing block), not
+            // `fixed` (viewport), or dialog-relative coords land off-target.
+            className={`${dialogPortal ? "absolute" : "fixed"} z-[90]`}
             style={{
               top: listPos.top,
               left: listPos.left,

@@ -40,6 +40,8 @@ export const ChatRequestMetadataSchema = z
     webSearchEnabled: z.boolean(),
     imageGenerationEnabled: z.boolean(),
     deepResearchEnabled: z.boolean(),
+    skillIds: z.array(boundedIdentifier).max(20).default([]),
+    mcpServerIds: z.array(boundedIdentifier).max(5).default([]),
     imageGenSettings: chatAgentImageGenSettingsSchema.nullable(),
   })
   .strict();

@@ -7,7 +7,7 @@ const USER_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const SESSION_ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 const STREAM_ID = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
 const metadata = { sessionId: SESSION_ID, documentIds: [], modelId: "deepseek/deepseek-v4-flash-0731", reasoningEffort: "max", webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false, imageGenSettings: null };
-const recipe = { model: { id: metadata.modelId, reasoningEffort: metadata.reasoningEffort }, documents: { ids: [] }, features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false }, imageGenSettings: null };
+const recipe = { model: { id: metadata.modelId, reasoningEffort: metadata.reasoningEffort }, documents: { ids: [] }, features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false }, userSkills: [], userMcp: [], imageGenSettings: null };
 const interaction = { id: "interaction-1", userId: USER_ID, sessionId: SESSION_ID, state: "pending", fingerprint: "f".repeat(64), recipe, continuation: { interaction: { id: "interaction-1", type: "tool-approval", toolName: "web_search" } }, request: { id: "interaction-1", type: "tool-approval", toolName: "web_search" } };
 
 vi.mock("@anvia/server", () => ({ resumeClientStreamResponse: vi.fn(() => new Response("stream", { status: 200 })) }));
@@ -49,7 +49,7 @@ const questionBody = () => ({
 });
 
 const fullRecipe = {
-  version: 2 as const,
+  version: 3 as const,
   agentId: "chat-agent" as const,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: metadata.modelId, reasoningEffort: metadata.reasoningEffort },
@@ -75,6 +75,8 @@ const fullRecipe = {
     staticContextTokens: 0,
   },
   features: { webSearchEnabled: false, imageGenerationEnabled: false, deepResearchEnabled: false },
+  userSkills: [],
+  userMcp: [],
   imageGenSettings: null,
   budgets: { maxTurns: 20, deepResearchMaxTurns: 8, deepResearchMaxSearches: 12, deepResearchMaxDurationMs: 360_000 },
   documents: { ids: [], catalog: [] },

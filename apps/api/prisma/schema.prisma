@@ -474,3 +474,49 @@ model SessionContextSnippet {
   @@index([claimId, claimedAt])
   @@map("session_context_snippet")
 }
+
+// ─── User skills (self-serve agent procedures; single SKILL.md body) ────────
+
+model UserSkill {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String
+  bodyMd      String   @db.Text
+  isEnabled   Boolean  @default(true)
+  status      String   @default("active")
+  issuesJson  Json?
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId, updatedAt])
+  @@map("user_skill")
+}
+
+// ─── User MCP servers (self-serve streamableHttp connections) ───────────────
+
+model UserMcpServer {
+  id              String    @id @default(cuid())
+  userId          String
+  name            String
+  url             String
+  authType        String    @default("none")
+  credentialsRef  String    @default("")
+  /// Encrypted custom headers JSON [{name,value}] (may hold secrets).
+  headersRef      String    @default("")
+  allowedToolsJson Json     @default("[]")
+  /// Last successful test-connection tool definitions (frozen into the recipe, CONTEXT7_TOOL_DEFINITIONS pattern).
+  toolsJson       Json      @default("[]")
+  isEnabled       Boolean   @default(true)
+  status          String    @default("untested")
+  lastCheckedAt   DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId, updatedAt])
+  @@map("user_mcp_server")
+}

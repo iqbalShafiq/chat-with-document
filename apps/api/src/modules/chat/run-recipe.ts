@@ -1,8 +1,9 @@
 import z from "zod";
 import { imageGenSettingsSchema } from "./image-gen-settings.js";
+import { SKILL_NAME_RE } from "../skills/service.js";
 
 export const CHAT_AGENT_ID = "chat-agent" as const;
-export const CHAT_AGENT_RECIPE_VERSION = 2 as const;
+export const CHAT_AGENT_RECIPE_VERSION = 3 as const;
 
 /**
  * Recipes cross the BullMQ/Redis boundary. Keep every string bounded and
@@ -172,6 +173,35 @@ export const chatAgentRecipeSchema = z
         deepResearchEnabled: z.boolean(),
       })
       .strict(),
+    userSkills: z
+      .array(
+        z
+          .object({
+            id,
+            // Same slug rule as the service layer: the worker materializes
+            // one directory per name, so traversal names are rejected here.
+            name: bounded(64).regex(SKILL_NAME_RE, "must be a lowercase-hyphen slug"),
+            description: bounded(1024),
+            bodyMd: instructionText,
+          })
+          .strict(),
+      )
+      .max(20)
+      .default([]),
+    userMcp: z
+      .array(
+        z
+          .object({
+            id,
+            name: bounded(64),
+            url: bounded(512),
+            allowedTools: z.array(bounded(128)).max(64),
+            toolDefinitions: z.array(staticToolDefinitionSchema).max(64),
+          })
+          .strict(),
+      )
+      .max(5)
+      .default([]),
     imageGenSettings: chatAgentImageGenSettingsSchema.nullable(),
     budgets: z
       .object({
@@ -268,7 +298,19 @@ export async function commitChatAgentRecipeClaim(
 
 /** Parse untrusted queue/storage input without stripping unknown fields. */
 export function parseChatAgentRecipe(value: unknown): ChatAgentRecipe {
+  assertSupportedRecipeVersion(value);
   return chatAgentRecipeSchema.parse(value);
+}
+
+/** Stale queued jobs deserve a readable rejection, not a literal mismatch. */
+function assertSupportedRecipeVersion(value: unknown): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+  const version = (value as { version?: unknown }).version;
+  if (version !== undefined && version !== CHAT_AGENT_RECIPE_VERSION) {
+    throw new Error(
+      `chat recipe version ${JSON.stringify(version)} is no longer supported (current: ${CHAT_AGENT_RECIPE_VERSION})`,
+    );
+  }
 }
 
 /** Validate already-resolved inputs at the persistence boundary. */

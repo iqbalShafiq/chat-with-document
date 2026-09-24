@@ -8,7 +8,7 @@ import {
 } from "./run-recipe.js";
 
 const fixture = {
-  version: 2 as const,
+  version: 3 as const,
   agentId: CHAT_AGENT_ID,
   identity: {
     sessionId: "session-1",
@@ -42,6 +42,29 @@ const fixture = {
     imageGenerationEnabled: false,
     deepResearchEnabled: true,
   },
+  userSkills: [
+    {
+      id: "skill-1",
+      name: "brief",
+      description: "Write a morning brief",
+      bodyMd: "---\nname: brief\ndescription: Write a morning brief\n---\nDo the brief.",
+    },
+  ],
+  userMcp: [
+    {
+      id: "mcp-1",
+      name: "docs",
+      url: "https://mcp.example.com/mcp",
+      allowedTools: ["search_docs"],
+      toolDefinitions: [
+        {
+          name: "search_docs",
+          description: "Search docs",
+          parameters: { type: "object" },
+        },
+      ],
+    },
+  ],
   imageGenSettings: {
     modelId: "openai/gpt-image-1",
     aspectRatio: "1:1",
@@ -107,8 +130,14 @@ describe("ChatAgentRecipe", () => {
     expect(first).toEqual(fixture);
   });
 
+  it("rejects a stale recipe version with a readable error", () => {
+    expect(() => parseChatAgentRecipe({ ...fixture, version: 2 })).toThrow(
+      "no longer supported",
+    );
+  });
+
   it("rejects invalid identity, version, agent id, unknown fields, and secrets", () => {
-    expect(() => parseChatAgentRecipe({ ...fixture, version: 3 })).toThrow();
+    expect(() => parseChatAgentRecipe({ ...fixture, version: 4 })).toThrow();
     expect(() => parseChatAgentRecipe({ ...fixture, agentId: "my-agent" })).toThrow();
     expect(() =>
       parseChatAgentRecipe({ ...fixture, apiKey: "secret" }),

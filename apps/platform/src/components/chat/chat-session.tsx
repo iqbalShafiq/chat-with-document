@@ -152,6 +152,17 @@ import {
   readSelectedModel,
   readSelectedReasoningEffort,
 } from "#/lib/chat-preferences";
+import { useUserSkills } from "#/hooks/use-user-skills";
+import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
+import { SkillsModal } from "#/components/skills/skills-modal";
+import { McpModal } from "#/components/mcp/mcp-modal";
+import {
+  MCP_SELECTION_KEY,
+  SKILLS_SELECTION_KEY,
+  intersectWithCatalog,
+  loadIdSelection,
+  saveIdSelection,
+} from "#/lib/chat/user-enhancement-selection";
 import {
   modelById,
   resolveReasoningFallback,
@@ -205,6 +216,15 @@ export type InitialComposerDraft = {
   text: string;
   attachments?: UIAttachment[];
 };
+
+function hasStoredSelection(key: string): boolean {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return window.localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
 
 /** Feature toggles restored on mount (share fork handoff). */
 export type InitialFeatureFlags = {
@@ -425,7 +445,121 @@ export function ChatSession({
   const [imageGenSettings, setImageGenSettings] = useState<ImageGenSettings>(() =>
     readImageGenSettings(),
   );
+  /**
+   * Per-chat user-enhancement selection. Null until the catalog loads, then
+   * the stored selection (or every enabled item when never stored).
+   */
+  const [activeSkillIds, setActiveSkillIds] = useState<string[] | null>(null);
+  const [activeMcpIds, setActiveMcpIds] = useState<string[] | null>(null);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null);
+  const userSkillsCatalog = useUserSkills(true);
+  const userMcpCatalog = useUserMcpServers(true);
+
+  const enabledSkillIds = useMemo(
+    () =>
+      (userSkillsCatalog.data ?? [])
+        .filter((skill) => skill.isEnabled && skill.status === "active")
+        .map((skill) => skill.id),
+    [userSkillsCatalog.data],
+  );
+  const enabledMcpIds = useMemo(
+    () =>
+      (userMcpCatalog.data ?? [])
+        .filter((server) => server.isEnabled && server.status !== "error")
+        .map((server) => server.id),
+    [userMcpCatalog.data],
+  );
+
+  // First catalog load decides the per-chat default: stored selection when
+  // the user chose before, every enabled item otherwise. Later catalog
+  // refreshes drop ids that no longer exist and adopt newly enabled ids
+  // (a fresh skill/server starts on, matching its global default).
+  const prevEnabledSkillsRef = useRef<string[]>([]);
+  const prevEnabledMcpRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (!userSkillsCatalog.data || activeSkillIds !== null) return;
+    prevEnabledSkillsRef.current = enabledSkillIds;
+    setActiveSkillIds(
+      hasStoredSelection(SKILLS_SELECTION_KEY)
+        ? intersectWithCatalog(loadIdSelection(SKILLS_SELECTION_KEY), enabledSkillIds)
+        : [...enabledSkillIds],
+    );
+  }, [userSkillsCatalog.data, activeSkillIds, enabledSkillIds]);
+  useEffect(() => {
+    if (!userMcpCatalog.data || activeMcpIds !== null) return;
+    prevEnabledMcpRef.current = enabledMcpIds;
+    setActiveMcpIds(
+      hasStoredSelection(MCP_SELECTION_KEY)
+        ? intersectWithCatalog(loadIdSelection(MCP_SELECTION_KEY), enabledMcpIds)
+        : [...enabledMcpIds],
+    );
+  }, [userMcpCatalog.data, activeMcpIds, enabledMcpIds]);
+  useEffect(() => {
+    if (activeSkillIds === null) return;
+    const prev = prevEnabledSkillsRef.current;
+    prevEnabledSkillsRef.current = enabledSkillIds;
+    const kept = activeSkillIds.filter((id) => enabledSkillIds.includes(id));
+    const added = enabledSkillIds.filter(
+      (id) => !prev.includes(id) && !kept.includes(id),
+    );
+    const next = [...kept, ...added];
+    if (next.length !== activeSkillIds.length || next.some((id, index) => id !== activeSkillIds[index])) {
+      setActiveSkillIds(next);
+    }
+  }, [activeSkillIds, enabledSkillIds]);
+  useEffect(() => {
+    if (activeMcpIds === null) return;
+    const prev = prevEnabledMcpRef.current;
+    prevEnabledMcpRef.current = enabledMcpIds;
+    const kept = activeMcpIds.filter((id) => enabledMcpIds.includes(id));
+    const added = enabledMcpIds.filter(
+      (id) => !prev.includes(id) && !kept.includes(id),
+    );
+    const next = [...kept, ...added];
+    if (next.length !== activeMcpIds.length || next.some((id, index) => id !== activeMcpIds[index])) {
+      setActiveMcpIds(next);
+    }
+  }, [activeMcpIds, enabledMcpIds]);
+
+  const skillsSummary = useMemo(
+    () =>
+      userSkillsCatalog.data === null
+        ? null
+        : {
+            active: intersectWithCatalog(activeSkillIds ?? [], enabledSkillIds).length,
+            total: enabledSkillIds.length,
+          },
+    [userSkillsCatalog.data, activeSkillIds, enabledSkillIds],
+  );
+  const mcpSummary = useMemo(
+    () =>
+      userMcpCatalog.data === null
+        ? null
+        : {
+            active: intersectWithCatalog(activeMcpIds ?? [], enabledMcpIds).length,
+            total: enabledMcpIds.length,
+          },
+    [userMcpCatalog.data, activeMcpIds, enabledMcpIds],
+  );
+
+  const handleSkillsToggle = useCallback(
+    (enabled: boolean) => {
+      const ids = enabled ? [...enabledSkillIds] : [];
+      setActiveSkillIds(ids);
+      saveIdSelection(SKILLS_SELECTION_KEY, ids);
+    },
+    [enabledSkillIds],
+  );
+  const handleMcpToggle = useCallback(
+    (enabled: boolean) => {
+      const ids = enabled ? [...enabledMcpIds] : [];
+      setActiveMcpIds(ids);
+      saveIdSelection(MCP_SELECTION_KEY, ids);
+    },
+    [enabledMcpIds],
+  );
   const [selectedReasoningEffort, setSelectedReasoningEffort] =
     useState<string | null>(null);
   const [hydratedResumePolicy, setHydratedResumePolicy] = useState<{
@@ -452,6 +586,10 @@ export function ChatSession({
   const deepResearchEnabledRef = useRef(deepResearchEnabled);
   const imageGenerationEnabledRef = useRef(imageGenerationEnabled);
   const imageGenSettingsRef = useRef(imageGenSettings);
+  const activeSkillIdsRef = useRef<string[]>([]);
+  const activeMcpIdsRef = useRef<string[]>([]);
+  activeSkillIdsRef.current = activeSkillIds ?? [];
+  activeMcpIdsRef.current = activeMcpIds ?? [];
   selectedModelRef.current = selectedModel;
   selectedReasoningEffortRef.current = selectedReasoningEffort;
   webSearchEnabledRef.current = webSearchEnabled;
@@ -625,6 +763,8 @@ export function ChatSession({
             webSearchEnabled: webSearchEnabledRef.current,
             imageGenerationEnabled: imageGenerationEnabledRef.current,
             deepResearchEnabled: deepResearchEnabledRef.current,
+            skillIds: activeSkillIdsRef.current,
+            mcpServerIds: activeMcpIdsRef.current,
             imageGenSettings: imageGenerationEnabledRef.current
               ? imageGenSettingsRef.current
               : null,
@@ -2819,6 +2959,14 @@ export function ChatSession({
                     onImageGenerationToggle={handleImageGenerationToggle}
                     imageGenSettings={imageGenSettings}
                     onImageGenSettingsChange={handleImageGenSettingsChange}
+                    skillsSummary={skillsSummary}
+                    mcpSummary={mcpSummary}
+                    skillsPerChatEnabled={(activeSkillIds ?? []).length > 0}
+                    mcpPerChatEnabled={(activeMcpIds ?? []).length > 0}
+                    onSkillsToggle={handleSkillsToggle}
+                    onMcpToggle={handleMcpToggle}
+                    onOpenSkills={() => setSkillsOpen(true)}
+                    onOpenMcp={() => setMcpOpen(true)}
                     activeContextImages={activeContextImages}
                     onToggleImageContext={(image) => {
                       void handleToggleImageContext(image);
@@ -2848,6 +2996,20 @@ export function ChatSession({
                           }
                         : null
                     }
+                  />
+                  <SkillsModal
+                    open={skillsOpen}
+                    onClose={() => setSkillsOpen(false)}
+                    onChanged={() => {
+                      void userSkillsCatalog.reload();
+                    }}
+                  />
+                  <McpModal
+                    open={mcpOpen}
+                    onClose={() => setMcpOpen(false)}
+                    onChanged={() => {
+                      void userMcpCatalog.reload();
+                    }}
                   />
                 </div>
               </div>

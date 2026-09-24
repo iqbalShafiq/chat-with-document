@@ -21,4 +21,19 @@ describe("Additional features menu", () => {
     expect(session).not.toContain("dataAnalysisEnabled");
     expect(session).toContain("deepResearchEnabled");
   });
+
+  it("hosts Skills and MCP rows with counts and manage entry points", () => {
+    const popover = source("./features-popover.tsx");
+    const composer = source("./chat-composer.tsx");
+    const session = source("../chat/chat-session.tsx");
+
+    expect(popover).toContain("skillsSummary");
+    expect(popover).toContain("mcpSummary");
+    expect(popover).toContain("onOpenSkills");
+    expect(popover).toContain("onOpenMcp");
+    expect(popover).toContain("CountBadge");
+    expect(composer).toContain("skillsSummary");
+    expect(session).toContain("activeSkillIds");
+    expect(session).toContain("activeMcpIds");
+  });
 });

@@ -1,4 +1,25 @@
 import { createMiddleware } from "@anvia/core/tool";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve as resolvePath, sep } from "node:path";
+import { McpClient } from "@anvia/mcp";
+import { loadSkills, skill } from "@anvia/core/skills";
+import { getMcpCredentials, getMcpHeaders } from "../mcp-servers/service.js";
+import {
+  createSkill,
+  deleteSkill,
+  listSkills,
+  setSkillEnabled,
+  updateSkill,
+} from "../skills/service.js";
+import {
+  createMcpServer,
+  deleteMcpServer,
+  listMcpServers,
+  setMcpServerEnabled,
+  updateMcpServer,
+} from "../mcp-servers/service.js";
+import { testMcpConnection } from "../mcp-servers/test-connection.js";
 import { prisma } from "../../utils/prisma.js";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { getObjectBuffer } from "../../lib/r2.js";
@@ -24,6 +45,8 @@ import {
   createChartTools,
   createDerivedDatasetTools,
   createTavilyClient,
+  createUserMcpTools,
+  createUserSkillsTools,
   createWebSearchTools,
   deepResearchLimits,
   DATASET_INSTRUCTION,
@@ -42,6 +65,8 @@ import {
   TABULAR_TOOL_DEFINITIONS,
   CHART_TOOL_DEFINITIONS,
   DERIVED_TOOL_DEFINITIONS,
+  USER_MCP_TOOL_DEFINITIONS,
+  USER_SKILL_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
@@ -122,6 +147,7 @@ import {
 } from "../profiling/service.js";
 import {
   CHAT_AGENT_ID,
+  CHAT_AGENT_RECIPE_VERSION,
   attachChatAgentRecipeClaim,
   chatAgentImageGenSettingsSchema,
   createChatAgentRecipe,
@@ -133,6 +159,10 @@ import {
   type ChatAgentRecipe,
   type ChatAgentSnippetDescriptor,
 } from "./run-recipe.js";
+import {
+  resolveUserEnhancements,
+  type UserEnhancementDb,
+} from "./user-enhancements.js";
 import {
   enqueueSiteBuildFromTool,
   readActiveSiteTitle,
@@ -279,7 +309,89 @@ export type ChatRunInput = {
   activeContextSnippet: ChatAgentSnippetDescriptor | null;
   /** Per-run in-flight tool jobs (wait-budget). */
   waitRegistry: InFlightToolRegistry;
+  /** Close per-run user MCP clients and remove materialized skill dirs. */
+  cleanup?: () => Promise<void>;
 };
+
+const USER_MCP_CONNECT_TIMEOUT_MS = 15_000;
+
+export function slugForMcpPrefix(name: string, fallback: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  // Suffix an id fragment: distinct servers named "My Docs"/"my_docs" must
+  // not share a prefix, or Agent construction throws on duplicate tools.
+  const base = (slug || fallback).slice(0, 24);
+  const fragment = fallback.slice(-6).replace(/[^a-z0-9]/gi, "") || "srv";
+  return `${base}_${fragment}_`;
+}
+
+/**
+ * Live MCP tool names carry the per-server prefix (collision guard); the
+ * frozen allow-list stores bare names. Strip one known prefix for comparison
+ * and parity — never guess at unknown prefixes.
+ */
+export function unprefixToolName(name: string, prefix: string): string {
+  if (prefix && name.startsWith(prefix)) return name.slice(prefix.length);
+  return name;
+}
+
+/** Intersect live (possibly prefixed) tools with the frozen allow-list. */
+export function selectReviewedTools<T extends { name: string }>(
+  liveTools: readonly T[],
+  allowed: ReadonlySet<string>,
+  prefix: string,
+): T[] {
+  if (allowed.size === 0) return [...liveTools];
+  return liveTools.filter((tool) => allowed.has(unprefixToolName(tool.name, prefix)));
+}
+
+/** Fail-closed guard: a run needs frozen reviewed definitions, never an empty review. */
+export function assertMcpEntryReviewed(entry: {
+  name: string;
+  toolDefinitions: readonly unknown[];
+}): void {
+  if (entry.toolDefinitions.length === 0) {
+    throw new Error(`MCP server "${entry.name}" has no reviewed tools`);
+  }
+}
+
+/**
+ * Order tool definitions by name so frozen (test-time order) and live
+ * (server return order) surfaces compare equal in parity. Returns a copy.
+ */
+export function sortToolDefinitionsByName<T extends { name: string }>(
+  definitions: readonly T[],
+): T[] {
+  return [...definitions].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+function timeoutError(message: string): Promise<never> {
+  return new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(message)), USER_MCP_CONNECT_TIMEOUT_MS),
+  );
+}
+
+export async function materializeRecipeSkills(
+  skills: { id: string; name: string; bodyMd: string }[],
+  rootDir: string,
+): Promise<void> {
+  // Directory MUST equal the frontmatter name: the native loader rejects
+  // anything else ("name must match the skill directory name"). Names are
+  // validated slugs (lowercase-hyphen), so they are path-safe — and the
+  // containment assert below pins that even for hand-built recipes.
+  for (const entry of skills) {
+    const dir = resolvePath(rootDir, entry.name);
+    if (dir !== rootDir && !dir.startsWith(rootDir + sep)) {
+      throw new Error(`skill directory escapes outside the skill root: ${entry.name}`);
+    }
+    await mkdir(dir, { recursive: true });
+    await writeFile(resolvePath(dir, "SKILL.md"), `${entry.bodyMd.trim()}\n`, "utf8");
+  }
+}
 
 /**
  * Client message id of the run's prompt (used for fact provenance). Falls back
@@ -574,13 +686,15 @@ type RecipeDocumentResolution = {
 
 /**
  * Keep the JSON tool surface in the same order as the recipe resolver:
- * application tools, Context7 MCP tools, then the optional view_image helper.
- * Anvia receives Context7 through mcpServers at runtime, but the serialized
- * static surface still needs deterministic parity across queue reconstruction.
+ * application tools, Context7 MCP tools, user MCP tools, then the optional
+ * view_image helper. Anvia receives MCP tools through mcpServers at runtime,
+ * but the serialized static surface still needs deterministic parity across
+ * queue reconstruction.
  */
 export function orderReconstructedToolDefinitions(input: {
   toolDefinitions: readonly ToolDefinition[];
   context7ToolDefinitions: readonly ToolDefinition[];
+  userMcpToolDefinitions?: readonly ToolDefinition[];
 }): ToolDefinition[] {
   const viewImage = input.toolDefinitions.filter(
     (definition) => definition.name === "view_image",
@@ -591,6 +705,7 @@ export function orderReconstructedToolDefinitions(input: {
   return [
     ...applicationTools,
     ...input.context7ToolDefinitions,
+    ...(input.userMcpToolDefinitions ?? []),
     ...viewImage,
   ];
 }
@@ -622,6 +737,20 @@ export type ChatAgentRecipeResolverDependencies = {
   context7Requested?: () => boolean;
   /** JSON-only MCP definitions captured before queue serialization. */
   context7ToolDefinitions?: () => Promise<readonly ToolDefinition[]>;
+  resolveUserEnhancements?: (
+    db: UserEnhancementDb,
+    userId: string,
+    selection: { skillIds: string[]; mcpServerIds: string[] },
+  ) => Promise<{
+    userSkills: { id: string; name: string; description: string; bodyMd: string }[];
+    userMcp: {
+      id: string;
+      name: string;
+      url: string;
+      allowedTools: string[];
+      toolDefinitions: { name: string; description: string; parameters: Record<string, unknown> }[];
+    }[];
+  }>;
 };
 
 export type ResolveChatAgentRecipeInput = {
@@ -633,6 +762,8 @@ export type ResolveChatAgentRecipeInput = {
   webSearchEnabled?: boolean;
   imageGenerationEnabled?: boolean;
   deepResearchEnabled?: boolean;
+  skillIds?: string[];
+  mcpServerIds?: string[];
   imageGenSettings?: unknown;
   traceId: string;
   streamId?: string;
@@ -699,9 +830,24 @@ export async function resolveChatAgentRecipe(
   const readContext7ToolDefinitions =
     dependencies?.context7ToolDefinitions ??
     (async () => CONTEXT7_TOOL_DEFINITIONS);
+  const readUserEnhancements =
+    dependencies?.resolveUserEnhancements ?? resolveUserEnhancements;
   // This is an authenticated capability snapshot. Read it exactly once so a
   // changing env/config source cannot produce a recipe with mixed semantics.
   const context7Requested = readContext7Requested();
+  // User enhancements resolve alongside capabilities so the frozen static
+  // surface (context + tool definitions) already contains them below.
+  // resolverPrisma is narrowed to the delegates each resolver needs; the
+  // real client carries userSkill/userMcpServer, test doubles inject the
+  // resolveUserEnhancements stub instead (see behavior tests).
+  const userEnhancements = await readUserEnhancements(
+    resolverPrisma as unknown as UserEnhancementDb,
+    input.userId,
+    {
+      skillIds: input.skillIds ?? [],
+      mcpServerIds: input.mcpServerIds ?? [],
+    },
+  );
 
   const normalizedPrompt = input.promptMessage
     ? parseMessage(input.promptMessage)
@@ -785,6 +931,20 @@ export async function resolveChatAgentRecipe(
     }
   }
 
+  // Active user-skill catalog (names + descriptions only; bodies stay behind
+  // the generated skill tools). Keeps the token estimate honest and the
+  // catalog visible in one frozen place.
+  if (userEnhancements.userSkills.length > 0) {
+    contextDescriptors.push({
+      id: "user_skill_catalog",
+      text:
+        "Active user skills\nThe user enabled these skills for this chat. Follow the matching skill's procedure when the task fits:\n" +
+        userEnhancements.userSkills
+          .map((entry) => `- ${entry.name}: ${entry.description}`)
+          .join("\n"),
+    });
+  }
+
   const tavilyConfig = readWebSearchConfig();
   const webSearchAvailable = tavilyConfig !== null;
   if (webSearchAvailable) {
@@ -851,6 +1011,13 @@ export async function resolveChatAgentRecipe(
   if (context7Requested && context7ToolDefinitions.length === 0) {
     throw new Error("context7 static tool definitions are unavailable");
   }
+  // Frozen user-MCP definitions ride the same parity point as Context7 (see
+  // orderReconstructedToolDefinitions): the worker intersects them with the
+  // live server tools by name and fails closed on an empty intersection.
+  // Sorted by name so server return order never breaks parity.
+  const userMcpToolDefinitions = sortToolDefinitionsByName(
+    userEnhancements.userMcp.flatMap((server) => server.toolDefinitions),
+  ) as unknown as ToolDefinition[];
   const contextBlocksForStaticSurface = [
     ...contextDescriptors,
     ...(activeImages.length > 0
@@ -896,7 +1063,10 @@ export async function resolveChatAgentRecipe(
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...USER_SKILL_TOOL_DEFINITIONS,
+    ...USER_MCP_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
+    ...userMcpToolDefinitions,
     ...(!modelAcceptsImage ? [VIEW_IMAGE_TOOL_DEFINITIONS.description] : []),
   ];
   const modelBudget = resolveModelTokenBudget({
@@ -933,7 +1103,7 @@ export async function resolveChatAgentRecipe(
   const limits = readDeepResearchLimits();
   try {
     const recipe = createChatAgentRecipe({
-    version: 2,
+    version: CHAT_AGENT_RECIPE_VERSION,
     agentId: CHAT_AGENT_ID,
     identity: {
       sessionId: input.sessionId,
@@ -951,6 +1121,8 @@ export async function resolveChatAgentRecipe(
       imageGenerationEnabled: input.imageGenerationEnabled ?? false,
       deepResearchEnabled: input.deepResearchEnabled ?? false,
     },
+    userSkills: userEnhancements.userSkills,
+    userMcp: userEnhancements.userMcp,
     imageGenSettings:
       input.imageGenSettings === null || input.imageGenSettings === undefined
         ? null
@@ -1430,10 +1602,187 @@ export async function reconstructChatRunInput(input: {
       enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),
     }),
   );
+  // User-owned skills/servers are managed through the same v1 services as
+  // the routers (ownership + validation inside); secrets never cross.
+  // Position mirrors the frozen surface: clarification, site build, then
+  // these two (see the toolDefinitions array in resolveChatAgentRecipe).
+  tools.push(
+    ...createUserSkillsTools({
+      userId,
+      list: async () => {
+        const rows = (await listSkills(prisma, userId)) as {
+          id: string;
+          name: string;
+          description: string;
+          isEnabled: boolean;
+          status: string;
+        }[];
+        return rows.map(({ id, name, description, isEnabled, status }) => ({
+          id,
+          name,
+          description,
+          isEnabled,
+          status,
+        }));
+      },
+      create: async (input) =>
+        (await createSkill(prisma, userId, { ...input, status: "draft" })) as {
+          id: string;
+          name: string;
+        },
+      update: async (id, input) =>
+        (await updateSkill(prisma, userId, id, input)) as { id: string },
+      remove: async (id) => {
+        await deleteSkill(prisma, userId, id);
+      },
+      setEnabled: async (id, isEnabled) => {
+        await setSkillEnabled(prisma, userId, id, isEnabled);
+      },
+    }),
+    ...createUserMcpTools({
+      userId,
+      list: async () => {
+        const rows = (await listMcpServers(prisma, userId)) as unknown as {
+          id: string;
+          name: string;
+          url: string;
+          authType: string;
+          isEnabled: boolean;
+          status: string;
+          allowedToolsJson?: unknown;
+        }[];
+        return rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          url: row.url,
+          authType: row.authType,
+          isEnabled: row.isEnabled,
+          status: row.status,
+          allowedTools: Array.isArray(row.allowedToolsJson)
+            ? (row.allowedToolsJson as string[])
+            : [],
+        }));
+      },
+      create: async (input) =>
+        (await createMcpServer(prisma, userId, input)) as { id: string; name: string },
+      update: async (id, input) =>
+        (await updateMcpServer(prisma, userId, id, input)) as { id: string },
+      remove: async (id) => {
+        await deleteMcpServer(prisma, userId, id);
+      },
+      setEnabled: async (id, isEnabled) => {
+        await setMcpServerEnabled(prisma, userId, id, isEnabled);
+      },
+      test: async (input) => testMcpConnection(input),
+    }),
+  );
   const waitRegistry = runtime?.waitRegistry ?? new InFlightToolRegistry();
   const waitIds = createToolCallIdGate();
   const waitProgress = runtime?.onToolWaitProgress;
   const context7Available = recipe.capabilities.context7Requested;
+
+  // User skills: re-materialize the frozen snapshots (the worker hot path
+  // reads no skill rows beyond credentials) and load them natively.
+  let userSkillSet: Awaited<ReturnType<typeof loadSkills>> | undefined;
+  const userSkillDir =
+    recipe.userSkills.length > 0
+      ? resolvePath(tmpdir(), `anreal-skills-${recipe.trace.traceId}`)
+      : "";
+  // User MCP: per-run connections under the frozen allow-list. Credentials
+  // never cross the queue; the worker re-reads them server-side by id.
+  const userMcpClients: McpClient[] = [];
+  const userMcpServers: McpServer[] = [];
+  const liveUserMcpToolDefinitions: ToolDefinition[] = [];
+  const closeUserEnhancements = async (): Promise<void> => {
+    await Promise.allSettled(userMcpClients.map((client) => client.close()));
+    if (userSkillDir) {
+      await rm(userSkillDir, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  };
+  try {
+    if (recipe.userSkills.length > 0) {
+      await materializeRecipeSkills(recipe.userSkills, userSkillDir);
+      userSkillSet = await loadSkills(skill.local(userSkillDir));
+    }
+    for (const entry of recipe.userMcp) {
+      assertMcpEntryReviewed(entry);
+      const stored = await prisma.userMcpServer.findFirst({
+        where: { id: entry.id, userId },
+        select: { authType: true, isEnabled: true },
+      });
+      if (!stored || !stored.isEnabled) {
+        throw new Error(`MCP server "${entry.name}" is no longer available`);
+      }
+      let bearerToken: string | null = null;
+      if (stored.authType === "bearer") {
+        try {
+          bearerToken = await getMcpCredentials(prisma, userId, entry.id);
+        } catch {
+          bearerToken = null;
+        }
+        if (!bearerToken) {
+          throw new Error(
+            `MCP server "${entry.name}" credentials are unreadable — re-enter the token`,
+          );
+        }
+      }
+      const customHeaders: Record<string, string> = {};
+      for (const header of await getMcpHeaders(prisma, userId, entry.id)) {
+        customHeaders[header.name] = header.value;
+      }
+      const prefix = slugForMcpPrefix(entry.name, entry.id);
+      const client = new McpClient({
+        name: `user-mcp-${entry.id}`,
+        tools: { prefix },
+        transport: {
+          type: "streamableHttp",
+          url: entry.url,
+          ssrfProtection: "strict",
+          headers: {
+            ...customHeaders,
+            ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}),
+          },
+        },
+        versionNegotiation: { mode: "auto" },
+      });
+      try {
+        const server = await Promise.race([
+          client.connect(),
+          timeoutError(`MCP server "${entry.name}" did not answer within 15s`),
+        ]);
+        const reviewed = selectReviewedTools(server.tools, new Set(entry.allowedTools), prefix);
+        if (reviewed.length === 0) {
+          throw new Error(`MCP server "${entry.name}" offers none of the reviewed tools`);
+        }
+        userMcpClients.push(client);
+        userMcpServers.push({ name: server.name, tools: reviewed });
+        for (const tool of reviewed) {
+          const definition = await tool.definition("");
+          // Parity compares bare names (see orderReconstructedToolDefinitions);
+          // the registered runtime tools keep their prefixed names.
+          liveUserMcpToolDefinitions.push({
+            ...definition,
+            name: unprefixToolName(tool.name, prefix),
+          });
+        }
+      } catch (error) {
+        await client.close().catch(() => undefined);
+        throw error instanceof Error
+          ? error
+          : new Error(`MCP server "${entry.name}" failed to connect`);
+      }
+    }
+  } catch (error) {
+    await closeUserEnhancements();
+    throw error;
+  }
+
+  const mcpServers = [
+    ...(context7Available && context7Server ? [context7Server] : []),
+    ...userMcpServers,
+  ];
 
   // view_image is a text-only helper. Vision models receive image bytes
   // natively (document tools, pinned context, web_search/web_fetch attach).
@@ -1489,6 +1838,7 @@ export async function reconstructChatRunInput(input: {
   const actualToolDefinitions = orderReconstructedToolDefinitions({
     toolDefinitions: reconstructedToolDefinitions,
     context7ToolDefinitions,
+    userMcpToolDefinitions: sortToolDefinitionsByName(liveUserMcpToolDefinitions),
   });
   assertNativeStaticContextMatches({
     expected: recipe.staticContext as any,
@@ -1532,9 +1882,8 @@ export async function reconstructChatRunInput(input: {
         },
       }),
     ],
-    ...(context7Available && context7Server
-      ? { mcpServers: [context7Server] }
-      : {}),
+    ...(mcpServers.length > 0 ? { mcpServers } : {}),
+    ...(userSkillSet ? { skills: userSkillSet } : {}),
     memory: nativeMemoryOptions,
   });
 
@@ -1565,5 +1914,8 @@ export async function reconstructChatRunInput(input: {
     /** The single text snippet pinned as additional context (null if none). */
     activeContextSnippet,
     waitRegistry,
+    cleanup: async () => {
+      await closeUserEnhancements();
+    },
   };
 }

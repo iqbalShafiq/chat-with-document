@@ -123,4 +123,10 @@ describe("createAgent", () => {
       { id: "fixture", text: "Convenience context" },
     ]);
   });
+
+  it("points the agent at the user-managed skills and MCP tools", () => {
+    expect(BASE_INSTRUCTIONS).toContain("manage_user_skills");
+    expect(BASE_INSTRUCTIONS).toContain("manage_user_mcp_servers");
+    expect(BASE_INSTRUCTIONS).toContain("draft");
+  });
 });

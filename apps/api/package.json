@@ -22,6 +22,7 @@
     "@anreal/agent": "workspace:*",
     "@anvia/client": "1.2.0",
     "@anvia/core": "1.5.0",
+    "@anvia/mcp": "1.1.3",
     "@anvia/memory-prisma": "1.2.1",
     "@anvia/sandbox": "1.1.4",
     "@anvia/server": "1.1.4",
