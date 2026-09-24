@@ -1240,6 +1240,9 @@ export function ChatSession({
   const initialDraftRef = useRef(initialComposerDraft);
   const initialFlagsRef = useRef(initialFeatureFlags ?? null);
   useEffect(() => {
+    // Keep the refs until models are ready: nulling them on an early
+    // (loading) run would silently drop prefilled drafts.
+    if (modelsStatus !== "success") return;
     const draft = normalizeInitialDraft(initialDraftRef.current);
     initialDraftRef.current = null;
     const flags = initialFlagsRef.current;
@@ -1259,7 +1262,7 @@ export function ChatSession({
         persistImageGenSettings(flags.imageGenSettings);
       }
     }
-    if (!draft || modelsStatus !== "success") return;
+    if (!draft) return;
     if (!draft.autoSend) {
       setComposerInputText(draft.text);
       focusComposer();

@@ -1,8 +1,8 @@
 import type { UseChatStatus } from "@anvia/react";
 import type { UIAttachment } from "@anvia/client";
 import { ComposerPrimitive, useComposer } from "@anvia/react-ui";
-import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { ArrowUp, CalendarClock, CornerDownLeft, FileText, FileX, Globe, Images, Link2, ListChecks, MessagesSquare, Plug, Square, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -19,6 +19,7 @@ import type {
   SessionDocument,
 } from "#/lib/api";
 import { isImageAttachmentLike } from "#/lib/api";
+import { parsePinnedArtifactRefs, type ParsedPinnedRef } from "#/lib/api-artifacts";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { QueuedDraft, QueuedItem } from "#/lib/chat/queued-messages";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
@@ -209,7 +210,20 @@ export function ChatComposer({
   const composer = useComposer();
   const composerHasInput =
     composer.input.trim().length > 0 || composer.attachments.length > 0;
-  const composerAction = composerActionForStatus(chatStatus, composerHasInput);
+  const pinnedRefs: ParsedPinnedRef[] = useMemo(
+    () => parsePinnedArtifactRefs(composer.input),
+    [composer.input],
+  );
+  const removePinnedRef = useCallback(
+    (ref: ParsedPinnedRef) => {
+      const current = composer.input;
+      const next = (current.slice(0, ref.start) + current.slice(ref.end))
+        .replace(/[ \t]*\n[ \t]*\n[ \t]*/g, "\n\n")
+        .trim();
+      composer.setInput(next);
+    },
+    [composer],
+  );  const composerAction = composerActionForStatus(chatStatus, composerHasInput);
   const queueSubmissionInFlightRef = useRef(false);
   const stopRequestedRef = useRef(false);
   const [queueSubmitting, setQueueSubmitting] = useState(false);
@@ -434,6 +448,51 @@ export function ChatComposer({
             }, 180);
           }}
         />
+      ) : null}
+
+      {pinnedRefs.length > 0 ? (
+        <div
+          className="flex min-w-0 flex-wrap gap-1.5"
+          role="list"
+          aria-label="Pinned artifacts"
+        >
+          {pinnedRefs.map((ref) => {
+            const Icon =
+              ref.type === "site"
+                ? Globe
+                : ref.type === "document"
+                  ? FileText
+                  : ref.type === "image"
+                    ? Images
+                    : ref.type === "task"
+                      ? ListChecks
+                      : ref.type === "schedule"
+                        ? CalendarClock
+                        : ref.type === "web_bundle"
+                          ? Link2
+                          : ref.type === "session"
+                            ? MessagesSquare
+                            : Plug;
+            return (
+              <span
+                key={`${ref.type}:${ref.id}:${ref.start}`}
+                role="listitem"
+                className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/[0.07] py-0 pl-2 pr-1 text-[11px] font-medium text-text animate-fade-in"
+              >
+                <Icon className="size-3 shrink-0 text-accent" strokeWidth={2} />
+                <span className="min-w-0 flex-1 truncate">{ref.label}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove pinned ${ref.type} ${ref.label}`}
+                  onClick={() => removePinnedRef(ref)}
+                  className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-text-muted transition hover:bg-white/[0.08] hover:text-text"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
       ) : null}
 
       <MessageQueueDock

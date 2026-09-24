@@ -27,6 +27,34 @@ export function formatPinnedArtifactRef(
   return `[@${type} ${cleanLabel} (${cleanId})]`;
 }
 
+const PINNED_REF_PATTERN =
+  /\[@(document|image|web_bundle|site|task|schedule|session)\s+([^\[\]]*?)\s*\(([^\s\[\]]+)\)\]/g;
+
+export type ParsedPinnedRef = {
+  type: ArtifactType;
+  id: string;
+  label: string;
+  start: number;
+  end: number;
+};
+
+/** Find pinned `[@type label (id)]` references in composer text. */
+export function parsePinnedArtifactRefs(text: string): ParsedPinnedRef[] {
+  const refs: ParsedPinnedRef[] = [];
+  PINNED_REF_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = PINNED_REF_PATTERN.exec(text)) !== null) {
+    refs.push({
+      type: match[1] as ArtifactType,
+      label: match[2]!.trim(),
+      id: match[3]!,
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return refs;
+}
+
 export type ArtifactListItem = {
   type: ArtifactType;
   id?: string;
