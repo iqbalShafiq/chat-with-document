@@ -50,6 +50,9 @@ export function SitesBrowser({
       size="lg"
       heightMode="viewport"
     >
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4">
+          <div className="flex flex-col gap-3">
       {!sessionId ? (
         <p className="text-[12px] text-text-muted">
           Open a chat first — sites live in the active session scope.
@@ -118,6 +121,9 @@ export function SitesBrowser({
           ))}
         </ul>
       )}
+          </div>
+        </div>
+      </div>
     </DialogShell>
   );
 }

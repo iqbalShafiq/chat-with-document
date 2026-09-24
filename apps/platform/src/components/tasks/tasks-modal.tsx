@@ -27,7 +27,10 @@ export function TasksModal({
       size="lg"
       heightMode="viewport"
     >
-      <div role="tablist" aria-label="Tasks and schedules" className="mb-3 flex gap-1.5">
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4">
+          <div className="flex flex-col gap-3">
+      <div role="tablist" aria-label="Tasks and schedules" className="flex gap-1.5">
         {(["tasks", "schedules"] as const).map((t) => (
           <button
             key={t}
@@ -56,6 +59,9 @@ export function TasksModal({
           Open a chat first — tasks live in the active session scope.
         </p>
       )}
+          </div>
+        </div>
+      </div>
     </DialogShell>
   );
 }
