@@ -1,15 +1,21 @@
 import { AnrealMark, AnrealWordmark } from "#/components/layout/anreal-brand";
 import { ImageGalleryModal } from "#/components/images/image-gallery-modal";
+import { SitesBrowser } from "#/components/sites/sites-browser";
+import { TasksModal } from "#/components/tasks/tasks-modal";
+import { CountBadge } from "#/components/ui/count-badge";
 import { SessionHistoryList } from "#/components/sidebar/session-history-list";
 import { AccountMenu } from "#/components/sidebar/account-menu";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
 import { fetchProjectImages, fetchUserImages, type ProjectListItem } from "#/lib/api";
+import { listScopeSites, listTasks } from "#/lib/api-artifacts";
 import { useCallback, useEffect, useState } from "react";
 import {
   FileText,
   FolderKanban,
+  Globe,
   Images,
+  ListChecks,
   MessagesSquare,
   PanelLeftClose,
   SquarePen,
@@ -86,7 +92,11 @@ export function ChatSidebar({
 }) {
   const visibleProjects = recentProjects.slice(0, RECENT_PROJECTS_MAX);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [sitesOpen, setSitesOpen] = useState(false);
   const [imageCount, setImageCount] = useState<number | null>(null);
+  const [openTaskCount, setOpenTaskCount] = useState<number | null>(null);
+  const [siteCount, setSiteCount] = useState<number | null>(null);
 
   // Lightweight badge: images in the current scope (project or user).
   const refreshImageCount = useCallback(async () => {
@@ -101,10 +111,37 @@ export function ChatSidebar({
     }
   }, [activeProjectId, viewMode]);
 
+  // Badge counts for the session-scoped artifact entries.
+  const refreshArtifactCounts = useCallback(async () => {
+    if (!activeSessionId) {
+      setOpenTaskCount(null);
+      setSiteCount(null);
+      return;
+    }
+    try {
+      const tasks = await listTasks(activeSessionId);
+      setOpenTaskCount(tasks.filter((t) => t.status !== "done").length);
+    } catch {
+      setOpenTaskCount(null);
+    }
+    try {
+      const sites = await listScopeSites(activeSessionId);
+      setSiteCount(sites.length);
+    } catch {
+      setSiteCount(null);
+    }
+  }, [activeSessionId]);
+
   useEffect(() => {
     setImageCount(null);
     void refreshImageCount();
   }, [refreshImageCount]);
+
+  useEffect(() => {
+    setOpenTaskCount(null);
+    setSiteCount(null);
+    void refreshArtifactCounts();
+  }, [refreshArtifactCounts]);
 
   return (
     <aside className="glass-sidebar flex h-full w-full min-h-0 flex-col">
@@ -242,6 +279,38 @@ export function ChatSidebar({
               </span>
             ) : null}
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTasksOpen(true);
+              onCloseMobile?.();
+            }}
+            aria-haspopup="dialog"
+            className="mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] text-text-muted hover:bg-white/[0.05] hover:text-text"
+          >
+            <ListChecks className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">Tasks</span>
+            {openTaskCount !== null && openTaskCount > 0 ? (
+              <CountBadge count={openTaskCount} label="open tasks" />
+            ) : null}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSitesOpen(true);
+              onCloseMobile?.();
+            }}
+            aria-haspopup="dialog"
+            className="mt-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] text-text-muted hover:bg-white/[0.05] hover:text-text"
+          >
+            <Globe className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium">Sites</span>
+            {siteCount !== null && siteCount > 0 ? (
+              <CountBadge count={siteCount} label="sites" />
+            ) : null}
+          </button>
         </div>
 
         {/* Recent projects sit above date groups (TODAY / …), history-list style */}
@@ -325,6 +394,24 @@ export function ChatSidebar({
           void refreshImageCount();
         }}
         activeProjectId={activeProjectId}
+      />
+
+      <TasksModal
+        open={tasksOpen}
+        onClose={() => {
+          setTasksOpen(false);
+          void refreshArtifactCounts();
+        }}
+        sessionId={activeSessionId}
+      />
+
+      <SitesBrowser
+        open={sitesOpen}
+        onClose={() => {
+          setSitesOpen(false);
+          void refreshArtifactCounts();
+        }}
+        sessionId={activeSessionId}
       />
     </aside>
   );

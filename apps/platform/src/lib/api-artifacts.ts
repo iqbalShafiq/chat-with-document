@@ -193,3 +193,21 @@ export async function createReport(input: {
   }
   return (await response.json()) as { documentId: string; filename: string };
 }
+
+export type ScopeSite = {
+  siteId: string;
+  version: number;
+  stableVersion: number | null;
+  status: string;
+  previewUrl: string | null;
+  downloadUrl: string;
+  updatedAt: string;
+};
+
+export async function listScopeSites(sessionId: string): Promise<ScopeSite[]> {
+  const params = new URLSearchParams({ sessionId });
+  const response = await apiFetch(`${API_BASE}/api/sites?${params.toString()}`);
+  if (!response.ok) throw new Error("Failed to load sites");
+  const data = (await response.json()) as { sites?: ScopeSite[] };
+  return Array.isArray(data.sites) ? data.sites : [];
+}
