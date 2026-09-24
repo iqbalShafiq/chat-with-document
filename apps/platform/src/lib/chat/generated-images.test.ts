@@ -333,6 +333,7 @@ function storedMeta(overrides: Record<string, unknown> = {}): GeneratedImageMeta
     height: 1024,
     modelId: "openai/gpt-5-image-mini",
     prompt: "stored prompt",
+    caption: "stored prompt",
     nOfTotal: null,
     source: "generated",
     sourceUrl: null,

@@ -8,7 +8,7 @@ import {
 } from "./run-recipe.js";
 
 const fixture = {
-  version: 3 as const,
+  version: 4 as const,
   agentId: CHAT_AGENT_ID,
   identity: {
     sessionId: "session-1",
@@ -137,7 +137,7 @@ describe("ChatAgentRecipe", () => {
   });
 
   it("rejects invalid identity, version, agent id, unknown fields, and secrets", () => {
-    expect(() => parseChatAgentRecipe({ ...fixture, version: 4 })).toThrow();
+    expect(() => parseChatAgentRecipe({ ...fixture, version: 999 })).toThrow();
     expect(() => parseChatAgentRecipe({ ...fixture, agentId: "my-agent" })).toThrow();
     expect(() =>
       parseChatAgentRecipe({ ...fixture, apiKey: "secret" }),

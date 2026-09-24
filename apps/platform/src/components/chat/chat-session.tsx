@@ -350,6 +350,7 @@ export function ChatSession({
   initialComposerDraft = null,
   initialFeatureFlags = null,
   onSiteBuildEvent,
+  onArtifactFocus,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -399,6 +400,10 @@ export function ChatSession({
       | { name: "siteBuildProgress"; data: ChatDataMap["siteBuildProgress"] }
       | { name: "siteBuildReady"; data: ChatDataMap["siteBuildReady"] },
   ) => void;
+  onArtifactFocus?: (event: {
+    name: "artifactFocus";
+    data: ChatDataMap["artifactFocus"];
+  }) => void;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -570,6 +575,10 @@ export function ChatSession({
     initialDeepResearchActivityState,
   );
   const [toolWait, setToolWait] = useState<Record<string, ToolWaitProgress>>({});
+  /** Latest artifact the agent pointed at (dismissible, cleared per session). */
+  const [artifactFocus, setArtifactFocus] = useState<ChatDataMap["artifactFocus"] | null>(
+    null,
+  );
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -827,6 +836,10 @@ export function ChatSession({
             return;
           case "siteBuildReady":
             onSiteBuildEvent?.({ name: event.name, data: event.data });
+            return;
+          case "artifactFocus":
+            setArtifactFocus(event.data);
+            onArtifactFocus?.({ name: event.name, data: event.data });
             return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
@@ -2890,6 +2903,7 @@ export function ChatSession({
 
                   <ClarificationPanel
                     onInteractionSettled={requestSettledInteractionReconcile}
+                    sessionId={sessionId}
                   />
 
                   <StaleSessionDialog
@@ -2918,6 +2932,26 @@ export function ChatSession({
 
                   {composerTopSlot ? (
                     <div className="mb-2">{composerTopSlot}</div>
+                  ) : null}
+
+                  {artifactFocus ? (
+                    <div
+                      role="status"
+                      className="mb-2 flex items-center gap-2 rounded-xl border border-accent/25 bg-accent/[0.07] px-3 py-2 animate-fade-in"
+                    >
+                      <p className="min-w-0 flex-1 truncate text-[11px] text-text">
+                        Agent menunjuk {artifactFocus.artifactType}
+                        {artifactFocus.label ? `: ${artifactFocus.label}` : ""}
+                      </p>
+                      <button
+                        type="button"
+                        aria-label="Dismiss artifact highlight"
+                        onClick={() => setArtifactFocus(null)}
+                        className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:text-text"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
                   ) : null}
 
                   <ChatComposer

@@ -83,6 +83,7 @@ describe("browser v1 stream data schemas", () => {
 
   it("exposes exactly the canonical data names", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
+      "artifactFocus",
       "deepResearchProgress",
       "queuedMessageApplied",
       "siteBuildProgress",
@@ -135,5 +136,29 @@ describe("browser v1 stream data schemas", () => {
       success: true,
       data: ready,
     });
+  });
+
+  it("accepts artifact focus with and without label", () => {
+    const focused: ChatDataMap["artifactFocus"] = {
+      artifactId: "img-1",
+      artifactType: "image",
+      label: "hero logo",
+    };
+    expect(ChatDataSchemas.artifactFocus.safeParse(focused)).toMatchObject({
+      success: true,
+      data: focused,
+    });
+    expect(
+      ChatDataSchemas.artifactFocus.safeParse({
+        artifactId: "img-1",
+        artifactType: "image",
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      ChatDataSchemas.artifactFocus.safeParse({
+        artifactId: "img-1",
+        artifactType: "nope",
+      }),
+    ).toMatchObject({ success: false });
   });
 });

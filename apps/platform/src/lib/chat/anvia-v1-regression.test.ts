@@ -185,6 +185,7 @@ describe("Anvia v1 migration-wide platform contracts", () => {
 
   it("keeps data names and payloads exact, including rejection privacy", () => {
     expect(Object.keys(ChatDataSchemas).sort()).toEqual([
+      "artifactFocus",
       "deepResearchProgress",
       "queuedMessageApplied",
       "siteBuildProgress",

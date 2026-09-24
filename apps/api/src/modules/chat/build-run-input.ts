@@ -28,6 +28,13 @@ import {
   CLARIFICATION_INSTRUCTION,
   CONTEXT7_INSTRUCTION,
   CONTEXT7_TOOL_DEFINITIONS,
+  ARTIFACT_CHOICE_INSTRUCTION,
+  ARTIFACT_TOOL_DEFINITIONS,
+  REPORT_TOOL_DEFINITIONS,
+  WORKSPACE_TOOL_DEFINITIONS,
+  createArtifactTools,
+  createReportTools,
+  createWorkspaceManageTools,
   createAgent,
   createChunkSearchService,
   createClarificationTool,
@@ -168,6 +175,12 @@ import {
   readActiveSiteTitle,
   siteBuildConfig,
 } from "../static-sites/service.js";
+import { getArtifact, listArtifacts } from "../artifacts/service.js";
+import { chartSpecToSvg } from "../charts/snapshot.js";
+import { buildReportPdf } from "../reports/service.js";
+import { createReport } from "../reports/store.js";
+import { publishArtifactFocus } from "./artifact-events.js";
+import { createTask, listTasks, updateTask } from "../tasks/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
 function buildProjectWorkspaceContext(input: {
@@ -997,6 +1010,7 @@ export async function resolveChatAgentRecipe(
 
   instructions.push(CLARIFICATION_INSTRUCTION);
   instructions.push(SITE_BUILD_TOOL_INSTRUCTIONS);
+  instructions.push(ARTIFACT_CHOICE_INSTRUCTION);
   if (context7Requested) {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
@@ -1063,6 +1077,9 @@ export async function resolveChatAgentRecipe(
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...ARTIFACT_TOOL_DEFINITIONS,
+    ...REPORT_TOOL_DEFINITIONS,
+    ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,
     ...USER_MCP_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
@@ -1358,6 +1375,142 @@ export async function reconstructChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
+  // Workspace artifacts focus publisher: fire-and-forget UI hint.
+  const focus = (
+    artifactId: string,
+    artifactType: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session",
+    label?: string,
+  ): void => {
+    publishArtifactFocus({ sessionId, artifactId, artifactType, ...(label ? { label } : {}) }).catch(
+      () => undefined,
+    );
+  };
+  // Live order must match the frozen surface: clarification, site-build,
+  // then artifacts (see the resolver toolDefinitions array).
+  const artifactTools = [
+    ...createArtifactTools({
+      list: ({ type, q }) =>
+        listArtifacts({
+          userId,
+          sessionProjectId: projectId,
+          ...(type ? { type: type as never } : {}),
+          ...(q ? { q } : {}),
+        }) as Promise<{ items: unknown[] }>,
+      get: ({ type, id }) =>
+        getArtifact({ userId, sessionProjectId: projectId, type: type as never, id }) as Promise<unknown>,
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createReportTools({
+      createReport: async ({ title, markdown, assetIds, citationMap }) => {
+        const svgAssets: string[] = [];
+        for (const assetId of assetIds ?? []) {
+          const image = await prisma.generatedImage.findFirst({
+            where: { id: assetId, userId },
+            select: { r2Key: true, mediaType: true },
+          });
+          if (!image || image.mediaType !== "image/svg+xml") continue;
+          const bytes = await getObjectBuffer(image.r2Key);
+          svgAssets.push(new TextDecoder().decode(bytes));
+        }
+        return createReport({
+          userId,
+          sessionId,
+          title,
+          markdown,
+          ...(svgAssets.length > 0 ? { svgAssets } : {}),
+          ...(citationMap ? { citationMap: citationMap as never } : {}),
+        });
+      },
+      snapshotChart: async ({ caption, chart }) => {
+        const svg = chartSpecToSvg(chart as never);
+        const bytes = new TextEncoder().encode(svg);
+        const saved = await getImageStore().saveGeneratedImage({
+          userId,
+          sessionId,
+          projectId,
+          buffer: bytes,
+          mediaType: "image/svg+xml",
+          modelId: "chart-snapshot",
+          prompt: caption,
+          caption,
+          width: 640,
+          height: 360,
+          source: "chart",
+        });
+        return { imageId: saved.id };
+      },
+      freezeBundle: async ({ title, sources }) => {
+        const bundle = await prisma.webBundle.create({
+          data: {
+            userId,
+            projectId,
+            title,
+            sources: sources as unknown as object,
+          },
+          select: { id: true },
+        });
+        return { id: bundle.id };
+      },
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createWorkspaceManageTools({
+      tasks: {
+        list: () => listTasks(userId, projectId),
+        create: ({ title }) => createTask({ userId, sessionId, title }) as Promise<{ id: string }>,
+        update: ({ id, status, title }) =>
+          updateTask({
+            userId,
+            id,
+            ...(status ? { status: status as never } : {}),
+            ...(title ? { title } : {}),
+          }) as Promise<unknown>,
+      },
+      schedules: {
+        list: async () => {
+          const { artifactWhere } = await import("../artifacts/scope.js");
+          return prisma.workspaceSchedule.findMany({
+            where: artifactWhere(userId, projectId),
+            orderBy: { createdAt: "desc" },
+            take: 100,
+          }) as unknown;
+        },
+        create: async ({ title, prompt, freq }) => {
+          const { nextRunAt } = await import("../schedules/queue.js");
+          const { getScheduleQueue, scheduleJobId } = await import("../schedules/queue.js");
+          const firstRun = nextRunAt(freq as "once" | "daily" | "weekly");
+          const schedule = await prisma.workspaceSchedule.create({
+            data: { userId, projectId, title, prompt, freq, nextRunAt: firstRun },
+            select: { id: true },
+          });
+          await getScheduleQueue()
+            .add(
+              "run",
+              { scheduleId: schedule.id, userId, projectId },
+              { jobId: scheduleJobId(schedule.id), delay: Math.max(0, firstRun.getTime() - Date.now()) },
+            )
+            .catch(() => undefined);
+          return { id: schedule.id };
+        },
+        cancel: async ({ id }) => {
+          const existing = await prisma.workspaceSchedule.findFirst({
+            where: { id, userId },
+            select: { id: true },
+          });
+          if (!existing) throw new Error("Schedule not found");
+          await prisma.workspaceSchedule.update({
+            where: { id: existing.id },
+            data: { status: "cancelled" },
+          });
+          const { getScheduleQueue, scheduleJobId } = await import("../schedules/queue.js");
+          await getScheduleQueue().remove(scheduleJobId(existing.id)).catch(() => undefined);
+          return { ok: true } as unknown;
+        },
+      },
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+  ];
+  // NOTE: pushed after site-build below so live order matches the frozen surface.
+
   // Active image context is frozen in the recipe. Reconstruction may fetch
   // bytes by r2Key later, but it never lists or clears current session context.
   const activeContextImages = recipe.activeContext.images;
@@ -1603,6 +1756,7 @@ export async function reconstructChatRunInput(input: {
         enqueueSiteBuildFromTool({ ...args, sessionId, userId, projectId }),
     }),
   );
+  tools.push(...artifactTools);
   // User-owned skills/servers are managed through the same v1 services as
   // the routers (ownership + validation inside); secrets never cross.
   // Position mirrors the frozen surface: clarification, site build, then

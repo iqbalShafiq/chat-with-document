@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createTool, type AnyTool } from "@anvia/core";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
@@ -37,3 +38,99 @@ export const ARTIFACT_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(findImagesSpec),
   createStaticToolDefinition(listSessionsSpec),
 ];
+
+/**
+ * Convention for visual artifact choices in request_clarification:
+ * choice values shaped `artifact:<type>:<id>` render as visual pickers
+ * in the UI and are submitted back verbatim. The protocol is unchanged
+ * (label/value strings) — only the value shape is contractual.
+ */
+export const ARTIFACT_CHOICE_PREFIX = "artifact:";
+
+export function encodeArtifactChoice(
+  type: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session",
+  id: string,
+): string {
+  return `${ARTIFACT_CHOICE_PREFIX}${type}:${id}`;
+}
+
+export function decodeArtifactChoice(value: string): {
+  type: string;
+  id: string;
+} | null {
+  if (!value.startsWith(ARTIFACT_CHOICE_PREFIX)) return null;
+  const rest = value.slice(ARTIFACT_CHOICE_PREFIX.length);
+  const sep = rest.indexOf(":");
+  if (sep <= 0) return null;
+  return { type: rest.slice(0, sep), id: rest.slice(sep + 1) };
+}
+
+export const ARTIFACT_CHOICE_INSTRUCTION = [
+  "When you are unsure which artifact the user means (image, site, document, task),",
+  "ask via request_clarification with one choice per candidate shaped exactly",
+  "`artifact:<type>:<id>` (type is document|image|web_bundle|site|task|schedule|session).",
+  "The UI renders those choices as visual pickers and returns the value verbatim;",
+  "decode it and act on that artifact id. Never invent ids.",
+].join(" ");
+
+export type ArtifactFocusHandler = (input: {
+  artifactId: string;
+  artifactType: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session";
+  label?: string;
+}) => void;
+
+const jsonOutputSchema = z.json();
+
+type JsonOutput = z.output<typeof jsonOutputSchema>;
+
+function toJson<T>(value: T): JsonOutput {
+  return jsonOutputSchema.parse(JSON.parse(JSON.stringify(value)));
+}
+
+export type ArtifactServiceDeps = {
+  list(input: { type?: string; q?: string }): Promise<{ items: unknown[] }>;
+  get(input: { type: string; id: string }): Promise<unknown>;
+};
+
+export function createArtifactTools(
+  deps: ArtifactServiceDeps & { onFocus?: ArtifactFocusHandler },
+): AnyTool[] {
+  const listArtifacts = createTool({
+    ...listArtifactsSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ type, q }): Promise<JsonOutput> => {
+      return toJson(
+        await deps.list({
+          ...(type ? { type } : {}),
+          ...(q ? { q } : {}),
+        }),
+      );
+    },
+  });
+  const findImages = createTool({
+    ...findImagesSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ query, limit }): Promise<JsonOutput> => {
+      const result = await deps.list({ type: "image", q: query });
+      const items = (result.items as unknown[]).slice(0, limit);
+      const first = items[0] as { id?: string } | undefined;
+      if (first?.id) {
+        deps.onFocus?.({ artifactId: first.id, artifactType: "image" });
+      }
+      return toJson({ images: items });
+    },
+  });
+  const listSessions = createTool({
+    ...listSessionsSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ q }): Promise<JsonOutput> => {
+      return toJson(
+        await deps.list({
+          type: "session",
+          ...(q ? { q } : {}),
+        }),
+      );
+    },
+  });
+  return [listArtifacts, findImages, listSessions];
+}

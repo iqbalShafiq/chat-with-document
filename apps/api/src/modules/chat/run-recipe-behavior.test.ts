@@ -6,6 +6,7 @@ import {
 import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
 import {
   BASE_INSTRUCTIONS,
+  ARTIFACT_TOOL_DEFINITIONS,
   CLARIFICATION_TOOL_DEFINITIONS,
   CHART_TOOL_DEFINITIONS,
   DEEP_RESEARCH_TOOL_DEFINITIONS,
@@ -13,11 +14,13 @@ import {
   DOCUMENT_TOOL_DEFINITIONS,
   IMAGE_GENERATION_TOOL_DEFINITIONS,
   PROFILE_TOOL_DEFINITIONS,
+  REPORT_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
   USER_MCP_TOOL_DEFINITIONS,
   USER_SKILL_TOOL_DEFINITIONS,
   WEB_SEARCH_TOOL_DEFINITIONS,
+  WORKSPACE_TOOL_DEFINITIONS,
 } from "@anreal/agent";
 import { createNativeStaticContext } from "./memory-policy.js";
 import { formatContextSnippetBlock } from "./context-snippets.js";
@@ -25,7 +28,7 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 3,
+    version: 4,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
     model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
@@ -109,6 +112,9 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...(capabilities.imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...ARTIFACT_TOOL_DEFINITIONS,
+    ...REPORT_TOOL_DEFINITIONS,
+    ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,
     ...USER_MCP_TOOL_DEFINITIONS,
     ...(!capabilities.modelAcceptsImage

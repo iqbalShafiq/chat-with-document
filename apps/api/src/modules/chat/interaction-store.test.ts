@@ -26,7 +26,7 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = parseChatAgentRecipe({
-  version: 3,
+  version: 4,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: "openai/gpt-5.6-luna", reasoningEffort: "medium" },

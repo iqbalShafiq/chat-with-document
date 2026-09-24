@@ -155,3 +155,74 @@ export async function updateImageCaption(
   });
   return updated;
 }
+
+export async function getArtifact(
+  input: {
+    userId: string;
+    sessionProjectId: string | null;
+    type: ArtifactType;
+    id: string;
+  },
+  deps: { prisma: PrismaSurface } = { prisma },
+): Promise<Record<string, unknown> | null> {
+  const where = artifactWhere(input.userId, input.sessionProjectId);
+  switch (input.type) {
+    case "document": {
+      const doc = await deps.prisma.document.findFirst({
+        where: { ...where, id: input.id },
+        select: {
+          id: true,
+          filename: true,
+          kind: true,
+          projectId: true,
+          pageCount: true,
+          createdAt: true,
+        },
+      });
+      return doc ? { type: "document", ...doc } : null;
+    }
+    case "image": {
+      const image = await deps.prisma.generatedImage.findFirst({
+        where: { ...where, id: input.id },
+        select: {
+          id: true,
+          caption: true,
+          prompt: true,
+          projectId: true,
+          sessionId: true,
+          source: true,
+          mediaType: true,
+          createdAt: true,
+        },
+      });
+      return image ? { type: "image", ...image } : null;
+    }
+    case "web_bundle": {
+      const bundle = await deps.prisma.webBundle.findFirst({
+        where: { ...where, id: input.id },
+      });
+      return bundle ? { type: "web_bundle", ...bundle } : null;
+    }
+    case "task": {
+      const task = await deps.prisma.workspaceTask.findFirst({
+        where: { ...where, id: input.id },
+      });
+      return task ? { type: "task", ...task } : null;
+    }
+    case "schedule": {
+      const schedule = await deps.prisma.workspaceSchedule.findFirst({
+        where: { ...where, id: input.id },
+      });
+      return schedule ? { type: "schedule", ...schedule } : null;
+    }
+    case "session": {
+      const session = await deps.prisma.chatSession.findFirst({
+        where: input.sessionProjectId
+          ? { id: input.id, userId: input.userId, projectId: input.sessionProjectId }
+          : { id: input.id, userId: input.userId, projectId: null },
+        select: { id: true, title: true, projectId: true, updatedAt: true },
+      });
+      return session ? { type: "session", sessionId: session.id, ...session } : null;
+    }
+  }
+}

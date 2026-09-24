@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createTool, type AnyTool } from "@anvia/core";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
@@ -51,3 +52,56 @@ export const REPORT_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(snapshotChartSpec),
   createStaticToolDefinition(freezeWebBundleSpec),
 ];
+
+export function createReportTools(deps: {
+  createReport(input: {
+    title: string;
+    markdown: string;
+    assetIds?: string[];
+    citationMap?: Array<Record<string, unknown>>;
+  }): Promise<{ documentId: string; filename: string }>;
+  snapshotChart(input: { caption: string; chart: unknown }): Promise<{ imageId: string }>;
+  freezeBundle(input: {
+    title: string;
+    sources: Array<{ url: string; title?: string }>;
+  }): Promise<{ id: string }>;
+  onFocus?: (input: { artifactId: string; artifactType: "document" | "image"; label?: string }) => void;
+}): AnyTool[] {
+  const jsonOutputSchema = z.json();
+  type JsonOutput = z.output<typeof jsonOutputSchema>;
+  const createPdfReport = createTool({
+    ...createPdfReportSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ title, markdown, assetIds, citationMap }): Promise<JsonOutput> => {
+      const result = await deps.createReport({
+        title,
+        markdown,
+        ...(assetIds ? { assetIds } : {}),
+        ...(citationMap ? { citationMap: citationMap as Array<Record<string, unknown>> } : {}),
+      });
+      deps.onFocus?.({ artifactId: result.documentId, artifactType: "document", label: title });
+      return jsonOutputSchema.parse({ ...result });
+    },
+  });
+  const snapshotChart = createTool({
+    ...snapshotChartSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ caption, chart }): Promise<JsonOutput> => {
+      const result = await deps.snapshotChart({ caption, chart });
+      deps.onFocus?.({ artifactId: result.imageId, artifactType: "image", label: caption });
+      return jsonOutputSchema.parse({ ...result });
+    },
+  });
+  const freezeWebBundle = createTool({
+    ...freezeWebBundleSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ title, sources }): Promise<JsonOutput> => {
+      const result = await deps.freezeBundle({
+        title,
+        sources: sources.map((s) => (s.title ? { url: s.url, title: s.title } : { url: s.url })),
+      });
+      return jsonOutputSchema.parse({ ...result });
+    },
+  });
+  return [createPdfReport, snapshotChart, freezeWebBundle];
+}

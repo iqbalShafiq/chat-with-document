@@ -115,6 +115,12 @@ describe("createChatClientStream", () => {
         screenshotUrl: null,
         downloadUrl: "/api/sites/site-1/v1/download",
       },
+      {
+        type: "artifact_focus",
+        artifactId: "img-1",
+        artifactType: "image",
+        label: "hero logo",
+      },
       outcome("response"),
     ];
 
@@ -126,6 +132,7 @@ describe("createChatClientStream", () => {
       expect.objectContaining({ name: "toolWaitProgress" }),
       expect.objectContaining({ name: "siteBuildProgress", data: { siteId: "site-1", version: 1, phase: "building", message: "Membangun hero." } }),
       expect.objectContaining({ name: "siteBuildReady", data: { siteId: "site-1", version: 1, previewUrl: "http://127.0.0.1:49111", screenshotUrl: null, downloadUrl: "/api/sites/site-1/v1/download" } }),
+      expect.objectContaining({ name: "artifactFocus", data: { artifactId: "img-1", artifactType: "image", label: "hero logo" } }),
     ]));
     expect(JSON.stringify(data)).not.toContain("do not forward");
     expect(() => parseClientStreamEvent(data[0], { metadataSchema: ChatMetadataSchema, dataSchemas: ChatDataSchemas })).not.toThrow();

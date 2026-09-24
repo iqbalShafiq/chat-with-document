@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
 import {
+  getArtifact,
   isArtifactType,
   listArtifacts,
   resolveSessionScope,
@@ -29,6 +30,30 @@ export const artifactsRouter = new Hono<{ Variables: AuthVariables }>()
       ...(c.req.query("q") ? { q: c.req.query("q")! } : {}),
     });
     return c.json(result);
+  })
+  .get("/:id", async (c) => {
+    const user = c.get("user");
+    const typeRaw = c.req.query("type");
+    if (!isArtifactType(typeRaw)) {
+      return c.json({ error: "type query is required" }, 400);
+    }
+    const sessionId = c.req.query("sessionId") ?? null;
+    let scope: string | null;
+    try {
+      scope = await resolveSessionScope({ userId: user.id, sessionId });
+    } catch {
+      return c.json({ error: "Session not found", code: "SESSION_NOT_FOUND" }, 404);
+    }
+    const artifact = await getArtifact({
+      userId: user.id,
+      sessionProjectId: scope,
+      type: typeRaw,
+      id: c.req.param("id"),
+    });
+    if (!artifact) {
+      return c.json({ error: "Artifact not found", code: "ARTIFACT_NOT_FOUND" }, 404);
+    }
+    return c.json({ artifact });
   })
   .patch("/images/:id", async (c) => {
     const user = c.get("user");
