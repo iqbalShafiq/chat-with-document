@@ -95,6 +95,29 @@ export const ARTIFACT_CHOICE_INSTRUCTION = [
   "decode it and act on that artifact id. Never invent ids.",
 ].join(" ");
 
+export const PINNED_ARTIFACT_INSTRUCTION = [
+  "The user can pin workspace artifacts into the chat; pinned references look like",
+  "`[@type label (id)]` (for example `[@site Kedai Kopi (abc123)]`).",
+  "Resolve a pinned reference with get_artifact before acting on it, exactly as if",
+  "you had listed it yourself. Never invent ids.",
+].join(" ");
+
+export type PinnableArtifactType =
+  | "document"
+  | "image"
+  | "web_bundle"
+  | "site"
+  | "task"
+  | "schedule"
+  | "session";
+
+/** Visible composer token for a pinned artifact; the agent resolves it via get_artifact. */
+export function formatPinnedArtifactRef(type: PinnableArtifactType, id: string, label: string): string {
+  const cleanLabel = label.trim().replace(/[\[\]]/g, "").slice(0, 80) || type;
+  const cleanId = id.trim();
+  return `[@${type} ${cleanLabel} (${cleanId})]`;
+}
+
 export type ArtifactFocusHandler = (input: {
   artifactId: string;
   artifactType: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session";

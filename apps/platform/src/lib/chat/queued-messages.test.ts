@@ -263,4 +263,17 @@ describe("share fork handoff draft", () => {
     expect(consumeShareForkDraft("fork-2")).toBeNull();
     expect(consumeShareForkDraft("other-session")).toBeNull();
   });
+
+  it("round-trips a prefill-only draft without feature flags", () => {
+    createStorage();
+    queueShareForkDraft("site-1", {
+      text: "Lanjutkan site ini [@site Kedai (abc)]",
+      attachments: [],
+      autoSend: false,
+    });
+    const draft = consumeShareForkDraft("site-1");
+    expect(draft?.text).toContain("[@site Kedai (abc)]");
+    expect(draft?.autoSend).toBe(false);
+    expect(draft?.webSearchEnabled).toBeUndefined();
+  });
 });

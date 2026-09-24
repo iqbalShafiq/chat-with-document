@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ARTIFACT_TOOL_DEFINITIONS, createArtifactTools, decodeArtifactChoice, encodeArtifactChoice } from "./artifacts.js";
+import {
+  ARTIFACT_TOOL_DEFINITIONS,
+  PINNED_ARTIFACT_INSTRUCTION,
+  createArtifactTools,
+  decodeArtifactChoice,
+  encodeArtifactChoice,
+  formatPinnedArtifactRef,
+} from "./artifacts.js";
 
 describe("ARTIFACT_TOOL_DEFINITIONS", () => {
   it("exposes list, find, sessions, get, and excerpt tools", () => {
@@ -16,6 +23,14 @@ describe("artifact choice convention", () => {
       id: "img-1",
     });
     expect(decodeArtifactChoice("plain text")).toBeNull();
+  });
+
+  it("formats pinned references the instruction describes", () => {
+    expect(formatPinnedArtifactRef("site", "abc123", "Kedai Kopi")).toBe(
+      "[@site Kedai Kopi (abc123)]",
+    );
+    expect(formatPinnedArtifactRef("site", "abc123", "a[b]c")).toBe("[@site abc (abc123)]");
+    expect(PINNED_ARTIFACT_INSTRUCTION).toContain("[@site Kedai Kopi (abc123)]");
   });
 });
 

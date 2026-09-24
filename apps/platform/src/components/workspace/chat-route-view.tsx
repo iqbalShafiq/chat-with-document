@@ -263,11 +263,21 @@ export function ChatRouteView(input: {
         composerTopSlot={siteBuild ? <SiteBuildPanel build={siteBuild} versions={siteVersions} onRetry={retrySiteBuild} onRollback={rollbackSiteBuild} /> : null}
         initialComposerDraft={
           shareForkHandoff
-            ? { text: shareForkHandoff.text, attachments: shareForkHandoff.attachments }
+            ? {
+                text: shareForkHandoff.text,
+                attachments: shareForkHandoff.attachments,
+                ...(shareForkHandoff.autoSend !== undefined
+                  ? { autoSend: shareForkHandoff.autoSend }
+                  : {}),
+              }
             : null
         }
         initialFeatureFlags={
-          shareForkHandoff
+          shareForkHandoff &&
+          (shareForkHandoff.webSearchEnabled !== undefined ||
+            shareForkHandoff.deepResearchEnabled !== undefined ||
+            shareForkHandoff.imageGenerationEnabled !== undefined ||
+            shareForkHandoff.imageGenSettings !== undefined)
             ? {
                 webSearchEnabled: shareForkHandoff.webSearchEnabled,
                 deepResearchEnabled: shareForkHandoff.deepResearchEnabled,

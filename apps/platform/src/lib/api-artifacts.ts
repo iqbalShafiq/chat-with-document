@@ -11,6 +11,22 @@ export type ArtifactType =
   | "schedule"
   | "session";
 
+/**
+ * Visible composer token for a pinned artifact. Must stay byte-identical
+ * with `formatPinnedArtifactRef` in `@anreal/agent` (covered by the same
+ * vectors in `api-artifacts.test.ts`), which the agent resolves via
+ * get_artifact per PINNED_ARTIFACT_INSTRUCTION.
+ */
+export function formatPinnedArtifactRef(
+  type: ArtifactType,
+  id: string,
+  label: string,
+): string {
+  const cleanLabel = label.trim().replace(/[\[\]]/g, "").slice(0, 80) || type;
+  const cleanId = id.trim();
+  return `[@${type} ${cleanLabel} (${cleanId})]`;
+}
+
 export type ArtifactListItem = {
   type: ArtifactType;
   id?: string;
@@ -217,6 +233,7 @@ export async function createReport(input: {
 
 export type ScopeSite = {
   siteId: string;
+  sessionId: string;
   version: number;
   stableVersion: number | null;
   status: string;
@@ -224,6 +241,20 @@ export type ScopeSite = {
   downloadUrl: string;
   updatedAt: string;
 };
+
+export type ChatSessionDetail = {
+  sessionId: string;
+  projectId: string | null;
+  title: string | null;
+};
+
+export async function getChatSessionDetail(sessionId: string): Promise<ChatSessionDetail> {
+  const response = await apiFetch(
+    `${API_BASE}/api/chat/sessions/${encodeURIComponent(sessionId)}`,
+  );
+  if (!response.ok) throw new Error("Session not found");
+  return (await response.json()) as ChatSessionDetail;
+}
 
 export async function listScopeSites(sessionId: string): Promise<ScopeSite[]> {
   const params = new URLSearchParams({ sessionId });

@@ -215,6 +215,8 @@ export type ForkPendingDraft = {
 export type InitialComposerDraft = {
   text: string;
   attachments?: UIAttachment[];
+  /** When false, prefill the composer without sending. Defaults to true. */
+  autoSend?: boolean;
 };
 
 function hasStoredSelection(key: string): boolean {
@@ -1221,13 +1223,17 @@ export function ChatSession({
 
   function normalizeInitialDraft(
     draft: InitialComposerDraft | string | null | undefined,
-  ): { text: string; attachments: UIAttachment[] } | null {
+  ): { text: string; attachments: UIAttachment[]; autoSend: boolean } | null {
     if (!draft) return null;
     if (typeof draft === "string") {
-      return draft.trim() ? { text: draft, attachments: [] } : null;
+      return draft.trim() ? { text: draft, attachments: [], autoSend: true } : null;
     }
     return draft.text.trim()
-      ? { text: draft.text, attachments: draft.attachments ?? [] }
+      ? {
+          text: draft.text,
+          attachments: draft.attachments ?? [],
+          autoSend: draft.autoSend !== false,
+        }
       : null;
   }
 
@@ -1254,6 +1260,11 @@ export function ChatSession({
       }
     }
     if (!draft || modelsStatus !== "success") return;
+    if (!draft.autoSend) {
+      setComposerInputText(draft.text);
+      focusComposer();
+      return;
+    }
     const controller = chatRef.current;
     if (!controller || controller.status === "submitted" || controller.status === "streaming") return;
     void submitComposerRef.current(draft.text, draft.attachments, controller, () => {});

@@ -168,6 +168,33 @@ export const chatPaths = {
     },
   },
   "/api/chat/sessions/{id}": {
+    get: {
+      operationId: "getChatSession",
+      tags: ["Chat"],
+      summary: "Read one session's identity",
+      description:
+        "Returns sessionId, projectId, and title for routing (e.g. opening a site's origin session). Out-of-scope ids yield 404.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          example: SESSION_ID_EXAMPLE,
+        },
+      ],
+      responses: {
+        "200": jsonResponse("Session.", chatSessionSchema, {
+          default: {
+            summary: "Session",
+            value: exampleChatSession,
+          },
+        }),
+        "401": unauthorized,
+        "404": notFound({ error: "Chat session not found", code: "CHAT_SESSION_NOT_FOUND" }),
+      },
+    },
     patch: {
       operationId: "renameChatSession",
       tags: ["Chat"],

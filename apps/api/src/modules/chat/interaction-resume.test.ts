@@ -49,7 +49,7 @@ const questionBody = () => ({
 });
 
 const fullRecipe = {
-  version: 4 as const,
+  version: 5 as const,
   agentId: "chat-agent" as const,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: metadata.modelId, reasoningEffort: metadata.reasoningEffort },

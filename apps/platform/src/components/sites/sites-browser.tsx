@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
-import { Download, ExternalLink } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Download, ExternalLink, MessageSquare } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
-import { API_BASE } from "#/lib/api";
-import { listScopeSites, type ScopeSite } from "#/lib/api-artifacts";
+import { API_BASE, createChatSession } from "#/lib/api";
+import {
+  formatPinnedArtifactRef,
+  getChatSessionDetail,
+  listScopeSites,
+  type ScopeSite,
+} from "#/lib/api-artifacts";
+import { queueShareForkDraft } from "#/lib/chat/queued-messages";
+import { sessionUrl } from "#/lib/workspace-urls";
 
 /**
  * Sidebar sites entry: every static site in the active session scope
@@ -20,6 +28,53 @@ export function SitesBrowser({
 }) {
   const [sites, setSites] = useState<ScopeSite[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatTarget, setChatTarget] = useState<ScopeSite | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  const openChatInOriginSession = async (site: ScopeSite) => {
+    setChatBusy(true);
+    setChatError(null);
+    try {
+      // Site manifests only carry their origin session; resolve its project
+      // for the canonical URL (standalone vs project room).
+      const origin = await getChatSessionDetail(site.sessionId).catch(() => null);
+      const projectId = origin?.projectId ?? null;
+      const known = await listScopeSites(sessionId)
+        .then((rows) => rows.some((row) => row.siteId === site.siteId))
+        .catch(() => true);
+      if (!known) throw new Error("Site is no longer in this scope");
+      void navigate(sessionUrl({ sessionId: site.sessionId, projectId }) as never);
+      onClose();
+    } catch (fetchError) {
+      setChatError(fetchError instanceof Error ? fetchError.message : "Could not open chat");
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const openChatInNewSession = async (site: ScopeSite) => {
+    setChatBusy(true);
+    setChatError(null);
+    try {
+      const origin = await getChatSessionDetail(site.sessionId).catch(() => null);
+      const created = await createChatSession({ projectId: origin?.projectId ?? null });
+      queueShareForkDraft(created.sessionId, {
+        text: `Lanjutkan site ini ${formatPinnedArtifactRef("site", site.siteId, site.siteId.slice(0, 8))}`,
+        attachments: [],
+        autoSend: false,
+      });
+      void navigate(
+        sessionUrl({ sessionId: created.sessionId, projectId: created.projectId }) as never,
+      );
+      onClose();
+    } catch (fetchError) {
+      setChatError(fetchError instanceof Error ? fetchError.message : "Could not open chat");
+    } finally {
+      setChatBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !sessionId) return;
@@ -42,8 +97,9 @@ export function SitesBrowser({
 
   if (!open) return null;
   return (
+    <>
     <DialogShell
-      open={open}
+      open={open && chatTarget === null}
       onClose={onClose}
       title="Sites"
       description="Static sites in this scope, from any session."
@@ -117,6 +173,18 @@ export function SitesBrowser({
               >
                 <Download className="size-3.5" />
               </a>
+              <button
+                type="button"
+                aria-label={`Chat about site ${site.siteId.slice(0, 8)}`}
+                title="Chat about this site"
+                onClick={() => {
+                  setChatTarget(site);
+                  setChatError(null);
+                }}
+                className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/[0.08] hover:text-text active:scale-95"
+              >
+                <MessageSquare className="size-3.5" />
+              </button>
             </li>
           ))}
         </ul>
@@ -125,5 +193,52 @@ export function SitesBrowser({
         </div>
       </div>
     </DialogShell>
+
+    <DialogShell
+      open={chatTarget !== null}
+      onClose={() => {
+        if (!chatBusy) {
+          setChatTarget(null);
+          setChatError(null);
+        }
+      }}
+      title="Chat about this site"
+      description={
+        chatTarget ? `Site ${chatTarget.siteId.slice(0, 8)} · v${chatTarget.version}` : undefined
+      }
+      size="sm"
+      heightMode="content"
+    >
+      <div className="flex flex-col gap-2">
+        {chatError ? (
+          <p role="alert" className="text-[11px] text-danger">
+            {chatError}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          disabled={chatBusy || !chatTarget}
+          onClick={() => chatTarget && void openChatInOriginSession(chatTarget)}
+          className="flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.07] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <span className="text-[12px] font-semibold text-text">Continue in its session</span>
+          <span className="text-[11px] text-text-muted">
+            Full history and build context stay intact.
+          </span>
+        </button>
+        <button
+          type="button"
+          disabled={chatBusy || !chatTarget}
+          onClick={() => chatTarget && void openChatInNewSession(chatTarget)}
+          className="flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.07] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <span className="text-[12px] font-semibold text-text">Start a new chat</span>
+          <span className="text-[11px] text-text-muted">
+            Clean room with the site pinned for the agent.
+          </span>
+        </button>
+      </div>
+    </DialogShell>
+    </>
   );
 }

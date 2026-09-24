@@ -111,6 +111,7 @@ export async function writeSitesIndex(
 
 export type SessionSiteEntry = {
   siteId: string;
+  sessionId: string;
   version: number;
   stableVersion: number | null;
   status: SiteBuildStatus;
@@ -163,6 +164,7 @@ export async function listSitesByScope(
     if (!manifest || manifest.userId !== userId) continue;
     out.push({
       siteId: manifest.siteId,
+      sessionId: manifest.sessionId,
       version: manifest.version,
       stableVersion: manifest.stableVersion,
       status: manifest.status,
@@ -218,6 +220,7 @@ export async function listSitesBySession(
     return [
       {
         siteId: manifest.siteId,
+        sessionId: manifest.sessionId,
         version: manifest.version,
         stableVersion: manifest.stableVersion,
         status: manifest.status,

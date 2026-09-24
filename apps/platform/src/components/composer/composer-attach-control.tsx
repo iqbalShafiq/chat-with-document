@@ -1,8 +1,12 @@
 import { useComposer } from "@anvia/react-ui";
-import { FolderOpen, Paperclip, Upload } from "lucide-react";
+import { FileText, FolderOpen, Globe, Paperclip, Upload } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { ArtifactPicker } from "#/components/artifacts/artifact-picker";
 import { DocumentLibraryModal } from "#/components/documents/document-library-modal";
+import { DialogShell } from "#/components/ui/dialog-shell";
 import { PopoverMenu } from "#/components/ui/popover-menu";
+import type { ArtifactType } from "#/lib/api-artifacts";
+import { formatPinnedArtifactRef, getArtifact } from "#/lib/api-artifacts";
 import {
   linkDocumentsToSession,
   type SessionDocument,
@@ -40,6 +44,7 @@ export function ComposerAttachControl({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [linking, setLinking] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [pinType, setPinType] = useState<Extract<ArtifactType, "site" | "document"> | null>(null);
 
   const busy = disabled || linking;
 
@@ -72,6 +77,18 @@ export function ComposerAttachControl({
       }
     },
     [composer, onRejectedFiles],
+  );
+
+  const handlePinArtifact = useCallback(
+    (id: string, label: string) => {
+      if (!pinType) return;
+      const token = formatPinnedArtifactRef(pinType, id, label);
+      const current = composer.input.replace(/\s+$/, "");
+      composer.setInput(current ? `${current}\n${token}` : token);
+      setPinType(null);
+      setMenuOpen(false);
+    },
+    [composer, pinType],
   );
 
   const handleLibraryConfirm = useCallback(
@@ -143,6 +160,26 @@ export function ComposerAttachControl({
                 setLibraryOpen(true);
               },
             },
+            {
+              id: "pin-site",
+              label: "Pin a site",
+              description: "Reference a static site from this scope",
+              icon: <Globe className="size-3.5" strokeWidth={1.75} />,
+              disabled: busy,
+              onSelect: () => {
+                setPinType("site");
+              },
+            },
+            {
+              id: "pin-report",
+              label: "Pin a report",
+              description: "Reference a PDF report from this scope",
+              icon: <FileText className="size-3.5" strokeWidth={1.75} />,
+              disabled: busy,
+              onSelect: () => {
+                setPinType("document");
+              },
+            },
           ]}
         />
       </div>
@@ -175,6 +212,35 @@ export function ComposerAttachControl({
         busy={linking}
         error={libraryError}
       />
+
+      <DialogShell
+        open={pinType !== null}
+        onClose={() => setPinType(null)}
+        title={pinType === "site" ? "Pin a site" : "Pin a report"}
+        description="The reference is inserted into your message for the agent to resolve."
+        size="md"
+        heightMode="viewport"
+      >
+        {pinType ? (
+          <ArtifactPicker
+            sessionId={sessionId}
+            artifactType={pinType}
+            value={null}
+            candidates={undefined}
+            onSelect={(id) => {
+              void getArtifact({ id, type: pinType, sessionId }).then(
+                (artifact) => {
+                  handlePinArtifact(
+                    id,
+                    artifact.caption ?? artifact.filename ?? artifact.title ?? id,
+                  );
+                },
+                () => handlePinArtifact(id, id),
+              );
+            }}
+          />
+        ) : null}
+      </DialogShell>
     </>
   );
 }

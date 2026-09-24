@@ -67,6 +67,7 @@ import { computeContextUsage } from "./context-usage.js";
 import {
   ChatSessionNotFoundError,
   ensureChatSession,
+  getChatSession,
   getOrCreateEmptyChatSession,
   normalizeSessionTitle,
   ProjectMembershipError,
@@ -551,6 +552,23 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         },
         400,
       );
+    }
+  })
+  .get("/sessions/:id", async (c) => {
+    const user = c.get("user");
+    try {
+      const session = await getChatSession(user.id, c.req.param("id"));
+      return c.json({
+        sessionId: session.id,
+        projectId: session.projectId,
+        title: session.title,
+        updatedAt: session.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof ChatSessionNotFoundError) {
+        return c.json({ error: error.message, code: error.code }, 404);
+      }
+      throw error;
     }
   })
   .patch("/sessions/:id", async (c) => {
