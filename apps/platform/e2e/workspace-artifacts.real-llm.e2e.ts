@@ -125,6 +125,7 @@ async function saveEvidence(page: Page, caseId: string): Promise<void> {
 
 test.describe.serial("workspace artifacts", () => {
   test("agent plans a family trip with subtasks", async ({ page }) => {
+    test.setTimeout(900_000);
     await ensureTestUser(page);
     const sessionId = await openFreshChatWithModel(page);
     const stamp = new Date().toISOString().slice(5, 10);
@@ -174,6 +175,7 @@ test.describe.serial("workspace artifacts", () => {
   });
 
   test("agent builds a PDF report from chat content", async ({ page }) => {
+    test.setTimeout(900_000);
     await ensureTestUser(page);
     const sessionId = await openFreshChatWithModel(page);
 
@@ -206,6 +208,7 @@ test.describe.serial("workspace artifacts", () => {
   });
 
   test("agent charts sales data and embeds it in a PDF report", async ({ page }) => {
+    test.setTimeout(900_000);
     await ensureTestUser(page);
     const stamp = new Date().toISOString().slice(5, 16).replace("T", "-");
     const reportTag = `analisis-penjualan-${stamp}`;
