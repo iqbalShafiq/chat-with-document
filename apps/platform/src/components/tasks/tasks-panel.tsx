@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { ManagementRow } from "#/components/ui/management-row";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import {
@@ -20,6 +20,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [editDescDraft, setEditDescDraft] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [subDrafts, setSubDrafts] = useState<Record<string, string>>({});
 
@@ -111,13 +112,18 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
               <li key={task.id} className="flex flex-col gap-1">
                 {renamingId === task.id ? (
                   <form
-                    className="flex gap-1.5"
+                    className="flex flex-col gap-1.5"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!renameDraft.trim()) return;
                       const title = renameDraft.trim();
+                      const description = editDescDraft.trim();
                       setRenamingId(null);
-                      void updateTask(task.id, { sessionId, title }).then(refresh);
+                      void updateTask(task.id, {
+                        sessionId,
+                        title,
+                        description: description ? description : null,
+                      }).then(refresh);
                     }}
                   >
                     <input
@@ -130,13 +136,31 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                       aria-label={`Rename ${task.title}`}
                       className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-text outline-none focus:border-accent/40"
                     />
-                    <button
-                      type="submit"
-                      disabled={!renameDraft.trim()}
-                      className="h-8 shrink-0 cursor-pointer rounded-lg bg-accent px-3 text-[11px] font-semibold text-canvas disabled:opacity-40"
-                    >
-                      Save
-                    </button>
+                    <input
+                      type="text"
+                      value={editDescDraft}
+                      maxLength={2000}
+                      onChange={(event) => setEditDescDraft(event.target.value)}
+                      placeholder="Description (optional)…"
+                      aria-label={`Description for ${task.title}`}
+                      className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-text placeholder:text-text-faint outline-none focus:border-accent/40"
+                    />
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setRenamingId(null)}
+                        className="h-7 cursor-pointer rounded-md px-2 text-[11px] text-text-muted hover:text-text"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={!renameDraft.trim()}
+                        className="h-7 shrink-0 cursor-pointer rounded-lg bg-accent px-3 text-[11px] font-semibold text-canvas disabled:opacity-40"
+                      >
+                        Save
+                      </button>
+                    </div>
                   </form>
                 ) : (
                   <ManagementRow
@@ -158,9 +182,10 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     toggleLabel={`Mark ${task.title} done`}
                     onEdit={() => {
                       setRenameDraft(task.title);
+                      setEditDescDraft(task.description ?? "");
                       setRenamingId(task.id);
                     }}
-                    editLabel={`Rename ${task.title}`}
+                    editLabel={`Edit ${task.title}`}
                     onDelete={() => {
                       setConfirmDeleteId(task.id);
                     }}
@@ -173,8 +198,11 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     aria-expanded={expanded}
                     aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
                     onClick={() => setExpandedId(expanded ? null : task.id)}
-                    className="w-fit cursor-pointer px-1 text-[10px] text-text-faint transition hover:text-text"
+                    className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-white/[0.06] hover:text-text"
                   >
+                    <ChevronDown
+                      className={`size-3 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+                    />
                     {expanded ? "Hide details" : `Details (${task.subtasks.length})`}
                   </button>
                 )}
