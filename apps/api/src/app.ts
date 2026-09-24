@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createAppCors } from "./lib/cors.js";
 import { artifactsRouter } from "./modules/artifacts/router.js";
+import { chartsRouter } from "./modules/charts/router.js";
 import { auth } from "./modules/auth/auth.js";
 import { publicShareRouter } from "./modules/chat/public-share-router.js";
 import { chatRouter } from "./modules/chat/router.js";
@@ -8,6 +9,8 @@ import { documentsRouter } from "./modules/documents/router.js";
 import { imagesRouter } from "./modules/images/router.js";
 import { modelsRouter } from "./modules/models/router.js";
 import { mcpServersRouter } from "./modules/mcp-servers/router.js";
+import { reportsRouter } from "./modules/reports/router.js";
+import { webBundlesRouter } from "./modules/web-bundles/router.js";
 import { profilingRouter } from "./modules/profiling/router.js";
 import { projectsRouter } from "./modules/projects/router.js";
 import { skillsRouter } from "./modules/skills/router.js";
@@ -21,6 +24,9 @@ export function createApp() {
     .get("/health", (c) => c.json({ ok: true }))
     .on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))
     .route("/api/artifacts", artifactsRouter)
+    .route("/api/reports", reportsRouter)
+    .route("/api/charts", chartsRouter)
+    .route("/api/web-bundles", webBundlesRouter)
     .route("/api/chat", chatRouter)
     .route("/api/shares", publicShareRouter)
     .route("/api/documents", documentsRouter)
