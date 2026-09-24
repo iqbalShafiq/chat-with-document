@@ -257,7 +257,7 @@ export function FeaturesPopover({
     <div className="relative inline-flex">
       {anyEnabled ? (
       <div
-        className="glass inline-flex h-9 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        className="glass inline-flex h-9 items-stretch gap-0.5 overflow-hidden rounded-xl px-1 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <button
           ref={buttonRef}
@@ -272,7 +272,7 @@ export function FeaturesPopover({
           aria-expanded={open}
           disabled={!anyAvailable}
           onClick={toggle}
-          className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-l-xl text-accent transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+          className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-lg text-accent transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
         >
           <Plus className="size-4" strokeWidth={1.75} />
         </button>
