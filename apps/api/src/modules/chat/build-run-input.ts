@@ -1480,14 +1480,25 @@ export async function reconstructChatRunInput(input: {
     ...createWorkspaceManageTools({
       tasks: {
         list: () => listTasks(userId, projectId),
-        create: ({ title }) => createTask({ userId, sessionId, title }) as Promise<{ id: string }>,
-        update: ({ id, status, title }) =>
+        create: ({ title, description, addSubtasks }) =>
+          createTask({
+            userId,
+            sessionId,
+            title,
+            ...(description ? { description } : {}),
+            ...(addSubtasks ? { addSubtasks } : {}),
+          }) as Promise<{ id: string }>,
+        update: ({ id, status, title, description, addSubtasks, toggleSubtasks, removeSubtasks }) =>
           updateTask({
             userId,
             sessionId,
             id,
             ...(status ? { status: status as never } : {}),
             ...(title ? { title } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(addSubtasks ? { addSubtasks } : {}),
+            ...(toggleSubtasks ? { toggleSubtasks } : {}),
+            ...(removeSubtasks ? { removeSubtasks } : {}),
           }) as Promise<unknown>,
       },
       schedules: {

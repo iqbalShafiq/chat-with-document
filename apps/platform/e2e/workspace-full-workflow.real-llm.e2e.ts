@@ -30,7 +30,9 @@ const EVIDENCE_DIR = resolve(E2E_DIR, "../../.playwright-mcp/workspace-full-work
 const TEST_EMAIL = "shafiq@testing.com";
 const TEST_PASSWORD = "Test@123";
 const TEST_NAME = "Shafiq Testing";
-const TAG = "FULLFLOW";
+const stamp = (): string => new Date().toISOString().slice(5, 16).replace("T", "-");
+const TAG = `ringkasan-kopi-${stamp()}`;
+const SITE_TAG = `kedai-kopi-senja-${stamp()}`;
 
 function sessionCookie(headers: Record<string, string>): string | null {
   const raw = headers["set-cookie"] ?? "";
@@ -165,7 +167,7 @@ test.describe.serial("workspace full workflow", () => {
     await attachFile(page, "sales.csv");
     await sendMessage(
       page,
-      `Analisis ${TAG}: aggregate total revenue per region dari sales.csv, buat bar chart-nya, snapshot chart itu, cari konteks pasar kopi singkat via web search, lalu buatkan laporan PDF berjudul ${TAG} minimal 2 paragraf yang memuat angka, chart, dan sitasi`,
+      `Analisis penjualan kopi: aggregate total revenue per region dari sales.csv, buat bar chart-nya, snapshot chart itu, cari konteks pasar kopi singkat via web search, lalu buatkan laporan PDF berjudul ${TAG} minimal 2 paragraf yang memuat angka, chart, dan sitasi`,
     );
     await waitForRunDone(page, 600_000);
 
@@ -187,7 +189,7 @@ test.describe.serial("workspace full workflow", () => {
 
     await sendMessage(
       page,
-      `Cari laporan ${TAG} di workspace, lalu buatkan landing page statis bertema kopi yang merangkumnya dengan nama situs ${TAG}site`,
+      `Cari laporan ${TAG} di workspace, lalu buatkan landing page statis untuk ${SITE_TAG} bertema kopi yang merangkum laporan tersebut`,
     );
     await waitForRunDone(page, 600_000);
 
@@ -217,7 +219,7 @@ test.describe.serial("workspace full workflow", () => {
     await setSwitch(page, "Image generator", true);
 
     const before = await artifacts(page, sessionId, "image");
-    await sendMessage(page, `Generate gambar logo kopi sederhana bertema ${TAG}logo`);
+    await sendMessage(page, `Generate gambar logo sederhana untuk kedai kopi senja`);
     await waitForRunDone(page, 600_000);
 
     const after = await artifacts(page, sessionId, "image");

@@ -504,6 +504,10 @@ model WorkspaceTask {
   status          String    @default("inbox")
   sourceSessionId String?
   dueAt           DateTime?
+  /// Optional context note for the task.
+  description     String?   @db.Text
+  /// Checklist items: [{ id, title, done }]. Progress derives from these.
+  subtasks        Json      @default("[]")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

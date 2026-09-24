@@ -46,4 +46,17 @@ describe("tasksRouter", () => {
     });
     expect(response.status).toBe(400);
   });
+
+  it("accepts subtask operations on update", async () => {
+    const response = await tasksRouter.request("/t1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "s1",
+        addSubtasks: ["Booking hotel"],
+        toggleSubtasks: [{ id: "s0", done: true }],
+      }),
+    });
+    expect(response.status).toBe(200);
+  });
 });

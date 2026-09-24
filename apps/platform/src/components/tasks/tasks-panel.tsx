@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Check, X } from "lucide-react";
 import { ManagementRow } from "#/components/ui/management-row";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
 import {
@@ -19,6 +20,8 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [subDrafts, setSubDrafts] = useState<Record<string, string>>({});
 
   const refresh = useCallback(() => {
     setError(null);
@@ -101,65 +104,162 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
         <p className="text-[11px] text-text-faint">No tasks yet — add one or ask the agent.</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
-          {tasks.map((task) =>
-            renamingId === task.id ? (
-              <li key={task.id}>
-                <form
-                  className="flex gap-1.5"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (!renameDraft.trim()) return;
-                    const title = renameDraft.trim();
-                    setRenamingId(null);
-                    void updateTask(task.id, { sessionId, title }).then(refresh);
-                  }}
-                >
-                  <input
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
-                    type="text"
-                    value={renameDraft}
-                    maxLength={200}
-                    onChange={(event) => setRenameDraft(event.target.value)}
-                    aria-label={`Rename ${task.title}`}
-                    className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-text outline-none focus:border-accent/40"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!renameDraft.trim()}
-                    className="h-8 shrink-0 cursor-pointer rounded-lg bg-accent px-3 text-[11px] font-semibold text-canvas disabled:opacity-40"
+          {tasks.map((task) => {
+            const doneCount = task.subtasks.filter((s) => s.done).length;
+            const expanded = expandedId === task.id;
+            return (
+              <li key={task.id} className="flex flex-col gap-1">
+                {renamingId === task.id ? (
+                  <form
+                    className="flex gap-1.5"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!renameDraft.trim()) return;
+                      const title = renameDraft.trim();
+                      setRenamingId(null);
+                      void updateTask(task.id, { sessionId, title }).then(refresh);
+                    }}
                   >
-                    Save
+                    <input
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus
+                      type="text"
+                      value={renameDraft}
+                      maxLength={200}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      aria-label={`Rename ${task.title}`}
+                      className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-text outline-none focus:border-accent/40"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!renameDraft.trim()}
+                      className="h-8 shrink-0 cursor-pointer rounded-lg bg-accent px-3 text-[11px] font-semibold text-canvas disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                  </form>
+                ) : (
+                  <ManagementRow
+                    title={
+                      task.subtasks.length > 0
+                        ? `${task.title} (${doneCount}/${task.subtasks.length})`
+                        : task.title
+                    }
+                    subtitle={task.description ?? task.status}
+                    enabled={task.status === "done"}
+                    onToggle={() => {
+                      const next = task.status === "done" ? "inbox" : "done";
+                      if (next === "done") {
+                        setConfirmDoneId(task.id);
+                        return;
+                      }
+                      void updateTask(task.id, { sessionId, status: next }).then(refresh);
+                    }}
+                    toggleLabel={`Mark ${task.title} done`}
+                    onEdit={() => {
+                      setRenameDraft(task.title);
+                      setRenamingId(task.id);
+                    }}
+                    editLabel={`Rename ${task.title}`}
+                    onDelete={() => {
+                      setConfirmDeleteId(task.id);
+                    }}
+                    deleteLabel={`Delete ${task.title}`}
+                  />
+                )}
+                {(task.subtasks.length > 0 || task.description) && (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
+                    onClick={() => setExpandedId(expanded ? null : task.id)}
+                    className="w-fit cursor-pointer px-1 text-[10px] text-text-faint transition hover:text-text"
+                  >
+                    {expanded ? "Hide details" : `Details (${task.subtasks.length})`}
                   </button>
-                </form>
+                )}
+                {expanded && (
+                  <div className="ml-2 flex flex-col gap-1 border-l border-white/[0.08] pl-2.5">
+                    {task.description ? (
+                      <p className="text-[11px] leading-relaxed text-text-muted">{task.description}</p>
+                    ) : null}
+                    <ul className="flex flex-col gap-1">
+                      {task.subtasks.map((sub) => (
+                        <li key={sub.id} className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={sub.done}
+                            aria-label={`Mark subtask ${sub.title} ${sub.done ? "not done" : "done"}`}
+                            onClick={() => {
+                              void updateTask(task.id, {
+                                sessionId,
+                                toggleSubtasks: [{ id: sub.id, done: !sub.done }],
+                              }).then(refresh);
+                            }}
+                            className={`inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded border transition ${
+                              sub.done
+                                ? "border-accent bg-accent text-canvas"
+                                : "border-white/[0.2] bg-transparent hover:border-accent"
+                            }`}
+                          >
+                            {sub.done ? <Check className="size-3" strokeWidth={3} /> : null}
+                          </button>
+                          <span
+                            className={`min-w-0 flex-1 truncate text-[11px] ${sub.done ? "text-text-faint line-through" : "text-text"}`}
+                          >
+                            {sub.title}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove subtask ${sub.title}`}
+                            onClick={() => {
+                              void updateTask(task.id, {
+                                sessionId,
+                                removeSubtasks: [sub.id],
+                              }).then(refresh);
+                            }}
+                            className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-text-faint transition hover:bg-white/[0.08] hover:text-text"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <form
+                      className="flex gap-1.5"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const title = (subDrafts[task.id] ?? "").trim();
+                        if (!title) return;
+                        setSubDrafts((d) => ({ ...d, [task.id]: "" }));
+                        void updateTask(task.id, { sessionId, addSubtasks: [title] }).then(refresh);
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={subDrafts[task.id] ?? ""}
+                        maxLength={200}
+                        onChange={(event) =>
+                          setSubDrafts((d) => ({ ...d, [task.id]: event.target.value }))
+                        }
+                        placeholder="Add subtask…"
+                        aria-label={`Add subtask to ${task.title}`}
+                        className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[11px] text-text placeholder:text-text-faint outline-none focus:border-accent/40"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!(subDrafts[task.id] ?? "").trim()}
+                        className="h-7 shrink-0 cursor-pointer rounded-lg bg-accent px-2.5 text-[11px] font-semibold text-canvas disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </form>
+                  </div>
+                )}
               </li>
-            ) : (
-              <ManagementRow
-                key={task.id}
-                title={task.title}
-                subtitle={task.status}
-                enabled={task.status === "done"}
-                onToggle={() => {
-                  const next = task.status === "done" ? "inbox" : "done";
-                  if (next === "done") {
-                    setConfirmDoneId(task.id);
-                    return;
-                  }
-                  void updateTask(task.id, { sessionId, status: next }).then(refresh);
-                }}
-                toggleLabel={`Mark ${task.title} done`}
-                onEdit={() => {
-                  setRenameDraft(task.title);
-                  setRenamingId(task.id);
-                }}
-                editLabel={`Rename ${task.title}`}
-                onDelete={() => {
-                  setConfirmDeleteId(task.id);
-                }}
-                deleteLabel={`Delete ${task.title}`}
-              />
-            ),
-          )}
+            );
+          })}
         </ul>
       )}
       <ConfirmDialog

@@ -124,34 +124,68 @@ async function saveEvidence(page: Page, caseId: string): Promise<void> {
 }
 
 test.describe.serial("workspace artifacts", () => {
-  test("agent creates a task and it appears scoped", async ({ page }) => {
+  test("agent plans a family trip with subtasks", async ({ page }) => {
     await ensureTestUser(page);
     const sessionId = await openFreshChatWithModel(page);
+    const stamp = new Date().toISOString().slice(5, 10);
+    const title = `Rencana liburan keluarga ke Bandung (${stamp})`;
 
-    await sendMessage(page, "Buatkan task berjudul E2EARTIFACT review laporan");
+    await sendMessage(
+      page,
+      `Tolong buatkan daftar rencana "${title}" dengan subtask: booking hotel, beli tiket kereta, dan susun itinerary 2 hari`,
+    );
     await waitForRunDone(page);
 
-    const tasks = await pollFor(
-      async () => {
-        const res = await page.request.get(
-          `${API_ORIGIN}/api/tasks?sessionId=${encodeURIComponent(sessionId)}`,
-        );
-        expect(res.ok()).toBe(true);
-        return ((await res.json()) as { items: { id: string; title: string; status: string }[] }).items;
-      },
-      (t) => t.title.includes("E2EARTIFACT"),
+    type TaskRow = {
+      id: string;
+      title: string;
+      status: string;
+      subtasks: { id: string; title: string; done: boolean }[];
+    };
+    const listTasks = async (): Promise<TaskRow[]> => {
+      const res = await page.request.get(
+        `${API_ORIGIN}/api/tasks?sessionId=${encodeURIComponent(sessionId)}`,
+      );
+      expect(res.ok()).toBe(true);
+      return ((await res.json()) as { items: TaskRow[] }).items;
+    };
+    const task = await pollFor(listTasks, (t) => t.title === title);
+    expect(task.status).toBe("inbox");
+    expect(task.subtasks.length).toBeGreaterThanOrEqual(3);
+
+    await sendMessage(page, "Hotelnya sudah saya booking, tandai subtask booking hotel sebagai selesai");
+    await waitForRunDone(page);
+
+    const updated = await pollFor(
+      listTasks,
+      (t) => t.id === task.id && t.subtasks.some((s) => s.done),
     );
-    expect(tasks.status).toBe("inbox");
-    await saveEvidence(page, "task-created");
+    expect(updated.subtasks.filter((s) => s.done)).toHaveLength(1);
+
+    await sendMessage(page, "Semuanya beres, tandai rencana liburannya selesai");
+    await waitForRunDone(page);
+
+    const done = await pollFor(
+      listTasks,
+      (t) => t.id === task.id && t.status === "done",
+    );
+    expect(done.status).toBe("done");
+    await saveEvidence(page, "task-subtasks");
   });
 
   test("agent builds a PDF report from chat content", async ({ page }) => {
     await ensureTestUser(page);
     const sessionId = await openFreshChatWithModel(page);
 
+    const beforeRes = await page.request.get(`${API_ORIGIN}/api/documents/library?scope=attach`);
+    expect(beforeRes.ok()).toBe(true);
+    const beforeIds = new Set(
+      ((await beforeRes.json()) as { items: { id: string }[] }).items.map((d) => d.id),
+    );
+
     await sendMessage(
       page,
-      "Buatkan laporan PDF berjudul E2EARTIFACT tentang tiga keuntungan dokumentasi yang rapi",
+      "Buatkan laporan PDF tentang tiga keuntungan dokumentasi yang rapi untuk tim operasional",
     );
     await waitForRunDone(page);
 
@@ -163,7 +197,7 @@ test.describe.serial("workspace artifacts", () => {
         expect(res.ok()).toBe(true);
         return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
       },
-      (d) => d.filename.includes("E2EARTIFACT"),
+      (d) => !beforeIds.has(d.id) && d.filename.toLowerCase().includes("dokumentasi"),
       240_000,
     );
     expect(docs.id).toBeTruthy();
@@ -173,6 +207,8 @@ test.describe.serial("workspace artifacts", () => {
 
   test("agent charts sales data and embeds it in a PDF report", async ({ page }) => {
     await ensureTestUser(page);
+    const stamp = new Date().toISOString().slice(5, 16).replace("T", "-");
+    const reportTag = `analisis-penjualan-${stamp}`;
 
     // Watch-mode dev restarts can drop one upload/send; retry once on a
     // guaranteed-fresh session (no queue pollution from the first attempt).
@@ -183,7 +219,7 @@ test.describe.serial("workspace artifacts", () => {
         await uploadAndAsk(
           page,
           "sales.csv",
-          "Analisis E2EARTIFACTCHART: aggregate total revenue per region, buat bar chart-nya, snapshot chart itu, lalu buatkan laporan PDF berjudul E2EARTIFACTCHART yang memuat chart tersebut",
+          `Analisis penjualan per region, buat bar chart-nya, snapshot chart itu, lalu buatkan laporan PDF berjudul ${reportTag} yang memuat chart tersebut`,
         );
         lastError = null;
         break;
@@ -199,7 +235,7 @@ test.describe.serial("workspace artifacts", () => {
         expect(res.ok()).toBe(true);
         return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
       },
-      (d) => d.filename.includes("E2EARTIFACTCHART"),
+      (d) => d.filename.includes(reportTag),
       420_000,
     );
     expect(docs.id).toBeTruthy();

@@ -6,13 +6,22 @@ import { createTask, listTasks, resolveScope, updateTask } from "./service.js";
 const createSchema = z.object({
   sessionId: z.string().min(1).max(120),
   title: z.string().trim().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  addSubtasks: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
   dueAt: z.string().datetime({ offset: true }).optional(),
 });
 
 const updateSchema = z.object({
   sessionId: z.string().min(1).max(120),
   status: z.enum(["inbox", "doing", "done"]).optional(),
-  title: z.string().min(1).max(200).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  addSubtasks: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
+  toggleSubtasks: z
+    .array(z.object({ id: z.string().min(1).max(120), done: z.boolean() }))
+    .max(50)
+    .optional(),
+  removeSubtasks: z.array(z.string().min(1).max(120)).max(50).optional(),
 });
 
 export const tasksRouter = new Hono<{ Variables: AuthVariables }>()
@@ -45,7 +54,15 @@ export const tasksRouter = new Hono<{ Variables: AuthVariables }>()
   .patch("/:id", async (c) => {
     const user = c.get("user");
     const parsed = updateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success || (!parsed.data.status && parsed.data.title === undefined)) {
+    if (
+      !parsed.success ||
+      (parsed.data.status === undefined &&
+        parsed.data.title === undefined &&
+        parsed.data.description === undefined &&
+        parsed.data.addSubtasks === undefined &&
+        parsed.data.toggleSubtasks === undefined &&
+        parsed.data.removeSubtasks === undefined)
+    ) {
       return c.json({ error: "Nothing to update." }, 400);
     }
     try {

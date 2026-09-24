@@ -77,10 +77,18 @@ export async function updateImageCaption(input: {
   return (await response.json()) as { id: string; caption: string };
 }
 
+export type TaskSubtask = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
 export type WorkspaceTask = {
   id: string;
   title: string;
   status: "inbox" | "doing" | "done";
+  description: string | null;
+  subtasks: TaskSubtask[];
   sourceSessionId: string | null;
   dueAt: string | null;
   createdAt: string;
@@ -92,7 +100,12 @@ export async function listTasks(sessionId: string): Promise<WorkspaceTask[]> {
   );
   if (!response.ok) throw new Error("Failed to load tasks");
   const data = (await response.json()) as { items?: WorkspaceTask[] };
-  return Array.isArray(data.items) ? data.items : [];
+  const items = Array.isArray(data.items) ? data.items : [];
+  return items.map((task) => ({
+    ...task,
+    description: task.description ?? null,
+    subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
+  }));
 }
 
 export async function createTask(input: {
@@ -113,7 +126,15 @@ export async function createTask(input: {
 
 export async function updateTask(
   id: string,
-  input: { sessionId: string; status?: WorkspaceTask["status"]; title?: string },
+  input: {
+    sessionId: string;
+    status?: WorkspaceTask["status"];
+    title?: string;
+    description?: string | null;
+    addSubtasks?: string[];
+    toggleSubtasks?: { id: string; done: boolean }[];
+    removeSubtasks?: string[];
+  },
 ): Promise<WorkspaceTask> {
   const response = await apiFetch(`${API_BASE}/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",

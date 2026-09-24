@@ -7,12 +7,20 @@ import {
 
 const manageTasksSpec = {
   name: "manage_tasks",
-  description: "Create, list, and update scoped workspace tasks. Updates mutate the same task, never duplicate.",
+  description:
+    "Create, list, and update scoped workspace tasks. A task has a title, optional description, status (inbox/doing/done), and a subtask checklist — add subtasks with addSubtasks, flip them with toggleSubtasks, remove with removeSubtasks. Updates mutate the same task, never duplicate.",
   inputSchema: z.object({
     action: z.enum(["create", "list", "update"]),
     title: z.string().max(200).optional(),
+    description: z.string().max(2000).optional(),
     id: z.string().optional(),
     status: z.enum(["inbox", "doing", "done"]).optional(),
+    addSubtasks: z.array(z.string().max(200)).max(50).optional(),
+    toggleSubtasks: z
+      .array(z.object({ id: z.string(), done: z.boolean() }))
+      .max(50)
+      .optional(),
+    removeSubtasks: z.array(z.string()).max(50).optional(),
   }),
 } as const;
 
@@ -36,8 +44,16 @@ export const WORKSPACE_TOOL_DEFINITIONS: ToolDefinition[] = [
 export function createWorkspaceManageTools(deps: {
   tasks: {
     list(): Promise<unknown>;
-    create(input: { title: string }): Promise<{ id: string }>;
-    update(input: { id: string; status?: string; title?: string }): Promise<unknown>;
+    create(input: { title: string; description?: string; addSubtasks?: string[] }): Promise<{ id: string }>;
+    update(input: {
+      id: string;
+      status?: string;
+      title?: string;
+      description?: string | null;
+      addSubtasks?: string[];
+      toggleSubtasks?: { id: string; done: boolean }[];
+      removeSubtasks?: string[];
+    }): Promise<unknown>;
   };
   schedules: {
     list(): Promise<unknown>;
@@ -52,11 +68,15 @@ export function createWorkspaceManageTools(deps: {
   const manageTasks = createTool({
     ...manageTasksSpec,
     outputSchema: jsonOutputSchema,
-    execute: async ({ action, title, id, status }): Promise<JsonOutput> => {
+    execute: async ({ action, title, description, id, status, addSubtasks, toggleSubtasks, removeSubtasks }): Promise<JsonOutput> => {
       if (action === "list") return toJson(await deps.tasks.list());
       if (action === "create") {
         if (!title) throw new Error("Title is required to create a task.");
-        const created = await deps.tasks.create({ title });
+        const created = await deps.tasks.create({
+          title,
+          ...(description ? { description } : {}),
+          ...(addSubtasks ? { addSubtasks } : {}),
+        });
         deps.onFocus?.({ artifactId: created.id, artifactType: "task", label: title });
         return toJson(created);
       }
@@ -66,6 +86,10 @@ export function createWorkspaceManageTools(deps: {
           id,
           ...(status ? { status } : {}),
           ...(title ? { title } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(addSubtasks ? { addSubtasks } : {}),
+          ...(toggleSubtasks ? { toggleSubtasks } : {}),
+          ...(removeSubtasks ? { removeSubtasks } : {}),
         }),
       );
     },
