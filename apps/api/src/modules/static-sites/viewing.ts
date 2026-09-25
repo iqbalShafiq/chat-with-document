@@ -1,10 +1,15 @@
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
+import { chromium } from "playwright-core";
 import {
   assertSafeSiteId,
   getScopedSite,
+  readSiteManifest,
   siteDataDir,
+  writeSiteManifest,
+  type SiteManifest,
 } from "./service.js";
+import { getImageStore } from "../images/service.js";
 
 export type SiteVersionRef = { siteId: string; version: number };
 
@@ -69,4 +74,258 @@ export async function extractSiteExcerpt(input: {
 }): Promise<{ title: string; headings: string[]; excerpt: string; truncated: boolean }> {
   const html = await (input.readHtml ?? readSiteIndexHtml)(input.ref);
   return stripHtmlToText(html, input.maxChars ?? 6000);
+}
+
+export const SITE_SCREENSHOT_VIEWPORT = { width: 1440, height: 900 };
+const SITE_SCREENSHOT_MAX_HEIGHT_PX = 16_000;
+const SITE_SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024;
+const SITE_SCREENSHOT_NAV_TIMEOUT_MS = 15_000;
+const SITE_SCREENSHOT_TOTAL_TIMEOUT_MS = 30_000;
+const SITE_SCREENSHOT_MAX_CONCURRENT = 2;
+const API_INTERNAL_ORIGIN = process.env.API_INTERNAL_ORIGIN ?? "http://localhost:4312";
+
+/** Minimal browser surface — real Playwright in prod, fakes in tests. */
+export type ViewingPage = {
+  goto: (url: string, opts?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
+  screenshot: (opts?: { fullPage?: boolean; timeout?: number }) => Promise<Uint8Array>;
+  close: () => Promise<unknown>;
+};
+export type ViewingBrowser = {
+  newPage: (opts?: { viewport?: { width: number; height: number } }) => Promise<ViewingPage>;
+  close: () => Promise<unknown>;
+};
+
+async function launchChromium(): Promise<ViewingBrowser> {
+  try {
+    return (await chromium.launch({ channel: "chrome" })) as unknown as ViewingBrowser;
+  } catch {
+    return (await chromium.launch()) as unknown as ViewingBrowser;
+  }
+}
+
+// FIFO semaphore so captures never exceed the browser budget.
+let activeCaptures = 0;
+const captureQueue: Array<() => void> = [];
+
+async function acquireCaptureSlot(): Promise<void> {
+  if (activeCaptures < SITE_SCREENSHOT_MAX_CONCURRENT) {
+    activeCaptures += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    captureQueue.push(resolve);
+  });
+  activeCaptures += 1;
+}
+
+function releaseCaptureSlot(): void {
+  activeCaptures = Math.max(0, activeCaptures - 1);
+  captureQueue.shift()?.();
+}
+
+// Single-flight per (siteId, version): concurrent callers share one capture.
+const inflightCaptures = new Map<
+  string,
+  Promise<{ imageId: string; capturedAt: string; truncated: boolean }>
+>();
+
+export type CaptureDeps = {
+  launch?: () => Promise<ViewingBrowser>;
+  save?: (args: { buffer: Uint8Array; width: number; height: number }) => Promise<{ id: string }>;
+  loadManifest?: (siteId: string) => Promise<SiteManifest | null>;
+  storeManifest?: (manifest: SiteManifest) => Promise<void>;
+};
+
+export async function captureSiteScreenshot(input: {
+  ref: SiteVersionRef;
+  label: string;
+  previewPath: string;
+  userId: string;
+  sessionId: string;
+  projectId: string | null;
+} & CaptureDeps): Promise<{ imageId: string; capturedAt: string; truncated: boolean }> {
+  const key = `${input.ref.siteId}:v${input.ref.version}`;
+  const cached = (await (input.loadManifest ?? readSiteManifest)(input.ref.siteId))?.screenshots?.[
+    input.ref.version
+  ];
+  if (cached) {
+    return { imageId: cached.imageId, capturedAt: cached.capturedAt, truncated: cached.truncated };
+  }
+  const pending = inflightCaptures.get(key);
+  if (pending) return pending;
+  const run = (async () => {
+    await acquireCaptureSlot();
+    try {
+      return await withTimeout(runCapture(input), SITE_SCREENSHOT_TOTAL_TIMEOUT_MS);
+    } finally {
+      releaseCaptureSlot();
+    }
+  })();
+  inflightCaptures.set(key, run);
+  try {
+    return await run;
+  } finally {
+    inflightCaptures.delete(key);
+  }
+}
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Site screenshot timed out.")), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** PNG IHDR height without any image dependency (width at 16, height at 20). */
+export function pngHeightPx(buffer: Uint8Array): number {
+  if (
+    buffer.length >= 24 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return (buffer[20]! << 24) | (buffer[21]! << 16) | (buffer[22]! << 8) | buffer[23]!;
+  }
+  return 0;
+}
+
+async function runCapture(
+  input: Parameters<typeof captureSiteScreenshot>[0],
+): Promise<{ imageId: string; capturedAt: string; truncated: boolean }> {
+  const browser = await (input.launch ?? launchChromium)();
+  try {
+    const page = await browser.newPage({ viewport: SITE_SCREENSHOT_VIEWPORT });
+    try {
+      await page.goto(`${API_INTERNAL_ORIGIN}${input.previewPath}`, {
+        waitUntil: "networkidle",
+        timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS,
+      });
+      let buffer = Buffer.from(
+        await page.screenshot({ fullPage: true, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
+      );
+      let truncated = buffer.length > SITE_SCREENSHOT_MAX_BYTES;
+      if (!truncated && pngHeightPx(buffer) > SITE_SCREENSHOT_MAX_HEIGHT_PX) {
+        buffer = Buffer.from(
+          await page.screenshot({ fullPage: false, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
+        );
+        truncated = true;
+      }
+      const saved = input.save
+        ? await input.save({ buffer, width: SITE_SCREENSHOT_VIEWPORT.width, height: SITE_SCREENSHOT_VIEWPORT.height })
+        : await getImageStore().saveGeneratedImage({
+            userId: input.userId,
+            sessionId: input.sessionId,
+            projectId: input.projectId,
+            buffer,
+            mediaType: "image/png",
+            modelId: "site-screenshot",
+            prompt: input.label,
+            caption: `Screenshot site ${input.label} v${input.ref.version}`,
+            width: SITE_SCREENSHOT_VIEWPORT.width,
+            height: SITE_SCREENSHOT_VIEWPORT.height,
+            source: "site-screenshot",
+          });
+      const capturedAt = new Date().toISOString();
+      const manifest = await (input.loadManifest ?? readSiteManifest)(input.ref.siteId);
+      if (manifest) {
+        await (input.storeManifest ?? writeSiteManifest)({
+          ...manifest,
+          screenshots: {
+            ...(manifest.screenshots ?? {}),
+            [input.ref.version]: {
+              imageId: saved.id,
+              capturedAt,
+              viewport: SITE_SCREENSHOT_VIEWPORT,
+              fullPage: true,
+              truncated,
+            },
+          },
+        });
+      }
+      return { imageId: saved.id, capturedAt, truncated };
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
+
+export type ViewSitePageResult = {
+  siteId: string;
+  version: number;
+  status: string;
+  title: string;
+  headings: string[];
+  excerpt: string;
+  excerptTruncated: boolean;
+  imageId: string;
+  capturedAt: string;
+  viewport: { width: number; height: number };
+  fullPage: boolean;
+  truncated: boolean;
+};
+
+export async function viewSitePage(input: {
+  userId: string;
+  sessionId: string;
+  sessionProjectId: string | null;
+  siteId: string;
+  version?: number;
+  question?: string;
+  dir?: string;
+  resolve?: typeof resolveSiteVersion;
+  loadManifest?: (siteId: string, dir?: string) => Promise<SiteManifest | null>;
+  excerpt?: typeof extractSiteExcerpt;
+  capture?: typeof captureSiteScreenshot;
+}): Promise<ViewSitePageResult> {
+  void input.question;
+  const ref = await (input.resolve ?? resolveSiteVersion)({
+    userId: input.userId,
+    sessionProjectId: input.sessionProjectId,
+    siteId: input.siteId,
+    ...(input.version !== undefined ? { version: input.version } : {}),
+    ...(input.dir !== undefined ? { dir: input.dir } : {}),
+  });
+  const manifest = await (input.loadManifest ??
+    ((siteId: string, dir?: string) => getScopedSite(input.userId, input.sessionProjectId, siteId, dir)))(
+    ref.siteId,
+    input.dir,
+  );
+  if (!manifest) throw new Error("Site not found in the current scope.");
+  const versionStatus = manifest.versions?.[ref.version]?.status ?? manifest.status;
+  if (versionStatus !== "ready") {
+    throw new Error(`Site ${ref.siteId} v${ref.version} is ${versionStatus} — nothing viewable yet.`);
+  }
+  const text = await (input.excerpt ?? extractSiteExcerpt)({ ref, maxChars: 6000 });
+  const shot = await (input.capture ?? captureSiteScreenshot)({
+    ref,
+    label: text.title || ref.siteId,
+    previewPath: `/api/sites/${ref.siteId}/v${ref.version}/preview/index.html`,
+    userId: input.userId,
+    sessionId: input.sessionId,
+    projectId: input.sessionProjectId,
+  });
+  return {
+    siteId: ref.siteId,
+    version: ref.version,
+    status: manifest.status,
+    title: text.title,
+    headings: text.headings,
+    excerpt: text.excerpt,
+    excerptTruncated: text.truncated,
+    imageId: shot.imageId,
+    capturedAt: shot.capturedAt,
+    viewport: SITE_SCREENSHOT_VIEWPORT,
+    fullPage: true,
+    truncated: shot.truncated,
+  };
 }

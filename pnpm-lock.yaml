@@ -71,6 +71,9 @@ importers:
       pdfkit:
         specifier: ^0.20.2
         version: 0.20.2
+      playwright-core:
+        specifier: ^1.63.0
+        version: 1.63.0
       prisma:
         specifier: ^7.10.0
         version: 7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
@@ -3664,6 +3667,11 @@ packages:
 
   playwright-core@1.62.1:
     resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -7981,6 +7989,8 @@ snapshots:
       pathe: 2.0.3
 
   playwright-core@1.62.1: {}
+
+  playwright-core@1.63.0: {}
 
   playwright@1.62.1:
     dependencies:

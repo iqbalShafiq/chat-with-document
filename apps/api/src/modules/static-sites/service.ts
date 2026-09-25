@@ -30,6 +30,17 @@ export type SiteManifest = {
   updatedAt: string;
   stableVersion: number | null;
   versions: Record<number, { status: SiteBuildStatus; updatedAt: string }>;
+  /** Permanent per-version screenshot cache (versions are immutable). */
+  screenshots?: Record<
+    number,
+    {
+      imageId: string;
+      capturedAt: string;
+      viewport: { width: number; height: number };
+      fullPage: boolean;
+      truncated: boolean;
+    }
+  >;
 };
 
 export type SiteBuildConfig = {
