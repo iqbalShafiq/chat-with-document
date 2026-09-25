@@ -17,7 +17,7 @@ describe("SITE_VIEW_TOOL_DEFINITIONS", () => {
 });
 
 describe("createViewSitePageTools", () => {
-  const viewResult = () => ({
+  const viewResult = async () => ({
     siteId: "kedai",
     version: 2,
     status: "ready",
