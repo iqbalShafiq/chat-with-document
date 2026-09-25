@@ -4,7 +4,6 @@ import { Download, ExternalLink, MessageSquare } from "lucide-react";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { API_BASE, createChatSession } from "#/lib/api";
 import {
-  formatPinnedArtifactRef,
   getChatSessionDetail,
   listScopeSites,
   type ScopeSite,
@@ -66,9 +65,16 @@ export function SitesBrowser({
       const origin = await getChatSessionDetail(site.sessionId).catch(() => null);
       const created = await createChatSession({ projectId: origin?.projectId ?? null });
       queueShareForkDraft(created.sessionId, {
-        text: `Lanjutkan site ini ${formatPinnedArtifactRef("site", site.siteId, site.siteId.slice(0, 8))}`,
+        text: "Lanjutkan site ini",
         attachments: [],
         autoSend: false,
+        pinnedArtifacts: [
+          {
+            type: "site",
+            id: site.siteId,
+            label: site.siteId.slice(0, 8),
+          },
+        ],
       });
       await navigate(
         sessionNavigate({ sessionId: created.sessionId, projectId: created.projectId }),

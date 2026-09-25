@@ -1,8 +1,9 @@
 import type { UseChatStatus } from "@anvia/react";
 import type { UIAttachment } from "@anvia/client";
 import { ComposerPrimitive, useComposer } from "@anvia/react-ui";
+import type { ComposerEntity } from "@anvia/react-ui";
 import { ArrowUp, CalendarClock, CornerDownLeft, FileText, FileX, Globe, Images, Link2, ListChecks, MessagesSquare, Plug, Square, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -19,7 +20,13 @@ import type {
   SessionDocument,
 } from "#/lib/api";
 import { isImageAttachmentLike } from "#/lib/api";
-import { parsePinnedArtifactRefs, type ParsedPinnedRef } from "#/lib/api-artifacts";
+import {
+  formatPinnedArtifactRef,
+  mergePinnedEntitiesText,
+  parsePinnedArtifactRefs,
+  stripPinnedArtifactRefs,
+  type ArtifactType,
+} from "#/lib/api-artifacts";
 import type { GeneratedImageItem } from "#/lib/chat/generated-images";
 import type { QueuedDraft, QueuedItem } from "#/lib/chat/queued-messages";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
@@ -103,6 +110,7 @@ export function ChatComposer({
   editHydration = null,
   clearComposerSignal = null,
   suppressOptimisticClear = null,
+  initialPinnedRefs,
   readOnly = false,
   locked = false,
   lockedLabel,
@@ -183,6 +191,8 @@ export function ChatComposer({
   clearComposerSignal?: { version: number } | null;
   /** When true at stream start, skip the optimistic composer clear (auto-flush). */
   suppressOptimisticClear?: RefObject<boolean> | null;
+  /** Artifact pins to seed as composer entities on mount (handoff drafts). */
+  initialPinnedRefs?: Array<{ type: ArtifactType; id: string; label: string }>;
   /** Frozen share view: field and controls render disabled. */
   readOnly?: boolean;
   /**
@@ -208,22 +218,65 @@ export function ChatComposer({
   // Local photo attachments (image/*) preview above the field; they are
   // uploaded as session images when the message is sent.
   const composer = useComposer();
+  const [artifactPins, setArtifactPins] = useState<
+    Array<{ type: ArtifactType; id: string; label: string }>
+  >([]);
   const composerHasInput =
-    composer.input.trim().length > 0 || composer.attachments.length > 0;
-  const pinnedRefs: ParsedPinnedRef[] = useMemo(
-    () => parsePinnedArtifactRefs(composer.input),
-    [composer.input],
-  );
-  const removePinnedRef = useCallback(
-    (ref: ParsedPinnedRef) => {
-      const current = composer.input;
-      const next = (current.slice(0, ref.start) + current.slice(ref.end))
-        .replace(/[ \t]*\n[ \t]*\n[ \t]*/g, "\n\n")
-        .trim();
-      composer.setInput(next);
+    composer.input.trim().length > 0 ||
+    composer.attachments.length > 0 ||
+    artifactPins.length > 0;
+  /**
+   * Pinned artifacts are app-owned state (chips above the field). A mirror
+   * effect keeps native composer entities in sync so Anvia's own gates
+   * (canSubmit, Enter-to-send) treat pins as content — Anvia wipes native
+   * entities on every keystroke, so the app state is the source of truth
+   * and token text merges into the message only at send time.
+   */
+  const pinKey = (type: string, id: string) => `${type}:${id}`;
+  const addArtifactPin = useCallback(
+    (ref: { type: ArtifactType; id: string; label: string }) => {
+      setArtifactPins((prev) =>
+        prev.some((pin) => pinKey(pin.type, pin.id) === pinKey(ref.type, ref.id))
+          ? prev
+          : [...prev, ref],
+      );
     },
-    [composer],
-  );  const composerAction = composerActionForStatus(chatStatus, composerHasInput);
+    [],
+  );
+  const removePinnedEntity = useCallback((type: string, id: string) => {
+    setArtifactPins((prev) =>
+      prev.filter((pin) => pinKey(pin.type, pin.id) !== pinKey(type, id)),
+    );
+  }, []);
+  useEffect(() => {
+    const wanted = new Set(artifactPins.map((pin) => pinKey(pin.type, pin.id)));
+    const current = new Set(
+      composer.entities
+        .filter((entity) => entity.triggerId === "artifact")
+        .map((entity) => {
+          const data = entity.data as Record<string, unknown> | undefined;
+          return pinKey(String(data?.artifactType ?? ""), String(data?.artifactId ?? ""));
+        }),
+    );
+    const same =
+      wanted.size === current.size && [...wanted].every((key) => current.has(key));
+    if (same) return;
+    composer.setEntities((prev) => [
+      ...prev.filter((entity) => entity.triggerId !== "artifact"),
+      ...artifactPins.map(
+        (pin): ComposerEntity => ({
+          id: `pin-${pinKey(pin.type, pin.id)}`,
+          triggerId: "artifact",
+          trigger: "@",
+          label: pin.label,
+          text: formatPinnedArtifactRef(pin.type, pin.id, pin.label),
+          range: { from: 0, to: 0 },
+          data: { artifactType: pin.type, artifactId: pin.id },
+        }),
+      ),
+    ]);
+  });
+  const composerAction = composerActionForStatus(chatStatus, composerHasInput);
   const queueSubmissionInFlightRef = useRef(false);
   const stopRequestedRef = useRef(false);
   const [queueSubmitting, setQueueSubmitting] = useState(false);
@@ -252,12 +305,18 @@ export function ChatComposer({
     queueSubmissionInFlightRef.current = true;
     setQueueSubmitting(true);
     try {
-      await onQueueSubmit(composer.input, composer.attachments);
+      // Fold pin token text into the queued draft so every downstream path
+      // (flush, recall, edit) carries the reference.
+      const text = mergePinnedEntitiesText(
+        composer.input,
+        artifactPins.map((pin) => formatPinnedArtifactRef(pin.type, pin.id, pin.label)),
+      );
+      await onQueueSubmit(text, composer.attachments);
     } finally {
       queueSubmissionInFlightRef.current = false;
       setQueueSubmitting(false);
     }
-  }, [composer.attachments, composer.input, composerAction, onQueueSubmit]);
+  }, [composer, composerAction, onQueueSubmit, artifactPins]);
 
   const requestStop = useCallback(() => {
     if (stopRequestedRef.current) return;
@@ -281,16 +340,28 @@ export function ChatComposer({
       if (previousStatus !== "waiting") {
         composer.setInput("");
         composer.clearAttachments();
+        composer.setEntities([]);
+        setArtifactPins([]);
       }
     }
     wasActiveRef.current = active;
   }, [active, chatStatus, composer, suppressOptimisticClear]);
 
   // Queue-item edit hydration: replace the composer contents with the item's
-  // draft (text + attachments). A null draft clears the editor (cancel edit).
+  // draft (text + attachments). Token references inside recalled text move
+  // back into pins so the field stays clean and chips return.
   useEffect(() => {
     if (!editHydration) return;
-    composer.setInput(editHydration.draft?.text ?? "");
+    const rawText = editHydration.draft?.text ?? "";
+    const parsed = parsePinnedArtifactRefs(rawText);
+    if (parsed.length > 0) {
+      setArtifactPins(
+        parsed.map((ref) => ({ type: ref.type, id: ref.id, label: ref.label || ref.id })),
+      );
+      composer.setInput(stripPinnedArtifactRefs(rawText));
+    } else {
+      composer.setInput(rawText);
+    }
     composer.setAttachments(editHydration.draft?.attachments ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
   }, [editHydration?.version]);
@@ -301,8 +372,20 @@ export function ChatComposer({
     if (!clearComposerSignal) return;
     composer.setInput("");
     composer.clearAttachments();
+    composer.setEntities([]);
+    setArtifactPins([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run per version bump
   }, [clearComposerSignal?.version]);
+
+  // Handoff prefill (e.g. "chat about this site" from the sites browser):
+  // seed pins once so pins arrive as chips, never as raw text.
+  const initialPinsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialPinsAppliedRef.current || !initialPinnedRefs?.length) return;
+    initialPinsAppliedRef.current = true;
+    for (const ref of initialPinnedRefs) addArtifactPin(ref);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per mount
+  }, [initialPinnedRefs]);
 
   // A new snippet always starts non-removing, even if the removal timeout
   // never ran (e.g. the snippet was cleared externally).
@@ -450,41 +533,41 @@ export function ChatComposer({
         />
       ) : null}
 
-      {pinnedRefs.length > 0 ? (
+      {artifactPins.length > 0 ? (
         <div
           className="flex min-w-0 flex-wrap gap-1.5"
           role="list"
           aria-label="Pinned artifacts"
         >
-          {pinnedRefs.map((ref) => {
+          {artifactPins.map((pin) => {
             const Icon =
-              ref.type === "site"
+              pin.type === "site"
                 ? Globe
-                : ref.type === "document"
+                : pin.type === "document"
                   ? FileText
-                  : ref.type === "image"
+                  : pin.type === "image"
                     ? Images
-                    : ref.type === "task"
+                    : pin.type === "task"
                       ? ListChecks
-                      : ref.type === "schedule"
+                      : pin.type === "schedule"
                         ? CalendarClock
-                        : ref.type === "web_bundle"
+                        : pin.type === "web_bundle"
                           ? Link2
-                          : ref.type === "session"
+                          : pin.type === "session"
                             ? MessagesSquare
                             : Plug;
             return (
               <span
-                key={`${ref.type}:${ref.id}:${ref.start}`}
+                key={pinKey(pin.type, pin.id)}
                 role="listitem"
                 className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/[0.07] py-0 pl-2 pr-1 text-[11px] font-medium text-text animate-fade-in"
               >
                 <Icon className="size-3 shrink-0 text-accent" strokeWidth={2} />
-                <span className="min-w-0 flex-1 truncate">{ref.label}</span>
+                <span className="min-w-0 flex-1 truncate">{pin.label}</span>
                 <button
                   type="button"
-                  aria-label={`Remove pinned ${ref.type} ${ref.label}`}
-                  onClick={() => removePinnedRef(ref)}
+                  aria-label={`Remove pinned ${pin.type} ${pin.label}`}
+                  onClick={() => removePinnedEntity(pin.type, pin.id)}
                   className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-text-muted transition hover:bg-white/[0.08] hover:text-text"
                 >
                   <X className="size-3" />
@@ -580,6 +663,7 @@ export function ChatComposer({
               disabled={locked || readOnly || isIngesting || modelsUnavailable}
               onLinkedDocuments={onLinkedDocuments}
               onRejectedFiles={onAttachmentRejected}
+              onPinArtifact={addArtifactPin}
             />
 
             {composerAction === "queue" ? (

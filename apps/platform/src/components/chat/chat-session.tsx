@@ -71,6 +71,10 @@ import {
   type SteerMessageInput,
   type WebCapabilities,
 } from "#/lib/api";
+import {
+  mergePinnedEntitiesText,
+  type ArtifactType,
+} from "#/lib/api-artifacts";
 import { type ImagePreviewContextActions } from "#/components/images/image-preview";
 import { collectCitedDocuments } from "#/lib/documents/cited-documents";
 import { collectWebSources } from "#/lib/chat/web-sources";
@@ -217,6 +221,8 @@ export type InitialComposerDraft = {
   attachments?: UIAttachment[];
   /** When false, prefill the composer without sending. Defaults to true. */
   autoSend?: boolean;
+  /** Artifact pins to seed as composer entities (never raw text). */
+  pinnedRefs?: Array<{ type: ArtifactType; id: string; label: string }>;
 };
 
 function hasStoredSelection(key: string): boolean {
@@ -1223,22 +1229,37 @@ export function ChatSession({
 
   function normalizeInitialDraft(
     draft: InitialComposerDraft | string | null | undefined,
-  ): { text: string; attachments: UIAttachment[]; autoSend: boolean } | null {
+  ): {
+    text: string;
+    attachments: UIAttachment[];
+    autoSend: boolean;
+    pinnedRefs: Array<{ type: ArtifactType; id: string; label: string }>;
+  } | null {
     if (!draft) return null;
     if (typeof draft === "string") {
-      return draft.trim() ? { text: draft, attachments: [], autoSend: true } : null;
+      return draft.trim()
+        ? { text: draft, attachments: [], autoSend: true, pinnedRefs: [] }
+        : null;
     }
     return draft.text.trim()
       ? {
           text: draft.text,
           attachments: draft.attachments ?? [],
           autoSend: draft.autoSend !== false,
+          pinnedRefs: draft.pinnedRefs ?? [],
         }
       : null;
   }
 
   const initialDraftRef = useRef(initialComposerDraft);
   const initialFlagsRef = useRef(initialFeatureFlags ?? null);
+  // Pinned refs ride to ChatComposer as a prop (ChatSession itself sits
+  // outside the composer provider, so it cannot call useComposer).
+  const initialPinnedRefs = useMemo(() => {
+    const draft = initialComposerDraft;
+    if (!draft || typeof draft === "string") return undefined;
+    return draft.pinnedRefs?.length ? draft.pinnedRefs : undefined;
+  }, [initialComposerDraft]);
   useEffect(() => {
     // Keep the refs until models are ready: nulling them on an early
     // (loading) run would silently drop prefilled drafts.
@@ -2733,16 +2754,26 @@ export function ChatSession({
         submitMessage={async ({
           input,
           attachments,
+          entities,
           clear,
         }) => {
           if (modelsStatus !== "success") return;
+          // Artifact pins live as composer entities (chips above the field);
+          // fold their token text into the message here so every downstream
+          // path (deferred, active, editing, direct) carries the reference.
+          const mergedInput = mergePinnedEntitiesText(
+            input,
+            entities
+              .filter((entity) => entity.triggerId === "artifact")
+              .map((entity) => entity.text),
+          );
           // Deferred share composer (pre-fork): the normal field already
           // collected input + full composer state (model, effort, features,
           // attachments). The owner forks and swaps rooms; this room sends
           // nothing itself so the draft is never duplicated.
           if (onDeferredComposerSubmit) {
             await onDeferredComposerSubmit({
-              text: input,
+              text: mergedInput,
               attachments,
               webSearchEnabled,
               deepResearchEnabled,
@@ -2758,19 +2789,19 @@ export function ChatSession({
             chatRef.current?.status === "submitted" ||
             chatRef.current?.status === "streaming"
           ) {
-            await handleActiveComposerSubmit(input, attachments);
+            await handleActiveComposerSubmit(mergedInput, attachments);
             return;
           }
           // Idle + editing: the composer holds the recalled draft — commit it
           // back into the queue item (a held queue would otherwise trap the
           // submit behind the conflict gate).
           if (editing) {
-            await handleSubmitQueueEdit(input, attachments);
+            await handleSubmitQueueEdit(mergedInput, attachments);
             return;
           }
           const currentChat = chatRef.current;
           if (!currentChat) return;
-          await submitComposerRef.current(input, attachments, currentChat, clear);
+          await submitComposerRef.current(mergedInput, attachments, currentChat, clear);
         }}
       >
         <div
@@ -3033,6 +3064,7 @@ export function ChatSession({
                     editHydration={editHydration}
                     clearComposerSignal={clearComposerSignal}
                     suppressOptimisticClear={autoFlushPreserveRef}
+                    initialPinnedRefs={initialPinnedRefs}
                     readOnly={composerReadOnly}
                     locked={deferredComposerLocked}
                     lockedLabel="Starting your copy…"

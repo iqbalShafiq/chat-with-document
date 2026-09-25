@@ -6,7 +6,7 @@ import { DocumentLibraryModal } from "#/components/documents/document-library-mo
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { PopoverMenu } from "#/components/ui/popover-menu";
 import type { ArtifactType } from "#/lib/api-artifacts";
-import { formatPinnedArtifactRef, getArtifact } from "#/lib/api-artifacts";
+import { getArtifact } from "#/lib/api-artifacts";
 import {
   linkDocumentsToSession,
   type SessionDocument,
@@ -27,6 +27,7 @@ export function ComposerAttachControl({
   disabled = false,
   onLinkedDocuments,
   onRejectedFiles,
+  onPinArtifact,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -36,6 +37,8 @@ export function ComposerAttachControl({
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   /** Called with client-side rejects (e.g. size limit) — never queued. */
   onRejectedFiles?: (rejects: AttachmentReject[]) => void;
+  /** Called when the user picks an artifact to pin (parent owns pin state). */
+  onPinArtifact?: (ref: { type: ArtifactType; id: string; label: string }) => void;
 }) {
   const composer = useComposer();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -82,13 +85,11 @@ export function ComposerAttachControl({
   const handlePinArtifact = useCallback(
     (id: string, label: string) => {
       if (!pinType) return;
-      const token = formatPinnedArtifactRef(pinType, id, label);
-      const current = composer.input.replace(/\s+$/, "");
-      composer.setInput(current ? `${current}\n${token}` : token);
+      onPinArtifact?.({ type: pinType, id, label });
       setPinType(null);
       setMenuOpen(false);
     },
-    [composer, pinType],
+    [onPinArtifact, pinType],
   );
 
   const handleLibraryConfirm = useCallback(

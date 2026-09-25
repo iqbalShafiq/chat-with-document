@@ -276,4 +276,32 @@ describe("share fork handoff draft", () => {
     expect(draft?.autoSend).toBe(false);
     expect(draft?.webSearchEnabled).toBeUndefined();
   });
+
+  it("round-trips pinned artifacts and drops malformed ones", () => {
+    createStorage();
+    queueShareForkDraft("site-2", {
+      text: "Lanjutkan site ini",
+      attachments: [],
+      autoSend: false,
+      pinnedArtifacts: [{ type: "site", id: "abc", label: "Kedai" }],
+    });
+    const draft = consumeShareForkDraft("site-2");
+    expect(draft?.text).toBe("Lanjutkan site ini");
+    expect(draft?.pinnedArtifacts).toEqual([{ type: "site", id: "abc", label: "Kedai" }]);
+    expect(consumeShareForkDraft("site-2")).toBeNull();
+  });
+
+  it("drops drafts whose pinned artifacts are malformed", () => {
+    const { sessionStore } = createStorage();
+    sessionStore.set(
+      shareForkDraftKey("site-3"),
+      JSON.stringify({
+        version: 1,
+        text: "hi",
+        attachments: [],
+        pinnedArtifacts: [{ type: "site" }],
+      }),
+    );
+    expect(consumeShareForkDraft("site-3")).toBeNull();
+  });
 });

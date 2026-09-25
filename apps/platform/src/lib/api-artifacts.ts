@@ -11,6 +11,24 @@ export type ArtifactType =
   | "schedule"
   | "session";
 
+const ARTIFACT_TYPES: readonly ArtifactType[] = [
+  "document",
+  "image",
+  "web_bundle",
+  "site",
+  "task",
+  "schedule",
+  "session",
+];
+
+/** Runtime guard for artifact types crossing trust boundaries (storage). */
+export function isArtifactType(value: unknown): value is ArtifactType {
+  return (
+    typeof value === "string" &&
+    (ARTIFACT_TYPES as readonly string[]).includes(value)
+  );
+}
+
 /**
  * Visible composer token for a pinned artifact. Must stay byte-identical
  * with `formatPinnedArtifactRef` in `@anreal/agent` (covered by the same
@@ -53,6 +71,37 @@ export function parsePinnedArtifactRefs(text: string): ParsedPinnedRef[] {
     });
   }
   return refs;
+}
+
+/**
+ * Remove every pinned `[@type label (id)]` span from text, collapsing the
+ * leftover whitespace. Used when references move into composer entities so
+ * the textfield only shows what the user typed.
+ */
+export function stripPinnedArtifactRefs(text: string): string {
+  const refs = parsePinnedArtifactRefs(text);
+  if (refs.length === 0) return text;
+  let out = text;
+  for (let i = refs.length - 1; i >= 0; i--) {
+    out = out.slice(0, refs[i]!.start) + out.slice(refs[i]!.end);
+  }
+  return out
+    .replace(/[ \t]*\n[ \t]*\n[ \t]*/g, "\n\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
+/**
+ * Append pinned-entity token texts to a message, skipping tokens already
+ * present (queue-then-send and recall-edit round trips must not duplicate).
+ */
+export function mergePinnedEntitiesText(input: string, tokens: string[]): string {
+  const missing = tokens
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !input.includes(token));
+  if (missing.length === 0) return input;
+  const base = input.replace(/\s+$/, "");
+  return base ? `${base}\n${missing.join("\n")}` : missing.join("\n");
 }
 
 export type ArtifactListItem = {

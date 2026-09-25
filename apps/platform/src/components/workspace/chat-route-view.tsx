@@ -9,6 +9,7 @@ import { settleStoppedRunTools } from "#/lib/chat/finalize-interrupted-tools";
 import { peekPendingApprovalToolNames } from "#/lib/chat/interaction-resume-storage";
 import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
 import { consumeShareForkDraft } from "#/lib/chat/queued-messages";
+import { isArtifactType, type ArtifactType } from "#/lib/api-artifacts";
 import {
   applySiteBuildEvent,
   applySiteVersionEvent,
@@ -268,6 +269,19 @@ export function ChatRouteView(input: {
                 attachments: shareForkHandoff.attachments,
                 ...(shareForkHandoff.autoSend !== undefined
                   ? { autoSend: shareForkHandoff.autoSend }
+                  : {}),
+                ...(shareForkHandoff.pinnedArtifacts !== undefined
+                  ? {
+                      pinnedRefs: shareForkHandoff.pinnedArtifacts.filter(
+                        (
+                          ref,
+                        ): ref is {
+                          type: ArtifactType;
+                          id: string;
+                          label: string;
+                        } => isArtifactType(ref.type),
+                      ),
+                    }
                   : {}),
               }
             : null
