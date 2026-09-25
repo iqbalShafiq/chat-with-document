@@ -116,6 +116,11 @@ export type ArtifactListItem = {
   projectId?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  /** Site registry fields (present on site items for preview links). */
+  siteId?: string;
+  version?: number;
+  status?: string;
+  previewUrl?: string | null;
 };
 
 export async function listArtifacts(input: {

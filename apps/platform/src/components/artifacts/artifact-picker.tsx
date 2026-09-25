@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Eye } from "lucide-react";
 import {
   getArtifact,
   listArtifacts,
   type ArtifactListItem,
   type ArtifactType,
 } from "#/lib/api-artifacts";
+import { API_BASE } from "#/lib/api";
+import { DialogShell } from "#/components/ui/dialog-shell";
+import { DocumentPreviewModal } from "#/components/documents/document-preview-modal";
 
 /** Prefix contract shared with the agent (see ARTIFACT_CHOICE_PREFIX). */
 export const ARTIFACT_CHOICE_PREFIX = "artifact:";
@@ -39,10 +42,40 @@ export function describeEmptyArtifacts(input: {
   return `No ${input.artifactType} artifacts in this scope yet.`;
 }
 
+function itemLabel(item: ArtifactListItem): string {
+  const id = item.id ?? item.sessionId ?? "";
+  return item.caption ?? item.filename ?? item.title ?? item.sessionId ?? id;
+}
+
+function itemId(item: ArtifactListItem): string {
+  return item.id ?? item.sessionId ?? "";
+}
+
+/** Row-level preview is offered for sites and documents (reports). */
+function previewKind(item: ArtifactListItem, fallback: ArtifactType): "site" | "document" | null {
+  const kind = item.type ?? fallback;
+  if (kind === "site") return "site";
+  if (kind === "document") return "document";
+  return null;
+}
+
+function resolveSitePreviewSrc(item: ArtifactListItem): string | null {
+  const raw =
+    item.previewUrl ??
+    (typeof item.version === "number"
+      ? `/api/sites/${item.siteId ?? item.id}/v${item.version}/preview/index.html`
+      : null);
+  if (!raw) return null;
+  return raw.startsWith("/api/sites/") ? `${API_BASE}${raw}` : raw;
+}
+
 /**
  * Visual artifact picker: radio list with thumbnails/labels for images,
  * documents, sites, and tasks. Used standalone and inside clarification
  * cards when the agent offers `artifact:<type>:<id>` choices.
+ *
+ * Site and document rows carry an eye button that opens a full preview
+ * modal without selecting the row — so pinning stops being guesswork.
  */
 export function ArtifactPicker({
   sessionId,
@@ -68,6 +101,8 @@ export function ArtifactPicker({
 }) {
   const [items, setItems] = useState<ArtifactListItem[] | null>(autoLoad || candidates ? null : []);
   const [error, setError] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<ArtifactListItem | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!autoLoad && !candidates) return;
@@ -122,40 +157,106 @@ export function ArtifactPicker({
       </p>
     );
   }
+  const previewType = previewItem ? (previewItem.type ?? artifactType) : null;
+  const previewId = previewItem ? itemId(previewItem) : "";
+  const previewLabel = previewItem ? itemLabel(previewItem) : "";
+  const siteSrc = previewItem && previewType === "site" ? resolveSitePreviewSrc(previewItem) : null;
+  const siteVersion =
+    previewItem && typeof previewItem.version === "number" ? previewItem.version : null;
   return (
-    <div role="radiogroup" aria-label={`Choose ${artifactType}`} className="flex flex-col gap-1.5">
-      {(shown ?? []).map((item) => {
-        const id = item.id ?? item.sessionId ?? "";
-        const selected = value === id;
-        const label =
-          item.caption ?? item.filename ?? item.title ?? item.sessionId ?? id;
-        return (
-          <button
-            key={id}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onSelect(id)}
-            className={
-              selected
-                ? "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-accent transition active:scale-[0.98]"
-                : "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-left text-[11px] font-medium text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.98]"
-            }
-          >
-            {selected ? <Check className="size-3 shrink-0" strokeWidth={2.5} /> : null}
-            {item.type === "image" ? (
-              <img
-                src={`/api/images/${encodeURIComponent(id)}`}
-                alt=""
-                aria-hidden
-                className="size-7 shrink-0 rounded-md object-cover"
-                loading="lazy"
-              />
-            ) : null}
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div role="radiogroup" aria-label={`Choose ${artifactType}`} className="flex flex-col gap-1.5">
+        {(shown ?? []).map((item) => {
+          const id = itemId(item);
+          const selected = value === id;
+          const label = itemLabel(item);
+          const kind = previewKind(item, artifactType);
+          return (
+            <div key={id} className="flex items-stretch gap-1.5">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onSelect(id)}
+                className={
+                  selected
+                    ? "inline-flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-accent transition active:scale-[0.98]"
+                    : "inline-flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-left text-[11px] font-medium text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.98]"
+                }
+              >
+                {selected ? <Check className="size-3 shrink-0" strokeWidth={2.5} /> : null}
+                {item.type === "image" ? (
+                  <img
+                    src={`/api/images/${encodeURIComponent(id)}`}
+                    alt=""
+                    aria-hidden
+                    className="size-7 shrink-0 rounded-md object-cover"
+                    loading="lazy"
+                  />
+                ) : null}
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+              </button>
+              {kind ? (
+                <button
+                  type="button"
+                  aria-label={`Preview ${kind} ${label}`}
+                  title={`Preview ${label}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    restoreFocusRef.current = event.currentTarget;
+                    setPreviewItem(item);
+                  }}
+                  className="inline-flex w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96]"
+                >
+                  <Eye className="size-3.5" strokeWidth={2} />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {previewType === "site" ? (
+        <DialogShell
+          open={previewItem !== null}
+          onClose={() => setPreviewItem(null)}
+          title={`Preview ${previewLabel}`}
+          description={siteVersion !== null ? `Site · v${siteVersion}` : "Site preview"}
+          size="xl"
+          restoreFocusRef={restoreFocusRef}
+        >
+          {siteSrc ? (
+            <iframe
+              title={`Preview ${previewLabel}`}
+              src={siteSrc}
+              sandbox="allow-scripts"
+              className="min-h-0 w-full flex-1 border-0"
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <p className="max-w-xs text-center text-[12px] text-text-muted">
+                {typeof previewItem?.status === "string" && previewItem.status !== "ready"
+                  ? `This site is still ${previewItem.status} — no preview yet.`
+                  : "No preview available for this site yet."}
+              </p>
+            </div>
+          )}
+        </DialogShell>
+      ) : null}
+      <DocumentPreviewModal
+        open={previewItem !== null && previewType === "document"}
+        document={
+          previewItem && previewType === "document"
+            ? { id: previewId, filename: previewItem.filename ?? previewLabel }
+            : null
+        }
+        onClose={() => {
+          setPreviewItem(null);
+          requestAnimationFrame(() => {
+            restoreFocusRef.current?.focus();
+          });
+        }}
+      />
+    </>
   );
 }
