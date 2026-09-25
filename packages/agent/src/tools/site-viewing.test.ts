@@ -73,4 +73,15 @@ describe("createViewSitePageTools", () => {
     const out = (await tools[0]!.call({ siteId: "kedai" })) as unknown as Record<string, unknown>;
     expect(out).toMatchObject({ imageId: "img-7", imageBytesIncluded: false });
   });
+
+  it("skips the vision queue when there is no image", async () => {
+    const pushVisionImage = vi.fn(async () => undefined);
+    const tools = createViewSitePageTools({
+      view: async () => ({ ...viewResult(), imageId: "" }),
+      pushVisionImage,
+    });
+    const out = (await tools[0]!.call({ siteId: "kedai" })) as unknown as Record<string, unknown>;
+    expect(out).toMatchObject({ imageId: "", imageBytesIncluded: false });
+    expect(pushVisionImage).not.toHaveBeenCalled();
+  });
 });

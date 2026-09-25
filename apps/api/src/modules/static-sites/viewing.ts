@@ -87,7 +87,12 @@ const API_INTERNAL_ORIGIN = process.env.API_INTERNAL_ORIGIN ?? "http://localhost
 /** Minimal browser surface — real Playwright in prod, fakes in tests. */
 export type ViewingPage = {
   goto: (url: string, opts?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
-  screenshot: (opts?: { fullPage?: boolean; timeout?: number }) => Promise<Uint8Array>;
+  screenshot: (opts?: {
+    fullPage?: boolean;
+    timeout?: number;
+    type?: "png" | "jpeg";
+    quality?: number;
+  }) => Promise<Uint8Array>;
   close: () => Promise<unknown>;
 };
 export type ViewingBrowser = {
@@ -124,16 +129,27 @@ function releaseCaptureSlot(): void {
 }
 
 // Single-flight per (siteId, version): concurrent callers share one capture.
-const inflightCaptures = new Map<
-  string,
-  Promise<{ imageId: string; capturedAt: string; truncated: boolean }>
->();
+export type ScreenshotShot = {
+  imageId: string;
+  capturedAt: string;
+  truncated: boolean;
+  mediaType: string;
+};
+
+const inflightCaptures = new Map<string, Promise<ScreenshotShot>>();
 
 export type CaptureDeps = {
   launch?: () => Promise<ViewingBrowser>;
-  save?: (args: { buffer: Uint8Array; width: number; height: number }) => Promise<{ id: string }>;
+  save?: (args: {
+    buffer: Uint8Array;
+    width: number;
+    height: number;
+    mediaType: string;
+  }) => Promise<{ id: string }>;
   loadManifest?: (siteId: string) => Promise<SiteManifest | null>;
   storeManifest?: (manifest: SiteManifest) => Promise<void>;
+  /** Test seam for the total capture budget (default 30s). */
+  totalTimeoutMs?: number;
 };
 
 export async function captureSiteScreenshot(input: {
@@ -143,20 +159,25 @@ export async function captureSiteScreenshot(input: {
   userId: string;
   sessionId: string;
   projectId: string | null;
-} & CaptureDeps): Promise<{ imageId: string; capturedAt: string; truncated: boolean }> {
+} & CaptureDeps): Promise<ScreenshotShot> {
   const key = `${input.ref.siteId}:v${input.ref.version}`;
   const cached = (await (input.loadManifest ?? readSiteManifest)(input.ref.siteId))?.screenshots?.[
     input.ref.version
   ];
   if (cached) {
-    return { imageId: cached.imageId, capturedAt: cached.capturedAt, truncated: cached.truncated };
+    return {
+      imageId: cached.imageId,
+      capturedAt: cached.capturedAt,
+      truncated: cached.truncated,
+      mediaType: cached.mediaType ?? "image/png",
+    };
   }
   const pending = inflightCaptures.get(key);
   if (pending) return pending;
   const run = (async () => {
     await acquireCaptureSlot();
     try {
-      return await withTimeout(runCapture(input), SITE_SCREENSHOT_TOTAL_TIMEOUT_MS);
+      return await runCapture(input);
     } finally {
       releaseCaptureSlot();
     }
@@ -199,33 +220,61 @@ export function pngHeightPx(buffer: Uint8Array): number {
 
 async function runCapture(
   input: Parameters<typeof captureSiteScreenshot>[0],
-): Promise<{ imageId: string; capturedAt: string; truncated: boolean }> {
+): Promise<ScreenshotShot> {
   const browser = await (input.launch ?? launchChromium)();
   try {
     const page = await browser.newPage({ viewport: SITE_SCREENSHOT_VIEWPORT });
     try {
-      await page.goto(`${API_INTERNAL_ORIGIN}${input.previewPath}`, {
-        waitUntil: "networkidle",
-        timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS,
-      });
-      let buffer = Buffer.from(
-        await page.screenshot({ fullPage: true, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
-      );
-      let truncated = buffer.length > SITE_SCREENSHOT_MAX_BYTES;
-      if (!truncated && pngHeightPx(buffer) > SITE_SCREENSHOT_MAX_HEIGHT_PX) {
-        buffer = Buffer.from(
-          await page.screenshot({ fullPage: false, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
+      // The total budget lives INSIDE this try/finally so a timeout still
+      // closes page + browser before the run settles (no orphan browsers,
+      // no semaphore leak).
+      const work = (async (): Promise<ScreenshotShot> => {
+        await page.goto(`${API_INTERNAL_ORIGIN}${input.previewPath}`, {
+          waitUntil: "networkidle",
+          timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS,
+        });
+        // Fallback chain enforcing the byte cap without new dependencies:
+        // fullPage PNG → viewport PNG → viewport JPEG. Each fallback marks
+        // the shot truncated so the agent knows what it is seeing.
+        let buffer = Buffer.from(
+          await page.screenshot({ fullPage: true, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
         );
-        truncated = true;
-      }
+        let mediaType = "image/png";
+        let fullPage = true;
+        let truncated = buffer.length > SITE_SCREENSHOT_MAX_BYTES;
+        if (!truncated && pngHeightPx(buffer) > SITE_SCREENSHOT_MAX_HEIGHT_PX) {
+          buffer = Buffer.from(
+            await page.screenshot({ fullPage: false, timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS }),
+          );
+          fullPage = false;
+          truncated = true;
+        }
+        if (buffer.length > SITE_SCREENSHOT_MAX_BYTES) {
+          buffer = Buffer.from(
+            await page.screenshot({
+              fullPage: false,
+              type: "jpeg",
+              quality: 70,
+              timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS,
+            }),
+          );
+          mediaType = "image/jpeg";
+          fullPage = false;
+          truncated = true;
+        }
       const saved = input.save
-        ? await input.save({ buffer, width: SITE_SCREENSHOT_VIEWPORT.width, height: SITE_SCREENSHOT_VIEWPORT.height })
+        ? await input.save({
+            buffer,
+            width: SITE_SCREENSHOT_VIEWPORT.width,
+            height: SITE_SCREENSHOT_VIEWPORT.height,
+            mediaType,
+          })
         : await getImageStore().saveGeneratedImage({
             userId: input.userId,
             sessionId: input.sessionId,
             projectId: input.projectId,
             buffer,
-            mediaType: "image/png",
+            mediaType,
             modelId: "site-screenshot",
             prompt: input.label,
             caption: `Screenshot site ${input.label} v${input.ref.version}`,
@@ -244,13 +293,16 @@ async function runCapture(
               imageId: saved.id,
               capturedAt,
               viewport: SITE_SCREENSHOT_VIEWPORT,
-              fullPage: true,
+              fullPage,
               truncated,
+              mediaType,
             },
           },
         });
       }
-      return { imageId: saved.id, capturedAt, truncated };
+      return { imageId: saved.id, capturedAt, truncated, mediaType };
+      })();
+      return await withTimeout(work, input.totalTimeoutMs ?? SITE_SCREENSHOT_TOTAL_TIMEOUT_MS);
     } finally {
       await page.close().catch(() => undefined);
     }
@@ -272,6 +324,10 @@ export type ViewSitePageResult = {
   viewport: { width: number; height: number };
   fullPage: boolean;
   truncated: boolean;
+  mediaType: string;
+  /** Set when the screenshot failed but the excerpt survived. The agent can still answer partially and may retry. */
+  captureError: string | null;
+  retryable: boolean;
 };
 
 export async function viewSitePage(input: {
@@ -306,18 +362,27 @@ export async function viewSitePage(input: {
     throw new Error(`Site ${ref.siteId} v${ref.version} is ${versionStatus} — nothing viewable yet.`);
   }
   const text = await (input.excerpt ?? extractSiteExcerpt)({ ref, maxChars: 6000 });
-  const shot = await (input.capture ?? captureSiteScreenshot)({
-    ref,
-    label: text.title || ref.siteId,
-    previewPath: `/api/sites/${ref.siteId}/v${ref.version}/preview/index.html`,
-    userId: input.userId,
-    sessionId: input.sessionId,
-    projectId: input.sessionProjectId,
-  });
+  let shot: { imageId: string; capturedAt: string; truncated: boolean; mediaType: string };
+  let captureError: string | null = null;
+  try {
+    shot = await (input.capture ?? captureSiteScreenshot)({
+      ref,
+      label: text.title || ref.siteId,
+      previewPath: `/api/sites/${ref.siteId}/v${ref.version}/preview/index.html`,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      projectId: input.sessionProjectId,
+    });
+  } catch (error) {
+    // Partial result: the excerpt survived, only the screenshot failed.
+    // The agent answers from text and may retry the visual.
+    captureError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+    shot = { imageId: "", capturedAt: "", truncated: false, mediaType: "image/png" };
+  }
   return {
     siteId: ref.siteId,
     version: ref.version,
-    status: manifest.status,
+    status: versionStatus,
     title: text.title,
     headings: text.headings,
     excerpt: text.excerpt,
@@ -327,5 +392,8 @@ export async function viewSitePage(input: {
     viewport: SITE_SCREENSHOT_VIEWPORT,
     fullPage: true,
     truncated: shot.truncated,
+    mediaType: shot.mediaType,
+    captureError,
+    retryable: captureError !== null,
   };
 }

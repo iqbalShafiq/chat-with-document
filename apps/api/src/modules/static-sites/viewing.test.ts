@@ -137,6 +137,7 @@ describe("captureSiteScreenshot", () => {
                 viewport: { width: 1440, height: 900 },
                 fullPage: true,
                 truncated: false,
+                mediaType: "image/png",
               },
             },
           }) as never,
@@ -167,8 +168,7 @@ describe("captureSiteScreenshot", () => {
     expect(closes.sort()).toEqual(["browser", "page"]);
   });
 
-  it("falls back to viewport capture for pages taller than the cap", async () => {
-    const tallPng = new Uint8Array([
+  it("falls back to viewport capture for pages taller than the cap", async () => {    const tallPng = new Uint8Array([
       137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
       0, 0, 5, 120, 0, 0, 78, 32, 8, 2, 0, 0, 0,
     ]);
@@ -190,6 +190,58 @@ describe("captureSiteScreenshot", () => {
     expect(calls).toEqual([{ fullPage: true }, { fullPage: false }]);
     expect(out.truncated).toBe(true);
   });
+
+  it("re-encodes oversized shots as JPEG to enforce the byte cap", async () => {
+    const bigPng = new Uint8Array(6 * 1024 * 1024).fill(7);
+    const calls: Array<{ fullPage?: boolean; type?: string }> = [];
+    const fakeBrowser = {
+      newPage: async () => ({
+        goto: async () => undefined,
+        screenshot: async (opts?: { fullPage?: boolean; type?: string }) => {
+          calls.push({ fullPage: opts?.fullPage, type: opts?.type });
+          return opts?.type === "jpeg" ? new Uint8Array([1, 2, 3]) : bigPng;
+        },
+        close: async () => undefined,
+      }),
+      close: async () => undefined,
+    };
+    let savedMediaType = "";
+    const out = await captureSiteScreenshot(
+      captureArgs({
+        launch: async () => fakeBrowser,
+        save: async (args: { buffer: Uint8Array; mediaType: string }) => {
+          savedMediaType = args.mediaType;
+          return { id: "img-j" };
+        },
+      }) as never,
+    );
+    expect(calls.at(-1)).toMatchObject({ fullPage: false, type: "jpeg" });
+    expect(out.mediaType).toBe("image/jpeg");
+    expect(savedMediaType).toBe("image/jpeg");
+    expect(out.truncated).toBe(true);
+  });
+
+  it("closes the browser on total timeout and frees the slot", async () => {
+    const closes: string[] = [];
+    const fakeBrowser = {
+      newPage: async () => ({
+        goto: async () => undefined,
+        screenshot: async () => new Promise<Uint8Array>(() => undefined),
+        close: async () => {
+          closes.push("page");
+        },
+      }),
+      close: async () => {
+        closes.push("browser");
+      },
+    };
+    await expect(
+      captureSiteScreenshot(
+        captureArgs({ launch: async () => fakeBrowser, totalTimeoutMs: 30 }) as never,
+      ),
+    ).rejects.toThrow(/timed out/);
+    expect(closes.sort()).toEqual(["browser", "page"]);
+  });
 });
 
 describe("viewSitePage", () => {
@@ -202,7 +254,7 @@ describe("viewSitePage", () => {
       resolve: async () => ({ siteId: "kedai", version: 2 }),
       loadManifest: async () => ({ status: "ready" }) as never,
       excerpt: async () => ({ title: "Kedai", headings: ["Halo"], excerpt: "Halo dunia", truncated: false }),
-      capture: async () => ({ imageId: "img-7", capturedAt: "2026-09-25T00:00:00.000Z", truncated: false }),
+      capture: async () => ({ imageId: "img-7", capturedAt: "2026-09-25T00:00:00.000Z", truncated: false, mediaType: "image/png" }),
     });
     expect(out).toMatchObject({
       siteId: "kedai",
@@ -214,6 +266,56 @@ describe("viewSitePage", () => {
       viewport: { width: 1440, height: 900 },
       fullPage: true,
     });
+  });
+
+  it("returns the excerpt with a retryable capture error when capture fails", async () => {
+    const out = await viewSitePage({
+      userId: "u",
+      sessionId: "sess",
+      sessionProjectId: null,
+      siteId: "kedai",
+      resolve: async () => ({ siteId: "kedai", version: 2 }),
+      loadManifest: async () =>
+        ({
+          siteId: "kedai",
+          status: "ready",
+          versions: { 2: { status: "ready", updatedAt: "t" } },
+        }) as never,
+      excerpt: async () => ({ title: "Kedai", headings: ["Halo"], excerpt: "Halo dunia", truncated: false }),
+      capture: async () => {
+        throw new Error("browser down");
+      },
+    });
+    expect(out).toMatchObject({
+      siteId: "kedai",
+      version: 2,
+      status: "ready",
+      excerpt: "Halo dunia",
+      imageId: "",
+      retryable: true,
+    });
+    expect(out.captureError).toMatch(/browser down/);
+  });
+
+  it("reports the viewed version's own status, not the manifest latest", async () => {
+    const out = await viewSitePage({
+      userId: "u",
+      sessionId: "sess",
+      sessionProjectId: null,
+      siteId: "kedai",
+      version: 1,
+      resolve: async () => ({ siteId: "kedai", version: 1 }),
+      loadManifest: async () =>
+        ({
+          siteId: "kedai",
+          status: "running",
+          versions: { 1: { status: "ready", updatedAt: "t" } },
+        }) as never,
+      excerpt: async () => ({ title: "K", headings: [], excerpt: "x", truncated: false }),
+      capture: async () => ({ imageId: "img-1", capturedAt: "t", truncated: false, mediaType: "image/png" }),
+    });
+    expect(out.status).toBe("ready");
+    expect(out.version).toBe(1);
   });
 
   it("refuses non-ready versions with an explicit message", async () => {

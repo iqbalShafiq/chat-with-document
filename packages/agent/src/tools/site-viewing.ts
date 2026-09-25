@@ -88,7 +88,7 @@ export function createViewSitePageTools(
       });
       deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
       let imageBytesIncluded = false;
-      if (deps.includeImageBytes !== false && deps.pushVisionImage) {
+      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
         try {
           await deps.pushVisionImage({ imageId: result.imageId });
           imageBytesIncluded = true;

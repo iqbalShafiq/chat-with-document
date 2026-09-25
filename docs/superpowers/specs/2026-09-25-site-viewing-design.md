@@ -76,7 +76,14 @@ gate `modelAcceptsImage` yang sudah ada (`build-run-input.ts:1019`).
   - PNG → `getImageStore().saveGeneratedImage({…, mediaType: "image/png",
     modelId: "site-screenshot", source: "site-screenshot",
     caption: "Screenshot site {label} v{n}", width, height})` → `imageId`.
-  - Selalu `browser.close()` di `finally` (anti zombie-process).
+  - Penegakan batas tanpa dependensi baru (rantai fallback, tiap langkah
+    menandai `truncated: true`): fullPage PNG → viewport PNG (bila
+    melebihi 5 MB atau tinggi > 16.000px) → viewport JPEG q70 (bila masih
+    melebihi 5 MB). Hasil mencatat `mediaType` aktual.
+  - Selalu `browser.close()` di `finally`; budget total 30 dtk dihitung DI
+    DALAM try/finally yang sama (timeout tetap menutup browser — tidak ada
+    browser yatim, tidak ada kebocoran slot semaphore, dapat di-inject
+    untuk test).
 - Batas operasional: maks 2 browser konkuren (antrean FIFO), timeout
   navigasi 15 dtk + total 30 dtk, PNG ≤ 5 MB (downscale bila perlu —
   vision hanya butuh keterbacaan, bukan piksel penuh).
@@ -146,12 +153,13 @@ gate `modelAcceptsImage` yang sudah ada (`build-run-input.ts:1019`).
 ## 6. Error handling
 
 - Site/version out-of-scope → throw not-found (gaya pesan existing).
-- Browser gagal launch / timeout / PNG korup → throw retryable error
-  (`retryable: true`, tanpa imageId) + cuplikan teks tetap dikembalikan bila
-  ada — agent tetap bisa menjawab parsial dan jujur bilang screenshot gagal.
-- Versi non-ready (building/failed) atau tanpa `index.html` → kembalikan
-  metadata + status, tanpa capture; pesan eksplisit "belum ada yang bisa
-  dilihat".
+- Screenshot gagal (browser/timeout/PNG korup) → hasil parsial: excerpt
+  tetap dikembalikan plus `captureError` + `retryable: true` (tanpa
+  `imageId`) — agent menjawab dari teks dan boleh retry visual. Factory
+  melewatkan antrean vision bila `imageId` kosong.
+- Versi non-ready (building/failed) atau tanpa `index.html` → throw dengan
+  pesan eksplisit "nothing viewable yet" (tidak ada excerpt untuk
+  diberikan).
 
 ## 7. Testing
 

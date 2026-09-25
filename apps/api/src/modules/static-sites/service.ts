@@ -39,6 +39,7 @@ export type SiteManifest = {
       viewport: { width: number; height: number };
       fullPage: boolean;
       truncated: boolean;
+      mediaType: string;
     }
   >;
 };
