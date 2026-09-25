@@ -14,6 +14,11 @@ import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { useImagePreview } from "#/components/images/image-preview";
 import { MathMarkdown } from "#/components/math-markdown";
+import { MarkdownBody } from "#/components/math-markdown";
+import {
+  PinnedArtifactChips,
+  splitPinnedText,
+} from "#/components/artifacts/pinned-artifact-chips";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { HIDDEN_CONTROL_TOOL_NAMES } from "#/lib/chat/tool-wait-progress";
@@ -485,6 +490,21 @@ function ChatMessageParts({
     >
       {(part) => {
         if (part.type === "text") {
+          // User pins arrive as raw `[@type label (id)]` tokens in the text.
+          // Show chips instead — the token must never reach the reader.
+          if (message.role === "user") {
+            const { cleanText, refs } = splitPinnedText(part.text);
+            if (refs.length > 0) {
+              return (
+                <MessagePrimitive.Part className="min-w-0 max-w-full">
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <PinnedArtifactChips pins={refs} />
+                    {cleanText ? <MarkdownBody content={cleanText} /> : null}
+                  </div>
+                </MessagePrimitive.Part>
+              );
+            }
+          }
           return (
             <MessagePrimitive.Part className="min-w-0 max-w-full">
               <MathMarkdown />

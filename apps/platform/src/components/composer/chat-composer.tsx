@@ -2,8 +2,9 @@ import type { UseChatStatus } from "@anvia/react";
 import type { UIAttachment } from "@anvia/client";
 import { ComposerPrimitive, useComposer } from "@anvia/react-ui";
 import type { ComposerEntity } from "@anvia/react-ui";
-import { ArrowUp, CalendarClock, CornerDownLeft, FileText, FileX, Globe, Images, Link2, ListChecks, MessagesSquare, Plug, Square, X } from "lucide-react";
+import { ArrowUp, CornerDownLeft, FileX, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { PinnedArtifactChips } from "#/components/artifacts/pinned-artifact-chips";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
 import { ComposerAttachControl } from "#/components/composer/composer-attach-control";
 import { ContextUsageIndicator } from "#/components/composer/context-usage-indicator";
@@ -534,48 +535,7 @@ export function ChatComposer({
       ) : null}
 
       {artifactPins.length > 0 ? (
-        <div
-          className="flex min-w-0 flex-wrap gap-1.5"
-          role="list"
-          aria-label="Pinned artifacts"
-        >
-          {artifactPins.map((pin) => {
-            const Icon =
-              pin.type === "site"
-                ? Globe
-                : pin.type === "document"
-                  ? FileText
-                  : pin.type === "image"
-                    ? Images
-                    : pin.type === "task"
-                      ? ListChecks
-                      : pin.type === "schedule"
-                        ? CalendarClock
-                        : pin.type === "web_bundle"
-                          ? Link2
-                          : pin.type === "session"
-                            ? MessagesSquare
-                            : Plug;
-            return (
-              <span
-                key={pinKey(pin.type, pin.id)}
-                role="listitem"
-                className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/[0.07] py-0 pl-2 pr-1 text-[11px] font-medium text-text animate-fade-in"
-              >
-                <Icon className="size-3 shrink-0 text-accent" strokeWidth={2} />
-                <span className="min-w-0 flex-1 truncate">{pin.label}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove pinned ${pin.type} ${pin.label}`}
-                  onClick={() => removePinnedEntity(pin.type, pin.id)}
-                  className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-text-muted transition hover:bg-white/[0.08] hover:text-text"
-                >
-                  <X className="size-3" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
+        <PinnedArtifactChips pins={artifactPins} onRemove={removePinnedEntity} />
       ) : null}
 
       <MessageQueueDock
