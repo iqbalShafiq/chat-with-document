@@ -75,14 +75,15 @@ export function createViewSitePageTools(
         ...(question !== undefined ? { question } : {}),
       });
       deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
-      const bytesIncluded = deps.includeImageBytes !== false;
+      const wantsBytes = deps.includeImageBytes !== false;
       const content: ToolResultContentPart[] = [
         {
           type: "text",
-          text: JSON.stringify({ ...result, imageBytesIncluded: bytesIncluded }),
+          // imageBytesIncluded is set from the outcome below, never assumed.
+          text: JSON.stringify({ ...result, imageBytesIncluded: false }),
         },
       ];
-      if (bytesIncluded && deps.loadImageBytes) {
+      if (wantsBytes && deps.loadImageBytes) {
         try {
           const image = await deps.loadImageBytes(result.imageId);
           content.push({
@@ -94,8 +95,14 @@ export function createViewSitePageTools(
             mediaType: image.mediaType,
             filename: result.imageId,
           });
-        } catch {
-          // Bytes are best-effort; the JSON text still carries imageId.
+          content[0] = {
+            type: "text",
+            text: JSON.stringify({ ...result, imageBytesIncluded: true }),
+          };
+        } catch (error) {
+          console.warn(
+            `[site-viewing] screenshot bytes skipped for ${result.imageId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
       return ToolOutput.content(content);

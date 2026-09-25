@@ -103,4 +103,31 @@ describe("createViewSitePageTools", () => {
     expect(toolResultText(textOut)).toMatchObject({ imageId: "img-7", imageBytesIncluded: false });
     expect(loadImageBytes).toHaveBeenCalledTimes(1);
   });
+
+  it("reports bytes as missing when the screenshot cannot be loaded", async () => {
+    const view = async () => ({
+      siteId: "kedai",
+      version: 2,
+      status: "ready",
+      title: "Kedai",
+      headings: [],
+      excerpt: "Halo",
+      excerptTruncated: false,
+      imageId: "img-7",
+      capturedAt: "t",
+      viewport: { width: 1440, height: 900 },
+      fullPage: true,
+      truncated: false,
+    });
+    const tools = createViewSitePageTools({
+      view,
+      loadImageBytes: async () => {
+        throw new Error("r2 down");
+      },
+    });
+    const out = await tools[0]!.call({ siteId: "kedai" });
+    const content = toolResultContent(out);
+    expect(content.some((part) => part.type === "file")).toBe(false);
+    expect(toolResultText(out)).toMatchObject({ imageId: "img-7", imageBytesIncluded: false });
+  });
 });
