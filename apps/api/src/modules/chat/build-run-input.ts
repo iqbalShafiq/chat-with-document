@@ -1423,6 +1423,15 @@ export async function reconstructChatRunInput(input: {
           ...(args.version !== undefined ? { version: args.version } : {}),
           ...(args.question !== undefined ? { question: args.question } : {}),
         }),
+      includeImageBytes: modelAcceptsImage,
+      loadImageBytes: async (imageId) => {
+        const image = await getImageStore().getImage(imageId);
+        if (!image || image.userId !== userId) {
+          throw new Error("Screenshot not found in the current scope.");
+        }
+        const data = await getImageStore().getObjectBuffer(image.r2Key);
+        return { buffer: new Uint8Array(data), mediaType: image.mediaType };
+      },
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
     ...createReportTools({

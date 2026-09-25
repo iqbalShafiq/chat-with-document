@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { createTool, type AnyTool } from "@anvia/core";
+import { createTool, type AnyTool, type ToolResultContentPart } from "@anvia/core";
+import { ToolOutput } from "@anvia/core/tool";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
@@ -37,14 +38,6 @@ export const SITE_VIEW_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(viewSitePageSpec),
 ];
 
-const jsonOutputSchema = z.json();
-
-type JsonOutput = z.output<typeof jsonOutputSchema>;
-
-function toJson<T>(value: T): JsonOutput {
-  return jsonOutputSchema.parse(JSON.parse(JSON.stringify(value)));
-}
-
 export type ViewSitePageResult = {
   siteId: string;
   version: number;
@@ -64,19 +57,48 @@ export function createViewSitePageTools(
   deps: {
     view: (input: { siteId: string; version?: number; question?: string }) => Promise<ViewSitePageResult>;
     onFocus?: ArtifactFocusHandler;
+    /**
+     * Vision models receive the screenshot bytes inline (mirrors
+     * get_document_page_images). Text-only models get JSON only and resolve
+     * the image via view_image. Defaults to true.
+     */
+    includeImageBytes?: boolean;
+    loadImageBytes?: (imageId: string) => Promise<{ buffer: Uint8Array; mediaType: string }>;
   },
 ): AnyTool[] {
   const viewSitePage = createTool({
     ...viewSitePageSpec,
-    outputSchema: jsonOutputSchema,
-    execute: async ({ siteId, version, question }): Promise<JsonOutput> => {
+    execute: async ({ siteId, version, question }) => {
       const result = await deps.view({
         siteId,
         ...(version !== undefined ? { version } : {}),
         ...(question !== undefined ? { question } : {}),
       });
       deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
-      return toJson(result);
+      const bytesIncluded = deps.includeImageBytes !== false;
+      const content: ToolResultContentPart[] = [
+        {
+          type: "text",
+          text: JSON.stringify({ ...result, imageBytesIncluded: bytesIncluded }),
+        },
+      ];
+      if (bytesIncluded && deps.loadImageBytes) {
+        try {
+          const image = await deps.loadImageBytes(result.imageId);
+          content.push({
+            type: "file",
+            data: {
+              type: "data",
+              data: Buffer.from(image.buffer).toString("base64"),
+            },
+            mediaType: image.mediaType,
+            filename: result.imageId,
+          });
+        } catch {
+          // Bytes are best-effort; the JSON text still carries imageId.
+        }
+      }
+      return ToolOutput.content(content);
     },
   });
   return [viewSitePage];
