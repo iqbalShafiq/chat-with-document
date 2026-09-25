@@ -27,6 +27,7 @@ export function ComposerAttachControl({
   disabled = false,
   onLinkedDocuments,
   onRejectedFiles,
+  onAttached,
   onPinArtifact,
 }: {
   sessionId: string;
@@ -37,6 +38,8 @@ export function ComposerAttachControl({
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   /** Called with client-side rejects (e.g. size limit) — never queued. */
   onRejectedFiles?: (rejects: AttachmentReject[]) => void;
+  /** Called after anything is attached (pin, library, upload) so the parent can refocus the field. */
+  onAttached?: () => void;
   /** Called when the user picks an artifact to pin (parent owns pin state). */
   onPinArtifact?: (ref: { type: ArtifactType; id: string; label: string }) => void;
 }) {
@@ -78,8 +81,11 @@ export function ComposerAttachControl({
       if (rejects.length > 0) {
         onRejectedFiles?.(rejects);
       }
+      if (files.length > rejects.length) {
+        onAttached?.();
+      }
     },
-    [composer, onRejectedFiles],
+    [composer, onAttached, onRejectedFiles],
   );
 
   const handlePinArtifact = useCallback(
@@ -88,8 +94,9 @@ export function ComposerAttachControl({
       onPinArtifact?.({ type: pinType, id, label });
       setPinType(null);
       setMenuOpen(false);
+      onAttached?.();
     },
-    [onPinArtifact, pinType],
+    [onAttached, onPinArtifact, pinType],
   );
 
   const handleLibraryConfirm = useCallback(
@@ -103,6 +110,7 @@ export function ComposerAttachControl({
         });
         onLinkedDocuments?.(result.linked);
         setLibraryOpen(false);
+        onAttached?.();
       } catch (error) {
         setLibraryError(
           error instanceof Error
@@ -113,7 +121,7 @@ export function ComposerAttachControl({
         setLinking(false);
       }
     },
-    [onLinkedDocuments, sessionId],
+    [onAttached, onLinkedDocuments, sessionId],
   );
 
   return (

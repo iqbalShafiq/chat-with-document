@@ -664,6 +664,13 @@ export function ChatComposer({
               onLinkedDocuments={onLinkedDocuments}
               onRejectedFiles={onAttachmentRejected}
               onPinArtifact={addArtifactPin}
+              onAttached={() => {
+                // Defer past the dialog's native focus-restore on close,
+                // otherwise focus snaps back to the menu invoker.
+                requestAnimationFrame(() => {
+                  composerInputRef.current?.focus();
+                });
+              }}
             />
 
             {composerAction === "queue" ? (
