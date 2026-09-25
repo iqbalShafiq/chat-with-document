@@ -122,10 +122,15 @@ gate `modelAcceptsImage` yang sudah ada (`build-run-input.ts:1019`).
 
 ## 4. Alur data per jenis model
 
-- Vision: `view_site_page` → `{excerpt, imageId, provenance}` → runtime
-  menyuntik bytes PNG sebagai image block native pada turn yang sama
-  (pola `includeImageBytes`). `view_image` TIDAK dipanggil.
-- Text-only: hasil yang sama tetapi tanpa bytes → model memanggil
+- Vision: `view_site_page` → `{excerpt, imageId, provenance}` sebagai JSON
+  + PNG diantrekan ke **pending vision buffer** run (`parentVisionImages`,
+  mekanisme yang sama dengan web_search images) sehingga turn model
+  berikutnya menerima image block native dalam user message. Berlaku untuk
+  SEMUA provider API (chat completions maupun responses). Tool TIDAK
+  mengembalikan file part: pada chat completions file part direduksi
+  framework menjadi placeholder `[file:…]`, dan toolCallId yang dipakai
+  ulang antar call bisa bertabrakan. `view_image` TIDAK dipanggil.
+- Text-only: hasil yang sama tetapi tanpa antrean bytes → model memanggil
   `view_image({imageId})` → helper vision mengembalikan deskripsi teks.
   Satu-satunya pintu visual model non-vision, sesuai arahan.
 
