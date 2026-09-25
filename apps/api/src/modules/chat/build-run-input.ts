@@ -31,6 +31,8 @@ import {
   ARTIFACT_CHOICE_INSTRUCTION,
   PINNED_ARTIFACT_INSTRUCTION,
   ARTIFACT_TOOL_DEFINITIONS,
+  SITE_VIEW_TOOL_DEFINITIONS,
+  createViewSitePageTools,
   REPORT_TOOL_DEFINITIONS,
   WORKSPACE_TOOL_DEFINITIONS,
   createArtifactTools,
@@ -176,6 +178,7 @@ import {
   readActiveSiteTitle,
   siteBuildConfig,
 } from "../static-sites/service.js";
+import { viewSitePage } from "../static-sites/viewing.js";
 import { getArtifact, getSessionExcerpt, listArtifacts } from "../artifacts/service.js";
 import { chartSpecToSvg } from "../charts/snapshot.js";
 import { buildReportPdf } from "../reports/service.js";
@@ -1080,6 +1083,7 @@ export async function resolveChatAgentRecipe(
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
     ...ARTIFACT_TOOL_DEFINITIONS,
+    ...SITE_VIEW_TOOL_DEFINITIONS,
     ...REPORT_TOOL_DEFINITIONS,
     ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,
@@ -1407,6 +1411,18 @@ export async function reconstructChatRunInput(input: {
           sessionId: excerptSessionId,
           limit,
         }) as Promise<unknown>,
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createViewSitePageTools({
+      view: (args) =>
+        viewSitePage({
+          userId,
+          sessionId,
+          sessionProjectId: projectId,
+          siteId: args.siteId,
+          ...(args.version !== undefined ? { version: args.version } : {}),
+          ...(args.question !== undefined ? { question: args.question } : {}),
+        }),
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
     ...createReportTools({

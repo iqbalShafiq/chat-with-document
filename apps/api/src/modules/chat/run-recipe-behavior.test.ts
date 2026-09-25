@@ -16,6 +16,7 @@ import {
   PROFILE_TOOL_DEFINITIONS,
   REPORT_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
+  SITE_VIEW_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
   USER_MCP_TOOL_DEFINITIONS,
   USER_SKILL_TOOL_DEFINITIONS,
@@ -28,7 +29,7 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 5,
+    version: 6,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
     model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
@@ -113,6 +114,7 @@ function recipe(overrides: Record<string, unknown> = {}) {
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
     ...ARTIFACT_TOOL_DEFINITIONS,
+    ...SITE_VIEW_TOOL_DEFINITIONS,
     ...REPORT_TOOL_DEFINITIONS,
     ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,

@@ -7,6 +7,7 @@ import {
   DERIVED_TOOL_DEFINITIONS,
   REPORT_TOOL_DEFINITIONS,
   SITE_BUILD_TOOL_DEFINITIONS,
+  SITE_VIEW_TOOL_DEFINITIONS,
   TABULAR_TOOL_DEFINITIONS,
   USER_MCP_TOOL_DEFINITIONS,
   USER_SKILL_TOOL_DEFINITIONS,
@@ -66,7 +67,7 @@ const RECIPE_MODEL = "openai/gpt-5.6-luna";
 
 function boundRecipe() {
   const value = {
-    version: 5,
+    version: 6,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: RECIPE_SESSION, userId: RECIPE_USER, projectId: null },
     model: { id: RECIPE_MODEL, reasoningEffort: null },
@@ -126,6 +127,7 @@ function boundRecipe() {
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
     ...ARTIFACT_TOOL_DEFINITIONS,
+    ...SITE_VIEW_TOOL_DEFINITIONS,
     ...REPORT_TOOL_DEFINITIONS,
     ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,

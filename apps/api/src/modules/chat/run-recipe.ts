@@ -3,7 +3,7 @@ import { imageGenSettingsSchema } from "./image-gen-settings.js";
 import { SKILL_NAME_RE } from "../skills/service.js";
 
 export const CHAT_AGENT_ID = "chat-agent" as const;
-export const CHAT_AGENT_RECIPE_VERSION = 5 as const;
+export const CHAT_AGENT_RECIPE_VERSION = 6 as const;
 
 /**
  * Recipes cross the BullMQ/Redis boundary. Keep every string bounded and

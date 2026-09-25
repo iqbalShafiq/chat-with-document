@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { createTool, type AnyTool } from "@anvia/core";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
 } from "./static-definition.js";
+import type { ArtifactFocusHandler } from "./artifacts.js";
 
 const viewSitePageInput = z.object({
   siteId: z
@@ -34,3 +36,48 @@ const viewSitePageSpec = {
 export const SITE_VIEW_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(viewSitePageSpec),
 ];
+
+const jsonOutputSchema = z.json();
+
+type JsonOutput = z.output<typeof jsonOutputSchema>;
+
+function toJson<T>(value: T): JsonOutput {
+  return jsonOutputSchema.parse(JSON.parse(JSON.stringify(value)));
+}
+
+export type ViewSitePageResult = {
+  siteId: string;
+  version: number;
+  status: string;
+  title: string;
+  headings: string[];
+  excerpt: string;
+  excerptTruncated: boolean;
+  imageId: string;
+  capturedAt: string;
+  viewport: { width: number; height: number };
+  fullPage: boolean;
+  truncated: boolean;
+};
+
+export function createViewSitePageTools(
+  deps: {
+    view: (input: { siteId: string; version?: number; question?: string }) => Promise<ViewSitePageResult>;
+    onFocus?: ArtifactFocusHandler;
+  },
+): AnyTool[] {
+  const viewSitePage = createTool({
+    ...viewSitePageSpec,
+    outputSchema: jsonOutputSchema,
+    execute: async ({ siteId, version, question }): Promise<JsonOutput> => {
+      const result = await deps.view({
+        siteId,
+        ...(version !== undefined ? { version } : {}),
+        ...(question !== undefined ? { question } : {}),
+      });
+      deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
+      return toJson(result);
+    },
+  });
+  return [viewSitePage];
+}
