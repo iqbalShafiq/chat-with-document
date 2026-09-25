@@ -2,6 +2,7 @@ import { prisma } from "../../utils/prisma.js";
 import { artifactWhere } from "./scope.js";
 import { createDefaultMemoryScopeKey } from "../chat/memory-scope.js";
 import { getScopedSite, listSitesByScope } from "../static-sites/service.js";
+import { extractSiteExcerpt } from "../static-sites/viewing.js";
 
 export const ARTIFACT_TYPES = [
   "document",
@@ -225,16 +226,24 @@ export async function getArtifact(
     }
     case "site": {
       const manifest = await getScopedSite(input.userId, input.sessionProjectId, input.id);
+      const excerpt = manifest
+        ? await extractSiteExcerpt({
+            ref: { siteId: manifest.siteId, version: manifest.version },
+            maxChars: 2000,
+          }).catch(() => null)
+        : null;
       return manifest
         ? {
             type: "site",
             id: manifest.siteId,
             siteId: manifest.siteId,
             version: manifest.version,
+            stableVersion: manifest.stableVersion,
             status: manifest.status,
             previewUrl: manifest.previewUrl,
             projectId: input.sessionProjectId,
             updatedAt: manifest.updatedAt,
+            ...(excerpt ? { excerpt: excerpt.excerpt } : {}),
           }
         : null;
     }

@@ -29,3 +29,39 @@ describe("listArtifacts session search", () => {
     expect(result.items.map((i) => (i as { sessionId: string }).sessionId)).toEqual(["s1"]);
   });
 });
+
+vi.mock("../static-sites/service.js", () => ({
+  getScopedSite: vi.fn(async () => ({
+    siteId: "kedai",
+    version: 2,
+    stableVersion: 2,
+    status: "ready",
+    previewUrl: "/api/sites/kedai/v2/preview/index.html",
+    projectId: null,
+    updatedAt: "2026-09-25T00:00:00.000Z",
+  })),
+}));
+
+vi.mock("../static-sites/viewing.js", () => ({
+  extractSiteExcerpt: vi.fn(async () => ({
+    title: "Kedai",
+    headings: ["Halo"],
+    excerpt: "Halo dunia",
+    truncated: false,
+  })),
+}));
+
+import { getArtifact } from "./service.js";
+
+describe("getArtifact site detail", () => {
+  it("includes a bounded excerpt and stableVersion", async () => {
+    const artifact = (await getArtifact({
+      userId: "u1",
+      sessionProjectId: null,
+      type: "site",
+      id: "kedai",
+    })) as unknown as Record<string, unknown>;
+    expect(artifact.excerpt).toBe("Halo dunia");
+    expect(artifact).toHaveProperty("stableVersion", 2);
+  });
+});
