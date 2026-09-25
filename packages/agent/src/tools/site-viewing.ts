@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { createTool, type AnyTool, type ToolResultContentPart } from "@anvia/core";
-import { ToolOutput } from "@anvia/core/tool";
+import { createTool, type AnyTool } from "@anvia/core";
 import {
   createStaticToolDefinition,
   type ToolDefinition,
@@ -62,8 +61,21 @@ export function createViewSitePageTools(
      * get_document_page_images). Text-only models get JSON only and resolve
      * the image via view_image. Defaults to true.
      */
+    /**
+     * Vision models see the screenshot via the run's pending vision buffer
+     * (same mechanism as web_search images): the tool itself stays JSON-only
+     * because file parts on tool results do not survive every provider path
+     * (chat completions renders them as `[file:…]` placeholders, and repeated
+     * toolCallIds collide). Text-only models get JSON only and resolve the
+     * image via view_image. Defaults to true.
+     */
     includeImageBytes?: boolean;
-    loadImageBytes?: (imageId: string) => Promise<{ buffer: Uint8Array; mediaType: string }>;
+    /**
+     * Queue the screenshot for native vision input on the next model turn.
+     * Implemented server-side (loads bytes from the image store into the
+     * run's pending vision buffer). Rejects when the bytes are unavailable.
+     */
+    pushVisionImage?: (image: { imageId: string }) => Promise<void> | void;
   },
 ): AnyTool[] {
   const viewSitePage = createTool({
@@ -75,37 +87,18 @@ export function createViewSitePageTools(
         ...(question !== undefined ? { question } : {}),
       });
       deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
-      const wantsBytes = deps.includeImageBytes !== false;
-      const content: ToolResultContentPart[] = [
-        {
-          type: "text",
-          // imageBytesIncluded is set from the outcome below, never assumed.
-          text: JSON.stringify({ ...result, imageBytesIncluded: false }),
-        },
-      ];
-      if (wantsBytes && deps.loadImageBytes) {
+      let imageBytesIncluded = false;
+      if (deps.includeImageBytes !== false && deps.pushVisionImage) {
         try {
-          const image = await deps.loadImageBytes(result.imageId);
-          content.push({
-            type: "file",
-            data: {
-              type: "data",
-              data: Buffer.from(image.buffer).toString("base64"),
-            },
-            mediaType: image.mediaType,
-            filename: result.imageId,
-          });
-          content[0] = {
-            type: "text",
-            text: JSON.stringify({ ...result, imageBytesIncluded: true }),
-          };
+          await deps.pushVisionImage({ imageId: result.imageId });
+          imageBytesIncluded = true;
         } catch (error) {
           console.warn(
-            `[site-viewing] screenshot bytes skipped for ${result.imageId}: ${error instanceof Error ? error.message : String(error)}`,
+            `[site-viewing] vision queue skipped for ${result.imageId}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }
-      return ToolOutput.content(content);
+      return { ...result, imageBytesIncluded };
     },
   });
   return [viewSitePage];

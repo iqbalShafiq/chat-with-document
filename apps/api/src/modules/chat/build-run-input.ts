@@ -1424,13 +1424,23 @@ export async function reconstructChatRunInput(input: {
           ...(args.question !== undefined ? { question: args.question } : {}),
         }),
       includeImageBytes: modelAcceptsImage,
-      loadImageBytes: async (imageId) => {
+      pushVisionImage: async ({ imageId }) => {
         const image = await getImageStore().getImage(imageId);
         if (!image || image.userId !== userId) {
           throw new Error("Screenshot not found in the current scope.");
         }
         const data = await getImageStore().getObjectBuffer(image.r2Key);
-        return { buffer: new Uint8Array(data), mediaType: image.mediaType };
+        if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
+        // url is inert for the pending buffer (only data/mediaType are read);
+        // the store reference marks it as non-navigable.
+        parentVisionImages.push([
+          {
+            url: `image-store:${imageId}`,
+            mediaType: image.mediaType,
+            data: Buffer.from(data).toString("base64"),
+            imageId,
+          },
+        ]);
       },
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
