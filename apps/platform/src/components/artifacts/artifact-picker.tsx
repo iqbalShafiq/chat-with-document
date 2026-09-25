@@ -172,7 +172,7 @@ export function ArtifactPicker({
           const label = itemLabel(item);
           const kind = previewKind(item, artifactType);
           return (
-            <div key={id} className="flex items-stretch gap-1.5">
+            <div key={id} className="flex items-center gap-1.5">
               <button
                 type="button"
                 role="radio"
@@ -206,7 +206,7 @@ export function ArtifactPicker({
                     restoreFocusRef.current = event.currentTarget;
                     setPreviewItem(item);
                   }}
-                  className="inline-flex w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-text-muted transition hover:bg-white/10 hover:text-text active:scale-[0.96]"
+                  className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-muted transition hover:bg-white/[0.08] hover:text-text active:scale-95"
                 >
                   <Eye className="size-3.5" strokeWidth={2} />
                 </button>
