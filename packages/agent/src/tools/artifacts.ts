@@ -100,6 +100,8 @@ export const PINNED_ARTIFACT_INSTRUCTION = [
   "`[@type label (id)]` (for example `[@site Kedai Kopi (abc123)]`).",
   "Resolve a pinned reference with get_artifact before acting on it, exactly as if",
   "you had listed it yourself. Never invent ids.",
+  "To judge a pinned site's content or appearance, call view_site_page after",
+  "get_artifact. Never ask the user for screenshots.",
 ].join(" ");
 
 export type PinnableArtifactType =

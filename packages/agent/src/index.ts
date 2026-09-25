@@ -67,5 +67,6 @@ export * from "./sites/site-plan.js";
 export * from "./sites/site-builder-agent.js";
 export * from "./tools/site-build.js";
 export * from "./tools/artifacts.js";
+export * from "./tools/site-viewing.js";
 export * from "./tools/report-tools.js";
 export * from "./tools/workspace-tools.js";
