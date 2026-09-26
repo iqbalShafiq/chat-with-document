@@ -312,7 +312,8 @@ export const artifactsPaths = {
       operationId: "createSchedule",
       tags: ["Artifacts"],
       summary: "Create a schedule",
-      description: "Enqueues a BullMQ workspace-schedule job; failures cap at 3 attempts.",
+      description:
+        "Runs the stored prompt in the origin session when due (chat-run pipeline); a busy session retries in 5 minutes; three real failures dead-letter the schedule. A queue failure returns 503 and marks the schedule failed.",
       security: bearerOrCookie,
       responses: {
         "201": jsonResponse(
@@ -322,6 +323,18 @@ export const artifactsPaths = {
         ),
         "400": badRequest({ error: "Invalid schedule payload" }),
         "401": unauthorized,
+        "503": jsonResponse(
+          "Schedule could not be queued.",
+          {
+            type: "object",
+            required: ["error", "code"],
+            properties: {
+              error: { type: "string" },
+              code: { type: "string", enum: ["SCHEDULE_QUEUE_ERROR"] },
+            },
+          },
+          ex("Queue error", { error: "Schedule could not be queued", code: "SCHEDULE_QUEUE_ERROR" }),
+        ),
       },
     },
   },

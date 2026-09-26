@@ -525,6 +525,7 @@ const shutdownCoordinator = createWorkerShutdownCoordinator({
   documentWorker: worker,
   profileWorker,
   siteBuildWorker,
+  scheduleWorker,
   closeQdrant,
   closeContext7: closeContext7Mcp,
   closeTracing,

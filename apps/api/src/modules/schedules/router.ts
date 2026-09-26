@@ -45,6 +45,7 @@ export const schedulesRouter = new Hono<{ Variables: AuthVariables }>()
       data: {
         userId: user.id,
         projectId: scope,
+        sessionId: parsed.data.sessionId,
         title: parsed.data.title,
         prompt: parsed.data.prompt,
         freq: parsed.data.freq,
@@ -52,13 +53,30 @@ export const schedulesRouter = new Hono<{ Variables: AuthVariables }>()
       },
       select: { id: true, title: true, freq: true, nextRunAt: true, status: true },
     });
-    await getScheduleQueue()
-      .add(
+    try {
+      await getScheduleQueue().add(
         "run",
         { scheduleId: schedule.id, userId: user.id, projectId: scope },
         { jobId: scheduleJobId(schedule.id), delay: Math.max(0, firstRun.getTime() - Date.now()) },
-      )
-      .catch(() => undefined);
+      );
+    } catch (error) {
+      // A "created" schedule that cannot fire is worse than a failed create:
+      // surface the failure and mark the row so it never looks active.
+      console.error("[schedules] enqueue failed", { scheduleId: schedule.id, error });
+      await prisma.workspaceSchedule
+        .update({
+          where: { id: schedule.id },
+          data: {
+            status: "failed",
+            lastError: error instanceof Error ? error.message.slice(0, 300) : "enqueue failed",
+          },
+        })
+        .catch(() => undefined);
+      return c.json(
+        { error: "Schedule could not be queued", code: "SCHEDULE_QUEUE_ERROR" },
+        503,
+      );
+    }
     return c.json(schedule, 201);
   })
   .delete("/:id", async (c) => {

@@ -57,7 +57,10 @@ export function createWorkspaceManageTools(deps: {
   };
   schedules: {
     list(): Promise<unknown>;
-    create(input: { title: string; prompt: string; freq: string }): Promise<{ id: string }>;
+    create(input: { title: string; prompt: string; freq: string }): Promise<{
+      id: string;
+      nextRunAt?: string | null;
+    }>;
     cancel(input: { id: string }): Promise<unknown>;
   };
   onFocus?: (input: { artifactId: string; artifactType: "task" | "schedule"; label?: string }) => void;

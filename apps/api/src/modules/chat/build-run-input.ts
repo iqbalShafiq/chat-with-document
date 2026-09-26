@@ -1562,7 +1562,10 @@ export async function reconstructChatRunInput(input: {
             id,
             ...(status ? { status: status as never } : {}),
             ...(title ? { title } : {}),
-            ...(description !== undefined ? { description } : {}),
+            // Empty string clears the description (null), never stores "".
+            ...(description !== undefined
+              ? { description: description === "" ? null : description }
+              : {}),
             ...(addSubtasks ? { addSubtasks } : {}),
             ...(toggleSubtasks ? { toggleSubtasks } : {}),
             ...(removeSubtasks ? { removeSubtasks } : {}),
@@ -1582,17 +1585,32 @@ export async function reconstructChatRunInput(input: {
           const { getScheduleQueue, scheduleJobId } = await import("../schedules/queue.js");
           const firstRun = nextRunAt(freq as "once" | "daily" | "weekly");
           const schedule = await prisma.workspaceSchedule.create({
-            data: { userId, projectId, title, prompt, freq, nextRunAt: firstRun },
-            select: { id: true },
+            data: { userId, projectId, sessionId, title, prompt, freq, nextRunAt: firstRun },
+            select: { id: true, nextRunAt: true },
           });
-          await getScheduleQueue()
-            .add(
+          try {
+            await getScheduleQueue().add(
               "run",
               { scheduleId: schedule.id, userId, projectId },
               { jobId: scheduleJobId(schedule.id), delay: Math.max(0, firstRun.getTime() - Date.now()) },
-            )
-            .catch(() => undefined);
-          return { id: schedule.id };
+            );
+          } catch (error) {
+            console.error("[schedules] tool enqueue failed", { scheduleId: schedule.id, error });
+            await prisma.workspaceSchedule
+              .update({
+                where: { id: schedule.id },
+                data: {
+                  status: "failed",
+                  lastError: error instanceof Error ? error.message.slice(0, 300) : "enqueue failed",
+                },
+              })
+              .catch(() => undefined);
+            throw new Error("Schedule could not be queued; nothing will run.");
+          }
+          return {
+            id: schedule.id,
+            nextRunAt: schedule.nextRunAt?.toISOString() ?? null,
+          };
         },
         cancel: async ({ id }) => {
           const { resolveScope } = await import("../tasks/service.js");
