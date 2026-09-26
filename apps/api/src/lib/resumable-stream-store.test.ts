@@ -335,6 +335,38 @@ describe("Redis resumable stream store", () => {
     );
   });
 
+  it("persists site live view data events through the store envelope", async () => {
+    const redis = createFakeRedis();
+    const store = createRedisResumableStreamStore(redis);
+    await store.open({ streamId: "s1" });
+    const event = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: {
+        runId: "run-1",
+        type: "data" as const,
+        name: "siteLiveView",
+        data: { state: "started", siteId: "site-1", label: "Kedai" },
+      },
+    };
+    const record = await store.append({ streamId: "s1", event: event as never });
+    expect(record.eventId).toBe(1);
+
+    const badState = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { state: "nope", siteId: "site-1" } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: badState })).rejects.toThrow(
+      /Invalid protocol-v3/,
+    );
+    const leaked = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { state: "started", siteId: "site-1", leaked: true } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: leaked })).rejects.toThrow(
+      /Invalid protocol-v3/,
+    );
+  });
+
   it("persists site build events through the store envelope", async () => {
     const redis = createFakeRedis();
     const store = createRedisResumableStreamStore(redis);
