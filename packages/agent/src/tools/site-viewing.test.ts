@@ -1,18 +1,89 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   SITE_VIEW_TOOL_DEFINITIONS,
+  createBrowseSiteTools,
   createViewSitePageTools,
 } from "./site-viewing.js";
 
 describe("SITE_VIEW_TOOL_DEFINITIONS", () => {
-  it("exposes exactly view_site_page with siteId/version/question params", () => {
-    expect(SITE_VIEW_TOOL_DEFINITIONS.map((d) => d.name)).toEqual(["view_site_page"]);
-    const params = SITE_VIEW_TOOL_DEFINITIONS[0]!.parameters as {
-      properties: Record<string, unknown>;
+  it("exposes view_site_page and browse_site with one action per call", () => {
+    expect(SITE_VIEW_TOOL_DEFINITIONS.map((d) => d.name)).toEqual([
+      "view_site_page",
+      "browse_site",
+    ]);
+    const browse = SITE_VIEW_TOOL_DEFINITIONS.find((d) => d.name === "browse_site")!;
+    const params = browse.parameters as {
       required: string[];
+      properties: Record<string, unknown>;
     };
-    expect(Object.keys(params.properties).sort()).toEqual(["question", "siteId", "version"]);
-    expect(params.required).toEqual(["siteId"]);
+    expect(params.required.sort()).toEqual(["action", "siteId"]);
+    expect(
+      (params.properties.action as { enum?: string[] }).enum?.sort(),
+    ).toEqual(["click", "close", "open", "scroll", "snapshot"]);
+  });
+});
+
+describe("createBrowseSiteTools", () => {
+  const browseResult = () => ({
+    siteId: "kedai",
+    version: 1,
+    action: "scroll" as const,
+    title: "Kedai",
+    url: "http://localhost:4312/api/sites/kedai/v1/preview/index.html",
+    imageId: "img-2",
+    blocked: false,
+    note: null,
+    actionsUsed: 2,
+    actionsRemaining: 10,
+    sessionState: "open" as const,
+    captureError: null,
+    retryable: false,
+  });
+
+  it("passes the action through and queues vision bytes", async () => {
+    const pushVisionImage = vi.fn(async () => undefined);
+    const act = vi.fn(async () => browseResult());
+    const tools = createBrowseSiteTools({ act, pushVisionImage });
+    expect(tools.map((t) => t.name)).toEqual(["browse_site"]);
+    const out = (await tools[0]!.call({
+      siteId: "kedai",
+      action: "scroll",
+      to: "bottom",
+    })) as unknown as Record<string, unknown>;
+    expect(act).toHaveBeenCalledWith({ siteId: "kedai", action: "scroll", to: "bottom" });
+    expect(out).toMatchObject({ imageId: "img-2", imageBytesIncluded: true });
+    expect(pushVisionImage).toHaveBeenCalledWith({ imageId: "img-2" });
+  });
+
+  it("focuses the site when opening a browse session", async () => {
+    const focused: Array<{ artifactId: string; artifactType: string; label?: string }> = [];
+    const tools = createBrowseSiteTools({
+      act: async () => ({ ...browseResult(), action: "open" }),
+      onFocus: (f) => {
+        focused.push({
+          artifactId: f.artifactId,
+          artifactType: f.artifactType,
+          ...(f.label !== undefined ? { label: f.label } : {}),
+        });
+      },
+    });
+    await tools[0]!.call({ siteId: "kedai", action: "open" });
+    expect(focused).toEqual([{ artifactId: "kedai", artifactType: "site", label: "Kedai" }]);
+  });
+
+  it("skips the vision queue for text-only models", async () => {
+    const pushVisionImage = vi.fn(async () => undefined);
+    const tools = createBrowseSiteTools({
+      act: async () => browseResult(),
+      pushVisionImage,
+      includeImageBytes: false,
+    });
+    const out = (await tools[0]!.call({
+      siteId: "kedai",
+      action: "snapshot",
+    })) as unknown as Record<string, unknown>;
+    expect(out).toMatchObject({ imageId: "img-2", imageBytesIncluded: false });
+    expect(pushVisionImage).not.toHaveBeenCalled();
   });
 });
 

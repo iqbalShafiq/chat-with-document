@@ -32,6 +32,7 @@ describe("artifact choice convention", () => {
     expect(formatPinnedArtifactRef("site", "abc123", "a[b]c")).toBe("[@site abc (abc123)]");
     expect(PINNED_ARTIFACT_INSTRUCTION).toContain("[@site Kedai Kopi (abc123)]");
     expect(PINNED_ARTIFACT_INSTRUCTION).toContain("view_site_page");
+    expect(PINNED_ARTIFACT_INSTRUCTION).toContain("browse_site");
   });
 });
 

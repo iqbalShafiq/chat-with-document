@@ -102,6 +102,8 @@ export const PINNED_ARTIFACT_INSTRUCTION = [
   "you had listed it yourself. Never invent ids.",
   "To judge a pinned site's content or appearance, call view_site_page after",
   "get_artifact. Never ask the user for screenshots.",
+  "For scroll/click interactions on a pinned site, use browse_site instead of",
+  "view_site_page; it streams live frames to the user.",
 ].join(" ");
 
 export type PinnableArtifactType =
