@@ -19,6 +19,7 @@ import {
   expandAssistantToolPanels,
   sendMessage,
   waitForRunDone,
+  waitForStreaming,
 } from "./helpers";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
@@ -240,6 +241,24 @@ export async function viewSiteResult(
   return null;
 }
 
+/** Poll the persisted history until view_site_page lands (run may still be finishing). */
+async function waitForViewResult(
+  page: Page,
+  sessionId: string,
+): Promise<Record<string, unknown>> {
+  let found: Record<string, unknown> | null = null;
+  await expect
+    .poll(
+      async () => {
+        found = await viewSiteResult(page, sessionId);
+        return found !== null;
+      },
+      { timeout: 300_000, intervals: [5_000] },
+    )
+    .toBe(true);
+  return found!;
+}
+
 test.describe.serial("agent site viewing", () => {
   let built: { sessionId: string; siteId: string; siteLabel: string };
 
@@ -250,6 +269,13 @@ test.describe.serial("agent site viewing", () => {
     await pinTaggedSite(page, built.siteLabel);
     await sendMessage(page, REVIEW_PROMPT);
     await waitForRunDone(page, 600_000);
+
+    // Verify the tool result FIRST (poll until persisted), then the UI.
+    const result = await waitForViewResult(page, reviewSessionId);
+    expect(typeof result.imageId).toBe("string");
+    expect((result.imageId as string).length).toBeGreaterThan(0);
+    expect(result.imageBytesIncluded).toBe(true);
+    expect(result.captureError).toBeNull();
 
     const answer = lastAssistant(page);
     await expect(answer).not.toContainText("[@site", { timeout: 30_000 });
@@ -262,13 +288,6 @@ test.describe.serial("agent site viewing", () => {
         timeout: 30_000,
       })
       .toContainEqual(expect.stringContaining("view_site_page"));
-    // The screenshot actually reached the vision model.
-    const result = await viewSiteResult(page, reviewSessionId);
-    expect(result).not.toBeNull();
-    expect(typeof result!.imageId).toBe("string");
-    expect((result!.imageId as string).length).toBeGreaterThan(0);
-    expect(result!.imageBytesIncluded).toBe(true);
-    expect(result!.captureError).toBeNull();
     await saveEvidence(page, "siteview-vision");
   });
 
@@ -281,7 +300,16 @@ test.describe.serial("agent site viewing", () => {
     await editor.click();
     await editor.pressSequentially(REVIEW_PROMPT, { delay: 15 });
     await page.getByRole("button", { name: "Send", exact: true }).click();
+    // The Send button is still visible for a beat before the run flips the
+    // composer to Stop — wait for the stream before waiting for it to end.
+    await waitForStreaming(page);
     await waitForRunDone(page, 600_000);
+
+    // Verify the tool result FIRST (poll until persisted), then the UI.
+    const result = await waitForViewResult(page, reviewSessionId);
+    expect((result.imageId as string).length).toBeGreaterThan(0);
+    // Text-only runs must not claim inline bytes; view_image is the path.
+    expect(result.imageBytesIncluded).toBe(false);
 
     const answer = lastAssistant(page);
     await expect(answer).not.toContainText("[@site", { timeout: 30_000 });
@@ -296,11 +324,6 @@ test.describe.serial("agent site viewing", () => {
     await expect.poll(transcripts, { timeout: 30_000 }).toContainEqual(
       expect.stringContaining("view_image"),
     );
-    const result = await viewSiteResult(page, reviewSessionId);
-    expect(result).not.toBeNull();
-    expect((result!.imageId as string).length).toBeGreaterThan(0);
-    // Text-only runs must not claim inline bytes; view_image is the path.
-    expect(result!.imageBytesIncluded).toBe(false);
     await saveEvidence(page, "siteview-textonly");
   });
 });
