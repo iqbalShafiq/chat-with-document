@@ -133,7 +133,7 @@ test.describe.serial("workspace artifacts", () => {
 
     await sendMessage(
       page,
-      `Tolong buatkan daftar rencana "${title}" dengan subtask: booking hotel, beli tiket kereta, dan susun itinerary 2 hari`,
+      `Tolong buatkan daftar rencana "${title}" berstatus inbox dengan subtask: booking hotel, beli tiket kereta, dan susun itinerary 2 hari`,
     );
     await waitForRunDone(page);
 
