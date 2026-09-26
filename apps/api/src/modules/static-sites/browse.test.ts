@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { getApiOrigin } from "../../lib/origins.js";
 import {
   BROWSE_FRAME_MIN_INTERVAL_MS,
   BROWSE_MAX_ACTIONS,
   BrowseSessionManager,
+  adaptPlaywrightPage,
   browseFrameKey,
   isAllowedBrowseNavigation,
 } from "./browse.js";
@@ -186,6 +188,86 @@ describe("browse session manager", () => {
 describe("browseFrameKey", () => {
   it("namespaces the ephemeral frame per chat session", () => {
     expect(browseFrameKey("s1")).toBe("site-live:s1");
+  });
+});
+
+describe("playwright page adapter guard", () => {
+  function fakeRawPage() {
+    const handlers: { route?: (route: never) => void | Promise<void> } = {};
+    const raw = {
+      goto: vi.fn(async () => undefined),
+      title: vi.fn(async () => "Kedai"),
+      url: vi.fn(() => "http://localhost:4312/api/sites/s/v1/preview/index.html"),
+      screenshot: vi.fn(async () => new Uint8Array([1])),
+      close: vi.fn(async () => undefined),
+      on: vi.fn(),
+      route: vi.fn(async (_pattern: string, handler: (route: never) => void | Promise<void>) => {
+        handlers.route = handler;
+      }),
+      mainFrame: vi.fn(() => "main"),
+      getByText: vi.fn(),
+      locator: vi.fn(),
+      mouse: { wheel: vi.fn(async () => undefined) },
+      evaluate: vi.fn(async () => undefined),
+      screencast: {
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+        showActions: vi.fn(async () => undefined),
+      },
+    };
+    return { raw, handlers };
+  }
+
+  function makeRoute(input: { nav: boolean; url: string }) {
+    return {
+      request: () => ({
+        isNavigationRequest: () => input.nav,
+        frame: () => "main",
+        url: () => input.url,
+      }),
+      continue: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+  }
+
+  it("keeps the preview visible on a blocked external navigation", async () => {
+    const origin = getApiOrigin();
+    const preview = `${origin}/api/sites/s/v1/preview/index.html`;
+    const { raw, handlers } = fakeRawPage();
+    const page = adaptPlaywrightPage(raw as never);
+    await page.goto(preview);
+    const blocked = makeRoute({ nav: true, url: "https://example.com/" });
+    await handlers.route!(blocked as never);
+    // Aborting would commit Chrome's error page and strand the session.
+    expect(blocked.continue).toHaveBeenCalledWith({ url: preview });
+    expect(blocked.abort).not.toHaveBeenCalled();
+    expect(page.consumeBlocked?.()).toBe("https://example.com/");
+  });
+
+  it("allows same-origin navigation and in-page anchors", async () => {
+    const origin = getApiOrigin();
+    const preview = `${origin}/api/sites/s/v1/preview/index.html`;
+    const { raw, handlers } = fakeRawPage();
+    const page = adaptPlaywrightPage(raw as never);
+    await page.goto(preview);
+    const anchor = makeRoute({ nav: true, url: `${preview}#kontak` });
+    await handlers.route!(anchor as never);
+    expect(anchor.continue).toHaveBeenCalledWith();
+    expect(anchor.abort).not.toHaveBeenCalled();
+    expect(page.consumeBlocked?.()).toBeNull();
+  });
+
+  it("blocks external subresources but allows API-origin assets", async () => {
+    const origin = getApiOrigin();
+    const { raw, handlers } = fakeRawPage();
+    adaptPlaywrightPage(raw as never);
+    const external = makeRoute({ nav: false, url: "https://cdn.example.com/x.js" });
+    await handlers.route!(external as never);
+    expect(external.abort).toHaveBeenCalledWith("blockedbyclient");
+    const local = makeRoute({ nav: false, url: `${origin}/api/sites/s/v1/preview/app.js` });
+    await handlers.route!(local as never);
+    expect(local.continue).toHaveBeenCalledWith();
+    expect(local.abort).not.toHaveBeenCalled();
   });
 });
 

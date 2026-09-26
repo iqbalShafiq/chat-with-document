@@ -428,7 +428,7 @@ async function defaultSaveImage(args: {
 type RawRoute = {
   request(): { isNavigationRequest(): boolean; frame(): unknown; url(): string };
   abort(errorCode: string): Promise<void>;
-  continue(): Promise<void>;
+  continue(options?: { url?: string }): Promise<void>;
 };
 
 type RawPlaywrightPage = ViewingPage & {
@@ -461,7 +461,11 @@ const BROWSE_FRAME_SIZE = { width: 1024, height: 640 };
 const BROWSE_FRAME_QUALITY = 60;
 
 export function adaptPlaywrightPage(raw: RawPlaywrightPage): BrowsePage {
+  const origin = getApiOrigin();
   let blockedUrl: string | null = null;
+  // Last URL the preview actually committed; blocked top-level navigations
+  // are redirected here so the session never lands on Chrome's error page.
+  let lastAllowedUrl: string | null = null;
   raw.on("dialog", (dialog) => {
     void dialog.dismiss().catch(() => undefined);
   });
@@ -473,18 +477,31 @@ export function adaptPlaywrightPage(raw: RawPlaywrightPage): BrowsePage {
   });
   void raw.route("**/*", (route) => {
     const request = route.request();
-    if (
-      request.isNavigationRequest() &&
-      request.frame() === raw.mainFrame() &&
-      !isAllowedBrowseNavigation(request.url(), getApiOrigin())
-    ) {
-      blockedUrl = request.url();
+    const url = request.url();
+    const isMainNavigation =
+      request.isNavigationRequest() && request.frame() === raw.mainFrame();
+    if (isMainNavigation) {
+      if (!isAllowedBrowseNavigation(url, origin)) {
+        blockedUrl = url;
+        return lastAllowedUrl
+          ? route.continue({ url: lastAllowedUrl })
+          : route.abort("blockedbyclient");
+      }
+      lastAllowedUrl = url;
+      return route.continue();
+    }
+    // Subresources: only the local API origin. Generated pages must not be
+    // able to probe other hosts (including loopback/private networks).
+    if (!isAllowedBrowseNavigation(url, origin)) {
       return route.abort("blockedbyclient");
     }
     return route.continue();
   });
   return {
-    goto: (url, opts) => raw.goto(url, opts),
+    goto: (url, opts) => {
+      lastAllowedUrl = url;
+      return raw.goto(url, opts);
+    },
     title: () => raw.title(),
     url: () => raw.url(),
     screenshot: (opts) =>
