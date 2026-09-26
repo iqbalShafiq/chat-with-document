@@ -141,7 +141,11 @@ async function openChatWithModel(page: Page, modelId: string, effort?: string): 
   return sessionId;
 }
 
-async function buildTaggedSite(page: Page): Promise<{ sessionId: string; siteId: string }> {
+async function buildTaggedSite(page: Page): Promise<{
+  sessionId: string;
+  siteId: string;
+  siteLabel: string;
+}> {
   await ensureTestUser(page);
   const sessionId = await openChatWithModel(page, "meta/muse-spark-1.3-contributor", "high");
   await sendMessage(
@@ -149,19 +153,20 @@ async function buildTaggedSite(page: Page): Promise<{ sessionId: string; siteId:
     `Buatkan landing page statis super sederhana bernama ${TAG}: satu halaman saja, hero berisi judul "${TAG}", satu paragraf pendek tentang kopi, tanpa gambar.`,
   );
   await waitForRunDone(page, 600_000);
+  // The artifacts list now labels sites by their brief name; match the build
+  // session to find our row, then pin by the label the picker actually shows.
   const site = await pollFor(
     async () => {
-      // Dev API memakai tsx --watch: site build menulis ribuan file ke
-      // data/sites sehingga server bisa restart mid-run. ECONNREFUSED
-      // sesaat = daftar kosong, bukan kegagalan — polling lanjut.
       try {
         const res = await page.request.get(
-          `${API_ORIGIN}/api/sites?sessionId=${encodeURIComponent(sessionId)}`,
+          `${API_ORIGIN}/api/artifacts?type=site&sessionId=${encodeURIComponent(sessionId)}`,
         );
         if (!res.ok()) return [];
-        return ((await res.json()) as {
-          sites: { siteId: string; sessionId: string; status: string; previewUrl: string | null }[];
-        }).sites;
+        return (
+          (await res.json()) as {
+            items: { id?: string; sessionId?: string; status?: string; title?: string }[];
+          }
+        ).items;
       } catch {
         return [];
       }
@@ -169,15 +174,19 @@ async function buildTaggedSite(page: Page): Promise<{ sessionId: string; siteId:
     (s) => s.sessionId === sessionId && s.status === "ready",
     600_000,
   );
-  expect(site.previewUrl).toBeTruthy();
-  return { sessionId, siteId: site.siteId };
+  const siteId = site.id ?? "";
+  expect(siteId.length).toBeGreaterThan(0);
+  return { sessionId, siteId, siteLabel: site.title ?? siteId };
 }
 
-async function pinTaggedSite(page: Page, buildSessionId: string): Promise<void> {
+function exactLabelPattern(label: string): RegExp {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+}
+
+async function pinTaggedSite(page: Page, siteLabel: string): Promise<void> {
   await page.getByRole("button", { name: "Attach document", exact: true }).click();
   await page.getByRole("menuitem", { name: /pin a site/i }).click();
-  // Site rows are labeled by their build session id (sites carry no title).
-  await page.getByRole("radio", { name: new RegExp(buildSessionId.slice(0, 8), "i") }).click();
+  await page.getByRole("radio", { name: exactLabelPattern(siteLabel) }).click();
   await page.getByRole("list", { name: "Pinned artifacts" }).waitFor({ timeout: 30_000 });
 }
 
@@ -228,13 +237,13 @@ export async function viewSiteResult(
 }
 
 test.describe.serial("agent site viewing", () => {
-  let built: { sessionId: string; siteId: string };
+  let built: { sessionId: string; siteId: string; siteLabel: string };
 
   test("vision model reviews a pinned site without asking for screenshots", async ({ page }) => {
     test.setTimeout(1_200_000);
     built = await buildTaggedSite(page);
     const reviewSessionId = await openChatWithModel(page, "meta/muse-spark-1.3-contributor", "high");
-    await pinTaggedSite(page, built.sessionId);
+    await pinTaggedSite(page, built.siteLabel);
     await sendMessage(page, REVIEW_PROMPT);
     await waitForRunDone(page, 600_000);
 
@@ -263,7 +272,7 @@ test.describe.serial("agent site viewing", () => {
     test.setTimeout(1_200_000);
     await ensureTestUser(page);
     const reviewSessionId = await openChatWithModel(page, TEXT_ONLY_MODEL);
-    await pinTaggedSite(page, built.sessionId);
+    await pinTaggedSite(page, built.siteLabel);
     const editor = page.locator("[data-anvia-composer-editor]");
     await editor.click();
     await editor.pressSequentially(REVIEW_PROMPT, { delay: 15 });
