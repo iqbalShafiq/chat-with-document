@@ -193,11 +193,17 @@ test.describe.serial("workspace artifacts", () => {
 
     const docs = await pollFor(
       async () => {
-        const res = await page.request.get(
-          `${API_ORIGIN}/api/documents/library?scope=attach`,
-        );
-        expect(res.ok()).toBe(true);
-        return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
+        // tsx --watch can restart the API mid-run; a refused connection is
+        // transient, not an empty library.
+        try {
+          const res = await page.request.get(
+            `${API_ORIGIN}/api/documents/library?scope=attach`,
+          );
+          if (!res.ok()) return [];
+          return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
+        } catch {
+          return [];
+        }
       },
       (d) => !beforeIds.has(d.id) && d.filename.toLowerCase().includes("dokumentasi"),
       240_000,
@@ -234,9 +240,13 @@ test.describe.serial("workspace artifacts", () => {
 
     const docs = await pollFor(
       async () => {
-        const res = await page.request.get(`${API_ORIGIN}/api/documents/library?scope=attach`);
-        expect(res.ok()).toBe(true);
-        return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
+        try {
+          const res = await page.request.get(`${API_ORIGIN}/api/documents/library?scope=attach`);
+          if (!res.ok()) return [];
+          return ((await res.json()) as { items: { id: string; filename: string }[] }).items;
+        } catch {
+          return [];
+        }
       },
       (d) => d.filename.includes(reportTag),
       420_000,
