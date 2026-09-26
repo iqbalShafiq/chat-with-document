@@ -316,6 +316,7 @@ Tools ini di-inject ke agent saat handle chat:
 | `edit_image` | Edit gambar generated sebelumnya (via `referenceImageId`) — dikirim sebagai `input_references` (data URL) |
 | `request_clarification` | Tanya user saat request ambigu (max 5 pertanyaan, tipe single/multiple choice/free text) |
 | `view_site_page` | Lihat site pinned: cuplikan teks + screenshot Playwright (vision: bytes inline, text-only: via `view_image`); cache permanen per versi |
+| `browse_site` | Browse interaktif site pinned: `open`/`scroll`/`click`/`snapshot`/`close` satu aksi per call; user menonton frame live + cursor Playwright di kartu atas composer |
 
 ### Agent site viewing (screenshot Playwright)
 
@@ -329,6 +330,21 @@ Tools ini di-inject ke agent saat handle chat:
 | Konkurensi | Maks 2 capture paralel (FIFO) + single-flight per `(siteId, version)` |
 | Pengiriman ke model | Bytes diantrekan ke pending vision buffer (pola sama dengan `web_search` images) untuk model vision; model text-only memakai `view_image(imageId)` |
 | Error | Capture gagal → cuplikan teks tetap dikembalikan + `captureError` + `retryable: true` (agent bisa menjawab parsial / retry) |
+
+### Agent live browse (`browse_site`)
+
+`browse_site` menjalankan **sesi browser persisten** di worker untuk site pinned: agent membuka sesi lalu scroll/klik satu aksi per tool call, dan setiap aksi mengembalikan screenshot baru (`imageId`; vision inline, text-only via `view_image`). Selama sesi hidup, frame browser di-stream sebagai JPEG ephemeral (Redis TTL 30 dtk, throttle ≥300 ms) dan disajikan lewat `GET /api/sites/live/:sessionId/frame` (auth + ownership sesi; 204 bila tidak ada frame). UI menampilkan kartu **Live** di atas composer dengan cursor + label aksi bawaan Playwright (`page.screencast` + `showActions({ cursor: "pointer" })`).
+
+| Aspek | Detail |
+| --- | --- |
+| Aksi | `open` → `scroll`/`click`/`snapshot` → `close`; `click` butuh tepat satu `selector` atau `text`; maks 12 aksi/sesi |
+| Idle | 120 dtk tanpa aksi → auto-close (sweeper 30 dtk); sesi juga ditutup saat run berakhir |
+| Keamanan | Hanya origin API lokal (`getApiOrigin()`); navigasi top-level keluar diblokir (`blocked: true`), dialog auto-dismiss, download/popup ditolak |
+| Browser | Berbagi semaphore dengan capture screenshot (maks 2 browser total) |
+| Frame | JPEG ≤1024×640 q60, Redis `site-live:<sessionId>`, TTL 30 dtk; event kecil `siteLiveView` (started/stopped) lewat stream chat |
+| Error | Sesi tidak ada → error "call open first"; screenshot gagal → `captureError` + `retryable` (sesi tetap hidup) |
+
+Contoh prompt: *“Buka site yang saya pin, scroll ke bawah, klik link Kontak, lalu jelaskan isinya.”* — agent memanggil `browse_site` dan user menonton prosesnya secara live.
 
 Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
 
