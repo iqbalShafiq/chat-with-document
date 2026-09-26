@@ -122,7 +122,7 @@ export type ViewingBrowser = {
   close: () => Promise<unknown>;
 };
 
-async function launchChromium(): Promise<ViewingBrowser> {
+export async function launchChromium(): Promise<ViewingBrowser> {
   try {
     return (await chromium.launch({ channel: "chrome" })) as unknown as ViewingBrowser;
   } catch {
@@ -134,7 +134,7 @@ async function launchChromium(): Promise<ViewingBrowser> {
 let activeCaptures = 0;
 const captureQueue: Array<() => void> = [];
 
-async function acquireCaptureSlot(): Promise<void> {
+export async function acquireCaptureSlot(): Promise<void> {
   if (activeCaptures < SITE_SCREENSHOT_MAX_CONCURRENT) {
     activeCaptures += 1;
     return;
@@ -145,7 +145,7 @@ async function acquireCaptureSlot(): Promise<void> {
   activeCaptures += 1;
 }
 
-function releaseCaptureSlot(): void {
+export function releaseCaptureSlot(): void {
   activeCaptures = Math.max(0, activeCaptures - 1);
   captureQueue.shift()?.();
 }
