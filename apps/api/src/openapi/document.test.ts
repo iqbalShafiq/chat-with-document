@@ -170,6 +170,8 @@ describe("OpenAPI document", () => {
           missing.push(`${label}: request body has no example`);
         }
         for (const [status, response] of Object.entries(op.responses ?? {})) {
+          // 204/304 are bodiless by definition — no example to document.
+          if (status === "204" || status === "304") continue;
           if (!contentHasExample(response.content)) {
             missing.push(`${label}: ${status} has no example`);
           }

@@ -204,6 +204,39 @@ export const artifactsPaths = {
       },
     },
   },
+  "/api/sites/live/{sessionId}/frame": {
+    get: {
+      operationId: "getSiteLiveFrame",
+      tags: ["Artifacts"],
+      summary: "Serve the latest live browse frame for a chat session",
+      description:
+        "Ephemeral JPEG (Redis, ~30s TTL) written while the agent browses a pinned site; scoped to the session owner. Returns 204 when no frame is available.",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "sessionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", maxLength: 120 },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "JPEG frame bytes.",
+          content: {
+            "image/jpeg": {
+              schema: { type: "string", format: "binary" },
+              example: "(binary JPEG frame)",
+            },
+          },
+        },
+        "204": { description: "No live frame available." },
+        "400": badRequest({ error: "invalid session id" }),
+        "401": unauthorized,
+        "404": notFound({ error: "Session not found" }),
+      },
+    },
+  },
   "/api/sites": {
     get: {
       operationId: "listScopeSites",

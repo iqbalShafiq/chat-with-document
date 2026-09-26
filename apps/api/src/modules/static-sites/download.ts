@@ -4,7 +4,9 @@ import { extname, join } from "node:path";
 import { z } from "zod";
 import { requireUser } from "../auth/middleware.js";
 import { prisma } from "../../utils/prisma.js";
+import { getRedis } from "../../lib/redis.js";
 import { enqueueSiteBuild } from "./queue.js";
+import { browseFrameKey } from "./browse.js";
 import {
   assertSafeSiteId,
   listSitesByScope,
@@ -16,6 +18,31 @@ import {
 import { resolveSessionProjectId } from "./session-project.js";
 
 export const siteDownloadRouter = new Hono();
+
+const LIVE_SESSION_ID = /^[A-Za-z0-9_-]{1,120}$/;
+
+// Live browse frames: ephemeral JPEG in Redis (~30s TTL) written by the
+// worker's browse session and polled by the chat UI while it is active.
+// Authed + session-scoped; 204 when no frame is available.
+siteDownloadRouter.get("/live/:sessionId/frame", requireUser, async (c) => {
+  const user = c.get("user") as { id: string } | undefined;
+  if (!user?.id) return c.json({ error: "unauthorized" }, 401);
+  const sessionId = c.req.param("sessionId");
+  if (!LIVE_SESSION_ID.test(sessionId ?? "")) {
+    return c.json({ error: "invalid session id" }, 400);
+  }
+  const session = await prisma.chatSession.findFirst({
+    where: { id: sessionId, userId: user.id },
+    select: { id: true },
+  });
+  if (!session) return c.json({ error: "Session not found" }, 404);
+  const frame = await getRedis().get(browseFrameKey(sessionId));
+  if (!frame) return c.body(null, 204);
+  return c.body(new Uint8Array(Buffer.from(frame, "base64")), 200, {
+    "content-type": "image/jpeg",
+    "cache-control": "no-store",
+  });
+});
 
 // NOTE: the static preview stays public (capability URL with an unguessable
 // UUID site id). The panel embeds it in a sandbox="allow-scripts" iframe with

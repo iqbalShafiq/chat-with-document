@@ -1,12 +1,25 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 vi.mock("./queue.js", () => ({
   enqueueSiteBuild: (...args: unknown[]) =>
     ((globalThis as { __enqueue?: (...a: unknown[]) => Promise<void> }).__enqueue ?? (async () => undefined))(...args),
+}));
+
+const store = vi.hoisted(() => ({
+  redisGet: vi.fn(),
+  sessionFindFirst: vi.fn(),
+}));
+
+vi.mock("../../lib/redis.js", () => ({
+  getRedis: () => ({ get: store.redisGet }),
+}));
+
+vi.mock("../../utils/prisma.js", () => ({
+  prisma: { chatSession: { findFirst: store.sessionFindFirst } },
 }));
 
 const auth = vi.hoisted(() => ({ reject: false }));
@@ -259,5 +272,70 @@ describe("site by-session and rollback", () => {
     const list = await siteDownloadRouter.request("/by-session/session-1");
     expect(list.status).toBe(200);
     expect(await list.json()).toEqual({ sites: [] });
+  });
+});
+
+describe("live browse frame", () => {
+  function appWithUser() {
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      (c as unknown as { set: (key: string, value: unknown) => void }).set("user", {
+        id: "user-1",
+      });
+      await next();
+    });
+    app.route("/api/sites", siteDownloadRouter);
+    return app;
+  }
+
+  beforeEach(() => {
+    store.redisGet.mockReset();
+    store.sessionFindFirst.mockReset();
+  });
+
+  it("rejects invalid session ids", async () => {
+    const response = await appWithUser().request("/api/sites/live/bad%21id/frame");
+    expect(response.status).toBe(400);
+    expect(store.sessionFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns 204 when no frame is cached", async () => {
+    store.sessionFindFirst.mockResolvedValue({ id: "session-1" });
+    store.redisGet.mockResolvedValue(null);
+    const response = await appWithUser().request("/api/sites/live/session-1/frame");
+    expect(response.status).toBe(204);
+    expect(store.redisGet).toHaveBeenCalledWith("site-live:session-1");
+  });
+
+  it("serves the cached JPEG for the session owner", async () => {
+    store.sessionFindFirst.mockResolvedValue({ id: "session-1" });
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00]);
+    store.redisGet.mockResolvedValue(bytes.toString("base64"));
+    const response = await appWithUser().request("/api/sites/live/session-1/frame");
+    expect(store.sessionFindFirst).toHaveBeenCalledWith({
+      where: { id: "session-1", userId: "user-1" },
+      select: { id: true },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(bytes));
+  });
+
+  it("404s for a session the user does not own", async () => {
+    store.sessionFindFirst.mockResolvedValue(null);
+    const response = await appWithUser().request("/api/sites/live/session-1/frame");
+    expect(response.status).toBe(404);
+    expect(store.redisGet).not.toHaveBeenCalled();
+  });
+
+  it("requires auth", async () => {
+    auth.reject = true;
+    try {
+      const response = await appWithUser().request("/api/sites/live/session-1/frame");
+      expect(response.status).toBe(401);
+    } finally {
+      auth.reject = false;
+    }
   });
 });
