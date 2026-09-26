@@ -13,7 +13,7 @@ const sourceSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("document_table"), documentId: z.string().min(1), pageIndex: z.number().int().min(0), tableIndex: z.number().int().min(0) }),
 ]) as z.ZodType<DatasetRef>;
 
-const chartRequestSchema = z.discriminatedUnion("kind", [
+export const chartRequestSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("bar"),
     x: z.string().min(1).describe("Group-by column for the x axis"),

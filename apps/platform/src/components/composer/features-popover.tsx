@@ -139,6 +139,7 @@ export function FeaturesPopover({
   const [menuPos, setMenuPos] = useState<{
     top: number;
     bottom: number;
+    left: number;
     right: number;
   } | null>(null);
   const [models, setModels] = useState<ImageModelsState>({
@@ -207,8 +208,8 @@ export function FeaturesPopover({
     const rect = buttonRef.current?.getBoundingClientRect();
     setMenuPos(
       rect
-        ? { top: rect.top, bottom: rect.bottom, right: rect.right }
-        : { top: 0, bottom: 0, right: 0 },
+        ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+        : { top: 0, bottom: 0, left: 0, right: 0 },
     );
     setOpen(true);
   };
@@ -221,8 +222,8 @@ export function FeaturesPopover({
     const rect = buttonRef.current?.getBoundingClientRect();
     setMenuPos(
       rect
-        ? { top: rect.top, bottom: rect.bottom, right: rect.right }
-        : { top: 0, bottom: 0, right: 0 },
+        ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+        : { top: 0, bottom: 0, left: 0, right: 0 },
     );
     setOpen(true);
   };
@@ -230,35 +231,49 @@ export function FeaturesPopover({
   // Position the panel explicitly (no transform: the scale-in animation owns
   // `transform` and would otherwise override a translate). Flip above the
   // trigger when there is room, below otherwise — keeps the panel inside the
-  // viewport on short windows. A ResizeObserver repositions while the panel
-  // grows (model list + editor loading in) so the flip decision uses the
-  // final height, not the first paint's.
+  // viewport on short windows. Horizontally the panel hugs the trigger's
+  // right edge, unless that would push it past the left edge — then it
+  // docks to the left viewport margin instead. A ResizeObserver repositions
+  // while the panel grows (model list + editor loading in) so the flip
+  // decisions use the final size, not the first paint's; window resizes
+  // re-run the same clamp.
   useLayoutEffect(() => {
     if (!open || !menuPos || !panelRef.current) return;
     const panel = panelRef.current;
 
     const applyPosition = () => {
       const height = panel.offsetHeight;
+      const width = panel.offsetWidth;
       const gap = 8;
+      const margin = 8;
       const openUp = menuPos.top - height - gap >= 0;
       panel.style.top = `${
         openUp ? menuPos.top - height - gap : menuPos.bottom + gap
       }px`;
-      panel.style.right = `${window.innerWidth - menuPos.right}px`;
+      if (menuPos.right - width < margin) {
+        panel.style.left = `${margin}px`;
+        panel.style.right = "auto";
+      } else {
+        panel.style.right = `${window.innerWidth - menuPos.right}px`;
+        panel.style.left = "auto";
+      }
     };
 
     applyPosition();
     const observer = new ResizeObserver(applyPosition);
     observer.observe(panel);
-    return () => observer.disconnect();
+    window.addEventListener("resize", applyPosition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", applyPosition);
+    };
   }, [open, menuPos]);
 
   return (
     <div className="relative inline-flex">
+      {anyEnabled ? (
       <div
-        className={`glass inline-flex h-8 items-stretch overflow-hidden rounded-xl transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          anyEnabled ? "" : ""
-        }`}
+        className="glass inline-flex h-9 items-stretch overflow-hidden rounded-xl px-1 transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <button
           ref={buttonRef}
@@ -273,21 +288,18 @@ export function FeaturesPopover({
           aria-expanded={open}
           disabled={!anyAvailable}
           onClick={toggle}
-          className={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
-            anyEnabled ? "rounded-l-xl text-accent" : "rounded-xl text-text-muted"
-          }`}
+          className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-lg text-accent transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/12 hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
         >
           <Plus className="size-4" strokeWidth={1.75} />
         </button>
 
-        {anyEnabled ? (
           <>
             <span
-              className="my-1.5 w-px shrink-0 self-stretch bg-white/[0.1]"
+              className="mx-1 my-1.5 w-px shrink-0 self-stretch bg-white/[0.1]"
               aria-hidden
             />
             <span
-              className="inline-flex items-center gap-1 rounded-r-xl px-1"
+              className="inline-flex items-center gap-1 rounded-r-xl"
               aria-label="Active features"
             >
               {webSearchEnabled ? (
@@ -425,8 +437,26 @@ export function FeaturesPopover({
               ) : null}
             </span>
           </>
-        ) : null}
       </div>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label="Additional features"
+          title={
+            anyAvailable
+              ? "Additional features"
+              : "No additional features available on this server"
+          }
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          disabled={!anyAvailable}
+          onClick={toggle}
+          className="glass glass-interactive inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-text-muted transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-text active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
+        >
+          <Plus className="size-4" strokeWidth={1.75} />
+        </button>
+      )}
 
       {open && menuPos
         ? createPortal(
@@ -434,7 +464,7 @@ export function FeaturesPopover({
               ref={panelRef}
               role="dialog"
               aria-label="Additional features"
-              className="glass-popover fixed z-[80] w-[17rem] rounded-2xl p-2.5 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-scale-in"
+              className="glass-popover fixed z-[80] w-[17rem] max-w-[calc(100vw-16px)] rounded-2xl p-2.5 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-scale-in"
             >
               <div className="flex flex-col gap-0.5">
                 <button

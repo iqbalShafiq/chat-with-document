@@ -1,8 +1,12 @@
 import { useComposer } from "@anvia/react-ui";
-import { FolderOpen, Paperclip, Upload } from "lucide-react";
+import { FileText, FolderOpen, Globe, Paperclip, Upload } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { ArtifactPicker } from "#/components/artifacts/artifact-picker";
 import { DocumentLibraryModal } from "#/components/documents/document-library-modal";
+import { DialogShell } from "#/components/ui/dialog-shell";
 import { PopoverMenu } from "#/components/ui/popover-menu";
+import type { ArtifactType } from "#/lib/api-artifacts";
+import { getArtifact } from "#/lib/api-artifacts";
 import {
   linkDocumentsToSession,
   type SessionDocument,
@@ -23,6 +27,8 @@ export function ComposerAttachControl({
   disabled = false,
   onLinkedDocuments,
   onRejectedFiles,
+  onAttached,
+  onPinArtifact,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -32,6 +38,10 @@ export function ComposerAttachControl({
   onLinkedDocuments?: (documents: SessionDocument[]) => void;
   /** Called with client-side rejects (e.g. size limit) — never queued. */
   onRejectedFiles?: (rejects: AttachmentReject[]) => void;
+  /** Called after anything is attached (pin, library, upload) so the parent can refocus the field. */
+  onAttached?: () => void;
+  /** Called when the user picks an artifact to pin (parent owns pin state). */
+  onPinArtifact?: (ref: { type: ArtifactType; id: string; label: string }) => void;
 }) {
   const composer = useComposer();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -40,6 +50,7 @@ export function ComposerAttachControl({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [linking, setLinking] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [pinType, setPinType] = useState<Extract<ArtifactType, "site" | "document"> | null>(null);
 
   const busy = disabled || linking;
 
@@ -70,8 +81,22 @@ export function ComposerAttachControl({
       if (rejects.length > 0) {
         onRejectedFiles?.(rejects);
       }
+      if (files.length > rejects.length) {
+        onAttached?.();
+      }
     },
-    [composer, onRejectedFiles],
+    [composer, onAttached, onRejectedFiles],
+  );
+
+  const handlePinArtifact = useCallback(
+    (id: string, label: string) => {
+      if (!pinType) return;
+      onPinArtifact?.({ type: pinType, id, label });
+      setPinType(null);
+      setMenuOpen(false);
+      onAttached?.();
+    },
+    [onAttached, onPinArtifact, pinType],
   );
 
   const handleLibraryConfirm = useCallback(
@@ -85,6 +110,7 @@ export function ComposerAttachControl({
         });
         onLinkedDocuments?.(result.linked);
         setLibraryOpen(false);
+        onAttached?.();
       } catch (error) {
         setLibraryError(
           error instanceof Error
@@ -95,7 +121,7 @@ export function ComposerAttachControl({
         setLinking(false);
       }
     },
-    [onLinkedDocuments, sessionId],
+    [onAttached, onLinkedDocuments, sessionId],
   );
 
   return (
@@ -143,6 +169,26 @@ export function ComposerAttachControl({
                 setLibraryOpen(true);
               },
             },
+            {
+              id: "pin-site",
+              label: "Pin a site",
+              description: "Reference a static site from this scope",
+              icon: <Globe className="size-3.5" strokeWidth={1.75} />,
+              disabled: busy,
+              onSelect: () => {
+                setPinType("site");
+              },
+            },
+            {
+              id: "pin-report",
+              label: "Pin a report",
+              description: "Reference a PDF report from this scope",
+              icon: <FileText className="size-3.5" strokeWidth={1.75} />,
+              disabled: busy,
+              onSelect: () => {
+                setPinType("document");
+              },
+            },
           ]}
         />
       </div>
@@ -175,6 +221,47 @@ export function ComposerAttachControl({
         busy={linking}
         error={libraryError}
       />
+
+      <DialogShell
+        open={pinType !== null}
+        onClose={() => setPinType(null)}
+        title={pinType === "site" ? "Pin a site" : "Pin a report"}
+        description="The reference is inserted into your message for the agent to resolve."
+        size="md"
+        heightMode="viewport"
+      >
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="chat-scroll-bleed absolute inset-0 overflow-y-auto overscroll-contain p-4">
+            <div className="flex flex-col gap-3">
+        {pinType ? (
+          <ArtifactPicker
+            sessionId={sessionId}
+            artifactType={pinType}
+            value={null}
+            candidates={undefined}
+            filter={pinType === "document" ? (item) => item.kind === "report" : undefined}
+            emptyHint={
+              pinType === "document"
+                ? "No PDF reports in this scope yet — ask the agent to build one."
+                : "No sites in this scope yet — ask the agent to build one."
+            }
+            onSelect={(id) => {
+              void getArtifact({ id, type: pinType, sessionId }).then(
+                (artifact) => {
+                  handlePinArtifact(
+                    id,
+                    artifact.caption ?? artifact.filename ?? artifact.title ?? id,
+                  );
+                },
+                () => handlePinArtifact(id, id),
+              );
+            }}
+          />
+        ) : null}
+            </div>
+          </div>
+        </div>
+      </DialogShell>
     </>
   );
 }

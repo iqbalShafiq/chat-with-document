@@ -14,6 +14,7 @@ export type GeneratedImageRecord = {
   height: number;
   modelId: string;
   prompt: string;
+  caption: string;
   nOfTotal: string | null;
   source: string;
   sourceUrl: string | null;
@@ -53,6 +54,8 @@ export function createImageStore(deps: ImageStoreDeps) {
       nOfTotal?: string;
       source?: string;
       sourceUrl?: string;
+      /** Searchable caption; defaults to prompt/filename when omitted. */
+      caption?: string;
     }): Promise<GeneratedImageRecord> {
       const mediaType = input.mediaType ?? "image/png";
       const r2Key = `images/${input.userId}/${randomUUID()}`;
@@ -71,6 +74,7 @@ export function createImageStore(deps: ImageStoreDeps) {
             height: input.height,
             modelId: input.modelId,
             prompt: input.prompt,
+            caption: input.caption?.trim() || input.prompt,
             source: input.source ?? "generated",
             ...(input.sourceUrl !== undefined
               ? { sourceUrl: input.sourceUrl }

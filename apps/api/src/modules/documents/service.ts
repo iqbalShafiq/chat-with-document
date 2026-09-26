@@ -323,12 +323,12 @@ export async function createDocumentUpload(input: {
 export type DerivedDocumentOrigin = "created" | "fetched";
 
 const DERIVED_FILENAME_PREFIX: Record<DerivedDocumentOrigin, string> = {
-  created: "[derived] ",
+  created: "[assistant] ",
   fetched: "[downloaded] ",
 };
 
 export function prefixDerivedFilename(filename: string, origin: DerivedDocumentOrigin, synthetic: boolean): string {
-  if (origin === "created" && synthetic) return `[synthetic] ${filename}`;
+  if (origin === "created" && synthetic) return `[sample] ${filename}`;
   return `${DERIVED_FILENAME_PREFIX[origin]}${filename}`;
 }
 
@@ -390,7 +390,7 @@ export async function createDerivedDocument(input: {
       });
       if (derivedCount >= MAX_DERIVED_PER_SESSION) {
         throw new Error(
-          `Too many derived datasets in this session (max ${MAX_DERIVED_PER_SESSION}). Delete an old [derived]/[downloaded] document or reuse an existing one.`,
+          `Too many assistant-made tables in this session (max ${MAX_DERIVED_PER_SESSION}). Delete an old [assistant]/[downloaded] document or reuse an existing one.`,
         );
       }
       const duplicate = await tx.document.findFirst({
@@ -404,7 +404,7 @@ export async function createDerivedDocument(input: {
       });
       if (duplicate) {
         throw new Error(
-          `A derived document named "${filename}" is already ${duplicate.status} (id ${duplicate.id}). Do not create it again — call read_dataset with that documentId and wait for readiness.`,
+          `A saved table named "${filename}" is already ${duplicate.status} (id ${duplicate.id}). Do not create it again — call read_dataset with that documentId and wait for readiness.`,
         );
       }
     },

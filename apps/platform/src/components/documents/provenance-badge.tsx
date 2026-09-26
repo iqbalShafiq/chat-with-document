@@ -29,9 +29,9 @@ export function provenanceTitle(input: {
     return input.originUrl ? `Downloaded from ${input.originUrl}` : "Downloaded from URL";
   }
   if (input.origin === "created") {
-    if (input.parentFilename) return `Derived from ${input.parentFilename}`;
+    if (input.parentFilename) return `Based on ${input.parentFilename}`;
     if (input.sourceNote) return input.sourceNote;
-    return "Created by the assistant";
+    return "Made by assistant";
   }
   return null;
 }

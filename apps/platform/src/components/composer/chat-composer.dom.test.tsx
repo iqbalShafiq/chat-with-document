@@ -7,6 +7,7 @@ import {
   type ChatController,
   type ComposerSubmitMessageArgs,
 } from "@anvia/react-ui";
+import type { QueuedDraft } from "#/lib/chat/queued-messages";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -75,6 +76,8 @@ function composerTree(input: {
   onStopRun?: () => void;
   primitiveStop?: () => void;
   defaultAttachments?: UIAttachment[];
+  initialPinnedRefs?: Array<{ type: "site"; id: string; label: string }>;
+  editHydration?: { version: number; draft: QueuedDraft | null } | null;
   composerError?: string | null;
 }) {
   const chat = controller(input.status, input.primitiveStop);
@@ -101,6 +104,8 @@ function composerTree(input: {
           onDismissAttachmentError={() => undefined}
           models={[model]}
           modelsStatus="success"
+          editHydration={input.editHydration}
+          initialPinnedRefs={input.initialPinnedRefs}
         />
       </ComposerPrimitive.Root>
     </ChatProvider>
@@ -114,6 +119,8 @@ function renderComposer(input: {
   onStopRun?: () => void;
   primitiveStop?: () => void;
   defaultAttachments?: UIAttachment[];
+  initialPinnedRefs?: Array<{ type: "site"; id: string; label: string }>;
+  editHydration?: { version: number; draft: QueuedDraft | null } | null;
   composerError?: string | null;
 }) {
   const { chat, submitMessage, tree } = composerTree(input);
@@ -274,5 +281,82 @@ describe("Anvia v1 composer DOM contract", () => {
     await userEvent.type(editor, "one{Shift>}{Enter}{/Shift}two{Shift>}{Enter}{/Shift}three");
     expect(editor.value).toBe("one\ntwo\nthree");
     expect(Number.parseFloat(editor.style.height)).toBeGreaterThan(startHeight);
+  });
+
+  describe("pinned artifact entities", () => {
+    const pin = { type: "site" as const, id: "abc", label: "Kedai" };
+
+    it("renders seeded pins as chips while the textfield stays clean", () => {
+      renderComposer({ status: "ready", initialPinnedRefs: [pin] });
+      expect(screen.getByRole("list", { name: "Pinned artifacts" })).toBeTruthy();
+      expect(screen.getByText("Kedai")).toBeTruthy();
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+    });
+
+    it("removing a chip drops the pin without touching text", async () => {
+      renderComposer({ status: "ready", initialPinnedRefs: [pin] });
+      await userEvent.click(
+        screen.getByRole("button", { name: "Remove pinned site Kedai" }),
+      );
+      expect(screen.queryByRole("list", { name: "Pinned artifacts" })).toBeNull();
+    });
+
+    it("merges entity tokens into queued drafts", () => {
+      const onQueueSubmit = vi.fn();
+      renderComposer({
+        status: "streaming",
+        onQueueSubmit,
+        editHydration: {
+          version: 1,
+          draft: {
+            text: "[@site Kedai (abc)]",
+            attachments: [],
+            documentIds: [],
+            contextSnippet: null,
+            pinnedImageIds: [],
+          },
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+      expect(onQueueSubmit).toHaveBeenCalledWith("[@site Kedai (abc)]", []);
+    });
+
+    it("merges entity tokens after typed text", () => {
+      const onQueueSubmit = vi.fn();
+      renderComposer({
+        status: "streaming",
+        onQueueSubmit,
+        editHydration: {
+          version: 1,
+          draft: {
+            text: "lanjutkan [@site Kedai (abc)]",
+            attachments: [],
+            documentIds: [],
+            contextSnippet: null,
+            pinnedImageIds: [],
+          },
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+      expect(onQueueSubmit).toHaveBeenCalledWith("lanjutkan\n[@site Kedai (abc)]", []);
+    });
+
+    it("hydrates recalled token text back into entities", () => {
+      renderComposer({
+        status: "ready",
+        editHydration: {
+          version: 1,
+          draft: {
+            text: "lanjutkan [@site Kedai (abc)]",
+            attachments: [],
+            documentIds: [],
+            contextSnippet: null,
+            pinnedImageIds: [],
+          },
+        },
+      });
+      expect(screen.getByRole("list", { name: "Pinned artifacts" })).toBeTruthy();
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("lanjutkan");
+    });
   });
 });

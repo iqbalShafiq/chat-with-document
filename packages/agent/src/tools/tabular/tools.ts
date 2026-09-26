@@ -93,7 +93,7 @@ const jsonOutputSchema = z.json();
 const saveAsSchema = z.object({
   name: z.string().trim().min(1).max(MAX_DERIVED_NAME_CHARS)
     .describe("Base filename for the saved result CSV (without prefix)"),
-}).describe("Save this result as a new derived document instead of only returning it");
+}).describe("Save this result as a new saved table instead of only returning it");
 
 const readDatasetInput = z.object({
   source: sourceSchema.describe("Which dataset to inspect"),
@@ -112,19 +112,19 @@ const queryDatasetSqlInput = z.object({
 const readDatasetSpec = {
   name: "read_dataset",
   description:
-    "Inspect a tabular dataset (CSV/XLSX upload, an agent-created [derived]/[synthetic] document, a [downloaded] URL document, or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing. When the document is still queued/processing, read_dataset waits briefly for readiness; if it reports still-pending, wait and call it once more with the same documentId — never create the dataset again.",
+    "Inspect a tabular dataset (CSV/XLSX upload, an assistant-made [assistant]/[sample] document, a [downloaded] URL document, or a table extracted from a document): returns the sheet name, row count, column names+types, and a preview of the first rows. Call this first to understand the data before analyzing. When the document is still queued/processing, read_dataset waits briefly for readiness; if it reports still-pending, wait and call it once more with the same documentId — never create the dataset again.",
   inputSchema: readDatasetInput,
 } as const;
 const analyzeDatasetSpec = {
   name: "analyze_dataset",
   description:
-    "Run a deterministic data-analysis operation on a dataset (uploads, derived/synthetic/URL documents, or extracted tables): profile (per-column or categorical), aggregate (multi-metric), filter, sort, top_n (optionally grouped), correlation, correlation_matrix, trend (numeric or ISO dates), stats, regression, multiple_regression, ttest (Welch), anova (one-way), outliers (IQR/z-score), or crosstab. The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Pass saveAs {name} to persist the result table as a new derived document for further chaining. Returns structured results and a chart spec the UI renders.",
+    "Run a deterministic data-analysis operation on a dataset (uploads, assistant-made/sample/URL documents, or extracted tables): profile (per-column or categorical), aggregate (multi-metric), filter, sort, top_n (optionally grouped), correlation, correlation_matrix, trend (numeric or ISO dates), stats, regression, multiple_regression, ttest (Welch), anova (one-way), outliers (IQR/z-score), or crosstab. The only analysis entrypoint: never analyze pasted numbers directly — put them in a dataset first. Pass saveAs {name} to persist the result table as a new saved table for further chaining. Returns structured results and a chart spec the UI renders.",
   inputSchema: analyzeDatasetInput,
 } as const;
 const queryDatasetSqlSpec = {
   name: "query_dataset_sql",
   description:
-    "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts. Pass saveAs {name} to persist the result as a new derived document for further chaining.",
+    "Run a read-only SQL SELECT query over a dataset using sql.js (SQLite WASM). The table is named after the sheet (or use t). Only SELECT / WITH ... SELECT is allowed. Results are capped. Use for ad-hoc questions; prefer analyze_dataset for charts. Pass saveAs {name} to persist the result as a new saved table for further chaining.",
   inputSchema: queryDatasetSqlInput,
 } as const;
 const extractDocumentTablesSpec = {

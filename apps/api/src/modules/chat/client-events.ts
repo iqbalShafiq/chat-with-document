@@ -62,6 +62,12 @@ const siteBuildProgressSchema = z.object({
   message: boundedString(2000),
 }).strict();
 
+const artifactFocusSchema = z.object({
+  artifactId: boundedString(120),
+  artifactType: z.enum(["document", "image", "web_bundle", "site", "task", "schedule", "session"]),
+  label: z.string().max(200).optional(),
+}).strict();
+
 const siteBuildReadySchema = z.object({
   siteId: boundedString(120),
   version: boundedCount(10_000),
@@ -107,12 +113,19 @@ const siteBuildReadyAppEventSchema = z.object({
   screenshotUrl: siteBuildReadySchema.shape.screenshotUrl,
   downloadUrl: siteBuildReadySchema.shape.downloadUrl,
 }).strict();
+const artifactFocusAppEventSchema = z.object({
+  type: z.literal("artifact_focus"),
+  artifactId: artifactFocusSchema.shape.artifactId,
+  artifactType: artifactFocusSchema.shape.artifactType,
+  label: artifactFocusSchema.shape.label,
+}).strict();
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
 export type ToolWaitProgressEvent = z.infer<typeof toolWaitProgressSchema>;
 export type SiteBuildProgress = z.infer<typeof siteBuildProgressSchema>;
 export type SiteBuildReady = z.infer<typeof siteBuildReadySchema>;
+export type ArtifactFocus = z.infer<typeof artifactFocusSchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
@@ -120,6 +133,7 @@ export type ChatDataMap = {
   toolWaitProgress: ToolWaitProgressEvent;
   siteBuildProgress: SiteBuildProgress;
   siteBuildReady: SiteBuildReady;
+  artifactFocus: ArtifactFocus;
 };
 
 export const ChatDataSchemas = {
@@ -128,6 +142,7 @@ export const ChatDataSchemas = {
   toolWaitProgress: toolWaitProgressSchema,
   siteBuildProgress: siteBuildProgressSchema,
   siteBuildReady: siteBuildReadySchema,
+  artifactFocus: artifactFocusSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -171,6 +186,12 @@ export type ChatAppEvent =
       previewUrl: string | null;
       screenshotUrl: string | null;
       downloadUrl: string;
+    }
+  | {
+      type: "artifact_focus";
+      artifactId: string;
+      artifactType: ArtifactFocus["artifactType"];
+      label?: string;
     }
   ;
 
@@ -243,6 +264,15 @@ export function mapChatAppEvent(
         downloadUrl: event.downloadUrl,
       });
       return withContext(context, { type: "data", name: "siteBuildReady", data }) as ChatClientEvent;
+    }
+    case "artifact_focus": {
+      artifactFocusAppEventSchema.parse(event);
+      const data = artifactFocusSchema.parse({
+        artifactId: event.artifactId,
+        artifactType: event.artifactType,
+        ...(event.label === undefined ? {} : { label: event.label }),
+      });
+      return withContext(context, { type: "data", name: "artifactFocus", data }) as ChatClientEvent;
     }
   }
 }

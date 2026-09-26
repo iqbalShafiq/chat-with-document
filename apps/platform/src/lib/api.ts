@@ -1530,6 +1530,8 @@ export type GeneratedImageMeta = {
   height: number;
   modelId: string;
   prompt: string;
+  /** Searchable caption (falls back to prompt for legacy rows). */
+  caption: string;
   nOfTotal: string | null;
   source: string;
   sourceUrl: string | null;
@@ -1655,6 +1657,7 @@ function isGeneratedImageMeta(value: unknown): value is GeneratedImageMeta {
     typeof value.height === "number" &&
     typeof value.modelId === "string" &&
     typeof value.prompt === "string" &&
+    (value.caption === undefined || typeof value.caption === "string") &&
     (value.nOfTotal === null || typeof value.nOfTotal === "string") &&
     typeof value.source === "string" &&
     (value.sourceUrl === null || typeof value.sourceUrl === "string") &&
@@ -1666,7 +1669,9 @@ function parseGeneratedImages(data: unknown): GeneratedImageMeta[] {
   if (!isRecord(data) || !Array.isArray(data.images)) {
     throw new Error("Unexpected images response shape");
   }
-  return (data.images as unknown[]).filter(isGeneratedImageMeta);
+  return (data.images as unknown[])
+    .filter(isGeneratedImageMeta)
+    .map((image) => ({ ...image, caption: image.caption ?? image.prompt }));
 }
 
 export async function fetchSessionImages(

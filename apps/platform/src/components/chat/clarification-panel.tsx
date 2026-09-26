@@ -7,6 +7,11 @@ import { useChatContext } from "@anvia/react-ui";
 import { Check, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
+  ArtifactPicker,
+  decodeArtifactChoice,
+} from "#/components/artifacts/artifact-picker";
+import type { ArtifactType } from "#/lib/api-artifacts";
+import {
   buildQuestionResponse,
   stageThenRespond,
 } from "#/lib/chat/interaction-response";
@@ -24,8 +29,11 @@ function isQuestionInteraction(
 /** Native v1 question cards; one submission answers every required prompt. */
 export function ClarificationPanel({
   onInteractionSettled,
+  sessionId,
 }: {
   onInteractionSettled?: () => Promise<void>;
+  /** When set, `artifact:<type>:<id>` choices render as visual pickers. */
+  sessionId?: string;
 }) {
   const chat = useChatContext();
   const pending = chat.interactions.pending.filter(isQuestionInteraction);
@@ -40,6 +48,7 @@ export function ClarificationPanel({
           respondingInteractions={chat.respondingInteractions}
           respond={chat.respondToInteraction}
           onInteractionSettled={onInteractionSettled}
+          sessionId={sessionId}
         />
       ))}
     </div>
@@ -51,6 +60,7 @@ function QuestionCard({
   respondingInteractions,
   respond,
   onInteractionSettled,
+  sessionId,
 }: {
   interaction: QuestionInteraction;
   respondingInteractions: ReadonlySet<string>;
@@ -59,6 +69,7 @@ function QuestionCard({
     response: AgentInteractionResponse;
   }) => Promise<void>;
   onInteractionSettled?: () => Promise<void>;
+  sessionId?: string;
 }) {
   const request = interaction.request;
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -148,6 +159,48 @@ function QuestionCard({
             : promptId;
           const showTextInput =
             question.choices === undefined || question.allowCustom === true;
+          const artifactCandidates =
+            sessionId && question.choices
+              ? question.choices.map((choice) => ({
+                  choice,
+                  decoded: decodeArtifactChoice(choice.value),
+                }))
+              : null;
+          const artifactType: ArtifactType | null =
+            artifactCandidates &&
+            artifactCandidates.length > 0 &&
+            artifactCandidates.every(
+              (c) => c.decoded !== null && c.decoded.type === artifactCandidates[0]!.decoded!.type,
+            )
+              ? artifactCandidates[0]!.decoded!.type
+              : null;
+          if (artifactType && artifactCandidates) {
+            return (
+              <div key={question.id} className="flex flex-col gap-1.5">
+                <p id={promptId} className="text-[12px] leading-relaxed text-text/90">
+                  {question.text}
+                </p>
+                <ArtifactPicker
+                  sessionId={sessionId!}
+                  artifactType={artifactType}
+                  value={(() => {
+                    const current = decodeArtifactChoice(value);
+                    return current?.type === artifactType ? current.id : null;
+                  })()}
+                  candidates={artifactCandidates.map((c) => c.decoded!.id)}
+                  onSelect={(id) => {
+                    const match = artifactCandidates.find((c) => c.decoded!.id === id);
+                    if (match) setAnswer(question.id, match.choice.value);
+                  }}
+                />
+                {fieldInvalid ? (
+                  <p id={errorId} role="alert" className="text-[10px] text-danger">
+                    Answer required.
+                  </p>
+                ) : null}
+              </div>
+            );
+          }
           return (
             <div key={question.id} className="flex flex-col gap-1.5">
               <p id={promptId} className="text-[12px] leading-relaxed text-text/90">

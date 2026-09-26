@@ -28,6 +28,16 @@ import {
   CLARIFICATION_INSTRUCTION,
   CONTEXT7_INSTRUCTION,
   CONTEXT7_TOOL_DEFINITIONS,
+  ARTIFACT_CHOICE_INSTRUCTION,
+  PINNED_ARTIFACT_INSTRUCTION,
+  ARTIFACT_TOOL_DEFINITIONS,
+  SITE_VIEW_TOOL_DEFINITIONS,
+  createViewSitePageTools,
+  REPORT_TOOL_DEFINITIONS,
+  WORKSPACE_TOOL_DEFINITIONS,
+  createArtifactTools,
+  createReportTools,
+  createWorkspaceManageTools,
   createAgent,
   createChunkSearchService,
   createClarificationTool,
@@ -168,6 +178,13 @@ import {
   readActiveSiteTitle,
   siteBuildConfig,
 } from "../static-sites/service.js";
+import { viewSitePage } from "../static-sites/viewing.js";
+import { getArtifact, getSessionExcerpt, listArtifacts } from "../artifacts/service.js";
+import { chartSpecToSvg } from "../charts/snapshot.js";
+import { buildReportPdf } from "../reports/service.js";
+import { createReport, editReport } from "../reports/store.js";
+import { publishArtifactFocus } from "./artifact-events.js";
+import { createTask, listTasks, updateTask } from "../tasks/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
 function buildProjectWorkspaceContext(input: {
@@ -247,6 +264,13 @@ export type ToolGrantHelpers = {
  * only exists inside its page's images JSON, so scan the ready documents
  * linked to this session (the same corpus the model saw image ids from).
  */
+/** Media types the PDF renderer can embed: SVG charts plus raster PNG/JPEG. */
+export function isReportAssetMediaType(mediaType: string): boolean {
+  return (
+    mediaType === "image/svg+xml" || mediaType === "image/png" || mediaType === "image/jpeg"
+  );
+}
+
 async function findSessionDocumentImage(
   imageId: string,
   userId: string,
@@ -997,6 +1021,8 @@ export async function resolveChatAgentRecipe(
 
   instructions.push(CLARIFICATION_INSTRUCTION);
   instructions.push(SITE_BUILD_TOOL_INSTRUCTIONS);
+  instructions.push(ARTIFACT_CHOICE_INSTRUCTION);
+  instructions.push(PINNED_ARTIFACT_INSTRUCTION);
   if (context7Requested) {
     instructions.push(CONTEXT7_INSTRUCTION);
   }
@@ -1063,6 +1089,10 @@ export async function resolveChatAgentRecipe(
     ...(imageGenerationAvailable ? IMAGE_GENERATION_TOOL_DEFINITIONS : []),
     ...CLARIFICATION_TOOL_DEFINITIONS,
     ...SITE_BUILD_TOOL_DEFINITIONS,
+    ...ARTIFACT_TOOL_DEFINITIONS,
+    ...SITE_VIEW_TOOL_DEFINITIONS,
+    ...REPORT_TOOL_DEFINITIONS,
+    ...WORKSPACE_TOOL_DEFINITIONS,
     ...USER_SKILL_TOOL_DEFINITIONS,
     ...USER_MCP_TOOL_DEFINITIONS,
     ...context7ToolDefinitions,
@@ -1358,6 +1388,255 @@ export async function reconstructChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
+  // Workspace artifacts focus publisher: fire-and-forget UI hint (a dropped
+  // hint must not sink the run, but it should never fail silently either).
+  const focus = (
+    artifactId: string,
+    artifactType: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session",
+    label?: string,
+  ): void => {
+    publishArtifactFocus({ sessionId, artifactId, artifactType, ...(label ? { label } : {}) }).catch(
+      (error) => {
+        console.warn("[artifacts] focus publish failed", { artifactId, artifactType, error });
+      },
+    );
+  };
+  // Live order must match the frozen surface: clarification, site-build,
+  // then artifacts (see the resolver toolDefinitions array).
+  const artifactTools = [
+    ...createArtifactTools({
+      list: ({ type, q }) =>
+        listArtifacts({
+          userId,
+          sessionProjectId: projectId,
+          ...(type ? { type: type as never } : {}),
+          ...(q ? { q } : {}),
+        }) as Promise<{ items: unknown[] }>,
+      get: ({ type, id }) =>
+        getArtifact({ userId, sessionProjectId: projectId, type: type as never, id }) as Promise<unknown>,
+      getExcerpt: ({ sessionId: excerptSessionId, limit }) =>
+        getSessionExcerpt({
+          userId,
+          sessionProjectId: projectId,
+          sessionId: excerptSessionId,
+          limit,
+        }) as Promise<unknown>,
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createViewSitePageTools({
+      view: (args) =>
+        viewSitePage({
+          userId,
+          sessionId,
+          sessionProjectId: projectId,
+          siteId: args.siteId,
+          ...(args.version !== undefined ? { version: args.version } : {}),
+          ...(args.question !== undefined ? { question: args.question } : {}),
+        }),
+      includeImageBytes: modelAcceptsImage,
+      pushVisionImage: async ({ imageId }) => {
+        const image = await getImageStore().getImage(imageId);
+        if (!image || image.userId !== userId) {
+          throw new Error("Screenshot not found in the current scope.");
+        }
+        const data = await getImageStore().getObjectBuffer(image.r2Key);
+        if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
+        // url is inert for the pending buffer (only data/mediaType are read);
+        // the store reference marks it as non-navigable.
+        parentVisionImages.push([
+          {
+            url: `image-store:${imageId}`,
+            mediaType: image.mediaType,
+            data: Buffer.from(data).toString("base64"),
+            imageId,
+          },
+        ]);
+      },
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createReportTools({
+      createReport: async ({ title, markdown, assetIds, citationMap }) => {
+        const svgAssets: string[] = [];
+        const rasterAssets: { buffer: Uint8Array; mediaType: string }[] = [];
+        const imageIds: string[] = [];
+        const rejected: string[] = [];
+        for (const assetId of assetIds ?? []) {
+          const image = await prisma.generatedImage.findFirst({
+            where: { id: assetId, userId, projectId },
+            select: { r2Key: true, mediaType: true },
+          });
+          if (!image || !isReportAssetMediaType(image.mediaType)) {
+            rejected.push(assetId);
+            continue;
+          }
+          const bytes = await getObjectBuffer(image.r2Key);
+          if (image.mediaType === "image/svg+xml") {
+            svgAssets.push(new TextDecoder().decode(bytes));
+          } else {
+            rasterAssets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+          }
+          imageIds.push(assetId);
+        }
+        if (rejected.length > 0) {
+          throw new Error(
+            `Unknown or out-of-scope assets: ${rejected.join(", ")}. Use chart snapshots (SVG), PNG, or JPEG images; list them with find_images first.`,
+          );
+        }
+        return createReport({
+          userId,
+          sessionId,
+          title,
+          markdown,
+          ...(svgAssets.length > 0 ? { svgAssets } : {}),
+          ...(rasterAssets.length > 0 ? { rasterAssets } : {}),
+          ...(imageIds.length > 0 ? { imageIds } : {}),
+          ...(citationMap ? { citationMap: citationMap as never } : {}),
+        });
+      },
+      editReport: async ({ documentId, title, markdown }) =>
+        editReport({
+          userId,
+          sessionId,
+          documentId,
+          ...(title ? { title } : {}),
+          ...(markdown ? { markdown } : {}),
+          // Stored raster refs are re-fetched so a full re-render keeps images.
+          fetchRasterAssets: async (storedImageIds) => {
+            const assets: { buffer: Uint8Array; mediaType: string }[] = [];
+            for (const imageId of storedImageIds) {
+              const image = await prisma.generatedImage.findFirst({
+                where: { id: imageId, userId, projectId },
+                select: { r2Key: true, mediaType: true },
+              });
+              if (!image || !isReportAssetMediaType(image.mediaType)) continue;
+              const bytes = await getObjectBuffer(image.r2Key);
+              assets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+            }
+            return assets;
+          },
+        }),
+      snapshotChart: async ({ caption, chart }) => {
+        const svg = chartSpecToSvg(chart as never);
+        const bytes = new TextEncoder().encode(svg);
+        const saved = await getImageStore().saveGeneratedImage({
+          userId,
+          sessionId,
+          projectId,
+          buffer: bytes,
+          mediaType: "image/svg+xml",
+          modelId: "chart-snapshot",
+          prompt: caption,
+          caption,
+          width: 640,
+          height: 360,
+          source: "chart",
+        });
+        return { imageId: saved.id };
+      },
+      freezeBundle: async ({ title, sources }) => {
+        const bundle = await prisma.webBundle.create({
+          data: {
+            userId,
+            projectId,
+            title,
+            sources: sources as unknown as object,
+          },
+          select: { id: true },
+        });
+        return { id: bundle.id };
+      },
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createWorkspaceManageTools({
+      tasks: {
+        list: () => listTasks(userId, projectId),
+        create: ({ title, description, addSubtasks }) =>
+          createTask({
+            userId,
+            sessionId,
+            title,
+            ...(description ? { description } : {}),
+            ...(addSubtasks ? { addSubtasks } : {}),
+          }) as Promise<{ id: string }>,
+        update: ({ id, status, title, description, addSubtasks, toggleSubtasks, removeSubtasks }) =>
+          updateTask({
+            userId,
+            sessionId,
+            id,
+            ...(status ? { status: status as never } : {}),
+            ...(title ? { title } : {}),
+            // Empty string clears the description (null), never stores "".
+            ...(description !== undefined
+              ? { description: description === "" ? null : description }
+              : {}),
+            ...(addSubtasks ? { addSubtasks } : {}),
+            ...(toggleSubtasks ? { toggleSubtasks } : {}),
+            ...(removeSubtasks ? { removeSubtasks } : {}),
+          }) as Promise<unknown>,
+      },
+      schedules: {
+        list: async () => {
+          const { artifactWhere } = await import("../artifacts/scope.js");
+          return prisma.workspaceSchedule.findMany({
+            where: artifactWhere(userId, projectId),
+            orderBy: { createdAt: "desc" },
+            take: 100,
+          }) as unknown;
+        },
+        create: async ({ title, prompt, freq }) => {
+          const { nextRunAt } = await import("../schedules/queue.js");
+          const { getScheduleQueue, scheduleJobId } = await import("../schedules/queue.js");
+          const firstRun = nextRunAt(freq as "once" | "daily" | "weekly");
+          const schedule = await prisma.workspaceSchedule.create({
+            data: { userId, projectId, sessionId, title, prompt, freq, nextRunAt: firstRun },
+            select: { id: true, nextRunAt: true },
+          });
+          try {
+            await getScheduleQueue().add(
+              "run",
+              { scheduleId: schedule.id, userId, projectId },
+              { jobId: scheduleJobId(schedule.id), delay: Math.max(0, firstRun.getTime() - Date.now()) },
+            );
+          } catch (error) {
+            console.error("[schedules] tool enqueue failed", { scheduleId: schedule.id, error });
+            await prisma.workspaceSchedule
+              .update({
+                where: { id: schedule.id },
+                data: {
+                  status: "failed",
+                  lastError: error instanceof Error ? error.message.slice(0, 300) : "enqueue failed",
+                },
+              })
+              .catch(() => undefined);
+            throw new Error("Schedule could not be queued; nothing will run.");
+          }
+          return {
+            id: schedule.id,
+            nextRunAt: schedule.nextRunAt?.toISOString() ?? null,
+          };
+        },
+        cancel: async ({ id }) => {
+          const { resolveScope } = await import("../tasks/service.js");
+          const scope = await resolveScope(userId, sessionId);
+          const existing = await prisma.workspaceSchedule.findFirst({
+            where: { id, userId, projectId: scope },
+            select: { id: true },
+          });
+          if (!existing) throw new Error("Schedule not found");
+          await prisma.workspaceSchedule.update({
+            where: { id: existing.id },
+            data: { status: "cancelled" },
+          });
+          const { getScheduleQueue, scheduleJobId } = await import("../schedules/queue.js");
+          await getScheduleQueue().remove(scheduleJobId(existing.id)).catch(() => undefined);
+          return { ok: true } as unknown;
+        },
+      },
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+  ];
+  // NOTE: pushed after site-build below so live order matches the frozen surface.
+
   // Active image context is frozen in the recipe. Reconstruction may fetch
   // bytes by r2Key later, but it never lists or clears current session context.
   const activeContextImages = recipe.activeContext.images;
@@ -1581,8 +1860,7 @@ export async function reconstructChatRunInput(input: {
   }
 
   // Clarification: the generic request_clarification tool suspends the run
-  // until the user answers (surfaced via the stream by the requester).
-  // Native v1 questions are serializable interactions and do not need an
+  // until the user answers (surfaced via the stream by the requester).  // Native v1 questions are serializable interactions and do not need an
   // application Promise/Redis requester in the worker process.
   tools.push(createClarificationTool());
   // ToolCallContext carries only { emitStreamEvent?, abortSignal? } — never
@@ -1599,9 +1877,11 @@ export async function reconstructChatRunInput(input: {
           ...(args.contextSiteName ? { contextSiteName: args.contextSiteName } : {}),
         }),
       readActiveSite: () => readActiveSiteTitle(sessionId),
-      enqueueBuild: (args) => enqueueSiteBuildFromTool({ ...args, sessionId, userId }),
+      enqueueBuild: (args) =>
+        enqueueSiteBuildFromTool({ ...args, sessionId, userId, projectId }),
     }),
   );
+  tools.push(...artifactTools);
   // User-owned skills/servers are managed through the same v1 services as
   // the routers (ownership + validation inside); secrets never cross.
   // Position mirrors the frozen surface: clarification, site build, then

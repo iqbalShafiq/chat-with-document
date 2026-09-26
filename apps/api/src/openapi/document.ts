@@ -6,6 +6,7 @@ import { documentsPaths } from "./paths/documents.js";
 import { healthPaths } from "./paths/health.js";
 import { imagesPaths } from "./paths/images.js";
 import { mcpServersPaths } from "./paths/mcp-servers.js";
+import { artifactsPaths } from "./paths/artifacts.js";
 import { modelsPaths } from "./paths/models.js";
 import { profilingPaths } from "./paths/profiling.js";
 import { projectsPaths } from "./paths/projects.js";
@@ -103,6 +104,7 @@ export function buildOpenApiDocument(input?: {
       { name: "Projects", description: "Project CRUD and last-opened." },
       { name: "Profiling", description: "User / project personalization profiles." },
       { name: "Skills", description: "User-owned agent skills (SKILL.md)." },
+      { name: "Artifacts", description: "Scoped workspace artifacts: reports, images, sites, tasks, schedules." },
       { name: "Usage", description: "Token and storage aggregates." },
     ],
     paths: {
@@ -116,6 +118,7 @@ export function buildOpenApiDocument(input?: {
       ...projectsPaths,
       ...profilingPaths,
       ...skillsPaths,
+      ...artifactsPaths,
       ...usagePaths,
     },
     components: openApiComponents,

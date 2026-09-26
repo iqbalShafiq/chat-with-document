@@ -267,15 +267,37 @@ export type ShareForkDraftAttachment = Pick<
   "id" | "type" | "name" | "mediaType" | "data" | "url" | "text"
 >;
 
+export type ShareForkDraftPinnedArtifact = {
+  type: string;
+  id: string;
+  label: string;
+};
+
 export type ShareForkDraft = {
   version: 1;
   text: string;
   attachments: ShareForkDraftAttachment[];
-  webSearchEnabled: boolean;
-  deepResearchEnabled: boolean;
-  imageGenerationEnabled: boolean;
-  imageGenSettings: ImageGenSettings;
+  webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
+  imageGenerationEnabled?: boolean;
+  imageGenSettings?: ImageGenSettings;
+  /** When false, prefill the composer without auto-sending (default true). */
+  autoSend?: boolean;
+  /** Artifact pins to seed as composer entities (never raw text). */
+  pinnedArtifacts?: ShareForkDraftPinnedArtifact[];
 };
+
+function isShareForkPinnedArtifact(value: unknown): value is ShareForkDraftPinnedArtifact {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.type === "string" &&
+    typeof record.id === "string" &&
+    typeof record.label === "string"
+  );
+}
 
 function isShareForkAttachment(value: unknown): value is ShareForkDraftAttachment {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -306,12 +328,16 @@ function isShareForkDraft(value: unknown): value is ShareForkDraft {
     typeof record.text === "string" &&
     Array.isArray(record.attachments) &&
     record.attachments.every(isShareForkAttachment) &&
-    typeof record.webSearchEnabled === "boolean" &&
-    typeof record.deepResearchEnabled === "boolean" &&
-    typeof record.imageGenerationEnabled === "boolean" &&
-    typeof settings === "object" &&
-    settings !== null &&
-    !Array.isArray(settings)
+    (record.webSearchEnabled === undefined || typeof record.webSearchEnabled === "boolean") &&
+    (record.deepResearchEnabled === undefined || typeof record.deepResearchEnabled === "boolean") &&
+    (record.imageGenerationEnabled === undefined ||
+      typeof record.imageGenerationEnabled === "boolean") &&
+    (record.autoSend === undefined || typeof record.autoSend === "boolean") &&
+    (record.pinnedArtifacts === undefined ||
+      (Array.isArray(record.pinnedArtifacts) &&
+        record.pinnedArtifacts.every(isShareForkPinnedArtifact))) &&
+    (settings === undefined ||
+      (typeof settings === "object" && settings !== null && !Array.isArray(settings)))
   );
 }
 
@@ -347,10 +373,12 @@ export function queueShareForkDraft(
   input: {
     text: string;
     attachments: UIAttachment[];
-    webSearchEnabled: boolean;
-    deepResearchEnabled: boolean;
-    imageGenerationEnabled: boolean;
-    imageGenSettings: ImageGenSettings;
+    webSearchEnabled?: boolean;
+    deepResearchEnabled?: boolean;
+    imageGenerationEnabled?: boolean;
+    imageGenSettings?: ImageGenSettings;
+    autoSend?: boolean;
+    pinnedArtifacts?: ShareForkDraftPinnedArtifact[];
   },
 ): void {
   const payload: ShareForkDraft = {
@@ -367,10 +395,28 @@ export function queueShareForkDraft(
       ...(attachment.url !== undefined ? { url: attachment.url } : {}),
       ...(attachment.text !== undefined ? { text: attachment.text } : {}),
     })),
-    webSearchEnabled: input.webSearchEnabled,
-    deepResearchEnabled: input.deepResearchEnabled,
-    imageGenerationEnabled: input.imageGenerationEnabled,
-    imageGenSettings: sanitizeImageGenSettings(input.imageGenSettings),
+    ...(input.webSearchEnabled !== undefined
+      ? { webSearchEnabled: input.webSearchEnabled }
+      : {}),
+    ...(input.deepResearchEnabled !== undefined
+      ? { deepResearchEnabled: input.deepResearchEnabled }
+      : {}),
+    ...(input.imageGenerationEnabled !== undefined
+      ? { imageGenerationEnabled: input.imageGenerationEnabled }
+      : {}),
+    ...(input.imageGenSettings !== undefined
+      ? { imageGenSettings: sanitizeImageGenSettings(input.imageGenSettings) }
+      : {}),
+    ...(input.autoSend !== undefined ? { autoSend: input.autoSend } : {}),
+    ...(input.pinnedArtifacts !== undefined
+      ? {
+          pinnedArtifacts: input.pinnedArtifacts.map((ref) => ({
+            type: ref.type,
+            id: ref.id,
+            label: ref.label,
+          })),
+        }
+      : {}),
   };
   try {
     sessionStorage.setItem(shareForkDraftKey(sessionId), JSON.stringify(payload));

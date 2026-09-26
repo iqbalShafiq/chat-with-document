@@ -42,7 +42,7 @@ const cases: EvalCase<EvalCaseInput, unknown>[] = [
         imageGenEnabled: false,
         hasDocuments: true,
         visionModelAvailable: true,
-        models: ["openai/gpt-5.6-luna"],
+        models: ["openai/gpt-6-luna"],
       },
       expected: {
         forbidsTools: ["view_image"],

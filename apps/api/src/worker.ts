@@ -42,6 +42,8 @@ import {
 import { SITE_BUILD_QUEUE } from "./modules/static-sites/queue.js";
 import { siteBuildConfig } from "./modules/static-sites/service.js";
 import { createSiteBuildWorker } from "./modules/static-sites/worker.js";
+import { SCHEDULE_QUEUE } from "./modules/schedules/queue.js";
+import { createScheduleWorker } from "./modules/schedules/worker.js";
 import { prisma } from "./utils/prisma.js";
 import {
   CHAT_RUN_QUEUE,
@@ -453,6 +455,24 @@ if (siteBuildWorker) {
   });
 }
 
+const scheduleWorker = createScheduleWorker();
+
+scheduleWorker.on("ready", () => {
+  console.log(`[schedules] ready on queue ${SCHEDULE_QUEUE}`);
+});
+
+scheduleWorker.on("completed", (job) => {
+  console.log(`[schedules] completed ${job.id}`);
+});
+
+scheduleWorker.on("failed", (job, error) => {
+  console.error(`[schedules] failed ${job?.id}`, error);
+});
+
+scheduleWorker.on("error", (error) => {
+  console.error("[schedules] worker error", error);
+});
+
 console.log(`[worker] listening on queue ${DOCUMENT_INGEST_QUEUE}`);
 
 // Validate the Prisma memory adapter/delegates before the chat queue is
@@ -505,6 +525,7 @@ const shutdownCoordinator = createWorkerShutdownCoordinator({
   documentWorker: worker,
   profileWorker,
   siteBuildWorker,
+  scheduleWorker,
   closeQdrant,
   closeContext7: closeContext7Mcp,
   closeTracing,

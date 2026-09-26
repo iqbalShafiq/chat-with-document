@@ -60,13 +60,13 @@ describe("formatToolOutput for tabular tools", () => {
   it("summarizes create_dataset with provenance fields", () => {
     const section = formatToolOutput("create_dataset", {
       documentId: "d-new",
-      filename: "[derived] ringkas.csv",
+      filename: "[assistant] ringkas.csv",
       origin: "created",
       parentDocumentId: "d-parent",
       rowCount: 5,
       status: "queued",
     });
-    expect(section.summary).toContain("[derived] ringkas.csv");
+    expect(section.summary).toContain("[assistant] ringkas.csv");
     expect(section.fields).toContainEqual({ label: "Origin", value: "created" });
   });
 

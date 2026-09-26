@@ -1,5 +1,5 @@
 const DATASET_CORE_LINES = [
-  "Dataset sources: user uploads (origin 'upload'), agent-created or derived tables (origin 'created', filenames prefixed [derived] or [synthetic]), and URL downloads (origin 'fetched', filenames prefixed [downloaded]).",
+  "Dataset sources: user uploads (origin 'upload'), assistant-made tables (origin 'created', filenames prefixed [assistant] or [sample]), and URL downloads (origin 'fetched', filenames prefixed [downloaded]).",
   "Preferred flow: discover via read_dataset / extract_document_tables, verify with read_dataset, then analyze_dataset for computation or create_chart when you need a specific chart shape (multi-series, pie, titled).",
   "When the user asks for an example without data: use create_dataset and label the answer as a synthetic example; never present it as fact.",
   "When a new CSV is needed from an existing session/project CSV (filter, summarize, or transform before analysis): read the source via read_dataset, then create_dataset with derivedFrom.documentId, wait for ready, verify with read_dataset, then analyze_dataset. Never analyze a derivation that is not ready.",
@@ -19,11 +19,11 @@ export const DATASET_CHART_EMBED_INSTRUCTION =
 export const DATASET_INSTRUCTION = [
   ...DATASET_CORE_LINES,
   DATASET_CHART_EMBED_INSTRUCTION,
-  "Deep Research reports: cite derived or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
+  "Deep Research reports: cite assistant-made or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
 ].join("\n");
 
 /** Nested researcher: no ![chart:N]() — parent numbering does not apply inside the report. */
 export const DATASET_INSTRUCTION_RESEARCHER = [
   ...DATASET_CORE_LINES,
-  "Deep Research reports: cite derived or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
+  "Deep Research reports: cite assistant-made or fetched datasets you built (URLs via sourceNote/originUrl, documents via filename and [[cite:N]] when their data backs a claim).",
 ].join("\n");

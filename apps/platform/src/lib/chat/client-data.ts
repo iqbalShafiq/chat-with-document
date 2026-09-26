@@ -60,12 +60,26 @@ export type SiteBuildReady = {
   downloadUrl: string;
 };
 
+export type ArtifactFocus = {
+  artifactId: string;
+  artifactType:
+    | "document"
+    | "image"
+    | "web_bundle"
+    | "site"
+    | "task"
+    | "schedule"
+    | "session";
+  label?: string;
+};
+
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
   toolWaitProgress: ToolWaitProgress;
   siteBuildProgress: SiteBuildProgress;
   siteBuildReady: SiteBuildReady;
+  artifactFocus: ArtifactFocus;
 };
 
 type ParseResult<T> =
@@ -255,6 +269,37 @@ function parseQueuedMessageApplied(value: unknown): ParseResult<QueuedMessageApp
   });
 }
 
+const ARTIFACT_TYPES = [
+  "document",
+  "image",
+  "web_bundle",
+  "site",
+  "task",
+  "schedule",
+  "session",
+] as const;
+
+function parseArtifactFocus(value: unknown): ParseResult<ArtifactFocus> {
+  if (
+    !isRecord(value) ||
+    !Object.keys(value).every((key) =>
+      ["artifactId", "artifactType", "label"].includes(key),
+    ) ||
+    !boundedString(value.artifactId, MAX_METADATA_STRING) ||
+    !(ARTIFACT_TYPES as readonly unknown[]).includes(value.artifactType)
+  ) {
+    return failure("invalid artifact focus");
+  }
+  if (value.label !== undefined && (typeof value.label !== "string" || value.label.length > 200)) {
+    return failure("invalid artifact focus");
+  }
+  return success({
+    artifactId: value.artifactId,
+    artifactType: value.artifactType as ArtifactFocus["artifactType"],
+    ...(value.label === undefined ? {} : { label: value.label as string }),
+  });
+}
+
 function parseSiteBuildProgress(value: unknown): ParseResult<SiteBuildProgress> {
   if (
     !isRecord(value) ||
@@ -320,6 +365,9 @@ const siteBuildProgressSchema: Schema<SiteBuildProgress> = {
 const siteBuildReadySchema: Schema<SiteBuildReady> = {
   safeParse: parseSiteBuildReady,
 };
+const artifactFocusSchema: Schema<ArtifactFocus> = {
+  safeParse: parseArtifactFocus,
+};
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
   streamMetadataSchema;
@@ -330,4 +378,5 @@ export const ChatDataSchemas = {
   toolWaitProgress: toolWaitProgressSchema,
   siteBuildProgress: siteBuildProgressSchema,
   siteBuildReady: siteBuildReadySchema,
+  artifactFocus: artifactFocusSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;

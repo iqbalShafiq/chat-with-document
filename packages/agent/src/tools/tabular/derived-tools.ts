@@ -48,7 +48,7 @@ const cellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
 const createDatasetInput = z.object({
   name: z.string().trim().min(1).max(MAX_DERIVED_NAME_CHARS)
-    .describe("Base filename for the new CSV (without prefix; the server adds [derived]/[synthetic])"),
+    .describe("Base filename for the new CSV (without prefix; the server adds [assistant]/[sample])"),
   columns: z.array(z.string()).min(1).max(MAX_DERIVED_HARD_COLUMNS).optional()
     .describe("Column names; required unless cloneFrom is used"),
   rows: z.array(z.array(cellSchema)).min(1).max(MAX_DERIVED_ROWS).optional()

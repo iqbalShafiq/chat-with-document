@@ -13,7 +13,7 @@ import { UserMessageEdit } from "#/components/chat/user-message-edit";
 import { GeneratedImageStrip } from "#/components/images/generated-image-strip";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
 import { useImagePreview } from "#/components/images/image-preview";
-import { MathMarkdown } from "#/components/math-markdown";
+import { PinnedTextPart } from "#/components/chat/pinned-text-part";
 import { ReasoningPanel } from "#/components/reasoning-panel";
 import { ToolActivityPanel } from "#/components/tool-activity-panel";
 import { HIDDEN_CONTROL_TOOL_NAMES } from "#/lib/chat/tool-wait-progress";
@@ -378,7 +378,7 @@ export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): bo
   if (part.type === "data") {
     // Progress/queue events have dedicated chrome; do not reprint them
     // as transcript lines on every update.
-    return part.name !== "deepResearchProgress" && part.name !== "toolWaitProgress" && part.name !== "siteBuildProgress" && part.name !== "siteBuildReady";
+    return part.name !== "deepResearchProgress" && part.name !== "toolWaitProgress" && part.name !== "siteBuildProgress" && part.name !== "siteBuildReady" && part.name !== "artifactFocus";
   }
   if (
     part.type === "reasoning" ||
@@ -487,7 +487,7 @@ function ChatMessageParts({
         if (part.type === "text") {
           return (
             <MessagePrimitive.Part className="min-w-0 max-w-full">
-              <MathMarkdown />
+              <PinnedTextPart role={message.role} text={part.text} />
             </MessagePrimitive.Part>
           );
         }

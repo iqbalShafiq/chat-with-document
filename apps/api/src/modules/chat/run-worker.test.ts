@@ -23,7 +23,7 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = {
-  version: 3 as const,
+  version: 6 as const,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
   model: { id: "deepseek/deepseek-v4-flash-0731", reasoningEffort: "max" as const },

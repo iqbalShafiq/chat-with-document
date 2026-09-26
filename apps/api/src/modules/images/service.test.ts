@@ -26,6 +26,7 @@ function makeRecord(
     height: 1024,
     modelId: "model-1",
     prompt: "a cat on a sofa",
+    caption: "a cat on a sofa",
     nOfTotal: null,
     source: "generated",
     sourceUrl: null,
