@@ -358,7 +358,6 @@ export function ChatSession({
   initialComposerDraft = null,
   initialFeatureFlags = null,
   onSiteBuildEvent,
-  onArtifactFocus,
 }: {
   sessionId: string;
   projectId?: string | null;
@@ -408,10 +407,6 @@ export function ChatSession({
       | { name: "siteBuildProgress"; data: ChatDataMap["siteBuildProgress"] }
       | { name: "siteBuildReady"; data: ChatDataMap["siteBuildReady"] },
   ) => void;
-  onArtifactFocus?: (event: {
-    name: "artifactFocus";
-    data: ChatDataMap["artifactFocus"];
-  }) => void;
 }) {
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -847,7 +842,6 @@ export function ChatSession({
             return;
           case "artifactFocus":
             setArtifactFocus(event.data);
-            onArtifactFocus?.({ name: event.name, data: event.data });
             return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(

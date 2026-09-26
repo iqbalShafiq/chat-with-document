@@ -364,6 +364,8 @@ describe("mergeGeneratedImages", () => {
         nOfTotal: "2 of 2",
         source: "generated",
         sourceUrl: null,
+        caption: null,
+        projectId: null,
       },
       {
         id: "both",
@@ -375,6 +377,8 @@ describe("mergeGeneratedImages", () => {
         nOfTotal: null,
         source: "generated",
         sourceUrl: null,
+        caption: null,
+        projectId: null,
       },
       {
         id: "stored-2",
@@ -386,6 +390,8 @@ describe("mergeGeneratedImages", () => {
         nOfTotal: "1 of 4",
         source: "generated",
         sourceUrl: null,
+        caption: "stored prompt",
+        projectId: null,
       },
     ]);
   });
@@ -407,6 +413,8 @@ describe("toGeneratedImageItem", () => {
       nOfTotal: "3 of 4",
       source: "generated",
       sourceUrl: null,
+      caption: "stored prompt",
+      projectId: null,
     });
   });
 });
@@ -512,6 +520,8 @@ describe("imageItemsFromToolPart", () => {
         nOfTotal: "1 of 2",
         source: "generated",
         sourceUrl: null,
+        caption: null,
+        projectId: null,
       },
       {
         id: "img-2",
@@ -523,6 +533,8 @@ describe("imageItemsFromToolPart", () => {
         nOfTotal: "2 of 2",
         source: "generated",
         sourceUrl: null,
+        caption: null,
+        projectId: null,
       },
     ]);
   });

@@ -60,19 +60,30 @@ export const artifactsRouter = new Hono<{ Variables: AuthVariables }>()
     const body = (await c.req.json().catch(() => null)) as {
       caption?: unknown;
       sessionId?: unknown;
+      projectId?: unknown;
     } | null;
     if (typeof body?.caption !== "string") {
       return c.json({ error: "caption is required" }, 400);
     }
-    if (typeof body?.sessionId !== "string" || !body.sessionId.trim()) {
-      return c.json({ error: "sessionId is required" }, 400);
+    const hasSession = typeof body?.sessionId === "string" && body.sessionId.trim().length > 0;
+    const hasProjectScope = body !== null && Object.prototype.hasOwnProperty.call(body, "projectId");
+    if (!hasSession && !hasProjectScope) {
+      return c.json({ error: "sessionId or projectId is required" }, 400);
+    }
+    if (
+      body?.projectId !== undefined &&
+      body?.projectId !== null &&
+      typeof body.projectId !== "string"
+    ) {
+      return c.json({ error: "projectId must be a string or null" }, 400);
     }
     try {
       const updated = await updateImageCaption({
         userId: user.id,
-        sessionId: body.sessionId,
+        ...(hasSession ? { sessionId: body!.sessionId as string } : {}),
+        ...(hasProjectScope ? { projectId: (body!.projectId as string | null) ?? null } : {}),
         imageId: c.req.param("id"),
-        caption: body.caption,
+        caption: body!.caption as string,
       });
       return c.json(updated);
     } catch (error) {

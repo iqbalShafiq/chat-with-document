@@ -166,19 +166,30 @@ export async function listArtifacts(
 }
 
 export async function updateImageCaption(
-  input: { userId: string; sessionId: string; imageId: string; caption: string },
+  input: {
+    userId: string;
+    /** Preferred scope source inside chat; gallery editing may pass projectId instead. */
+    sessionId?: string | null;
+    projectId?: string | null;
+    imageId: string;
+    caption: string;
+  },
   deps: { prisma: Pick<typeof prisma, "generatedImage" | "chatSession"> } = { prisma },
 ): Promise<{ id: string; caption: string }> {
   const caption = input.caption.trim();
   if (caption.length < 1 || caption.length > 280) {
     throw new Error("Caption must be 1-280 characters.");
   }
-  const session = await deps.prisma.chatSession.findFirst({
-    where: { id: input.sessionId, userId: input.userId },
-    select: { projectId: true },
-  });
-  if (!session) throw new Error("Session not found");
-  const scope = artifactWhere(input.userId, session.projectId ?? null);
+  let projectId = input.projectId ?? null;
+  if (input.sessionId) {
+    const session = await deps.prisma.chatSession.findFirst({
+      where: { id: input.sessionId, userId: input.userId },
+      select: { projectId: true },
+    });
+    if (!session) throw new Error("Session not found");
+    projectId = session.projectId ?? null;
+  }
+  const scope = artifactWhere(input.userId, projectId);
   const image = await deps.prisma.generatedImage.findFirst({
     where: { ...scope, id: input.imageId },
     select: { id: true },

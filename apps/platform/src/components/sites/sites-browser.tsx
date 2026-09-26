@@ -164,7 +164,7 @@ export function SitesBrowser({
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-text">
-                  {site.siteId.slice(0, 8)} · v{site.version}
+                  {site.siteName ?? site.siteId.slice(0, 8)} · v{site.version}
                 </p>
                 <p className="truncate text-[11px] text-text-faint">{site.status}</p>
               </div>

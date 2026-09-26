@@ -158,20 +158,27 @@ export async function getArtifact(input: {
 
 export async function updateImageCaption(input: {
   imageId: string;
-  sessionId: string;
   caption: string;
+  /** Chat context: scope resolves through the session. */
+  sessionId?: string;
+  /** Gallery context: scope is the image's own project (null = standalone). */
+  projectId?: string | null;
 }): Promise<{ id: string; caption: string }> {
+  const body =
+    input.sessionId !== undefined
+      ? { caption: input.caption, sessionId: input.sessionId }
+      : { caption: input.caption, projectId: input.projectId ?? null };
   const response = await apiFetch(
     `${API_BASE}/api/artifacts/images/${encodeURIComponent(input.imageId)}`,
     {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ caption: input.caption, sessionId: input.sessionId }),
+      body: JSON.stringify(body),
     },
   );
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? "Failed to update caption");
+    const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(errorBody?.error ?? "Failed to update caption");
   }
   return (await response.json()) as { id: string; caption: string };
 }
@@ -323,6 +330,8 @@ export type ScopeSite = {
   previewUrl: string | null;
   downloadUrl: string;
   updatedAt: string;
+  /** Human label from the brief; null for legacy builds without one. */
+  siteName?: string | null;
 };
 
 export type ChatSessionDetail = {

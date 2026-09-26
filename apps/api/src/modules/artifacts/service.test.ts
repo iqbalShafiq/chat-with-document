@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
+const imageFindFirst = vi.hoisted(() =>
+  vi.fn(async () => ({ id: "img-1" })),
+);
+const imageUpdate = vi.hoisted(() =>
+  vi.fn(async ({ data }: { data: { caption: string } }) => ({
+    id: "img-1",
+    caption: data.caption,
+  })),
+);
+
 vi.mock("../../utils/prisma.js", () => ({
   prisma: {
     chatSession: {
@@ -12,16 +22,52 @@ vi.mock("../../utils/prisma.js", () => ({
         const q = titleFilter?.contains;
         return q ? all.filter((s) => s.title.toLowerCase().includes(q.toLowerCase())) : all;
       }),
+      findFirst: vi.fn(async () => null),
     },
     document: { findMany: vi.fn(async () => []) },
-    generatedImage: { findMany: vi.fn(async () => []) },
+    generatedImage: {
+      findMany: vi.fn(async () => []),
+      findFirst: imageFindFirst,
+      update: imageUpdate,
+    },
     webBundle: { findMany: vi.fn(async () => []) },
     workspaceTask: { findMany: vi.fn(async () => []) },
     workspaceSchedule: { findMany: vi.fn(async () => []) },
   },
 }));
 
-import { listArtifacts } from "./service.js";
+import { listArtifacts, updateImageCaption } from "./service.js";
+
+describe("updateImageCaption scope", () => {
+  it("accepts a project scope without a session (gallery editing)", async () => {
+    const out = await updateImageCaption({
+      userId: "u1",
+      projectId: "pX",
+      imageId: "img-1",
+      caption: "  Logo baru  ",
+    });
+    expect(out).toEqual({ id: "img-1", caption: "Logo baru" });
+    expect(imageFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "u1", projectId: "pX", id: "img-1" }),
+      }),
+    );
+  });
+
+  it("still resolves scope through the session when one is given", async () => {
+    const { prisma } = await import("../../utils/prisma.js");
+    vi.mocked(prisma.chatSession.findFirst).mockResolvedValueOnce({
+      id: "s1",
+      projectId: "pS",
+    } as never);
+    await updateImageCaption({ userId: "u1", sessionId: "s1", imageId: "img-1", caption: "x" });
+    expect(imageFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "u1", projectId: "pS" }),
+      }),
+    );
+  });
+});
 
 describe("listArtifacts session search", () => {
   it("filters sessions by title query", async () => {

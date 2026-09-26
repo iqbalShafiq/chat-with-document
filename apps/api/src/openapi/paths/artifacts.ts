@@ -67,7 +67,8 @@ export const artifactsPaths = {
       operationId: "updateImageCaption",
       tags: ["Artifacts"],
       summary: "Update an image caption",
-      description: "Captions are 1-280 characters and power find_images for PDF/site reuse.",
+      description:
+        "Captions are 1-280 characters and power find_images for PDF/site reuse. Scope comes from sessionId (chat) or projectId (gallery editing); pass exactly one.",
       security: bearerOrCookie,
       responses: {
         "200": jsonResponse(
@@ -79,7 +80,7 @@ export const artifactsPaths = {
           },
           ex("Caption", { id: "cuid123", caption: "hero logo" }),
         ),
-        "400": badRequest({ error: "Caption must be 1-280 characters." }),
+        "400": badRequest({ error: "sessionId or projectId is required" }),
         "401": unauthorized,
         "404": notFound({ error: "Image not found", code: "IMAGE_NOT_FOUND" }),
       },

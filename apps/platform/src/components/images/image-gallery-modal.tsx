@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderKanban } from "lucide-react";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
+import { CaptionField } from "#/components/artifacts/caption-field";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { Select } from "#/components/ui/select";
 import { toGeneratedImageItem } from "#/lib/chat/generated-images";
@@ -134,8 +135,18 @@ export function ImageGalleryModal({
           {!loading && images.length > 0 ? (
             <ul className="grid list-none grid-cols-3 gap-2 p-0">
               {images.map((image) => (
-                <li key={image.id} className="min-w-0">
+                <li key={image.id} className="flex min-w-0 flex-col gap-1">
                   <GeneratedImageThumbnail image={toGeneratedImageItem(image)} />
+                  <CaptionField
+                    imageId={image.id}
+                    projectId={image.projectId}
+                    caption={image.caption}
+                    onSaved={(caption) => {
+                      setImages((rows) =>
+                        rows.map((row) => (row.id === image.id ? { ...row, caption } : row)),
+                      );
+                    }}
+                  />
                 </li>
               ))}
             </ul>

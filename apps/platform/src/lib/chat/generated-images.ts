@@ -28,6 +28,10 @@ export type GeneratedImageItem = {
   nOfTotal: string | null;
   source: string;
   sourceUrl: string | null;
+  /** Searchable caption; null for live tool parts that have none yet. */
+  caption: string | null;
+  /** Owning project for gallery-scoped caption edits (null = standalone). */
+  projectId: string | null;
 };
 
 const IMAGE_TOOL_NAMES = new Set(["generate_image", "edit_image"]);
@@ -180,6 +184,8 @@ function toItem(
         image.total > 1 ? `${image.index + 1} of ${image.total}` : null,
       source: image.source,
       sourceUrl: image.sourceUrl,
+      caption: null,
+      projectId: null,
     };
   }
   return {
@@ -192,6 +198,8 @@ function toItem(
     nOfTotal: image.nOfTotal,
     source: image.source,
     sourceUrl: image.sourceUrl,
+    caption: image.caption ?? null,
+    projectId: image.projectId ?? null,
   };
 }
 

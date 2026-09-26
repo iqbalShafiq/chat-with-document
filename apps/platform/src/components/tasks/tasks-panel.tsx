@@ -33,6 +33,22 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
       });
   }, [sessionId]);
 
+  // Every mutation surfaces its failure: a silent rejection leaves the list
+  // stale and the user believing the change landed.
+  const mutate = useCallback(
+    (work: Promise<unknown>) => {
+      void work
+        .then(() => {
+          setError(null);
+          refresh();
+        })
+        .catch((mutationError) => {
+          setError(mutationError instanceof Error ? mutationError.message : "Update failed");
+        });
+    },
+    [refresh],
+  );
+
   useEffect(() => {
     setTasks(null);
     refresh();
@@ -119,11 +135,11 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                       const title = renameDraft.trim();
                       const description = editDescDraft.trim();
                       setRenamingId(null);
-                      void updateTask(task.id, {
+                      mutate(updateTask(task.id, {
                         sessionId,
                         title,
                         description: description ? description : null,
-                      }).then(refresh);
+                      }));
                     }}
                   >
                     <input
@@ -171,19 +187,46 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     }
                     subtitle={task.description ?? task.status}
                     leading={
-                      task.subtasks.length > 0 || task.description ? (
-                        <button
-                          type="button"
-                          aria-expanded={expanded}
-                          aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
-                          onClick={() => setExpandedId(expanded ? null : task.id)}
-                          className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.08] hover:text-text"
-                        >
-                          <ChevronDown
-                            className={`size-4 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
-                          />
-                        </button>
-                      ) : undefined
+                      <>
+                        {task.subtasks.length > 0 || task.description ? (
+                          <button
+                            type="button"
+                            aria-expanded={expanded}
+                            aria-label={`${expanded ? "Hide" : "Show"} details for ${task.title}`}
+                            onClick={() => setExpandedId(expanded ? null : task.id)}
+                            className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-text-faint transition hover:bg-white/[0.08] hover:text-text"
+                          >
+                            <ChevronDown
+                              className={`size-4 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+                            />
+                          </button>
+                        ) : null}
+                        {task.status !== "done" ? (
+                          <button
+                            type="button"
+                            aria-label={
+                              task.status === "doing"
+                                ? `Mark ${task.title} inbox`
+                                : `Mark ${task.title} doing`
+                            }
+                            onClick={() =>
+                              mutate(
+                                updateTask(task.id, {
+                                  sessionId,
+                                  status: task.status === "doing" ? "inbox" : "doing",
+                                }),
+                              )
+                            }
+                            className={`h-6 shrink-0 cursor-pointer rounded-md px-1.5 text-[10px] font-medium transition ${
+                              task.status === "doing"
+                                ? "bg-accent/15 text-accent"
+                                : "text-text-faint hover:bg-white/[0.08] hover:text-text"
+                            }`}
+                          >
+                            {task.status === "doing" ? "Doing" : "Start"}
+                          </button>
+                        ) : null}
+                      </>
                     }
                     enabled={task.status === "done"}
                     onToggle={() => {
@@ -192,7 +235,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                         setConfirmDoneId(task.id);
                         return;
                       }
-                      void updateTask(task.id, { sessionId, status: next }).then(refresh);
+                      mutate(updateTask(task.id, { sessionId, status: next }));
                     }}
                     toggleLabel={`Mark ${task.title} done`}
                     onEdit={() => {
@@ -221,10 +264,10 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                             aria-checked={sub.done}
                             aria-label={`Mark subtask ${sub.title} ${sub.done ? "not done" : "done"}`}
                             onClick={() => {
-                              void updateTask(task.id, {
+                              mutate(updateTask(task.id, {
                                 sessionId,
                                 toggleSubtasks: [{ id: sub.id, done: !sub.done }],
-                              }).then(refresh);
+                              }));
                             }}
                             className={`inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded border transition ${
                               sub.done
@@ -243,10 +286,10 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                             type="button"
                             aria-label={`Remove subtask ${sub.title}`}
                             onClick={() => {
-                              void updateTask(task.id, {
+                              mutate(updateTask(task.id, {
                                 sessionId,
                                 removeSubtasks: [sub.id],
-                              }).then(refresh);
+                              }));
                             }}
                             className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-text-faint transition hover:bg-white/[0.08] hover:text-text"
                           >
@@ -262,7 +305,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                         const title = (subDrafts[task.id] ?? "").trim();
                         if (!title) return;
                         setSubDrafts((d) => ({ ...d, [task.id]: "" }));
-                        void updateTask(task.id, { sessionId, addSubtasks: [title] }).then(refresh);
+                        mutate(updateTask(task.id, { sessionId, addSubtasks: [title] }));
                       }}
                     >
                       <input
@@ -300,7 +343,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
         onConfirm={() => {
           const id = confirmDoneId;
           setConfirmDoneId(null);
-          if (id) void updateTask(id, { sessionId, status: "done" }).then(refresh);
+          if (id) mutate(updateTask(id, { sessionId, status: "done" }));
         }}
       />
       <ConfirmDialog
@@ -312,7 +355,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
         onConfirm={() => {
           const id = confirmDeleteId;
           setConfirmDeleteId(null);
-          if (id) void deleteTask(id, sessionId).then(refresh);
+          if (id) mutate(deleteTask(id, sessionId));
         }}
       />
     </section>

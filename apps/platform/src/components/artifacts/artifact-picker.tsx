@@ -9,6 +9,8 @@ import {
 import { API_BASE } from "#/lib/api";
 import { DialogShell } from "#/components/ui/dialog-shell";
 import { DocumentPreviewModal } from "#/components/documents/document-preview-modal";
+import { ReportPdfPreview } from "#/components/artifacts/report-pdf-preview";
+import { useGeneratedImage } from "#/components/images/use-generated-image";
 
 /** Prefix contract shared with the agent (see ARTIFACT_CHOICE_PREFIX). */
 export const ARTIFACT_CHOICE_PREFIX = "artifact:";
@@ -69,6 +71,22 @@ function resolveSitePreviewSrc(item: ArtifactListItem): string | null {
   return raw.startsWith("/api/sites/") ? `${API_BASE}${raw}` : raw;
 }
 
+/** Thumbnails need the authenticated blob path (plain <img> cannot). */
+function PickerImageThumb({ imageId }: { imageId: string }) {
+  const { displaySrc, state } = useGeneratedImage(imageId);
+  if (state === "ready" && displaySrc) {
+    return (
+      <img
+        src={displaySrc}
+        alt=""
+        aria-hidden
+        className="size-7 shrink-0 rounded-md object-cover"
+      />
+    );
+  }
+  return <span aria-hidden className="size-7 shrink-0 rounded-md bg-white/[0.06]" />;
+}
+
 /**
  * Visual artifact picker: radio list with thumbnails/labels for images,
  * documents, sites, and tasks. Used standalone and inside clarification
@@ -103,15 +121,21 @@ export function ArtifactPicker({
   const [error, setError] = useState<string | null>(null);
   const [previewItem, setPreviewItem] = useState<ArtifactListItem | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  // Parents re-create the candidates array each render; key the effect on the
+  // ids so identical lists never re-fetch (and reset to loading) needlessly.
+  const candidatesKey = candidates?.join("|") ?? null;
+  const candidatesRef = useRef(candidates);
+  candidatesRef.current = candidates;
 
   useEffect(() => {
-    if (!autoLoad && !candidates) return;
+    if (!autoLoad && !candidatesKey) return;
     let cancelled = false;
     setItems(null);
     setError(null);
-    const load = candidates
+    const current = candidatesKey ? (candidatesRef.current ?? []) : null;
+    const load = current
       ? Promise.all(
-          candidates.map((id) => getArtifact({ id, type: artifactType, sessionId }).catch(() => null)),
+          current.map((id) => getArtifact({ id, type: artifactType, sessionId }).catch(() => null)),
         ).then((rows) => rows.filter((r): r is ArtifactListItem => r !== null))
       : listArtifacts({ sessionId, type: artifactType });
     void load
@@ -126,7 +150,7 @@ export function ArtifactPicker({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, artifactType, autoLoad, candidates]);
+  }, [sessionId, artifactType, autoLoad, candidatesKey]);
 
   if (error) {
     return (
@@ -185,15 +209,7 @@ export function ArtifactPicker({
                 }
               >
                 {selected ? <Check className="size-3 shrink-0" strokeWidth={2.5} /> : null}
-                {item.type === "image" ? (
-                  <img
-                    src={`/api/images/${encodeURIComponent(id)}`}
-                    alt=""
-                    aria-hidden
-                    className="size-7 shrink-0 rounded-md object-cover"
-                    loading="lazy"
-                  />
-                ) : null}
+                {item.type === "image" ? <PickerImageThumb imageId={id} /> : null}
                 <span className="min-w-0 flex-1 truncate">{label}</span>
               </button>
               {kind ? (
@@ -243,10 +259,29 @@ export function ArtifactPicker({
           )}
         </DialogShell>
       ) : null}
+      {previewType === "document" && previewItem?.kind === "report" ? (
+        <ReportPdfPreview
+          open={previewItem !== null}
+          reportId={previewId}
+          sessionId={sessionId}
+          filename={previewItem.filename ?? previewLabel}
+          restoreFocusRef={restoreFocusRef}
+          onClose={() => {
+            setPreviewItem(null);
+            requestAnimationFrame(() => {
+              restoreFocusRef.current?.focus();
+            });
+          }}
+        />
+      ) : null}
       <DocumentPreviewModal
-        open={previewItem !== null && previewType === "document"}
+        open={
+          previewItem !== null &&
+          previewType === "document" &&
+          previewItem.kind !== "report"
+        }
         document={
-          previewItem && previewType === "document"
+          previewItem && previewType === "document" && previewItem.kind !== "report"
             ? { id: previewId, filename: previewItem.filename ?? previewLabel }
             : null
         }

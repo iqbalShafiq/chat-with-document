@@ -20,25 +20,24 @@ const TABS: Array<{ type: ArtifactType; label: string }> = [
  */
 export function ArtifactsRail({ sessionId }: { sessionId: string }) {
   const [tab, setTab] = useState<ArtifactType>("document");
-  const [items, setItems] = useState<ArtifactListItem[] | null>(null);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [pages, setPages] = useState<Record<string, ArtifactListItem[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // One fetch per session; tab switches read the cache instead of refetching.
   useEffect(() => {
     let cancelled = false;
-    setItems(null);
+    setPages(null);
     setError(null);
     void Promise.all(
       TABS.map((t) => listArtifacts({ sessionId, type: t.type }).catch(() => [] as ArtifactListItem[])),
     )
-      .then((pages) => {
+      .then((rows) => {
         if (cancelled) return;
-        const next: Record<string, number> = {};
-        pages.forEach((page, i) => {
-          next[TABS[i]!.type] = page.length;
+        const next: Record<string, ArtifactListItem[]> = {};
+        TABS.forEach((t, i) => {
+          next[t.type] = rows[i] ?? [];
         });
-        setCounts(next);
-        setItems(pages[TABS.findIndex((t) => t.type === tab)] ?? []);
+        setPages(next);
       })
       .catch((fetchError) => {
         if (!cancelled) {
@@ -48,7 +47,13 @@ export function ArtifactsRail({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, tab]);
+  }, [sessionId]);
+
+  const items = pages ? (pages[tab] ?? []) : null;
+  const counts: Record<string, number> = {};
+  if (pages) {
+    for (const t of TABS) counts[t.type] = (pages[t.type] ?? []).length;
+  }
 
   return (
     <section aria-label="Artifacts" className="flex min-h-0 flex-col gap-2">

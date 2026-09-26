@@ -240,7 +240,11 @@ export function ComposerAttachControl({
             value={null}
             candidates={undefined}
             filter={pinType === "document" ? (item) => item.kind === "report" : undefined}
-            emptyHint="No PDF reports in this scope yet — ask the agent to build one."
+            emptyHint={
+              pinType === "document"
+                ? "No PDF reports in this scope yet — ask the agent to build one."
+                : "No sites in this scope yet — ask the agent to build one."
+            }
             onSelect={(id) => {
               void getArtifact({ id, type: pinType, sessionId }).then(
                 (artifact) => {

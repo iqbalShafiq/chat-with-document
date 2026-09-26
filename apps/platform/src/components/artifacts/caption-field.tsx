@@ -5,13 +5,16 @@ import { updateImageCaption } from "#/lib/api-artifacts";
 /** Inline caption editor for a single image asset. */
 export function CaptionField({
   imageId,
-  sessionId,
   caption,
+  sessionId,
+  projectId,
   onSaved,
 }: {
   imageId: string;
-  sessionId: string;
   caption: string;
+  /** Scope: chat passes sessionId, the gallery passes projectId. */
+  sessionId?: string;
+  projectId?: string | null;
   onSaved?: (caption: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -46,7 +49,11 @@ export function CaptionField({
         if (saving || !draft.trim() || draft.length > 280) return;
         setSaving(true);
         setError(null);
-        void updateImageCaption({ imageId, sessionId, caption: draft.trim() })
+        void updateImageCaption({
+          imageId,
+          caption: draft.trim(),
+          ...(sessionId !== undefined ? { sessionId } : { projectId: projectId ?? null }),
+        })
           .then((saved) => {
             setSaving(false);
             setEditing(false);
