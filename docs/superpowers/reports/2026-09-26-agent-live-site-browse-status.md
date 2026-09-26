@@ -40,7 +40,8 @@ isi task ada di ledger/commit messages).
   **2/2 pass** (vision: kartu live + frame JPEG tersaji + `browse_site` ≥3x;
   text-only: `view_image` setelah browse). Screenshot bukti:
   `apps/.playwright-mcp/site-live-browse/*.png`.
-- E2E rerun pasca-fix dijalankan terakhir; lihat commit/message PR untuk hasilnya.
+- E2E rerun pasca-fix: **2/2 pass (3.8m)** — Critical 1 (stopped sebelum close)
+  dan guard adapter baru tidak meregresi alur live browse.
 
 Cara menjalankan (Windows, dari root repo; dev stack `pnpm dev` harus hidup,
 API :4312 / platform :3000, `.env` berisi `OPENAI_BASE_URL` + `OPENAI_API_KEY`):
