@@ -328,8 +328,35 @@ describe("Anvia v1 chat worker", () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("records usage through the injected tap with run identity", async () => {
+  it("finalizes live browse sessions before closing the stream", async () => {
+    const order: string[] = [];
     const stream = fakeStream([responseEvent()]);
+    const h = createDependencies(stream, {
+      reconstruct: (async () => ({
+        agent: {
+          stream() {
+            return stream;
+          },
+        },
+        projectId: null,
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        waitRegistry: { abortAll() {} },
+        finalizeLiveSessions: async () => {
+          order.push("finalize");
+        },
+      })) as never,
+    });
+    const originalClose = h.store.close;
+    h.store.close = (async (input: never) => {
+      order.push("close");
+      return originalClose(input);
+    }) as never;
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(order).toEqual(["finalize", "close"]);
+  });
+
+  it("records usage through the injected tap with run identity", async () => {    const stream = fakeStream([responseEvent()]);
     const seen: Array<{ ctx: unknown; items: number }> = [];
     const tapUsage = (
       source: AsyncIterable<AgentStreamEvent>,

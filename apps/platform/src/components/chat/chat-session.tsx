@@ -914,6 +914,8 @@ export function ChatSession({
         case "message_end":
           setDeepResearch(resetDeepResearchActivity());
           setToolWait({});
+          setSiteLiveView(null);
+          setSiteLiveViewHidden(false);
           void refreshContextUsage();
           return;
         case "error":
@@ -923,6 +925,8 @@ export function ChatSession({
           // "Waiting" from the last progress event it never finished.
           setToolWait({});
           setDeepResearch(resetDeepResearchActivity());
+          setSiteLiveView(null);
+          setSiteLiveViewHidden(false);
           chatRef.current?.setMessages((messages) =>
             settleStoppedRunTools(
               [...messages],

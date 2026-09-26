@@ -602,6 +602,15 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let resumeOverrideTaken = false;
     let interactionPersistenceFailed = false;
     let runCleanup: (() => Promise<void>) | null = null;
+    let finalizeLive: (() => Promise<void>) | null = null;
+    let liveFinalized = false;
+    const finalizeLiveOnce = async (): Promise<void> => {
+      if (!finalizeLive || liveFinalized) return;
+      liveFinalized = true;
+      await finalizeLive().catch((error) => {
+        console.error("[chat-run] live session finalize failed", error);
+      });
+    };
     try {
       startOwnerWal();
       monitorStop();
@@ -679,6 +688,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       const runInput = reconstructed.value;
       waitRegistry = runInput.waitRegistry;
       runCleanup = runInput.cleanup ?? null;
+      finalizeLive = runInput.finalizeLiveSessions ?? null;
       if (cancelled) cancelOwnedWaitJobs(cancelReason);
       if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
         throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
@@ -835,6 +845,10 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
 
       const closeStatus = terminal === "error" ? "error" : "completed";
       waitRegistry.abortAll(cancelled ? cancelReason : "run ended");
+      // Live browse sessions must publish their `stopped` event while the
+      // stream is still running; closing the stream first would strand the
+      // UI on a frozen live card.
+      await finalizeLiveOnce();
       await deps.streamStore.close({ streamId, status: closeStatus });
       await releaseOwnedActiveRun();
       await clearOwnedStopFlag();
@@ -850,6 +864,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       const statusNow = await deps.streamStore.status({ streamId }).catch(() => ({ status: "running" as const, lastEventId: 0 }));
       if (statusNow.status === "running") {
         try {
+          await finalizeLiveOnce();
           await appendSafeTerminal(deps.streamStore, streamId, streamId, cancelled);
           await deps.streamStore.close({ streamId, status: "error" });
         } catch (terminalError) {

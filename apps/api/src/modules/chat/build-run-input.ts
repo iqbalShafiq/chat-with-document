@@ -338,6 +338,11 @@ export type ChatRunInput = {
   waitRegistry: InFlightToolRegistry;
   /** Close per-run user MCP clients and remove materialized skill dirs. */
   cleanup?: () => Promise<void>;
+  /**
+   * Close live browse sessions while the run stream is still open so the UI
+   * receives the `siteLiveView(stopped)` event. Runs before `cleanup`.
+   */
+  finalizeLiveSessions?: () => Promise<void>;
 };
 
 const USER_MCP_CONNECT_TIMEOUT_MS = 15_000;
@@ -2225,6 +2230,13 @@ export async function reconstructChatRunInput(input: {
     waitRegistry,
     cleanup: async () => {
       await closeUserEnhancements();
+    },
+    finalizeLiveSessions: async () => {
+      await getBrowseSessions()
+        .closeFor(`${userId}:${sessionId}`, "run ended")
+        .catch((error) => {
+          console.warn("[browse] live session finalize failed", error);
+        });
     },
   };
 }
