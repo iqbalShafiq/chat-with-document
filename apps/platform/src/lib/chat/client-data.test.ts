@@ -88,8 +88,27 @@ describe("browser v1 stream data schemas", () => {
       "queuedMessageApplied",
       "siteBuildProgress",
       "siteBuildReady",
+      "siteLiveView",
       "toolWaitProgress",
     ]);
+  });
+
+  it("accepts bounded live view events and rejects extra fields", () => {
+    const view: ChatDataMap["siteLiveView"] = {
+      state: "started",
+      siteId: "site-1",
+      label: "Kedai",
+    };
+    expect(ChatDataSchemas.siteLiveView.safeParse(view)).toMatchObject({
+      success: true,
+      data: view,
+    });
+    expect(
+      ChatDataSchemas.siteLiveView.safeParse({ state: "nope", siteId: "site-1" }),
+    ).toMatchObject({ success: false });
+    expect(
+      ChatDataSchemas.siteLiveView.safeParse({ ...view, leaked: true }),
+    ).toMatchObject({ success: false });
   });
 
   it("accepts bounded tool wait progress", () => {

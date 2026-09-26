@@ -378,7 +378,7 @@ export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): bo
   if (part.type === "data") {
     // Progress/queue events have dedicated chrome; do not reprint them
     // as transcript lines on every update.
-    return part.name !== "deepResearchProgress" && part.name !== "toolWaitProgress" && part.name !== "siteBuildProgress" && part.name !== "siteBuildReady" && part.name !== "artifactFocus";
+    return part.name !== "deepResearchProgress" && part.name !== "toolWaitProgress" && part.name !== "siteBuildProgress" && part.name !== "siteBuildReady" && part.name !== "artifactFocus" && part.name !== "siteLiveView";
   }
   if (
     part.type === "reasoning" ||

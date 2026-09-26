@@ -190,6 +190,7 @@ describe("Anvia v1 migration-wide platform contracts", () => {
       "queuedMessageApplied",
       "siteBuildProgress",
       "siteBuildReady",
+      "siteLiveView",
       "toolWaitProgress",
     ]);
     expect(ChatDataSchemas.queuedMessageApplied.safeParse({

@@ -34,6 +34,7 @@ import {
 } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
+import { SiteLiveCard } from "./site-live-card";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
@@ -582,6 +583,11 @@ export function ChatSession({
   const [artifactFocus, setArtifactFocus] = useState<ChatDataMap["artifactFocus"] | null>(
     null,
   );
+  /** Live browse session announced by the worker; frames come from the API. */
+  const [siteLiveView, setSiteLiveView] = useState<ChatDataMap["siteLiveView"] | null>(
+    null,
+  );
+  const [siteLiveViewHidden, setSiteLiveViewHidden] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -842,6 +848,10 @@ export function ChatSession({
             return;
           case "artifactFocus":
             setArtifactFocus(event.data);
+            return;
+          case "siteLiveView":
+            setSiteLiveView(event.data);
+            if (event.data.state === "started") setSiteLiveViewHidden(false);
             return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
@@ -2990,6 +3000,16 @@ export function ChatSession({
                       >
                         Dismiss
                       </button>
+                    </div>
+                  ) : null}
+
+                  {siteLiveView?.state === "started" && !siteLiveViewHidden ? (
+                    <div className="mb-2">
+                      <SiteLiveCard
+                        view={siteLiveView}
+                        sessionId={sessionId}
+                        onHide={() => setSiteLiveViewHidden(true)}
+                      />
                     </div>
                   ) : null}
 

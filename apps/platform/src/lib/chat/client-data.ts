@@ -73,6 +73,12 @@ export type ArtifactFocus = {
   label?: string;
 };
 
+export type SiteLiveView = {
+  state: "started" | "stopped";
+  siteId: string;
+  label?: string;
+};
+
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
   queuedMessageApplied: QueuedMessageApplied;
@@ -80,6 +86,7 @@ export type ChatDataMap = {
   siteBuildProgress: SiteBuildProgress;
   siteBuildReady: SiteBuildReady;
   artifactFocus: ArtifactFocus;
+  siteLiveView: SiteLiveView;
 };
 
 type ParseResult<T> =
@@ -300,6 +307,25 @@ function parseArtifactFocus(value: unknown): ParseResult<ArtifactFocus> {
   });
 }
 
+function parseSiteLiveView(value: unknown): ParseResult<SiteLiveView> {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ["state", "siteId", "label"]) ||
+    (value.state !== "started" && value.state !== "stopped") ||
+    !boundedString(value.siteId, MAX_METADATA_STRING)
+  ) {
+    return failure("invalid site live view");
+  }
+  if (value.label !== undefined && (typeof value.label !== "string" || value.label.length > 200)) {
+    return failure("invalid site live view");
+  }
+  return success({
+    state: value.state,
+    siteId: value.siteId,
+    ...(value.label === undefined ? {} : { label: value.label as string }),
+  });
+}
+
 function parseSiteBuildProgress(value: unknown): ParseResult<SiteBuildProgress> {
   if (
     !isRecord(value) ||
@@ -368,6 +394,9 @@ const siteBuildReadySchema: Schema<SiteBuildReady> = {
 const artifactFocusSchema: Schema<ArtifactFocus> = {
   safeParse: parseArtifactFocus,
 };
+const siteLiveViewSchema: Schema<SiteLiveView> = {
+  safeParse: parseSiteLiveView,
+};
 
 export const ChatStreamMetadataSchema: ClientMetadataSchema<ChatStreamMetadata> =
   streamMetadataSchema;
@@ -379,4 +408,5 @@ export const ChatDataSchemas = {
   siteBuildProgress: siteBuildProgressSchema,
   siteBuildReady: siteBuildReadySchema,
   artifactFocus: artifactFocusSchema,
+  siteLiveView: siteLiveViewSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
