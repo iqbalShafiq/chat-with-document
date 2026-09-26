@@ -1,7 +1,13 @@
 import { Worker } from "bullmq";
 import { getBullmqConnectionOptions } from "../../lib/redis.js";
 import { prisma } from "../../utils/prisma.js";
-import { getScheduleQueue, nextRunAt, SCHEDULE_QUEUE, scheduleJobId } from "./queue.js";
+import {
+  getScheduleQueue,
+  nextRunAt,
+  SCHEDULE_QUEUE,
+  scheduleFollowUpJobId,
+  scheduleRetryJobId,
+} from "./queue.js";
 import { startScheduledChatRun, type ScheduledRunResult } from "./start-run.js";
 
 const RETRY_DELAY_MS = 5 * 60 * 1000;
@@ -67,7 +73,7 @@ export async function runWorkspaceSchedule(
       nextRunAt: retryAt,
     });
     await deps.enqueue(
-      `${scheduleJobId(schedule.id)}:retry:${retryAt.getTime()}`,
+      scheduleRetryJobId(schedule.id, retryAt.getTime()),
       jobData,
       RETRY_DELAY_MS,
     );
@@ -89,7 +95,7 @@ export async function runWorkspaceSchedule(
     const retryAt = new Date(now.getTime() + RETRY_DELAY_MS);
     await deps.updateSchedule(schedule.id, { nextRunAt: retryAt });
     await deps.enqueue(
-      `${scheduleJobId(schedule.id)}:retry:${retryAt.getTime()}`,
+      scheduleRetryJobId(schedule.id, retryAt.getTime()),
       jobData,
       RETRY_DELAY_MS,
     );
@@ -109,7 +115,7 @@ export async function runWorkspaceSchedule(
   const next = nextRunAt(schedule.freq as "daily" | "weekly", now);
   await deps.updateSchedule(schedule.id, { nextRunAt: next });
   await deps.enqueue(
-    `${scheduleJobId(schedule.id)}:${next.getTime()}`,
+    scheduleFollowUpJobId(schedule.id, next.getTime()),
     jobData,
     Math.max(0, next.getTime() - now.getTime()),
   );

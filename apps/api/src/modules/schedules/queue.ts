@@ -26,8 +26,17 @@ export function getScheduleQueue(): Queue<ScheduleJobData> {
   return queue;
 }
 
+/** BullMQ custom ids must not contain ':' — it is the Redis key separator. */
 export function scheduleJobId(scheduleId: string): string {
-  return `workspace-schedule:${scheduleId}`;
+  return `workspace-schedule-${scheduleId}`;
+}
+
+export function scheduleRetryJobId(scheduleId: string, atMs: number): string {
+  return `workspace-schedule-${scheduleId}-retry-${atMs}`;
+}
+
+export function scheduleFollowUpJobId(scheduleId: string, atMs: number): string {
+  return `workspace-schedule-${scheduleId}-next-${atMs}`;
 }
 
 export function nextRunAt(freq: "once" | "daily" | "weekly", from = new Date()): Date {
