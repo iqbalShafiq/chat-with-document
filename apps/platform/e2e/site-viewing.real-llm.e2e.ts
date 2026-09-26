@@ -215,18 +215,22 @@ export async function viewSiteResult(
   const messages = await sessionMessages(page, sessionId);
   for (const message of messages) {
     for (const part of message.content ?? []) {
-      if (part.type === "tool-result" && part.toolName === "view_site_page") {
-        const output = part.output as { type?: string; value?: unknown } | undefined;
-        const value = output?.value as
-          | { text?: string }
-          | Array<{ type: string; text?: string }>
-          | undefined;
-        const text =
-          typeof value === "object" && value !== null && !Array.isArray(value)
-            ? (value as { text?: string }).text
-            : Array.isArray(value)
-              ? value.find((entry) => entry.type === "text")?.text
-              : undefined;
+      if (part.type !== "tool-result" || part.toolName !== "view_site_page") continue;
+      const output = part.output as { type?: string; value?: unknown } | undefined;
+      // JSON output (text-only path or legacy) carries the object directly.
+      if (
+        output?.type === "json" &&
+        typeof output.value === "object" &&
+        output.value !== null &&
+        !Array.isArray(output.value)
+      ) {
+        return output.value as Record<string, unknown>;
+      }
+      // Rich content output: find the JSON text part and parse it.
+      if (Array.isArray(output?.value)) {
+        const text = (output.value as Array<{ type: string; text?: string }>).find(
+          (entry) => entry.type === "text",
+        )?.text;
         if (typeof text === "string") {
           return JSON.parse(text) as Record<string, unknown>;
         }
