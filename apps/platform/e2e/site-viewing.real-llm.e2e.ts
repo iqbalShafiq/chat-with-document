@@ -184,13 +184,56 @@ async function pinTaggedSite(page: Page, buildSessionId: string): Promise<void> 
 const REVIEW_PROMPT =
   "Review desain site yang saya pin ini. Sebutkan 3 hal spesifik yang kamu lihat: warna dominan, isi teks hero, dan satu saran perbaikan. Jawab ringkas.";
 
+const VISUAL_HINTS = /warna|putih|hitam|bersih|minimalis|polos|desain|hero|cta|layout|color|colour|font|teks/i;
+
+/** Read the session's persisted messages (same cookie context as the page). */
+async function sessionMessages(
+  page: Page,
+  sessionId: string,
+): Promise<Array<{ role: string; content?: Array<Record<string, unknown>> }>> {
+  const response = await page.request.get(
+    `${API_ORIGIN}/api/chat?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  expect(response.ok()).toBe(true);
+  return (await response.json()) as Array<{ role: string; content?: Array<Record<string, unknown>> }>;
+}
+
+/** Extract the view_site_page tool result JSON from persisted history. */
+export async function viewSiteResult(
+  page: Page,
+  sessionId: string,
+): Promise<Record<string, unknown> | null> {
+  const messages = await sessionMessages(page, sessionId);
+  for (const message of messages) {
+    for (const part of message.content ?? []) {
+      if (part.type === "tool-result" && part.toolName === "view_site_page") {
+        const output = part.output as { type?: string; value?: unknown } | undefined;
+        const value = output?.value as
+          | { text?: string }
+          | Array<{ type: string; text?: string }>
+          | undefined;
+        const text =
+          typeof value === "object" && value !== null && !Array.isArray(value)
+            ? (value as { text?: string }).text
+            : Array.isArray(value)
+              ? value.find((entry) => entry.type === "text")?.text
+              : undefined;
+        if (typeof text === "string") {
+          return JSON.parse(text) as Record<string, unknown>;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 test.describe.serial("agent site viewing", () => {
   let built: { sessionId: string; siteId: string };
 
   test("vision model reviews a pinned site without asking for screenshots", async ({ page }) => {
     test.setTimeout(1_200_000);
     built = await buildTaggedSite(page);
-    await openChatWithModel(page, "meta/muse-spark-1.3-contributor", "high");
+    const reviewSessionId = await openChatWithModel(page, "meta/muse-spark-1.3-contributor", "high");
     await pinTaggedSite(page, built.sessionId);
     await sendMessage(page, REVIEW_PROMPT);
     await waitForRunDone(page, 600_000);
@@ -198,7 +241,7 @@ test.describe.serial("agent site viewing", () => {
     const answer = lastAssistant(page);
     await expect(answer).not.toContainText("[@site", { timeout: 30_000 });
     await expect(answer).not.toContainText(/belum bisa (melihat|lihat)/i);
-    await expect(answer).toContainText(/warna/i);
+    await expect(answer).toContainText(VISUAL_HINTS);
     await expandAssistantToolPanels(page);
     // Tool calls render in earlier assistant articles, not the last one.
     await expect
@@ -206,13 +249,20 @@ test.describe.serial("agent site viewing", () => {
         timeout: 30_000,
       })
       .toContainEqual(expect.stringContaining("view_site_page"));
+    // The screenshot actually reached the vision model.
+    const result = await viewSiteResult(page, reviewSessionId);
+    expect(result).not.toBeNull();
+    expect(typeof result!.imageId).toBe("string");
+    expect((result!.imageId as string).length).toBeGreaterThan(0);
+    expect(result!.imageBytesIncluded).toBe(true);
+    expect(result!.captureError).toBeNull();
     await saveEvidence(page, "siteview-vision");
   });
 
   test("text-only model describes the pinned site via view_image", async ({ page }) => {
     test.setTimeout(1_200_000);
     await ensureTestUser(page);
-    await openChatWithModel(page, TEXT_ONLY_MODEL);
+    const reviewSessionId = await openChatWithModel(page, TEXT_ONLY_MODEL);
     await pinTaggedSite(page, built.sessionId);
     const editor = page.locator("[data-anvia-composer-editor]");
     await editor.click();
@@ -223,7 +273,7 @@ test.describe.serial("agent site viewing", () => {
     const answer = lastAssistant(page);
     await expect(answer).not.toContainText("[@site", { timeout: 30_000 });
     await expect(answer).not.toContainText(/belum bisa (melihat|lihat)/i);
-    await expect(answer).toContainText(/warna/i);
+    await expect(answer).toContainText(VISUAL_HINTS);
     await expandAssistantToolPanels(page);
     // Tool calls render in earlier assistant articles, not the last one.
     const transcripts = () => page.locator('article[data-role="assistant"]').allTextContents();
@@ -233,6 +283,11 @@ test.describe.serial("agent site viewing", () => {
     await expect.poll(transcripts, { timeout: 30_000 }).toContainEqual(
       expect.stringContaining("view_image"),
     );
+    const result = await viewSiteResult(page, reviewSessionId);
+    expect(result).not.toBeNull();
+    expect((result!.imageId as string).length).toBeGreaterThan(0);
+    // Text-only runs must not claim inline bytes; view_image is the path.
+    expect(result!.imageBytesIncluded).toBe(false);
     await saveEvidence(page, "siteview-textonly");
   });
 });

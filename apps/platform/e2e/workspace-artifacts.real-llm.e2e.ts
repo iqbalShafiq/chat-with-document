@@ -264,6 +264,80 @@ test.describe.serial("workspace artifacts", () => {
     expect(body.items.every((i) => i.projectId === null)).toBe(true);
   });
 
+  test("project A never leaks artifacts into project B", async ({ page }) => {
+    await ensureTestUser(page);
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const makeProject = async (name: string): Promise<string> => {
+      const res = await page.request.post(`${API_ORIGIN}/api/projects`, {
+        data: { name: `${name}-${suffix}` },
+      });
+      expect(res.ok()).toBe(true);
+      const body = (await res.json()) as { id?: string; project?: { id: string } };
+      const id = body.id ?? body.project?.id;
+      expect(id).toBeTruthy();
+      return id!;
+    };
+    const sessionFor = async (projectId: string): Promise<string> => {
+      const sessionId = crypto.randomUUID();
+      const res = await page.request.post(`${API_ORIGIN}/api/chat/sessions`, {
+        data: { sessionId, projectId },
+      });
+      expect(res.ok()).toBe(true);
+      return sessionId;
+    };
+
+    const projectA = await makeProject("Scope A");
+    const projectB = await makeProject("Scope B");
+    const sessionA = await sessionFor(projectA);
+    const sessionB = await sessionFor(projectB);
+
+    const report = await page.request.post(`${API_ORIGIN}/api/reports`, {
+      data: {
+        sessionId: sessionA,
+        title: `scope-report-${suffix}`,
+        markdown: "# Scope report\nBody.",
+      },
+    });
+    expect(report.ok()).toBe(true);
+    const { documentId } = (await report.json()) as { documentId: string };
+
+    const inA = await page.request.get(
+      `${API_ORIGIN}/api/artifacts?type=document&sessionId=${encodeURIComponent(sessionA)}`,
+    );
+    expect(inA.ok()).toBe(true);
+    expect(
+      ((await inA.json()) as { items: { id?: string }[] }).items.some(
+        (item) => item.id === documentId,
+      ),
+    ).toBe(true);
+
+    const inB = await page.request.get(
+      `${API_ORIGIN}/api/artifacts?type=document&sessionId=${encodeURIComponent(sessionB)}`,
+    );
+    expect(inB.ok()).toBe(true);
+    expect(
+      ((await inB.json()) as { items: { id?: string }[] }).items.some(
+        (item) => item.id === documentId,
+      ),
+    ).toBe(false);
+
+    const crossRead = await page.request.get(
+      `${API_ORIGIN}/api/artifacts/${encodeURIComponent(documentId)}?type=document&sessionId=${encodeURIComponent(sessionB)}`,
+    );
+    expect(crossRead.status()).toBe(404);
+
+    // Report PDF preview is scoped the same way.
+    const crossPdf = await page.request.get(
+      `${API_ORIGIN}/api/reports/${encodeURIComponent(documentId)}/pdf?sessionId=${encodeURIComponent(sessionB)}`,
+    );
+    expect(crossPdf.status()).toBe(404);
+    const ownPdf = await page.request.get(
+      `${API_ORIGIN}/api/reports/${encodeURIComponent(documentId)}/pdf?sessionId=${encodeURIComponent(sessionA)}`,
+    );
+    expect(ownPdf.status()).toBe(200);
+    expect(ownPdf.headers()["content-type"]).toContain("application/pdf");
+  });
+
   test("image caption search finds a generated asset", async ({ page }) => {
     await ensureTestUser(page);
     await openFreshChatExact(page);
