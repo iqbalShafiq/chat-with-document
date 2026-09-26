@@ -130,7 +130,12 @@ export type SessionSiteEntry = {
   previewUrl: string | null;
   downloadUrl: string;
   updatedAt: string;
+  /** Human label from the brief; null for legacy builds without one. */
+  siteName: string | null;
 };
+
+/** Resolve a session's project (DB-backed); injected to keep this module disk-only. */
+export type SessionProjectResolver = (sessionId: string) => Promise<string | null>;
 
 function sitesScopeIndexPath(dirOverride?: string): string {
   return join(dirOverride ?? siteDataDir(), "sites-scope-index.json");
@@ -157,12 +162,109 @@ async function readScopeIndex(
   }
 }
 
+export async function writeScopeIndex(
+  index: Record<string, ScopeIndexEntry[]>,
+  dirOverride?: string,
+): Promise<void> {
+  const path = sitesScopeIndexPath(dirOverride);
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(path, JSON.stringify(index, null, 2), "utf8");
+}
+
+/** Legacy pre-scope index: sessionId → { siteId, siteName }. */
+async function readLegacySiteIndex(
+  dirOverride?: string,
+): Promise<Record<string, { siteId: string; siteName: string | null }>> {
+  try {
+    const raw = await readFile(sitesIndexPath(dirOverride), "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, { siteId: string; siteName: string | null }> = {};
+    for (const [sessionId, entry] of Object.entries(parsed)) {
+      if (typeof entry === "string" && entry) {
+        out[sessionId] = { siteId: entry, siteName: null };
+        continue;
+      }
+      if (typeof entry === "object" && entry !== null) {
+        const { siteId, siteName } = entry as { siteId?: unknown; siteName?: unknown };
+        if (typeof siteId === "string" && siteId) {
+          out[sessionId] = {
+            siteId,
+            siteName: typeof siteName === "string" && siteName ? siteName : null,
+          };
+        }
+      }
+    }
+    return out;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+    console.warn("[sites] legacy index read failed", error);
+    return {};
+  }
+}
+
+/**
+ * Backward-compat (spec §4.4): sites built before the scope index existed
+ * live only in `sites-index.json`. Rebuild scope entries from it, resolving
+ * each session's project through the injected DB reader.
+ */
+export async function backfillLegacySiteScope(input: {
+  userId: string;
+  projectId: string | null;
+  dir?: string;
+  resolveSessionProject: SessionProjectResolver;
+}): Promise<number> {
+  const legacy = await readLegacySiteIndex(input.dir);
+  const entries = Object.entries(legacy);
+  if (entries.length === 0) return 0;
+  const index = await readScopeIndex(input.dir);
+  const key = scopeKey(input.userId, input.projectId);
+  const current = index[key] ?? [];
+  const listed = new Set(current.map((entry) => entry.siteId));
+  let added = 0;
+  for (const [sessionId, entry] of entries) {
+    if (listed.has(entry.siteId)) continue;
+    let manifest: SiteManifest | null;
+    try {
+      assertSafeSiteId(entry.siteId);
+      manifest = await readSiteManifest(entry.siteId, input.dir);
+    } catch {
+      continue;
+    }
+    if (!manifest || manifest.userId !== input.userId) continue;
+    const project = await input.resolveSessionProject(sessionId);
+    if (project !== input.projectId) continue;
+    current.unshift({
+      siteId: entry.siteId,
+      siteName: entry.siteName ?? manifest.brief?.siteName ?? entry.siteId,
+      updatedAt: manifest.updatedAt,
+    });
+    listed.add(entry.siteId);
+    added += 1;
+  }
+  if (added > 0) {
+    index[key] = current.slice(0, 50);
+    await writeScopeIndex(index, input.dir);
+  }
+  return added;
+}
+
 export async function listSitesByScope(
   userId: string,
   projectId: string | null,
-  opts?: { dir?: string },
+  opts?: { dir?: string; resolveSessionProject?: SessionProjectResolver },
 ): Promise<SessionSiteEntry[]> {
   const dirOverride = opts?.dir;
+  if (opts?.resolveSessionProject) {
+    await backfillLegacySiteScope({
+      userId,
+      projectId,
+      ...(dirOverride ? { dir: dirOverride } : {}),
+      resolveSessionProject: opts.resolveSessionProject,
+    }).catch((error) => {
+      console.warn("[sites] legacy scope backfill failed", error);
+    });
+  }
   const index = await readScopeIndex(dirOverride);
   const entries = index[scopeKey(userId, projectId)] ?? [];
   const out: SessionSiteEntry[] = [];
@@ -183,6 +285,7 @@ export async function listSitesByScope(
       previewUrl: manifest.previewUrl,
       downloadUrl: `/api/sites/${manifest.siteId}/v${manifest.version}/download`,
       updatedAt: manifest.updatedAt,
+      siteName: entry.siteName ?? manifest.brief?.siteName ?? null,
     });
   }
   return out;
@@ -190,22 +293,36 @@ export async function listSitesByScope(
 
 /**
  * Single scoped manifest read: membership in the caller's scope index plus
- * userId match. Anything else is null (callers map to generic 404).
+ * userId match. Legacy sites (pre-scope-index) are backfilled on demand when
+ * a resolver is provided. Anything else is null (callers map to generic 404).
  */
 export async function getScopedSite(
   userId: string,
   projectId: string | null,
   siteId: string,
   dirOverride?: string,
+  resolveSessionProject?: SessionProjectResolver,
 ): Promise<SiteManifest | null> {
   try {
     assertSafeSiteId(siteId);
   } catch {
     return null;
   }
-  const index = await readScopeIndex(dirOverride);
+  let index = await readScopeIndex(dirOverride);
   const listed = (index[scopeKey(userId, projectId)] ?? []).some((e) => e.siteId === siteId);
-  if (!listed) return null;
+  if (!listed && resolveSessionProject) {
+    await backfillLegacySiteScope({
+      userId,
+      projectId,
+      ...(dirOverride ? { dir: dirOverride } : {}),
+      resolveSessionProject,
+    }).catch(() => undefined);
+    index = await readScopeIndex(dirOverride);
+  }
+  const listedAfter = (index[scopeKey(userId, projectId)] ?? []).some(
+    (e) => e.siteId === siteId,
+  );
+  if (!listedAfter) return null;
   const manifest = await readSiteManifest(siteId, dirOverride);
   if (!manifest || manifest.userId !== userId) return null;
   return manifest;
@@ -239,6 +356,7 @@ export async function listSitesBySession(
         previewUrl: manifest.previewUrl,
         downloadUrl: `/api/sites/${manifest.siteId}/v${manifest.version}/download`,
         updatedAt: manifest.updatedAt,
+        siteName: manifest.brief?.siteName ?? null,
       },
     ];
   } catch (error) {
@@ -288,9 +406,14 @@ export async function enqueueSiteBuildFromTool(
     version = 1;
   } else {
     const existing = await readSiteManifest(siteId, dirOverride);
-    version = (existing?.version ?? 0) + 1;
-    stableVersion = existing?.stableVersion ?? null;
-    versions = { ...(existing?.versions ?? {}) };
+    // Rebuilds may only touch the caller's own site (UUID ids are
+    // unguessable, but scope must never rely on that).
+    if (!existing || existing.userId !== input.userId) {
+      throw new Error("Site not found in the current scope.");
+    }
+    version = (existing.version ?? 0) + 1;
+    stableVersion = existing.stableVersion ?? null;
+    versions = { ...(existing.versions ?? {}) };
   }
   const updatedAt = new Date().toISOString();
   versions[version] = { status: "queued", updatedAt };
@@ -331,15 +454,24 @@ export async function enqueueSiteBuildFromTool(
       console.warn("[sites] index write failed", error);
     }
     try {
-      const scopePath = sitesScopeIndexPath(dirOverride);
       const scopeIndex = await readScopeIndex(dirOverride);
       const key = scopeKey(input.userId, input.projectId ?? null);
+      // A rebuild from another scope MOVES the site: drop any stale entry
+      // under this user's other scope keys, then insert into the current one.
+      const userPrefix = `${input.userId}:`;
+      for (const existingKey of Object.keys(scopeIndex)) {
+        if (existingKey !== key && existingKey.startsWith(userPrefix)) {
+          const filtered = (scopeIndex[existingKey] ?? []).filter((e) => e.siteId !== siteId);
+          if (filtered.length !== (scopeIndex[existingKey] ?? []).length) {
+            scopeIndex[existingKey] = filtered;
+          }
+        }
+      }
       const existing = scopeIndex[key] ?? [];
       const without = existing.filter((e) => e.siteId !== siteId);
       without.unshift({ siteId, siteName: input.brief.siteName, updatedAt });
       scopeIndex[key] = without.slice(0, 50);
-      await mkdir(join(scopePath, ".."), { recursive: true });
-      await writeFile(scopePath, JSON.stringify(scopeIndex, null, 2), "utf8");
+      await writeScopeIndex(scopeIndex, dirOverride);
     } catch (error) {
       console.warn("[sites] scope index write failed", error);
     }

@@ -21,7 +21,9 @@ export async function publishArtifactFocus(input: {
       type: "artifact_focus",
       artifactId: input.artifactId,
       artifactType: input.artifactType,
-      ...(input.label === undefined ? {} : { label: input.label }),
+      // Defensive bound: the projection drops labels >200 chars, and a focus
+      // hint must never silently disappear because a title was long.
+      ...(input.label === undefined ? {} : { label: input.label.slice(0, 200) }),
     },
     { runId: streamId },
   );

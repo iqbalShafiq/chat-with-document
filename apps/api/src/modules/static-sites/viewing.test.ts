@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +79,24 @@ describe("resolveSiteVersion", () => {
     expect(out.excerpt.length).toBeLessThanOrEqual(6000);
     expect(out.truncated).toBe(true);
   });
+
+  it("reads index.html through the dir seam with a bounded read", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sites-view-"));
+    try {
+      await mkdir(join(dir, "s", "v1"), { recursive: true });
+      await writeFile(
+        join(dir, "s", "v1", "index.html"),
+        `<h1>Halo</h1>${"y".repeat(400_000)}`,
+        "utf8",
+      );
+      const out = await extractSiteExcerpt({ ref: { siteId: "s", version: 1 }, dir });
+      expect(out.excerpt).toContain("Halo");
+      // Bounded read: only the 256KB cap reaches the stripper.
+      expect(out.excerpt.length).toBeLessThanOrEqual(6000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("captureSiteScreenshot", () => {
@@ -135,15 +153,17 @@ describe("captureSiteScreenshot", () => {
                 imageId: "img-9",
                 capturedAt: "t",
                 viewport: { width: 1440, height: 900 },
-                fullPage: true,
+                fullPage: false,
                 truncated: false,
-                mediaType: "image/png",
+                mediaType: "image/jpeg",
               },
             },
           }) as never,
       }) as never,
     );
     expect(out.imageId).toBe("img-9");
+    expect(out.fullPage).toBe(false);
+    expect(out.mediaType).toBe("image/jpeg");
     expect(launch).not.toHaveBeenCalled();
   });
 
@@ -254,7 +274,14 @@ describe("viewSitePage", () => {
       resolve: async () => ({ siteId: "kedai", version: 2 }),
       loadManifest: async () => ({ status: "ready" }) as never,
       excerpt: async () => ({ title: "Kedai", headings: ["Halo"], excerpt: "Halo dunia", truncated: false }),
-      capture: async () => ({ imageId: "img-7", capturedAt: "2026-09-25T00:00:00.000Z", truncated: false, mediaType: "image/png" }),
+      capture: async () => ({
+        imageId: "img-7",
+        capturedAt: "2026-09-25T00:00:00.000Z",
+        truncated: false,
+        mediaType: "image/png",
+        fullPage: false,
+      }),
+      question: "review the hero section",
     });
     expect(out).toMatchObject({
       siteId: "kedai",
@@ -264,7 +291,8 @@ describe("viewSitePage", () => {
       imageId: "img-7",
       capturedAt: "2026-09-25T00:00:00.000Z",
       viewport: { width: 1440, height: 900 },
-      fullPage: true,
+      fullPage: false,
+      focus: "review the hero section",
     });
   });
 
@@ -312,7 +340,7 @@ describe("viewSitePage", () => {
           versions: { 1: { status: "ready", updatedAt: "t" } },
         }) as never,
       excerpt: async () => ({ title: "K", headings: [], excerpt: "x", truncated: false }),
-      capture: async () => ({ imageId: "img-1", capturedAt: "t", truncated: false, mediaType: "image/png" }),
+      capture: async () => ({ imageId: "img-1", capturedAt: "t", truncated: false, mediaType: "image/png", fullPage: true }),
     });
     expect(out.status).toBe("ready");
     expect(out.version).toBe(1);

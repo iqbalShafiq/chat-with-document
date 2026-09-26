@@ -1,6 +1,7 @@
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { chromium } from "playwright-core";
+import { getApiOrigin } from "../../lib/origins.js";
 import {
   assertSafeSiteId,
   getScopedSite,
@@ -9,6 +10,7 @@ import {
   writeSiteManifest,
   type SiteManifest,
 } from "./service.js";
+import { resolveSessionProjectId } from "./session-project.js";
 import { getImageStore } from "../images/service.js";
 
 export type SiteVersionRef = { siteId: string; version: number };
@@ -21,7 +23,13 @@ export async function resolveSiteVersion(input: {
   /** Test/override seam for the sites data dir. */
   dir?: string;
 }): Promise<SiteVersionRef> {
-  const manifest = await getScopedSite(input.userId, input.sessionProjectId, input.siteId, input.dir);
+  const manifest = await getScopedSite(
+    input.userId,
+    input.sessionProjectId,
+    input.siteId,
+    input.dir,
+    resolveSessionProjectId,
+  );
   if (!manifest) throw new Error("Site not found in the current scope.");
   const version = input.version ?? manifest.stableVersion ?? manifest.version;
   if (!Number.isInteger(version) || version < 1) {
@@ -32,14 +40,26 @@ export async function resolveSiteVersion(input: {
 
 const READ_CAP_BYTES = 256 * 1024;
 
-export async function readSiteIndexHtml(ref: SiteVersionRef): Promise<string> {
+export async function readSiteIndexHtml(
+  ref: SiteVersionRef,
+  dir?: string,
+): Promise<string> {
   assertSafeSiteId(ref.siteId);
-  const path = join(siteDataDir(), ref.siteId, `v${ref.version}`, "index.html");
-  const handle = await readFile(path, "utf8").catch(() => null);
-  // Pola baca-dibatasi: baca penuh lalu potong — file dist statis kecil;
-  // cap di sini mencegah OOM bila ada aset raksasa nyasar.
-  if (handle === null) throw new Error("Site page has nothing viewable yet.");
-  return handle.length > READ_CAP_BYTES ? handle.slice(0, READ_CAP_BYTES) : handle;
+  const path = join(dir ?? siteDataDir(), ref.siteId, `v${ref.version}`, "index.html");
+  // Bounded read: never load a multi-MB page into memory just to truncate it.
+  let handle;
+  try {
+    handle = await open(path, "r");
+  } catch {
+    throw new Error("Site page has nothing viewable yet.");
+  }
+  try {
+    const buffer = Buffer.alloc(READ_CAP_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 export function stripHtmlToText(html: string, maxChars: number): {
@@ -70,9 +90,12 @@ export function stripHtmlToText(html: string, maxChars: number): {
 export async function extractSiteExcerpt(input: {
   ref: SiteVersionRef;
   maxChars?: number;
+  dir?: string;
   readHtml?: (ref: SiteVersionRef) => Promise<string>;
 }): Promise<{ title: string; headings: string[]; excerpt: string; truncated: boolean }> {
-  const html = await (input.readHtml ?? readSiteIndexHtml)(input.ref);
+  const html = await (
+    input.readHtml ?? ((ref: SiteVersionRef) => readSiteIndexHtml(ref, input.dir))
+  )(input.ref);
   return stripHtmlToText(html, input.maxChars ?? 6000);
 }
 
@@ -82,7 +105,6 @@ const SITE_SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024;
 const SITE_SCREENSHOT_NAV_TIMEOUT_MS = 15_000;
 const SITE_SCREENSHOT_TOTAL_TIMEOUT_MS = 30_000;
 const SITE_SCREENSHOT_MAX_CONCURRENT = 2;
-const API_INTERNAL_ORIGIN = process.env.API_INTERNAL_ORIGIN ?? "http://localhost:4312";
 
 /** Minimal browser surface — real Playwright in prod, fakes in tests. */
 export type ViewingPage = {
@@ -134,6 +156,7 @@ export type ScreenshotShot = {
   capturedAt: string;
   truncated: boolean;
   mediaType: string;
+  fullPage: boolean;
 };
 
 const inflightCaptures = new Map<string, Promise<ScreenshotShot>>();
@@ -170,6 +193,7 @@ export async function captureSiteScreenshot(input: {
       capturedAt: cached.capturedAt,
       truncated: cached.truncated,
       mediaType: cached.mediaType ?? "image/png",
+      fullPage: cached.fullPage ?? true,
     };
   }
   const pending = inflightCaptures.get(key);
@@ -229,7 +253,7 @@ async function runCapture(
       // closes page + browser before the run settles (no orphan browsers,
       // no semaphore leak).
       const work = (async (): Promise<ScreenshotShot> => {
-        await page.goto(`${API_INTERNAL_ORIGIN}${input.previewPath}`, {
+        await page.goto(`${getApiOrigin()}${input.previewPath}`, {
           waitUntil: "networkidle",
           timeout: SITE_SCREENSHOT_NAV_TIMEOUT_MS,
         });
@@ -300,7 +324,7 @@ async function runCapture(
           },
         });
       }
-      return { imageId: saved.id, capturedAt, truncated, mediaType };
+      return { imageId: saved.id, capturedAt, truncated, mediaType, fullPage };
       })();
       return await withTimeout(work, input.totalTimeoutMs ?? SITE_SCREENSHOT_TOTAL_TIMEOUT_MS);
     } finally {
@@ -325,6 +349,8 @@ export type ViewSitePageResult = {
   fullPage: boolean;
   truncated: boolean;
   mediaType: string;
+  /** Focus hint echoed from the call (the model asked what to look at). */
+  focus: string | null;
   /** Set when the screenshot failed but the excerpt survived. The agent can still answer partially and may retry. */
   captureError: string | null;
   retryable: boolean;
@@ -343,7 +369,6 @@ export async function viewSitePage(input: {
   excerpt?: typeof extractSiteExcerpt;
   capture?: typeof captureSiteScreenshot;
 }): Promise<ViewSitePageResult> {
-  void input.question;
   const ref = await (input.resolve ?? resolveSiteVersion)({
     userId: input.userId,
     sessionProjectId: input.sessionProjectId,
@@ -352,7 +377,14 @@ export async function viewSitePage(input: {
     ...(input.dir !== undefined ? { dir: input.dir } : {}),
   });
   const manifest = await (input.loadManifest ??
-    ((siteId: string, dir?: string) => getScopedSite(input.userId, input.sessionProjectId, siteId, dir)))(
+    ((siteId: string, dir?: string) =>
+      getScopedSite(
+        input.userId,
+        input.sessionProjectId,
+        siteId,
+        dir,
+        resolveSessionProjectId,
+      )))(
     ref.siteId,
     input.dir,
   );
@@ -361,8 +393,12 @@ export async function viewSitePage(input: {
   if (versionStatus !== "ready") {
     throw new Error(`Site ${ref.siteId} v${ref.version} is ${versionStatus} — nothing viewable yet.`);
   }
-  const text = await (input.excerpt ?? extractSiteExcerpt)({ ref, maxChars: 6000 });
-  let shot: { imageId: string; capturedAt: string; truncated: boolean; mediaType: string };
+  const text = await (input.excerpt ?? extractSiteExcerpt)({
+    ref,
+    maxChars: 6000,
+    ...(input.dir !== undefined ? { dir: input.dir } : {}),
+  });
+  let shot: ScreenshotShot;
   let captureError: string | null = null;
   try {
     shot = await (input.capture ?? captureSiteScreenshot)({
@@ -377,7 +413,7 @@ export async function viewSitePage(input: {
     // Partial result: the excerpt survived, only the screenshot failed.
     // The agent answers from text and may retry the visual.
     captureError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
-    shot = { imageId: "", capturedAt: "", truncated: false, mediaType: "image/png" };
+    shot = { imageId: "", capturedAt: "", truncated: false, mediaType: "image/png", fullPage: true };
   }
   return {
     siteId: ref.siteId,
@@ -390,9 +426,10 @@ export async function viewSitePage(input: {
     imageId: shot.imageId,
     capturedAt: shot.capturedAt,
     viewport: SITE_SCREENSHOT_VIEWPORT,
-    fullPage: true,
+    fullPage: shot.fullPage,
     truncated: shot.truncated,
     mediaType: shot.mediaType,
+    focus: input.question ?? null,
     captureError,
     retryable: captureError !== null,
   };

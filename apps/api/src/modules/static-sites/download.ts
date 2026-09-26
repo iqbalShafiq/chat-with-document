@@ -13,6 +13,7 @@ import {
   siteDataDir,
   writeSiteManifest,
 } from "./service.js";
+import { resolveSessionProjectId } from "./session-project.js";
 
 export const siteDownloadRouter = new Hono();
 
@@ -94,7 +95,9 @@ siteDownloadRouter.get("/", requireUser, async (c) => {
     select: { projectId: true },
   });
   if (!session) return c.json({ error: "Session not found" }, 404);
-  const sites = await listSitesByScope(user.id, session.projectId ?? null);
+  const sites = await listSitesByScope(user.id, session.projectId ?? null, {
+    resolveSessionProject: resolveSessionProjectId,
+  });
   return c.json({ sites });
 });
 

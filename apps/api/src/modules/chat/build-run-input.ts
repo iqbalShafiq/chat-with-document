@@ -1388,14 +1388,17 @@ export async function reconstructChatRunInput(input: {
     ...(profileTool ? [profileTool] : []),
   ];
 
-  // Workspace artifacts focus publisher: fire-and-forget UI hint.
+  // Workspace artifacts focus publisher: fire-and-forget UI hint (a dropped
+  // hint must not sink the run, but it should never fail silently either).
   const focus = (
     artifactId: string,
     artifactType: "document" | "image" | "web_bundle" | "site" | "task" | "schedule" | "session",
     label?: string,
   ): void => {
     publishArtifactFocus({ sessionId, artifactId, artifactType, ...(label ? { label } : {}) }).catch(
-      () => undefined,
+      (error) => {
+        console.warn("[artifacts] focus publish failed", { artifactId, artifactType, error });
+      },
     );
   };
   // Live order must match the frozen surface: clarification, site-build,

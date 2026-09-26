@@ -2,6 +2,7 @@ import { prisma } from "../../utils/prisma.js";
 import { artifactWhere } from "./scope.js";
 import { createDefaultMemoryScopeKey } from "../chat/memory-scope.js";
 import { getScopedSite, listSitesByScope } from "../static-sites/service.js";
+import { resolveSessionProjectId } from "../static-sites/session-project.js";
 import { extractSiteExcerpt } from "../static-sites/viewing.js";
 
 export const ARTIFACT_TYPES = [
@@ -104,10 +105,18 @@ export async function listArtifacts(
     for (const i of images) items.push({ type: "image", ...i });
   }
   if (types.includes("site")) {
-    const sites = await listSitesByScope(input.userId, input.sessionProjectId);
+    const sites = await listSitesByScope(input.userId, input.sessionProjectId, {
+      resolveSessionProject: resolveSessionProjectId,
+    });
     for (const s of sites) {
-      if (q && !s.siteId.toLowerCase().includes(q.toLowerCase())) continue;
-      items.push({ type: "site", id: s.siteId, ...s });
+      if (q) {
+        const needle = q.toLowerCase();
+        const matches =
+          s.siteId.toLowerCase().includes(needle) ||
+          (s.siteName?.toLowerCase().includes(needle) ?? false);
+        if (!matches) continue;
+      }
+      items.push({ type: "site", id: s.siteId, ...s, title: s.siteName ?? undefined });
     }
   }
   if (types.includes("web_bundle")) {
@@ -203,6 +212,10 @@ export async function getArtifact(
           kind: true,
           projectId: true,
           pageCount: true,
+          summary: true,
+          origin: true,
+          originUrl: true,
+          parentDocumentId: true,
           createdAt: true,
         },
       });
@@ -225,10 +238,19 @@ export async function getArtifact(
       return image ? { type: "image", ...image } : null;
     }
     case "site": {
-      const manifest = await getScopedSite(input.userId, input.sessionProjectId, input.id);
+      const manifest = await getScopedSite(
+        input.userId,
+        input.sessionProjectId,
+        input.id,
+        undefined,
+        resolveSessionProjectId,
+      );
       const excerpt = manifest
         ? await extractSiteExcerpt({
-            ref: { siteId: manifest.siteId, version: manifest.version },
+            ref: {
+              siteId: manifest.siteId,
+              version: manifest.stableVersion ?? manifest.version,
+            },
             maxChars: 2000,
           }).catch(() => null)
         : null;
@@ -237,6 +259,7 @@ export async function getArtifact(
             type: "site",
             id: manifest.siteId,
             siteId: manifest.siteId,
+            title: manifest.brief?.siteName ?? undefined,
             version: manifest.version,
             stableVersion: manifest.stableVersion,
             status: manifest.status,
