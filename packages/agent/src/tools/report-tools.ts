@@ -39,7 +39,16 @@ const renderedChartSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("histogram"),
-    bins: z.array(z.number().finite()).max(200),
+    bins: z
+      .array(
+        z.object({
+          min: z.number().finite(),
+          max: z.number().finite(),
+          count: z.number().finite().min(0),
+        }),
+      )
+      .min(1)
+      .max(200),
     label: z.string().max(80).optional(),
     title: z.string().max(120).optional(),
   }),
@@ -55,7 +64,7 @@ const renderedChartSchema = z.discriminatedUnion("kind", [
 const createPdfReportSpec = {
   name: "create_pdf_report",
   description:
-    "Build a PDF report from markdown plus chart/image asset ids and a citation map. Saves as a derived report document in scope.",
+    "Build a PDF report from markdown plus chart/image asset ids (SVG chart snapshots, PNG, or JPEG) and a citation map. Saves as a derived report document in scope.",
   inputSchema: z.object({
     title: z.string().min(1).max(120),
     markdown: z.string().min(1).max(100_000),

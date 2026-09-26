@@ -29,4 +29,32 @@ describe("REPORT_TOOL_DEFINITIONS", () => {
     const props = params.properties as Record<string, { type?: string; oneOf?: unknown[] }>;
     expect(props.chart?.type ?? props.chart?.oneOf).toBeTruthy();
   });
+
+  it("accepts the histogram shape the chart tools emit ({min,max,count} bins)", async () => {
+    const seen: unknown[] = [];
+    const tools = createReportTools({
+      createReport: async () => ({ documentId: "d1", filename: "r.pdf" }),
+      editReport: async (input) => ({ documentId: input.documentId, filename: "r.pdf" }),
+      snapshotChart: async (input) => {
+        seen.push(input.chart);
+        return { imageId: "img-1" };
+      },
+      freezeBundle: async () => ({ id: "b1" }),
+    });
+    const snapshot = tools.find((t) => t.name === "snapshot_chart")!;
+    await snapshot.call({
+      caption: "Distribusi revenue",
+      chart: {
+        kind: "histogram",
+        bins: [
+          { min: 0, max: 10, count: 3 },
+          { min: 10, max: 20, count: 7 },
+        ],
+      },
+    });
+    expect(seen).toHaveLength(1);
+    await expect(
+      snapshot.call({ caption: "legacy", chart: { kind: "histogram", bins: [1, 2, 3] } }),
+    ).rejects.toThrow();
+  });
 });

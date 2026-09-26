@@ -251,6 +251,9 @@ model Document {
   kind             String            @default("source")
   /// For kind "report": [{ claim, documentId?, pageIndex?, webBundleId?, url? }].
   citationMap      Json?
+  /// For kind "report": frozen source { markdown, svgAssets?, imageIds? } so
+  /// title-only edits can re-render without destroying the body.
+  reportSource     Json?
   /// Provenance: "upload" (user upload) | "created" (agent create_dataset) | "fetched" (agent fetch_dataset_from_url).
   origin           String            @default("upload")
   /// For origin "created": source Document id this was derived from, if any.
@@ -519,11 +522,17 @@ model WorkspaceSchedule {
   id        String    @id @default(cuid())
   userId    String
   projectId String?
+  /// Origin session the prompt runs in (frozen scope).
+  sessionId String?
   title     String
   prompt    String    @db.Text
   freq      String    @default("once")
   nextRunAt DateTime?
   status    String    @default("active")
+  /// Consecutive execution failures; 3 → status "failed" (dead-letter).
+  attempts  Int       @default(0)
+  lastRunAt DateTime?
+  lastError String?
   createdAt DateTime  @default(now())
 
   @@index([userId, status, nextRunAt])

@@ -1,9 +1,11 @@
+export type HistogramBin = { min: number; max: number; count: number };
+
 export type ChartSpecInput =
   | { kind: "bar"; labels: string[]; series: Array<{ name: string; values: number[] }>; title?: string }
   | { kind: "line"; labels: string[]; series: Array<{ name: string; values: number[] }>; title?: string }
   | { kind: "pie"; labels: string[]; values: number[]; name?: string; title?: string }
   | { kind: "scatter"; points: Array<{ x: number; y: number }>; xLabel?: string; yLabel?: string; title?: string }
-  | { kind: "histogram"; bins: number[]; label?: string; title?: string };
+  | { kind: "histogram"; bins: HistogramBin[]; label?: string; title?: string };
 
 /** Loud validation for chart specs: finite numbers only, shapes intact. */
 export function assertValidChartSpec(spec: unknown): asserts spec is ChartSpecInput {
@@ -64,7 +66,25 @@ export function assertValidChartSpec(spec: unknown): asserts spec is ChartSpecIn
     }
     case "histogram": {
       const o = s as { bins?: unknown };
-      if (!finiteArray(o.bins)) fail();
+      if (
+        !Array.isArray(o.bins) ||
+        o.bins.length < 1 ||
+        !o.bins.every((bin) => {
+          if (typeof bin !== "object" || bin === null) return false;
+          const b = bin as { min?: unknown; max?: unknown; count?: unknown };
+          return (
+            typeof b.min === "number" &&
+            Number.isFinite(b.min) &&
+            typeof b.max === "number" &&
+            Number.isFinite(b.max) &&
+            typeof b.count === "number" &&
+            Number.isFinite(b.count) &&
+            b.count >= 0
+          );
+        })
+      ) {
+        fail();
+      }
       return;
     }
   }
@@ -168,14 +188,21 @@ function scatterBody(spec: Extract<ChartSpecInput, { kind: "scatter" }>): string
 }
 
 function histogramBody(spec: Extract<ChartSpecInput, { kind: "histogram" }>): string {
-  const max = Math.max(1, ...spec.bins);
+  const max = Math.max(1, ...spec.bins.map((b) => b.count));
   const plotW = W - PAD * 2;
   const plotH = H - PAD * 2;
   const bw = plotW / Math.max(1, spec.bins.length);
   let body = "";
-  spec.bins.forEach((v, i) => {
-    const h = (v / max) * plotH;
-    body += `<rect x="${(PAD + i * bw + 1).toFixed(1)}" y="${(16 + plotH - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="#4f8cff"/>`;
+  spec.bins.forEach((bin, i) => {
+    const h = (bin.count / max) * plotH;
+    const x = PAD + i * bw + 1;
+    const y = 16 + plotH - h;
+    body += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="#4f8cff"><title>${esc(`${bin.min}–${bin.max}: ${bin.count}`)}</title></rect>`;
+    body += `<text x="${(x + bw / 2 - 1).toFixed(1)}" y="${H - 14}" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#6b7280" text-anchor="middle">${esc(String(bin.min))}</text>`;
   });
+  const last = spec.bins.at(-1);
+  if (last) {
+    body += `<text x="${(PAD + plotW).toFixed(1)}" y="${H - 14}" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#6b7280" text-anchor="middle">${esc(String(last.max))}</text>`;
+  }
   return body;
 }

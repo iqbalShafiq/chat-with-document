@@ -264,6 +264,13 @@ export type ToolGrantHelpers = {
  * only exists inside its page's images JSON, so scan the ready documents
  * linked to this session (the same corpus the model saw image ids from).
  */
+/** Media types the PDF renderer can embed: SVG charts plus raster PNG/JPEG. */
+export function isReportAssetMediaType(mediaType: string): boolean {
+  return (
+    mediaType === "image/svg+xml" || mediaType === "image/png" || mediaType === "image/jpeg"
+  );
+}
+
 async function findSessionDocumentImage(
   imageId: string,
   userId: string,
@@ -1447,22 +1454,29 @@ export async function reconstructChatRunInput(input: {
     ...createReportTools({
       createReport: async ({ title, markdown, assetIds, citationMap }) => {
         const svgAssets: string[] = [];
+        const rasterAssets: { buffer: Uint8Array; mediaType: string }[] = [];
+        const imageIds: string[] = [];
         const rejected: string[] = [];
         for (const assetId of assetIds ?? []) {
           const image = await prisma.generatedImage.findFirst({
             where: { id: assetId, userId, projectId },
             select: { r2Key: true, mediaType: true },
           });
-          if (!image || image.mediaType !== "image/svg+xml") {
+          if (!image || !isReportAssetMediaType(image.mediaType)) {
             rejected.push(assetId);
             continue;
           }
           const bytes = await getObjectBuffer(image.r2Key);
-          svgAssets.push(new TextDecoder().decode(bytes));
+          if (image.mediaType === "image/svg+xml") {
+            svgAssets.push(new TextDecoder().decode(bytes));
+          } else {
+            rasterAssets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+          }
+          imageIds.push(assetId);
         }
         if (rejected.length > 0) {
           throw new Error(
-            `Unknown or out-of-scope chart assets: ${rejected.join(", ")}. List them with find_images first.`,
+            `Unknown or out-of-scope assets: ${rejected.join(", ")}. Use chart snapshots (SVG), PNG, or JPEG images; list them with find_images first.`,
           );
         }
         return createReport({
@@ -1471,6 +1485,8 @@ export async function reconstructChatRunInput(input: {
           title,
           markdown,
           ...(svgAssets.length > 0 ? { svgAssets } : {}),
+          ...(rasterAssets.length > 0 ? { rasterAssets } : {}),
+          ...(imageIds.length > 0 ? { imageIds } : {}),
           ...(citationMap ? { citationMap: citationMap as never } : {}),
         });
       },
@@ -1481,6 +1497,20 @@ export async function reconstructChatRunInput(input: {
           documentId,
           ...(title ? { title } : {}),
           ...(markdown ? { markdown } : {}),
+          // Stored raster refs are re-fetched so a full re-render keeps images.
+          fetchRasterAssets: async (storedImageIds) => {
+            const assets: { buffer: Uint8Array; mediaType: string }[] = [];
+            for (const imageId of storedImageIds) {
+              const image = await prisma.generatedImage.findFirst({
+                where: { id: imageId, userId, projectId },
+                select: { r2Key: true, mediaType: true },
+              });
+              if (!image || !isReportAssetMediaType(image.mediaType)) continue;
+              const bytes = await getObjectBuffer(image.r2Key);
+              assets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+            }
+            return assets;
+          },
         }),
       snapshotChart: async ({ caption, chart }) => {
         const svg = chartSpecToSvg(chart as never);
@@ -1809,8 +1839,7 @@ export async function reconstructChatRunInput(input: {
   }
 
   // Clarification: the generic request_clarification tool suspends the run
-  // until the user answers (surfaced via the stream by the requester).
-  // Native v1 questions are serializable interactions and do not need an
+  // until the user answers (surfaced via the stream by the requester).  // Native v1 questions are serializable interactions and do not need an
   // application Promise/Redis requester in the worker process.
   tools.push(createClarificationTool());
   // ToolCallContext carries only { emitStreamEvent?, abortSignal? } — never

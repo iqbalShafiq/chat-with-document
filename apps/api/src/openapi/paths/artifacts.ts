@@ -131,6 +131,38 @@ export const artifactsPaths = {
       },
     },
   },
+  "/api/reports/{id}/pdf": {
+    get: {
+      operationId: "getReportPdf",
+      tags: ["Artifacts"],
+      summary: "Serve a report PDF for in-chat preview",
+      description:
+        "Scoped by the caller's session; out-of-scope or non-report ids return 404. Response body is the PDF bytes (inline).",
+      security: bearerOrCookie,
+      parameters: [
+        {
+          name: "sessionId",
+          in: "query",
+          required: true,
+          schema: { type: "string", maxLength: 120 },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "PDF bytes.",
+          content: {
+            "application/pdf": {
+              schema: { type: "string", format: "binary" },
+              example: "%PDF-1.7 …",
+            },
+          },
+        },
+        "400": badRequest({ error: "sessionId is required" }),
+        "401": unauthorized,
+        "404": notFound({ error: "Report not found", code: "REPORT_NOT_FOUND" }),
+      },
+    },
+  },
   "/api/charts/snapshot": {
     post: {
       operationId: "snapshotChart",

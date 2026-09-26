@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
-import { createReport, editReport } from "./store.js";
+import { createReport, editReport, getReportFile } from "./store.js";
 
 const citationSchema = z.object({
   claim: z.string().min(1).max(500),
@@ -35,6 +35,25 @@ export const reportsRouter = new Hono<{ Variables: AuthVariables }>()
       }
       return c.json({ error: message }, 400);
     }
+  })
+  .get("/:id/pdf", async (c) => {
+    const user = c.get("user");
+    const sessionId = c.req.query("sessionId");
+    if (!sessionId) return c.json({ error: "sessionId is required" }, 400);
+    const file = await getReportFile({
+      userId: user.id,
+      sessionId,
+      documentId: c.req.param("id"),
+    });
+    if (!file) {
+      return c.json({ error: "Report not found", code: "REPORT_NOT_FOUND" }, 404);
+    }
+    const body = new Uint8Array(file.bytes);
+    return c.body(body, 200, {
+      "content-type": file.mimeType,
+      "content-disposition": `inline; filename="${file.filename.replace(/"/g, "")}"`,
+      "content-length": String(body.byteLength),
+    });
   })
   .patch("/:id", async (c) => {
     const user = c.get("user");

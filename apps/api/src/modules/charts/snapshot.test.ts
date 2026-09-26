@@ -33,4 +33,21 @@ describe("chartSpecToSvg", () => {
     ).toThrow("Invalid chart spec");
     expect(() => assertValidChartSpec(null)).toThrow("Invalid chart spec");
   });
+
+  it("renders histogram bins with {min,max,count} and rejects the legacy number[] shape", () => {
+    const svg = chartSpecToSvg({
+      kind: "histogram",
+      bins: [
+        { min: 0, max: 10, count: 3 },
+        { min: 10, max: 20, count: 7 },
+      ],
+      title: "Distribusi",
+    });
+    expect(svg).toContain("<svg");
+    expect(svg).toContain("10");
+    expect(svg).toContain("20");
+    expect(() =>
+      assertValidChartSpec({ kind: "histogram", bins: [1, 2, 3] }),
+    ).toThrow("Invalid chart spec");
+  });
 });
