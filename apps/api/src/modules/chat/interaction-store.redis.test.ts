@@ -17,7 +17,7 @@ import { CHAT_AGENT_ID, parseChatAgentRecipe } from "./run-recipe.js";
 const userId = "redis-integration-user";
 const sessionId = "redis-integration-session";
 const recipe = parseChatAgentRecipe({
-  version: 6,
+  version: 7,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId, userId, projectId: null },
   model: { id: "openai/gpt-5.6-luna", reasoningEffort: "medium" },

@@ -24,7 +24,7 @@ vi.mock("./run-queue.js", () => ({
   ACTIVE_RUN_KEY: (sessionId: string) => `rs-active:${sessionId}`,
 }));
 
-import { publishSiteBuildEvent } from "./site-events.js";
+import { publishSiteBuildEvent, publishSiteLiveView } from "./site-events.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,6 +72,36 @@ describe("publishSiteBuildEvent", () => {
         screenshotUrl: null,
         downloadUrl: "/api/sites/site-1/v1/download",
       },
+    });
+    expect(f.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("publishSiteLiveView", () => {
+  it("appends the live view event to the session active stream", async () => {
+    f.redisGet.mockResolvedValue("stream-1");
+    f.append.mockResolvedValue({ eventId: 1 });
+
+    await publishSiteLiveView("session-1", {
+      state: "started",
+      siteId: "site-1",
+      label: "Kedai",
+    });
+
+    expect(f.redisGet).toHaveBeenCalledWith("rs-active:session-1");
+    expect(f.map).toHaveBeenCalledWith(
+      { type: "site_live_view", state: "started", siteId: "site-1", label: "Kedai" },
+      { runId: "stream-1" },
+    );
+    expect(f.append).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing without an active stream", async () => {
+    f.redisGet.mockResolvedValue(null);
+    await publishSiteLiveView("session-1", {
+      state: "stopped",
+      siteId: "site-1",
+      label: "Kedai",
     });
     expect(f.append).not.toHaveBeenCalled();
   });

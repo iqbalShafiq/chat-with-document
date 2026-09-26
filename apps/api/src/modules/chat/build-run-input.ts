@@ -32,6 +32,7 @@ import {
   PINNED_ARTIFACT_INSTRUCTION,
   ARTIFACT_TOOL_DEFINITIONS,
   SITE_VIEW_TOOL_DEFINITIONS,
+  createBrowseSiteTools,
   createViewSitePageTools,
   REPORT_TOOL_DEFINITIONS,
   WORKSPACE_TOOL_DEFINITIONS,
@@ -184,6 +185,8 @@ import { chartSpecToSvg } from "../charts/snapshot.js";
 import { buildReportPdf } from "../reports/service.js";
 import { createReport, editReport } from "../reports/store.js";
 import { publishArtifactFocus } from "./artifact-events.js";
+import { publishSiteLiveView } from "./site-events.js";
+import { getBrowseSessions, setBrowseLiveNotifier } from "../static-sites/browse.js";
 import { createTask, listTasks, updateTask } from "../tasks/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
@@ -1403,6 +1406,27 @@ export async function reconstructChatRunInput(input: {
   };
   // Live order must match the frozen surface: clarification, site-build,
   // then artifacts (see the resolver toolDefinitions array).
+  const pushSiteVisionImage = async ({ imageId }: { imageId: string }): Promise<void> => {
+    const image = await getImageStore().getImage(imageId);
+    if (!image || image.userId !== userId) {
+      throw new Error("Screenshot not found in the current scope.");
+    }
+    const data = await getImageStore().getObjectBuffer(image.r2Key);
+    if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
+    // url is inert for the pending buffer (only data/mediaType are read);
+    // the store reference marks it as non-navigable.
+    parentVisionImages.push([
+      {
+        url: `image-store:${imageId}`,
+        mediaType: image.mediaType,
+        data: Buffer.from(data).toString("base64"),
+        imageId,
+      },
+    ]);
+  };
+  // Live browse frames reach the browser as ephemeral Redis frames; only the
+  // small started/stopped events travel the chat stream. Wired per run.
+  setBrowseLiveNotifier((liveSessionId, event) => publishSiteLiveView(liveSessionId, event));
   const artifactTools = [
     ...createArtifactTools({
       list: ({ type, q }) =>
@@ -1434,24 +1458,24 @@ export async function reconstructChatRunInput(input: {
           ...(args.question !== undefined ? { question: args.question } : {}),
         }),
       includeImageBytes: modelAcceptsImage,
-      pushVisionImage: async ({ imageId }) => {
-        const image = await getImageStore().getImage(imageId);
-        if (!image || image.userId !== userId) {
-          throw new Error("Screenshot not found in the current scope.");
-        }
-        const data = await getImageStore().getObjectBuffer(image.r2Key);
-        if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
-        // url is inert for the pending buffer (only data/mediaType are read);
-        // the store reference marks it as non-navigable.
-        parentVisionImages.push([
-          {
-            url: `image-store:${imageId}`,
-            mediaType: image.mediaType,
-            data: Buffer.from(data).toString("base64"),
-            imageId,
-          },
-        ]);
-      },
+      pushVisionImage: pushSiteVisionImage,
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createBrowseSiteTools({
+      act: (args) =>
+        getBrowseSessions().act({
+          userId,
+          sessionId,
+          projectId,
+          siteId: args.siteId,
+          ...(args.version !== undefined ? { version: args.version } : {}),
+          action: args.action,
+          ...(args.selector !== undefined ? { selector: args.selector } : {}),
+          ...(args.text !== undefined ? { text: args.text } : {}),
+          ...(args.to !== undefined ? { to: args.to } : {}),
+        }),
+      includeImageBytes: modelAcceptsImage,
+      pushVisionImage: pushSiteVisionImage,
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
     ...createReportTools({
@@ -1980,6 +2004,11 @@ export async function reconstructChatRunInput(input: {
         () => undefined,
       );
     }
+    await getBrowseSessions()
+      .closeFor(`${userId}:${sessionId}`, "run ended")
+      .catch((error) => {
+        console.warn("[browse] session cleanup failed", error);
+      });
   };
   try {
     if (recipe.userSkills.length > 0) {

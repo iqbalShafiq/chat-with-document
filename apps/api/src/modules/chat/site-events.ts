@@ -44,3 +44,34 @@ export async function publishSiteBuildEvent(input: {
 
   await getStreamStore().append({ streamId, event: toChatResumableEvent(event) });
 }
+
+export type SiteLiveViewAppEvent = {
+  state: "started" | "stopped";
+  siteId: string;
+  label?: string;
+};
+
+/**
+ * Tell the browser that a live browse session started or stopped so the chat
+ * can show/hide the frame card. Frames themselves never travel this path.
+ */
+export async function publishSiteLiveView(
+  sessionId: string,
+  event: SiteLiveViewAppEvent,
+): Promise<void> {
+  const streamId = await getRedis().get(ACTIVE_RUN_KEY(sessionId));
+  if (!streamId) return;
+
+  const mapped = mapChatAppEvent(
+    {
+      type: "site_live_view",
+      state: event.state,
+      siteId: event.siteId,
+      ...(event.label === undefined ? {} : { label: event.label.slice(0, 200) }),
+    },
+    { runId: streamId },
+  );
+  if (!mapped) return;
+
+  await getStreamStore().append({ streamId, event: toChatResumableEvent(mapped) });
+}

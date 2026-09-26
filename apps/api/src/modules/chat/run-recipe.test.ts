@@ -8,7 +8,7 @@ import {
 } from "./run-recipe.js";
 
 const fixture = {
-  version: 6 as const,
+  version: 7 as const,
   agentId: CHAT_AGENT_ID,
   identity: {
     sessionId: "session-1",

@@ -67,7 +67,7 @@ const RECIPE_MODEL = "openai/gpt-5.6-luna";
 
 function boundRecipe() {
   const value = {
-    version: 6,
+    version: 7,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: RECIPE_SESSION, userId: RECIPE_USER, projectId: null },
     model: { id: RECIPE_MODEL, reasoningEffort: null },
