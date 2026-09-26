@@ -217,7 +217,9 @@ export function SitesBrowser({
       }}
       title="Chat about this site"
       description={
-        chatTarget ? `Site ${chatTarget.siteId.slice(0, 8)} · v${chatTarget.version}` : undefined
+        chatTarget
+          ? `${chatTarget.siteName ?? `Site ${chatTarget.siteId.slice(0, 8)}`} · v${chatTarget.version}`
+          : undefined
       }
       size="sm"
       heightMode="content"

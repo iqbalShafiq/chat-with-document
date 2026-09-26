@@ -55,6 +55,10 @@ import {
   type SteeringStore,
 } from "./steering.js";
 import { removeFailedPromptForRetry } from "./remove-failed-prompt.js";
+import {
+  tapAgentStreamUsage,
+  type TapAgentUsageContext,
+} from "../usage/tap-agent-usage.js";
 
 export { CHAT_RUN_QUEUE, type ChatRunJobData } from "./run-queue.js";
 
@@ -118,6 +122,14 @@ export type ChatRunWorkerDependencies = {
     attachments?: readonly unknown[];
   }) => Promise<void>;
   activeRuns?: ActiveRunRegistry;
+  /**
+   * Wraps the outgoing native event stream to record an AgentUsageEvent on
+   * terminal events (unread badges / usage audit rely on this).
+   */
+  tapUsage?: <T>(
+    source: AsyncIterable<T>,
+    ctx: TapAgentUsageContext,
+  ) => AsyncIterable<T>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -772,7 +784,14 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
             modelId: parsed.recipe.model.id,
             reasoningEffort: parsed.recipe.model.reasoningEffort,
           },
-          events: observedEvents,
+          events: (deps.tapUsage ?? tapAgentStreamUsage)(observedEvents, {
+            userId: parsed.userId,
+            sessionId: parsed.sessionId,
+            provider: parsed.recipe.model.id.split("/")[0] ?? "unknown",
+            model: parsed.recipe.model.id,
+            reasoningEffort: parsed.recipe.model.reasoningEffort ?? null,
+            agentId: parsed.recipe.agentId,
+          }),
           onInteraction: async (outcome) => {
             try {
               if (deps.persistInteraction) {

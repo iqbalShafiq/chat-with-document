@@ -315,6 +315,20 @@ Tools ini di-inject ke agent saat handle chat:
 | `generate_image` | Generate gambar dari prompt; param (model, aspect ratio, quality, background) hanya diisi saat user minta, selainnya pakai default session |
 | `edit_image` | Edit gambar generated sebelumnya (via `referenceImageId`) — dikirim sebagai `input_references` (data URL) |
 | `request_clarification` | Tanya user saat request ambigu (max 5 pertanyaan, tipe single/multiple choice/free text) |
+| `view_site_page` | Lihat site pinned: cuplikan teks + screenshot Playwright (vision: bytes inline, text-only: via `view_image`); cache permanen per versi |
+
+### Agent site viewing (screenshot Playwright)
+
+`view_site_page` membuka site dari registry scope, membaca `index.html` (cuplikan ≤6000 char, baca terbatas 256 KB) dan mengambil screenshot lewat **Playwright** (`playwright-core`). Hasilnya di-cache permanen per `(siteId, version)` di manifest site — versi site immutable, jadi tidak ada stale.
+
+| Aspek | Detail |
+| --- | --- |
+| Browser | `chromium.launch({ channel: "chrome" })` (Chrome sistem) dengan fallback Chromium bawaan; kalau belum ada, jalankan `pnpm --filter @anreal/api exec playwright install chromium` |
+| Env | Tidak ada key baru; origin internal mengikuti `BETTER_AUTH_URL`/`PORT` (`getApiOrigin()`) |
+| Batas | Viewport 1440×900, fullPage → fallback viewport PNG → JPEG (cap 5 MB), tinggi ≤16.000 px, timeout navigasi 15 dtk / total 30 dtk |
+| Konkurensi | Maks 2 capture paralel (FIFO) + single-flight per `(siteId, version)` |
+| Pengiriman ke model | Bytes diantrekan ke pending vision buffer (pola sama dengan `web_search` images) untuk model vision; model text-only memakai `view_image(imageId)` |
+| Error | Capture gagal → cuplikan teks tetap dikembalikan + `captureError` + `retryable: true` (agent bisa menjawab parsial / retry) |
 
 Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
 

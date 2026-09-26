@@ -303,6 +303,38 @@ describe("Redis resumable stream store", () => {
     await expect(store.append({ streamId: "s1", event: bad })).rejects.toThrow(/Invalid protocol-v3/);
   });
 
+  it("persists artifact focus data events through the store envelope", async () => {
+    const redis = createFakeRedis();
+    const store = createRedisResumableStreamStore(redis);
+    await store.open({ streamId: "s1" });
+    const event = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: {
+        runId: "run-1",
+        type: "data" as const,
+        name: "artifactFocus",
+        data: { artifactId: "site-1", artifactType: "site", label: "Kedai" },
+      },
+    };
+    const record = await store.append({ streamId: "s1", event: event as never });
+    expect(record.eventId).toBe(1);
+
+    const badType = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { artifactId: "x", artifactType: "nope" } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: badType })).rejects.toThrow(
+      /Invalid protocol-v3/,
+    );
+    const leaked = {
+      protocol: CLIENT_STREAM_PROTOCOL,
+      event: { ...event.event, data: { artifactId: "x", artifactType: "site", leaked: true } },
+    } as never;
+    await expect(store.append({ streamId: "s1", event: leaked })).rejects.toThrow(
+      /Invalid protocol-v3/,
+    );
+  });
+
   it("persists site build events through the store envelope", async () => {
     const redis = createFakeRedis();
     const store = createRedisResumableStreamStore(redis);

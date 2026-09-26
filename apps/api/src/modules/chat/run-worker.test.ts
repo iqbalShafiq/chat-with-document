@@ -328,6 +328,35 @@ describe("Anvia v1 chat worker", () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
+  it("records usage through the injected tap with run identity", async () => {
+    const stream = fakeStream([responseEvent()]);
+    const seen: Array<{ ctx: unknown; items: number }> = [];
+    const tapUsage = (
+      source: AsyncIterable<AgentStreamEvent>,
+      ctx: unknown,
+    ): AsyncIterable<AgentStreamEvent> => {
+      const record = { ctx, items: 0 };
+      seen.push(record);
+      return (async function* () {
+        for await (const item of source) {
+          record.items += 1;
+          yield item;
+        }
+      })();
+    };
+    const h = createDependencies(stream, { tapUsage: tapUsage as never });
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.ctx).toMatchObject({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      provider: "deepseek",
+      model: "deepseek/deepseek-v4-flash-0731",
+      agentId: CHAT_AGENT_ID,
+    });
+    expect(seen[0]!.items).toBeGreaterThan(0);
+  });
+
   it("resumes with only the official continuation and response shape", async () => {
     const stream = fakeStream([responseEvent("native-run-1")]);
     const h = createDependencies(stream);

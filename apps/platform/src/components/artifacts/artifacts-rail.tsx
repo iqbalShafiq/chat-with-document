@@ -12,6 +12,9 @@ const TABS: Array<{ type: ArtifactType; label: string }> = [
   { type: "image", label: "Images" },
   { type: "site", label: "Sites" },
   { type: "task", label: "Tasks" },
+  { type: "schedule", label: "Sched" },
+  { type: "web_bundle", label: "Web" },
+  { type: "session", label: "Chats" },
 ];
 
 /**

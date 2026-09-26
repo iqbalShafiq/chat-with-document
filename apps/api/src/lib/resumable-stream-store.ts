@@ -202,6 +202,16 @@ function validDefaultData(name: string, value: unknown): boolean {
       boundedInteger(value.waitCount, 10_000) &&
       (value.stage === undefined || boundedText(value.stage, 240));
   }
+  if (name === "artifactFocus") {
+    return (
+      exactKeys(value, ["artifactId", "artifactType"], ["label"]) &&
+      boundedText(value.artifactId, 120) &&
+      ["document", "image", "web_bundle", "site", "task", "schedule", "session"].includes(
+        String(value.artifactType),
+      ) &&
+      (value.label === undefined || boundedText(value.label, 200))
+    );
+  }
   if (name === "siteBuildProgress") {
     return exactKeys(value, ["siteId", "version", "phase", "message"]) && boundedText(value.siteId, 120) && Number.isInteger(value.version) && boundedText(value.message, 2000);
   }
@@ -218,6 +228,7 @@ const DEFAULT_DATA_SCHEMAS = {
   toolWaitProgress: schema((value) => validDefaultData("toolWaitProgress", value)),
   siteBuildProgress: schema((value) => validDefaultData("siteBuildProgress", value)),
   siteBuildReady: schema((value) => validDefaultData("siteBuildReady", value)),
+  artifactFocus: schema((value) => validDefaultData("artifactFocus", value)),
 } as Record<string, ClientDataSchema>;
 
 function parseStoredEvent(value: unknown, validation: StoreValidationOptions): ClientResumableEvent {

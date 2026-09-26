@@ -2,8 +2,8 @@
   "name": "@anreal/api",
   "type": "module",
   "scripts": {
-    "dev": "pnpm with-env node --import tsx --watch src/index.ts",
-    "worker:dev": "pnpm with-env node --import tsx --watch src/worker.ts",
+    "dev": "pnpm with-env node --import tsx --watch-path=src src/index.ts",
+    "worker:dev": "pnpm with-env node --import tsx --watch-path=src src/worker.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "worker:start": "node dist/worker.js",
